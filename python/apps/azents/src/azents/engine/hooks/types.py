@@ -4,7 +4,12 @@ import dataclasses
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from azents.core.routine_execution import (
+    RoutineExecutionRef,
+    validate_routine_execution_refs,
+)
 
 RuntimeHookName = Literal[
     "on_session_start",
@@ -284,10 +289,24 @@ class ScheduledTaskSessionContinuationInput(SessionContinuationInputBase):
     title: str = Field(min_length=1)
 
 
+class RoutineSessionContinuationInput(SessionContinuationInputBase):
+    """One ordinary continuation carrying exact incomplete occurrence references."""
+
+    kind: Literal["routine"] = "routine"
+    executions: tuple[RoutineExecutionRef, ...]
+
+    @model_validator(mode="after")
+    def validate_refs(self) -> "RoutineSessionContinuationInput":
+        """Reject duplicate or empty identities before inbox admission."""
+        validate_routine_execution_refs(self.executions)
+        return self
+
+
 SessionContinuationInput = Annotated[
     GoalSessionContinuationInput
     | ExternalChannelSessionContinuationInput
-    | ScheduledTaskSessionContinuationInput,
+    | ScheduledTaskSessionContinuationInput
+    | RoutineSessionContinuationInput,
     Field(discriminator="kind"),
 ]
 

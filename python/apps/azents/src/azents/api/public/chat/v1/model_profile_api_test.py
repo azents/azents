@@ -61,6 +61,7 @@ from azents.testing.model_selection import (
     make_test_model_settings,
     make_test_selectable_model_options,
 )
+from azents.testing.routine import make_test_routine_execution
 
 from .chat_api_test import _StopChatService
 
@@ -217,6 +218,7 @@ async def profile_http() -> AsyncIterator[_ProfileHTTPFixture]:
     mailbox_admission = create_autospec(MailboxAdmissionRepository, instance=True)
     service = ChatWriteService(
         operations=ChatWriteOperationsRepository(
+            routine_execution_repository=make_test_routine_execution(),
             agent_repository=agents,
             agent_session_repository=sessions,
             workspace_user_repository=memberships,

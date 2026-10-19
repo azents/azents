@@ -15,6 +15,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.routine.preserved import preserved_routine_work_exists
 
 
 @dataclasses.dataclass(frozen=True)
@@ -146,8 +147,11 @@ class LifecycleTargetRepository:
         session_ids: Sequence[str],
         retention: ArchiveRetention,
         end_reason: AgentSessionEndReason | None,
+        preserved_running_session_ids: Sequence[str],
     ) -> None:
         """Archive an admitted group, preserving canonical records until purge."""
+        if not set(preserved_running_session_ids).issubset(session_ids):
+            raise ValueError("Preserved execution must belong to the archive tree.")
         await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id.in_(session_ids))
@@ -158,6 +162,12 @@ class LifecycleTargetRepository:
                 run_state=AgentSessionRunState.IDLE,
             )
         )
+        if preserved_running_session_ids:
+            await session.write_session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id.in_(preserved_running_session_ids))
+                .values(run_state=AgentSessionRunState.RUNNING)
+            )
         await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == root_session_id)
@@ -212,6 +222,16 @@ class LifecycleTargetRepository:
             session_ids=session_ids,
             retention=immediate,
             end_reason=None,
+            preserved_running_session_ids=tuple(
+                (
+                    await session.read_session.scalars(
+                        sa.select(RDBAgentSession.id).where(
+                            RDBAgentSession.id.in_(session_ids),
+                            preserved_routine_work_exists(),
+                        )
+                    )
+                ).all()
+            ),
         )
         await self.schedule_archive_purge(
             session,

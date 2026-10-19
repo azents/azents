@@ -95,6 +95,26 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                 purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
             ),
             SessionLifecycleParticipantDefinition(
+                key="session.routine",
+                policy_version=1,
+                dependencies=("session.execution", "session.toolkit-state"),
+                owned_resources=(
+                    _database_resource(
+                        "routines",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_routine",
+                    ),
+                    _database_resource(
+                        "routine_work_records",
+                        SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
+                        "test_session_lifecycle_routine",
+                    ),
+                ),
+                archive_policy=SessionLifecycleTransitionPolicy.TERMINATE,
+                restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
+                purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
+            ),
+            SessionLifecycleParticipantDefinition(
                 key="session.broker-state",
                 policy_version=1,
                 dependencies=("session.execution",),

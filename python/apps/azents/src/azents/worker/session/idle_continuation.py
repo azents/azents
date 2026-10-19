@@ -13,6 +13,7 @@ from azents.core.enums import (
 from azents.core.json_value import JSONValue
 from azents.core.mailbox_data import (
     MailboxPresentationItem,
+    RoutineContinuationMailboxPayload,
     ScheduledTaskContinuationMailboxPayload,
 )
 from azents.engine.hooks.dispatcher import (
@@ -22,6 +23,7 @@ from azents.engine.hooks.dispatcher import (
 from azents.engine.hooks.types import (
     ExternalChannelSessionContinuationInput,
     GoalSessionContinuationInput,
+    RoutineSessionContinuationInput,
     ScheduledTaskSessionContinuationInput,
     SessionContinuationInput,
     SessionIdleHookContext,
@@ -125,6 +127,8 @@ class IdleContinuationService:
                 mailbox_kind = MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
             case ScheduledTaskSessionContinuationInput():
                 mailbox_kind = MailboxItemKind.SCHEDULED_TASK_CONTINUATION
+            case RoutineSessionContinuationInput():
+                mailbox_kind = MailboxItemKind.ROUTINE_CONTINUATION
             case _:
                 assert_never(continuation)
         metadata: dict[str, JSONValue] = dict(continuation.metadata)
@@ -143,6 +147,19 @@ class IdleContinuationService:
                         presentation_kind="scheduled_task_continuation",
                         content=continuation.content,
                         metadata={"title": continuation.title},
+                    )
+                ],
+            )
+        if isinstance(continuation, RoutineSessionContinuationInput):
+            payload = RoutineContinuationMailboxPayload(
+                type="routine_continuation",
+                executions=continuation.executions,
+                items=[
+                    MailboxPresentationItem(
+                        item_key="routine_continuation:0",
+                        presentation_kind="routine_continuation",
+                        content=continuation.content,
+                        metadata={},
                     )
                 ],
             )

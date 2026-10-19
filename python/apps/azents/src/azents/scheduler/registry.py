@@ -4,6 +4,8 @@ import dataclasses
 import datetime
 import logging
 
+from azents.core.routine import ROUTINE_TICK_INTERVAL
+from azents.scheduler.routine_source_dispatch import routine_source_dispatch_handler
 from azents.scheduler.types import (
     RetryPolicy,
     ScheduledTaskDefinition,
@@ -437,6 +439,17 @@ COMPACTED_EVENT_CLEANUP_TASK = ScheduledTaskDefinition(
 )
 
 
+ROUTINE_SOURCE_DISPATCH_TASK = ScheduledTaskDefinition(
+    key="routine_source_dispatch",
+    description="Collect Routine sources and enqueue ordinary judgment actions.",
+    interval=ROUTINE_TICK_INTERVAL,
+    timeout=datetime.timedelta(minutes=2),
+    retry_policy=RetryPolicy(kind="next_interval"),
+    handler=routine_source_dispatch_handler,
+    enabled_by_default=True,
+)
+
+
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
@@ -451,6 +464,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     EXTERNAL_ACCOUNT_OAUTH_CLEANUP_TASK,
     HISTORICAL_MEMORY_DISCOVERY_TASK,
     USER_SCHEDULED_TASK_DISPATCH_TASK,
+    ROUTINE_SOURCE_DISPATCH_TASK,
 )
 
 

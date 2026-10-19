@@ -37,9 +37,12 @@ from azents.repos.engine_tool_result_operation import (
 )
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.routine.state import RoutineStateRepository
+from azents.repos.routine.stop import RoutineStopRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user_stop import UserStopOperationRepository
 from azents.repos.user_stop_data import (
     UserStopCancelledCallsInput,
@@ -200,6 +203,7 @@ async def stop_fixture(
         sessions,
         transcripts,
         EngineToolResultOperationRepository(observed, runs, transcripts, owner=None),
+        RoutineStopRepository(RoutineStateRepository(ToolkitStateRepository())),
     )
     return StopFixture(
         UserStopOwnerInput(session_id=session_id, owner_generation=generation),

@@ -77,6 +77,7 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
+from azents.testing.routine import make_test_routine_lifecycle
 
 
 def _lifecycle() -> SessionLifecycleOperationsRepository:
@@ -87,6 +88,7 @@ def _lifecycle() -> SessionLifecycleOperationsRepository:
         retention_repository=ArchivedSessionRetentionRepository(),
         external_channel_repository=ExternalChannelLifecycleRepository.create(),
         scheduled_task_repository=ScheduledTaskLifecycleRepository.create(),
+        routine_repository=make_test_routine_lifecycle(),
     )
 
 

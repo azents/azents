@@ -1,11 +1,21 @@
 """Action execution repository data models."""
 
 import datetime
+from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
 from azents.core.json_value import JSONValue
+
+
+@dataclass(frozen=True)
+class OperationActionExecutionResult:
+    """Effect of an operation action on its ordinary host Run."""
+
+    completed: bool
+    context_invalidated: bool
+    complete_run: bool
 
 
 class ActionExecution(BaseModel):
@@ -35,6 +45,11 @@ class ActionExecution(BaseModel):
     cancelled_at: datetime.datetime | None = Field(description="Cancellation time")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
+
+    @property
+    def chat_visible(self) -> bool:
+        """Keep internal Routine checking outside public action projections."""
+        return self.action_type != "routine_judgment"
 
 
 class ActionExecutionCreate(BaseModel):

@@ -1,6 +1,7 @@
 ---
 title: "Session Routines Implementation Plan"
 created: 2026-10-18
+updated: 2026-10-19
 tags: [routine, implementation, plan]
 ---
 
@@ -9,9 +10,9 @@ tags: [routine, implementation, plan]
 ## Approved Baseline
 
 - [Requirements](../requirements/routine-261018-session-routines.md): REQ-1 through REQ-18.
-- [ADR](../adr/routine-261018-session-routines.md): ADR-D1 through ADR-D3.
-- [Design](../design/routine-261018-session-routines.md): revision 1, approved 2026-10-18 KST.
-- Approved mechanisms: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`.
+- [ADR](../adr/routine-261018-session-routines.md): ADR-D2/D3 and ADR-D4, which supersedes D1's independent judgment ownership.
+- [Design](../design/routine-261018-session-routines.md): revision 2, requester-directed change and implementation authorization on 2026-10-18 KST.
+- Approved mechanisms: `M1, M2, M4, M5, M6, M7, M8, M9, M10, M11, M12`; M3 is retired.
 - Design delta: None.
 - Primary implementation, integration and validation owner: `/root`.
 - Single independent read-only reviewer for every complete stable phase diff: `/root/routine-reviewer`.
@@ -29,10 +30,10 @@ next phase; construct the complete stack before waiting for all CI. Use titles
 | Phase | Branch | Scope and interface | Mechanisms | Dependencies |
 | --- | --- | --- | --- | --- |
 | 1: Foundation | `feat/routine-261018-1-foundation` | Definition and record contracts/persistence, safe management primitives, Primary ownership/backfill, schema migrations and focused tests; approved documents and plans | M1, M6, M9, M11 | main |
-| 2: Judgment | `feat/routine-261018-2-judgment` | Canonical full-context Structured/no-tools operation, isolated Session judgment event and usage, provider wire contracts and generated event clients | M3, M7, M11 | phase 1 |
-| 3: Execution | `feat/routine-261018-3-execution` | Bounded dispatch, Worker-side overlap, Toolkit State, typed inbox/continuation, tools/result/notification, lifecycle and bundled guidance | M2, M4, M5, M10, M11 | phases 1-2 |
+| 2: Judgment | `feat/routine-261018-2-judgment` | Retained canonical Structured/no-tools call and isolated judgment observation contracts; no background lifecycle is activated | M7, M11; call contract retained by M12 after M3 retirement | phase 1 |
+| 3: Execution | `feat/routine-261018-3-execution` | Bounded tick admission, internal judgment inbox action in the ordinary Run loop, Toolkit State, selected-work FIFO/continuation, tools/result/notification, lifecycle and bundled guidance; remove unactivated separate judgment ownership | M2, M4, M5, M10, M11, M12 | phases 1-2 |
 | 4: Inspection | `feat/routine-261018-4-inspection` | Authorized read APIs, generated clients, desktop/mobile read-only UI, Routine activity/locales, usage-regression tests | M8; integrates M1, M6, M7, M9 | phases 1-3 |
-| 5: Verification | `feat/routine-261018-5-verification` | Complete deterministic E1-E20 coverage, live prerequisites/evidence, Living Spec promotion, corrections and plan cleanup after verification | M1-M11 | phases 1-4 |
+| 5: Verification | `feat/routine-261018-5-verification` | Complete revised E1-E20 coverage, live prerequisites/evidence, Living Spec promotion, corrections and plan cleanup after verification | M1, M2, M4-M12 | phases 1-4 |
 
 No phase activates a separate retry mode, destination fallback, definition version
 history or generic tool-group framework. A new material mechanism returns to the
@@ -49,6 +50,10 @@ require renewed product approval.
   ambiguity.
 - Judgment appends a typed Session observation, never a normal turn marker,
   foreground phase, prompt snapshot or context-usage update.
+- Judgment execution is an internal inbox action consumed by the existing Run
+  loop. Reuse normal Session/Run/action owner and recovery; remove the unactivated
+  separate judgment lease/pending-job lifecycle. The host Run retains its
+  ordinary lifecycle, without forcing assistant inference for no-action.
 - Toolkit State and typed Mailbox input own admitted work and continuation in the
   Scheduled execution model. Result submission settles one item only.
 - Canonical result recording commits before optional authorized one-attempt
@@ -123,5 +128,53 @@ same-reviewer verification: full custom-call history preservation and actual
 Structured/output-tool capability context. Root validation passed 1570 integrated
 backend tests, full backend ty/Ruff/format, generated-client template tests (16),
 forced web/admin/session-core type checks and Session core tests (58)/lint/format.
-Phase 2 is ready for commit/rebase/PR. Scheduler/admission/notification activation,
-inspection UI and product E2E remain phases 3-5. Design delta: None.
+Phase 2 [PR #2329](https://github.com/azents/azents/pull/2329) is open at
+`6f795908e` atop the corrected foundation `ab7834c36`, with all commit hooks
+passed. Post-rebase focused historical-fixture/judgment/DB checks passed 25 tests.
+Phase 3 branch and execution plan are prepared. Scheduler/admission/notification
+activation, inspection UI and product E2E remain phases 3-5. Design delta: None.
+
+The initial phase 2 CI exposed PostgreSQL/ORM event-enum ordering drift. The
+unmerged migration now inserts the judgment label at its declared position;
+the dedicated migration suite (50 tests, including the exact DDL comparison)
+and focused migration/persistence tests (2) passed before the correction was
+pushed. Phase 1 CI is fully green. Phase 2 run `39134760932`, attempt `2`,
+completed successfully at `6f795908e`. The unchanged Web duration gate passed
+at 405s against a 427.6s baseline; the first attempt's distributed slowness remains
+unexplained rather than attributed to a proven environment fault.
+
+Phase 3 now follows requester-directed ADR-D4 and Design revision 2: judgment is
+an internal inbox action processed by the ordinary Run loop, not an independent
+background lifecycle. Unactivated judgment lease/claim machinery has been removed.
+Source continuity, admitted Toolkit State, typed ordinary FIFO presentation,
+database-only inbox admission/capture/settlement, canonical provider preparation
+and internal operation dispatch/cancellation are implemented locally. Initial
+no-action execution is verified without ordinary foreground preparation/inference.
+Source-only Scheduler admission and resumed/subsequent Run boundary tests are also
+implemented. Root-only tools, atomic per-item results, one-attempt current-Primary
+or Session-chat delivery, normal idle continuation and compaction continuity are
+connected. Explicit Stop composition also preserves definitions/completed work
+while closing incomplete attempts under the normal owner fence. Archive/restore/
+purge participation and narrow preserved-work owner recovery are connected.
+Canonical Run input associations reject mixed ordinary work; purge waits without
+fencing work still allowed to finish and verifies Routine namespace absence before
+root deletion. The latest expanded matrix passed 627 tests; a separate overlapping
+Event/Stop matrix passed 1,295 tests. Ordinary explicit failed-run retry now
+atomically rebinds only incomplete started Routine occurrences to its existing
+new pending Run, preserving admitted context and original start time. Completed
+items remain complete. Bundled guidance and source-generated contracts are ready.
+Internal judgment remains durable but is excluded from public pending/live action
+execution and composer projections. The final backend run passed 13,214 tests
+with 3 skips; Ruff, format and whole-backend ty passed. A separate final focused
+Routine/retry/lifecycle/retention/fixture suite passed 139 tests. Forced TypeScript
+typecheck/lint/format completed all 18 tasks; both regenerated Python clients
+passed 16 tests each. The single independent review found three corrections:
+expected judgment preparation failures now settle without stranding the queue;
+ordinary Routine inputs contribute to the existing context breakdown without
+judgment usage; and bundled guidance chooses Routine versus Scheduled Task by
+output obligation. Root's post-correction full backend run passed 13,220 tests
+with 3 skips in 318.85s, the expanded integrated suite passed 165 tests, and Ruff,
+format, ty and skill packaging passed. These matrices overlap and are not
+additive. Bounded same-reviewer confirmation closed all three findings without
+remaining issues. Commit and Phase 3 PR creation are next. Phase 4 has not
+started. Design delta: None.

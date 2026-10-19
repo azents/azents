@@ -1698,6 +1698,7 @@ class AgentSessionRepository:
                 retention_days=retention_days,
             ),
             end_reason=end_reason,
+            preserved_running_session_ids=(),
         )
 
     async def restore_tree(
@@ -2188,11 +2189,11 @@ class AgentSessionRepository:
         session_id: str,
         run_id: str,
         continue_running: bool,
-        allow_archived_scheduled_continuation: bool,
+        allow_archived_work_continuation: bool,
     ) -> bool:
         """Atomically consume one matching idle continuation boundary."""
         allowed_statuses = [AgentSessionStatus.ACTIVE]
-        if allow_archived_scheduled_continuation:
+        if allow_archived_work_continuation:
             allowed_statuses.append(AgentSessionStatus.ARCHIVED)
         values: dict[str, object] = {
             "pending_idle_continuation_run_id": None,

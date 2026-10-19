@@ -28,6 +28,7 @@ from azents.core.mailbox_data import (
     AgentRemoveGitWorktreeContinuationResult,
     ExternalChannelMessageMailboxPayload,
     MailboxItem,
+    RoutineMailboxPayload,
     ScheduledTaskContinuationMailboxPayload,
     ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
@@ -45,6 +46,7 @@ from azents.engine.events.types import (
     Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
+    RoutineInputPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskTriggerPayload,
     SystemErrorPayload,
@@ -382,6 +384,36 @@ class MailboxService:
             operation = dataclasses.replace(
                 operation, execution=committed.action_execution
             )
+        user_messages = (
+            []
+            if committed.handled_failure
+            else [
+                item.user_message
+                for item in outcome.promoted
+                if item.user_message is not None and committed.promoted_event_ids
+            ]
+        )
+        if preflight.buffer is not None and isinstance(
+            preflight.buffer.payload, RoutineMailboxPayload
+        ):
+            # Promotion can filter stale occurrences; use only committed context.
+            user_messages = []
+            for event in committed.events:
+                if not isinstance(event.payload, RoutineInputPayload):
+                    continue
+                if event.external_id is None:
+                    raise RuntimeError("Promoted Routine input requires its identity.")
+                user_messages.append(
+                    make_run_user_message(
+                        sender_user_id=None,
+                        content=event.payload.content,
+                        metadata={},
+                        attachments=[],
+                        external_id=event.external_id,
+                        attachment_source="mailbox_item",
+                        requested_inference_profile=None,
+                    )
+                )
         return PromotedMailboxItems(
             turn_effect=(
                 TurnEffect.FAILED
@@ -396,15 +428,7 @@ class MailboxService:
                 if preflight.buffer is not None and outcome.promoted
                 else None
             ),
-            user_messages=(
-                []
-                if committed.handled_failure
-                else [
-                    item.user_message
-                    for item in outcome.promoted
-                    if item.user_message is not None and committed.promoted_event_ids
-                ]
-            ),
+            user_messages=user_messages,
             events=committed.events,
             promoted_event_ids=committed.promoted_event_ids,
             deleted_buffer_ids=committed.deleted_buffer_ids,
@@ -463,6 +487,36 @@ class MailboxService:
                 payload.model_dump(mode="json")
             ),
             external_id=f"{buffer.id}:scheduled_task",
+        )
+
+    def _routine_promoted_item(self, buffer: MailboxItem) -> _PromotedMailboxItem:
+        """Prepare explicit Routine input; final occurrence authority is fenced."""
+        if not isinstance(buffer.payload, RoutineMailboxPayload):
+            raise ValueError("Routine mailbox payload is malformed.")
+        content = buffer.presentation.content
+        payload = RoutineInputPayload(
+            executions=buffer.payload.executions, content=content
+        )
+        return _PromotedMailboxItem(
+            buffer=buffer,
+            user_message=make_run_user_message(
+                sender_user_id=None,
+                content=content,
+                metadata={},
+                attachments=[],
+                external_id=f"{buffer.id}:routine",
+                attachment_source="mailbox_item",
+                requested_inference_profile=None,
+            ),
+            event_kind=(
+                EventKind.ROUTINE_TRIGGER
+                if buffer.kind is MailboxItemKind.ROUTINE_TRIGGER
+                else EventKind.ROUTINE_CONTINUATION
+            ),
+            payload=_JSON_OBJECT_ADAPTER.validate_python(
+                payload.model_dump(mode="json")
+            ),
+            external_id=f"{buffer.id}:routine",
         )
 
     async def _prepare_mailbox_item_attachments(
@@ -672,6 +726,8 @@ class MailboxService:
                 return _ScheduledTaskMailboxProcessor(self)
             case MailboxItemKind.TURN_ACTION_CONTINUATION:
                 return _TurnActionContinuationMailboxProcessor(self)
+            case MailboxItemKind.ROUTINE_TRIGGER | MailboxItemKind.ROUTINE_CONTINUATION:
+                return _RoutineMailboxProcessor(self)
             case MailboxItemKind.AGENT_MESSAGE:
                 return _AgentMessageMailboxProcessor(self)
             case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
@@ -840,6 +896,23 @@ class _ScheduledTaskMailboxProcessor:
         del context
         return _preparation_outcome(
             [self.service._scheduled_promoted_item(buffer)], TurnEffect.ELIGIBLE
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _RoutineMailboxProcessor:
+    """Promote admitted Routine work through the ordinary FIFO turn path."""
+
+    service: MailboxService
+
+    async def process(
+        self,
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
+        del context
+        return _preparation_outcome(
+            [self.service._routine_promoted_item(buffer)], TurnEffect.ELIGIBLE
         )
 
 
@@ -1095,6 +1168,8 @@ def _buffer_requires_inference(
             | MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE
             | MailboxItemKind.SCHEDULED_TASK_TRIGGER
             | MailboxItemKind.SCHEDULED_TASK_CONTINUATION
+            | MailboxItemKind.ROUTINE_TRIGGER
+            | MailboxItemKind.ROUTINE_CONTINUATION
         ):
             return True
         case MailboxItemKind.ACTION_MESSAGE:

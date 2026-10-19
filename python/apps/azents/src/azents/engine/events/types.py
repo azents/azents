@@ -34,6 +34,10 @@ from azents.core.inference_profile import (
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_operation import ModelOperationState
+from azents.core.routine_execution import (
+    RoutineExecutionRef,
+    validate_routine_execution_refs,
+)
 from azents.core.routine_judgment import (
     RoutineJudgmentConsidered,
     RoutineJudgmentDecision,
@@ -485,6 +489,17 @@ class ScheduledTaskResultPayload(BaseModel):
     result: str = Field(min_length=1)
 
 
+class RoutineNotificationPayload(BaseModel):
+    """One requested user message published to the Session chat."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    execution_id: str = Field(min_length=1)
+    slug: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
 class AssistantMessagePayload(BaseModel):
     """Assistant message payload."""
 
@@ -659,6 +674,21 @@ class TokenUsagePayload(BaseModel):
         default=None,
         description="Known charge or estimate authority; absent on historical usage",
     )
+
+
+class RoutineInputPayload(BaseModel):
+    """Ordinary executable Routine input, distinct from passive judgment usage."""
+
+    model_config = ConfigDict(frozen=True)
+
+    executions: tuple[RoutineExecutionRef, ...]
+    content: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_exact_occurrences(self) -> "RoutineInputPayload":
+        """Validate the admitted occurrence set before persistence or lowering."""
+        validate_routine_execution_refs(self.executions)
+        return self
 
 
 class RoutineJudgmentPayload(BaseModel):
@@ -852,6 +882,8 @@ EventPayload = (
     | ScheduledTaskContinuationPayload
     | ScheduledTaskResultPayload
     | RoutineJudgmentPayload
+    | RoutineInputPayload
+    | RoutineNotificationPayload
     | AssistantMessagePayload
     | ReasoningPayload
     | ClientToolCallPayload
@@ -883,6 +915,9 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.SCHEDULED_TASK_CONTINUATION: ScheduledTaskContinuationPayload,
     EventKind.SCHEDULED_TASK_RESULT: ScheduledTaskResultPayload,
     EventKind.ROUTINE_JUDGMENT: RoutineJudgmentPayload,
+    EventKind.ROUTINE_TRIGGER: RoutineInputPayload,
+    EventKind.ROUTINE_CONTINUATION: RoutineInputPayload,
+    EventKind.ROUTINE_NOTIFICATION: RoutineNotificationPayload,
     EventKind.ACTION_EXECUTION_RESULT: ActionExecutionResultPayload,
     EventKind.SKILL_LOADED: SkillLoadedPayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,

@@ -5,6 +5,7 @@ import json
 import sqlalchemy as sa
 from alembic import command
 from azcommon.uuid import uuid7
+from pydantic import TypeAdapter
 from testcontainers.postgres import PostgresContainer
 
 from azents.core.enums import EventKind
@@ -21,6 +22,11 @@ def test_judgment_migration_retains_observation_without_a_run(
         command.upgrade(database.config, "08a588456917")
         legacy = _seed_legacy(database.engine, binding_count=0)
         with database.engine.connect() as connection:
+            predecessor_values = TypeAdapter(list[str]).validate_python(
+                connection.scalar(
+                    sa.text("SELECT enum_range(NULL::event_kind)::text[]")
+                )
+            )
             assert (
                 connection.scalar(
                     sa.text(
@@ -34,9 +40,16 @@ def test_judgment_migration_retains_observation_without_a_run(
         command.upgrade(database.config, "854782c43687")
         observation = _observation()
         with database.engine.begin() as connection:
-            assert connection.scalar(
-                sa.text("SELECT enum_range(NULL::event_kind)::text[]")
-            ) == [kind.value for kind in EventKind]
+            expected_values = list(predecessor_values)
+            expected_values.insert(
+                expected_values.index("goal_updated"), "routine_judgment"
+            )
+            assert (
+                connection.scalar(
+                    sa.text("SELECT enum_range(NULL::event_kind)::text[]")
+                )
+                == expected_values
+            )
             connection.execute(
                 sa.text(
                     "INSERT INTO events(id,session_id,kind,payload,provider,model) "

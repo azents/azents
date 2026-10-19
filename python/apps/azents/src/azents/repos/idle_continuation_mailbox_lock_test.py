@@ -35,6 +35,7 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
+from azents.testing.routine import make_test_routine_authority
 from azents.worker.session.idle_continuation_lock_test import (
     _cleanup_workspace_fixture,
     _wait_for_database_blocker,
@@ -112,7 +113,7 @@ class _ObservedIdleConsumption(AgentSessionRepository):
         session_id: str,
         run_id: str,
         continue_running: bool,
-        allow_archived_scheduled_continuation: bool,
+        allow_archived_work_continuation: bool,
     ) -> bool:
         """Establish the actual owner-fence wait, then execute production SQL."""
         self.consumption_started.set()
@@ -126,9 +127,7 @@ class _ObservedIdleConsumption(AgentSessionRepository):
             session_id=session_id,
             run_id=run_id,
             continue_running=continue_running,
-            allow_archived_scheduled_continuation=(
-                allow_archived_scheduled_continuation
-            ),
+            allow_archived_work_continuation=(allow_archived_work_continuation),
         )
 
 
@@ -291,6 +290,7 @@ async def test_idle_consumption_preserves_child_root_fk_and_parent_mailbox(
             runs,
             mailboxes,
             ScheduledTaskCycleRepository(ToolkitStateRepository()),
+            make_test_routine_authority(),
         )
         return await repository.finalize(
             session_id=root.id,

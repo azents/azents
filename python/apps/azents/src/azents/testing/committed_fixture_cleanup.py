@@ -139,6 +139,14 @@ async def _cleanup(
                     for parent in owned.values()
                     if parent.table_name == "agent_runtimes"
                 )
+            # Purge audit roots intentionally outlive Sessions without a SQL FK.
+            # Include only jobs belonging to this exact newly owned Session.
+            if table.name == "archived_session_purge_jobs":
+                predicates.extend(
+                    table.c.root_session_id == parent.values["id"]
+                    for parent in owned.values()
+                    if parent.table_name == "agent_sessions"
+                )
             if predicates:
                 matches = await _rows(connection, table, sa.or_(*predicates))
                 for key, row in matches.items():

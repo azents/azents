@@ -100,6 +100,8 @@ from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.mailbox.promotion import MailboxPromotionRepository
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.model_file.data import ModelFile
+from azents.repos.routine.execution import RoutineExecutionRepository
+from azents.repos.routine.state import RoutineStateRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
@@ -937,6 +939,9 @@ def _mailbox_item_service(
             scheduled_task_repository=ScheduledTaskRepository(),
             scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
                 toolkit_state_repository=ToolkitStateRepository()
+            ),
+            routine_execution_repository=RoutineExecutionRepository(
+                states=RoutineStateRepository(toolkit_states=ToolkitStateRepository())
             ),
         ),
     )

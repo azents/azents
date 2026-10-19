@@ -1,13 +1,21 @@
 """Worker operation TurnAction executor registry tests."""
 
+import dataclasses
 import datetime
 from typing import Any, Literal, assert_never, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
+from azents.core.action_execution_data import (
+    ActionExecution,
+    ActionExecutionProjection,
+    OperationActionExecutionResult,
+)
 from azents.core.enums import ActionExecutionStatus
+from azents.core.routine import RoutineScope
+from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.tools import TurnContext
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     AgentRemoveGitWorktreeAction,
@@ -16,20 +24,36 @@ from azents.engine.events.action_messages import (
     CreateSessionWorkingFolderAction,
     GoalAction,
     OperationAction,
+    RoutineJudgmentAction,
 )
-from azents.engine.events.types import Event
+from azents.engine.events.routine_judgment_test import _observation
+from azents.engine.events.types import Event, RoutineJudgmentPayload
+from azents.engine.routine_judgment_context import (
+    PrepareRoutineJudgmentContext,
+    RoutineJudgmentActionContext,
+    RoutineJudgmentContext,
+)
+from azents.engine.routine_judgment_context_test import request
+from azents.repos.routine.judgment_inbox import (
+    RoutineJudgmentSettlement,
+)
+from azents.services.routine.judgment import RoutineJudgmentService
 from azents.services.session_git_worktree import (
-    GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
 )
-from azents.services.turn_action import TurnActionCapabilityRegistry
+from azents.services.turn_action import (
+    TurnActionCapabilityRegistry,
+    TurnActionPreparationContext,
+    TurnActionPreparationEffect,
+)
+from azents.testing.model_selection import make_test_model_selection
 
 from .turn_action_executor import (
     OperationActionExecutionContext,
     OperationActionExecutorRegistry,
 )
 
-_RESULT = GitWorktreeActionExecutionResult(
+_RESULT = OperationActionExecutionResult(
     completed=True,
     context_invalidated=False,
     complete_run=False,
@@ -112,6 +136,7 @@ def _registry(
     service: _Service | None = None,
 ) -> OperationActionExecutorRegistry:
     return OperationActionExecutorRegistry(
+        routine_judgment_service=Mock(spec=RoutineJudgmentService),
         capabilities=TurnActionCapabilityRegistry(
             skill_store=cast(Any, object()),
             vfs_projection_service=None,
@@ -131,6 +156,10 @@ async def _history_event_appended(event: Event) -> None:
     del event
 
 
+async def _action_removed(action_execution_id: str) -> None:
+    del action_execution_id
+
+
 def _context(
     execution: ActionExecution,
     *,
@@ -144,6 +173,8 @@ def _context(
         owner_generation=3,
         on_projection_updated=_projection_updated,
         on_history_event_appended=_history_event_appended,
+        on_action_removed=_action_removed,
+        routine_judgment=None,
     )
 
 
@@ -254,3 +285,123 @@ def test_decode_rejects_non_operation_action() -> None:
 
     with pytest.raises(ValueError, match="requires an operation action"):
         registry.decode(GoalAction().model_dump(mode="json"))
+
+
+async def test_judgment_is_an_internal_neutral_operation() -> None:
+    action = RoutineJudgmentAction(judgment_id="judgment-1")
+    registry = _registry()
+    assert registry.decode(action.model_dump(mode="json")) == action
+    policy = registry.capabilities.policy_for(action)
+    assert policy.visibility == "internal" and policy.operation
+    assert not policy.admission_profile_required
+    assert not registry.capabilities.preparation_requires_inference(action)
+    prepared = await registry.capabilities.prepare(
+        action=action,
+        context=TurnActionPreparationContext(
+            agent_id="agent-1",
+            session_id="session-1",
+            workspace_id="workspace-1",
+            active_run_id="run-1",
+            mailbox_item_id="mailbox-1",
+            content="",
+        ),
+    )
+    assert prepared.operation_action == action
+    assert prepared.effect is TurnActionPreparationEffect.NEUTRAL
+    assert prepared.events == [] and not prepared.append_user_message
+
+
+@pytest.mark.parametrize("observed", [False, True])
+async def test_judgment_dispatch_stays_neutral_and_uses_its_domain_owner(
+    observed: bool,
+) -> None:
+    observation = _observation()
+    assert isinstance(observation.payload, RoutineJudgmentPayload)
+    action = RoutineJudgmentAction(judgment_id=observation.payload.judgment_id)
+    execution = _execution(action)
+    scope = RoutineScope("workspace-1", "agent-1", "session-1")
+    selection = make_test_model_selection()
+
+    async def prepare() -> RoutineJudgmentContext:
+        return RoutineJudgmentContext(
+            request=request(selection),
+            model_selection=selection,
+            model_target_label="default",
+            turn=TurnContext(
+                workspace_id=scope.workspace_id,
+                model=selection.model_identifier,
+                session_id=scope.session_id,
+                run_id="run-1",
+                publish_event=AsyncMock(),
+            ),
+            admit_dispatch=AsyncMock(),
+        )
+
+    async def execute(
+        *,
+        scope: RoutineScope,
+        action: RoutineJudgmentAction,
+        execution: ActionExecution,
+        owner: SessionExecutionOwner,
+        prepare_context: PrepareRoutineJudgmentContext,
+    ) -> RoutineJudgmentSettlement:
+        assert owner.owner_generation == 3
+        assert execution.action_type == action.type
+        assert scope.session_id == owner.session_id
+        context = await prepare_context()
+        assert context.turn.run_id == "run-1"
+        return RoutineJudgmentSettlement(
+            observation=observation if observed else None, admission=None
+        )
+
+    service = Mock(spec=RoutineJudgmentService)
+    service.execute = AsyncMock(side_effect=execute)
+    worktree = _service()
+    registry = dataclasses.replace(
+        _registry(worktree), routine_judgment_service=service
+    )
+    history = AsyncMock()
+    removed = AsyncMock()
+    result = await registry.execute(
+        action=action,
+        context=dataclasses.replace(
+            _context(execution),
+            routine_judgment=RoutineJudgmentActionContext(scope, prepare),
+            on_history_event_appended=history,
+            on_action_removed=removed,
+        ),
+    )
+    assert result == _RESULT
+    if observed:
+        history.assert_awaited_once_with(observation)
+        removed.assert_not_awaited()
+    else:
+        history.assert_not_awaited()
+        removed.assert_awaited_once_with(execution.id)
+    worktree.run_git_worktree_action.assert_not_awaited()
+
+
+async def test_judgment_recovery_uses_current_owner_without_worktree_terminal() -> None:
+    action = RoutineJudgmentAction(judgment_id="old-judgment")
+    execution = _execution(action)
+    service = Mock(spec=RoutineJudgmentService)
+    registry = dataclasses.replace(_registry(), routine_judgment_service=service)
+    history = AsyncMock()
+    removed = AsyncMock()
+    await registry.cancel(
+        action=action,
+        execution=execution,
+        owner_generation=4,
+        reason="Ordinary owner handover.",
+        predecessor_run_id=None,
+        on_history_event_appended=history,
+        on_action_removed=removed,
+    )
+    service.cancel.assert_awaited_once_with(
+        execution=execution,
+        owner=SessionExecutionOwner(
+            session_id=execution.session_id, owner_generation=4
+        ),
+    )
+    history.assert_not_awaited()
+    removed.assert_awaited_once_with(execution.id)

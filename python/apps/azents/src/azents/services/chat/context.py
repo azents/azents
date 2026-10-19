@@ -31,6 +31,8 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    RoutineInputPayload,
+    RoutineNotificationPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
     ScheduledTaskTriggerPayload,
@@ -315,11 +317,15 @@ def _build_breakdown(
             chars["user"] += len(render_external_channel_message(payload))
         elif isinstance(
             payload,
-            ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+            ScheduledTaskTriggerPayload
+            | ScheduledTaskContinuationPayload
+            | RoutineInputPayload,
         ):
             chars["user"] += len(payload.content)
         elif isinstance(payload, ScheduledTaskResultPayload):
             chars["assistant"] += len(payload.result) + len(payload.title)
+        elif isinstance(payload, RoutineNotificationPayload):
+            chars["assistant"] += len(payload.content)
         elif isinstance(payload, SkillLoadedPayload):
             chars["user"] += len(payload.body)
         elif isinstance(payload, AssistantMessagePayload):

@@ -33,7 +33,7 @@ ACTION_ONE_OF_SCHEMAS = ["AgentCreateGitWorktreeAction", "AgentRemoveGitWorktree
 
 class Action(BaseModel):
     """
-    Durable action payload
+    Visible durable action payload
     """
     # data type: CommandAction
     oneof_schema_1_validator: Optional[CommandAction] = None

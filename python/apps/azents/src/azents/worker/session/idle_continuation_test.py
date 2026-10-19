@@ -158,11 +158,11 @@ class _AgentSessionRepository:
         session_id: str,
         run_id: str,
         continue_running: bool,
-        allow_archived_scheduled_continuation: bool,
+        allow_archived_work_continuation: bool,
     ) -> bool:
         """Consume the matching durable boundary."""
         del session
-        assert allow_archived_scheduled_continuation is (
+        assert allow_archived_work_continuation is (
             self.status is AgentSessionStatus.ARCHIVED
         )
         if not self.consume_result:
@@ -301,7 +301,7 @@ class _IdleContinuationRepository:
                 session_id=session_id,
                 run_id=run_id,
                 continue_running=bool(accepted),
-                allow_archived_scheduled_continuation=(
+                allow_archived_work_continuation=(
                     eligibility.archived_cycle_id is not None
                 ),
             )
@@ -335,7 +335,7 @@ class _IdleContinuationRepository:
         archived_cycle_id = None
         if locked.status is not AgentSessionStatus.ACTIVE:
             if locked.status is not AgentSessionStatus.ARCHIVED:
-                return IdleBoundaryEligibility(False, None)
+                return IdleBoundaryEligibility(False, None, None)
             run = await self.agent_run_repository.get_by_id(session, run_id)
             cycle_id = run.scheduled_task_cycle_id
             cycle = await self.scheduled_task_cycle_repository.get_started(
@@ -345,18 +345,18 @@ class _IdleContinuationRepository:
                 cycle_id=cycle_id,
             )
             if cycle is None or cycle.state.current_run_id != run_id:
-                return IdleBoundaryEligibility(False, None)
+                return IdleBoundaryEligibility(False, None, None)
             archived_cycle_id = cycle_id
         if locked.pending_idle_continuation_run_id != run_id:
-            return IdleBoundaryEligibility(False, None)
+            return IdleBoundaryEligibility(False, None, None)
         if locked.pending_command_id is not None:
-            return IdleBoundaryEligibility(False, None)
+            return IdleBoundaryEligibility(False, None, None)
         if await self.mailbox_item_repository.has_by_session_id_and_scheduling_mode(
             session,
             session_id=session_id,
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         ):
-            return IdleBoundaryEligibility(False, None)
+            return IdleBoundaryEligibility(False, None, None)
         if (
             await self.agent_run_repository.get_active_by_session_id(
                 session,
@@ -364,8 +364,8 @@ class _IdleContinuationRepository:
             )
             is not None
         ):
-            return IdleBoundaryEligibility(False, None)
-        return IdleBoundaryEligibility(True, archived_cycle_id)
+            return IdleBoundaryEligibility(False, None, None)
+        return IdleBoundaryEligibility(True, archived_cycle_id, None)
 
 
 class _EventPublisher:

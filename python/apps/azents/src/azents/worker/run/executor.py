@@ -21,7 +21,11 @@ from azents.broker.types import (
     SessionBroker,
     SessionWakeUp,
 )
-from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
+from azents.core.action_execution_data import (
+    ActionExecution,
+    ActionExecutionProjection,
+    OperationActionExecutionResult,
+)
 from azents.core.agent import AgentModelSelection
 from azents.core.agent_session_data import AgentSession, PendingSessionCommand
 from azents.core.chat_data import (
@@ -54,6 +58,7 @@ from azents.core.model_operation import (
     ModelOperationKind,
     ModelOperationSnapshot,
 )
+from azents.core.routine import RoutineScope
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
@@ -68,6 +73,7 @@ from azents.core.tools import (
     ToolkitContext,
     ToolkitExecutionMode,
     ToolkitProvider,
+    TurnContext,
 )
 from azents.core.worker_model_profile import (
     ModelCandidateChainExhausted,
@@ -107,6 +113,11 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.engine.routine_judgment_context import (
+    RoutineJudgmentActionContext,
+    RoutineJudgmentContext,
+    RoutineJudgmentHost,
+)
 from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import (
     AgentEngineProtocol,
@@ -143,6 +154,7 @@ from azents.engine.run.provider_failure import (
 )
 from azents.engine.run.resolve import (
     resolve_agent_tools,
+    resolve_invoke_input_with_profile,
     resolve_invoke_input_with_resolved_profile,
     resolve_model_candidate_runtime,
 )
@@ -159,6 +171,7 @@ from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
     get_goal_toolkit_provider,
+    get_routine_toolkit_provider,
     get_runtime_web_toolkit_provider,
     get_scheduled_toolkit_provider,
     get_todo_toolkit_provider,
@@ -171,6 +184,7 @@ from azents.engine.tools.dynamic_worktree import (
 )
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.routine import RoutineToolkitProvider
 from azents.engine.tools.runtime_web import RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
@@ -222,7 +236,6 @@ from azents.services.oauth_runtime_clients import (
     create_runtime_oauth_client_factories,
 )
 from azents.services.session_git_worktree import (
-    GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
 )
 from azents.services.session_title import SessionTitleService
@@ -455,6 +468,9 @@ class RunExecutor:
     scheduled_toolkit_provider: Annotated[
         ScheduledToolkitProvider, Depends(get_scheduled_toolkit_provider)
     ]
+    routine_toolkit_provider: Annotated[
+        RoutineToolkitProvider, Depends(get_routine_toolkit_provider)
+    ]
     external_channel_toolkit_provider: Annotated[
         ExternalChannelToolkitProvider,
         Depends(get_worker_external_channel_toolkit_provider),
@@ -525,6 +541,22 @@ class RunExecutor:
                 owner_generation=owner_generation,
             )
             predecessor_run_id = active_run.id if active_run is not None else None
+        for projection in await self.read_repository.action_execution_projections(
+            session_id
+        ):
+            if projection.execution.action_type != "routine_judgment":
+                continue
+            await self.operation_action_executor.cancel(
+                action=self.operation_action_executor.decode(
+                    projection.execution.action
+                ),
+                execution=projection.execution,
+                owner_generation=owner_generation,
+                reason=reason,
+                predecessor_run_id=predecessor_run_id,
+                on_history_event_appended=publish_history_event,
+                on_action_removed=publish_removal,
+            )
         await self.session_git_worktree_service.cancel_live_action_executions(
             session_id=session_id,
             owner_generation=owner_generation,
@@ -697,6 +729,7 @@ class RunExecutor:
             todo_toolkit_provider=self.todo_toolkit_provider,
             goal_toolkit_provider=self.goal_toolkit_provider,
             scheduled_toolkit_provider=self.scheduled_toolkit_provider,
+            routine_toolkit_provider=self.routine_toolkit_provider,
             external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
@@ -985,6 +1018,124 @@ class RunExecutor:
                 else ToolkitExecutionMode.ROOT
             ),
         )
+
+        async def prepare_judgment_context(
+            profile: RequestedInferenceProfile,
+        ) -> RoutineJudgmentContext:
+            """Resolve ordinary context without admitting a foreground operation."""
+            invoke = InvokeInput(
+                agent_id=snapshot.agent_id, session_id=snapshot.session_id, messages=[]
+            )
+            existing = turn_inference_state
+            if (
+                existing is not None
+                and existing.model_target_label == profile.model_target_label
+                and existing.reasoning_effort == profile.reasoning_effort
+                and existing.enabled_execution_options
+                == profile.enabled_execution_options
+            ):
+                resolved = await resolve_invoke_input_with_resolved_profile(
+                    invoke,
+                    context_source=None,
+                    resolved_model_selection=existing.model_selection,
+                    resolved_model_settings=existing.model_settings,
+                    resolved_reasoning_effort=existing.reasoning_effort,
+                    resolved_enabled_execution_options=existing.enabled_execution_options,
+                    repositories=self.resolve_repositories,
+                    model_metadata_service=self.model_metadata_service,
+                    oauth_clients=self.oauth_clients,
+                    exchange_file_service=self.exchange_file_service,
+                    model_file_service=self.model_file_service,
+                    image_generation_catalog_service=self.image_generation_catalog_service,
+                )
+                if resolved.failure:
+                    raise ProfileResolutionRuntimeError(
+                        _profile_resolution_failure(resolved.error)
+                    )
+                judgment_request = resolved.value
+                judgment_selection = existing.model_selection
+            else:
+                fresh = await resolve_invoke_input_with_profile(
+                    invoke,
+                    requested_profile=profile,
+                    context_source=None,
+                    repositories=self.resolve_repositories,
+                    model_metadata_service=self.model_metadata_service,
+                    oauth_clients=self.oauth_clients,
+                    exchange_file_service=self.exchange_file_service,
+                    model_file_service=self.model_file_service,
+                    image_generation_catalog_service=self.image_generation_catalog_service,
+                )
+                if fresh.failure:
+                    raise ProfileResolutionRuntimeError(
+                        _profile_resolution_failure(fresh.error)
+                    )
+                judgment_request = fresh.value.run_request
+                judgment_selection = fresh.value.model_selection
+
+            async def prepare_bindings(
+                bindings: Sequence[ToolkitBinding],
+            ) -> list[ToolkitBinding]:
+                return (
+                    list(bindings)
+                    if prepare_toolkits is None
+                    else await prepare_toolkits(bindings)
+                )
+
+            bindings = await self.resolve_idle_continuation_toolkits(
+                snapshot,
+                run_id=run_id,
+                prepare_toolkits=prepare_bindings,
+                dispatch_event=dispatch_event,
+            )
+
+            async def publish_judgment_context_event(event: PublishedEvent) -> None:
+                await dispatch_event(snapshot.session_id, event)
+
+            async def admit_judgment_dispatch() -> None:
+                async def assert_owner() -> None:
+                    await self.session_lifecycle.assert_current_owner_generation(
+                        snapshot.session_id, owner_generation=owner_generation
+                    )
+
+                if not await tool_admission_barrier.run_if_open(assert_owner):
+                    raise asyncio.CancelledError(SHUTDOWN_CANCEL_MESSAGE)
+
+            return RoutineJudgmentContext(
+                request=dataclasses.replace(judgment_request, toolkits=bindings),
+                model_selection=judgment_selection,
+                model_target_label=profile.model_target_label,
+                turn=TurnContext(
+                    workspace_id=snapshot.workspace_id,
+                    model=judgment_request.model,
+                    run_id=run_id,
+                    session_id=snapshot.session_id,
+                    run_index=agent_run.run_index,
+                    tool_search_enabled=judgment_request.tool_search_enabled,
+                    resource_authority=SessionResourceAuthority(
+                        workspace_id=snapshot.workspace_id,
+                        agent_id=snapshot.agent_id,
+                        session_id=snapshot.session_id,
+                        root_session_id=snapshot.root_session_id,
+                        run_id=run_id,
+                        run_index=agent_run.run_index,
+                        owner_generation=owner_generation,
+                    ),
+                    publish_event=publish_judgment_context_event,
+                    check_stop=check_stop,
+                    mailbox_activity_observer=mailbox_activity_observer,
+                ),
+                admit_dispatch=admit_judgment_dispatch,
+            )
+
+        routine_host = RoutineJudgmentHost(
+            scope=RoutineScope(
+                workspace_id=snapshot.workspace_id,
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+            ),
+            prepare_context=prepare_judgment_context,
+        )
         if command is None:
             initial_input = await self.poll_run_inputs(
                 agent_id=snapshot.agent_id,
@@ -997,6 +1148,7 @@ class RunExecutor:
                 initial_turn_eligible=actionable_transcript_pending,
                 poll_fn=None,
                 process_actions=True,
+                routine_host=routine_host,
                 dispatch_event=dispatch_event,
             )
             if initial_input.requested_inference_profile is not None:
@@ -1377,6 +1529,7 @@ class RunExecutor:
             todo_toolkit_provider=self.todo_toolkit_provider,
             goal_toolkit_provider=self.goal_toolkit_provider,
             scheduled_toolkit_provider=self.scheduled_toolkit_provider,
+            routine_toolkit_provider=self.routine_toolkit_provider,
             external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
@@ -1963,6 +2116,7 @@ class RunExecutor:
                             owner_generation=owner_generation,
                             tool_admission_barrier=tool_admission_barrier,
                             mark_context_invalidated=mark_turn_boundary_context_invalidated,
+                            routine_host=routine_host,
                             dispatch_event=dispatch_event,
                         )
                         engine_iter = self.engine.run(
@@ -3040,6 +3194,7 @@ class RunExecutor:
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
         mark_context_invalidated: Callable[[], None],
+        routine_host: RoutineJudgmentHost | None,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
         configuration_signature: str | None = None,
     ) -> PollMessages:
@@ -3063,6 +3218,7 @@ class RunExecutor:
                 initial_turn_eligible=True,
                 poll_fn=poll_fn,
                 process_actions=True,
+                routine_host=routine_host,
                 dispatch_event=dispatch_event,
             )
             follow_up_boundary = (
@@ -3109,6 +3265,7 @@ class RunExecutor:
         initial_turn_eligible: bool,
         poll_fn: PollMessages | None,
         process_actions: bool,
+        routine_host: RoutineJudgmentHost | None,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> RunInputPollResult:
         """Consume pending run inputs and report whether a wake-up has work."""
@@ -3174,6 +3331,11 @@ class RunExecutor:
                     owner_generation=owner_generation,
                     tool_admission_barrier=tool_admission_barrier,
                     operation_action=promoted.operation_action,
+                    routine_judgment=(
+                        routine_host.for_profile(selected_profile)
+                        if routine_host is not None and selected_profile is not None
+                        else None
+                    ),
                 )
                 if process_actions
                 else OperationActionProcessResult(
@@ -3236,6 +3398,7 @@ class RunExecutor:
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
         operation_action: OperationActionInput | None,
+        routine_judgment: RoutineJudgmentActionContext | None,
     ) -> OperationActionProcessResult:
         """Execute atomically claimed operation TurnActions before model dispatch."""
         context_invalidated = False
@@ -3252,6 +3415,7 @@ class RunExecutor:
                 action=operation_action.action,
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
+                routine_judgment=routine_judgment,
             )
             processed_mailbox_item_ids.add(operation_action.buffer.id)
             context_invalidated = result.context_invalidated
@@ -3283,6 +3447,7 @@ class RunExecutor:
                 action=action,
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
+                routine_judgment=routine_judgment,
             )
             context_invalidated = context_invalidated or result.context_invalidated
             complete_run = complete_run or result.complete_run
@@ -3303,7 +3468,8 @@ class RunExecutor:
         action: OperationAction,
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
-    ) -> GitWorktreeActionExecutionResult:
+        routine_judgment: RoutineJudgmentActionContext | None,
+    ) -> OperationActionExecutionResult:
         """Execute one atomically claimed operation action."""
 
         operation_logger = bind_extra(
@@ -3313,6 +3479,8 @@ class RunExecutor:
         async def publish_projection(
             projection: ActionExecutionProjection,
         ) -> None:
+            if not projection.execution.chat_visible:
+                return
             await self.session_lifecycle.assert_current_owner_generation(
                 session_id,
                 owner_generation=owner_generation,
@@ -3325,6 +3493,22 @@ class RunExecutor:
             except WebSocketBroadcastPublishError:
                 operation_logger.exception(
                     "Failed to broadcast action execution projection",
+                )
+
+        async def publish_removal(action_execution_id: str) -> None:
+            if not execution.chat_visible:
+                return
+            await self.session_lifecycle.assert_current_owner_generation(
+                session_id, owner_generation=owner_generation
+            )
+            try:
+                await self.broadcast.publish(
+                    session_id,
+                    chat_action_execution_removed_dump(session_id, action_execution_id),
+                )
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
+                    "Failed to broadcast action execution removal"
                 )
 
         async def publish_history_event(event: Event) -> None:
@@ -3342,25 +3526,19 @@ class RunExecutor:
                     "Failed to broadcast action execution history event",
                     extra={"event_id": event.id},
                 )
-            try:
-                await self.broadcast.publish(
-                    session_id,
-                    chat_action_execution_removed_dump(session_id, execution.id),
-                )
-            except WebSocketBroadcastPublishError:
-                operation_logger.exception(
-                    "Failed to broadcast action execution removal",
-                )
+            await publish_removal(execution.id)
 
         if execution.owner_generation != owner_generation:
-            await self.session_git_worktree_service.cancel_action_execution(
+            await self.operation_action_executor.cancel(
+                action=action,
+                on_action_removed=publish_removal,
                 execution=execution,
                 owner_generation=owner_generation,
                 reason="Operation cancelled during Session ownership handover.",
                 on_history_event_appended=publish_history_event,
                 predecessor_run_id=None,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -3375,14 +3553,16 @@ class RunExecutor:
 
         admitted = await tool_admission_barrier.run_if_open(admit_operation)
         if not admitted:
-            await self.session_git_worktree_service.cancel_action_execution(
+            await self.operation_action_executor.cancel(
+                action=action,
+                on_action_removed=publish_removal,
                 execution=execution,
                 owner_generation=owner_generation,
                 reason="Operation cancelled before worker shutdown.",
                 on_history_event_appended=publish_history_event,
                 predecessor_run_id=None,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -3398,6 +3578,8 @@ class RunExecutor:
                 owner_generation=owner_generation,
                 on_projection_updated=publish_projection,
                 on_history_event_appended=publish_history_event,
+                on_action_removed=publish_removal,
+                routine_judgment=routine_judgment,
             ),
         )
 
@@ -3469,6 +3651,7 @@ class RunExecutor:
             if (
                 promoted.operation_action is not None
                 and promoted.operation_action.execution is not None
+                and promoted.operation_action.execution.chat_visible
             ):
                 await self.broadcast.publish(
                     session_id,

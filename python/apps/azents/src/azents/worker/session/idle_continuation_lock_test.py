@@ -25,6 +25,7 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.toolkit_state import ToolkitStateRepository
+from azents.testing.routine import make_test_routine_authority
 
 
 async def _cleanup_workspace_fixture(engine: AsyncEngine, workspace_id: str) -> None:
@@ -119,6 +120,7 @@ async def test_idle_description_does_not_wait_for_held_owner_or_hierarchy_rows(
         AgentRunRepository(),
         MailboxRepository(),
         ScheduledTaskCycleRepository(ToolkitStateRepository()),
+        make_test_routine_authority(),
     )
     try:
         async with AsyncSession(rdb_engine) as holder:
@@ -199,6 +201,7 @@ async def test_idle_finalization_waits_for_exact_owner_handover_then_rejects(
         AgentRunRepository(),
         MailboxRepository(),
         ScheduledTaskCycleRepository(ToolkitStateRepository()),
+        make_test_routine_authority(),
     )
     task: asyncio.Task[object] | None = None
     try:

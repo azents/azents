@@ -42,9 +42,9 @@ class PurgeClaim:
 
 @dataclasses.dataclass(frozen=True)
 class PurgeRootPreparation:
-    """Committed owner fencing, stop requests and detached root membership."""
+    """Committed work-preservation decision and detached root membership."""
 
     terminal: ArchivedSessionPurgeJobSummary | None
     session_ids: tuple[str, ...]
     active: bool
-    preserve_scheduled: bool
+    preserve_started_work: bool

@@ -93,7 +93,9 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    RoutineInputPayload,
     RoutineJudgmentPayload,
+    RoutineNotificationPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
     ScheduledTaskTriggerPayload,
@@ -638,9 +640,14 @@ class PydanticAILowerer:
         if isinstance(payload, SystemReminderPayload):
             return self._prompt(format_plain_system_reminder(payload.text))
         if isinstance(
-            payload, ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload
+            payload,
+            RoutineInputPayload
+            | ScheduledTaskTriggerPayload
+            | ScheduledTaskContinuationPayload,
         ):
             return self._prompt(payload.content)
+        if isinstance(payload, RoutineNotificationPayload):
+            return ModelResponse(parts=[TextPart(payload.content)])
         if isinstance(payload, ScheduledTaskResultPayload):
             return ModelResponse(
                 parts=[

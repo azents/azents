@@ -220,6 +220,32 @@ def test_agent_worktree_action_is_hidden_from_public_live_projections() -> None:
         mailbox_item_to_pending_projection(mailbox_item)
 
 
+def test_routine_judgment_action_is_not_a_pending_chat_message() -> None:
+    mailbox_item = MailboxItem(
+        id="1" * 32,
+        session_id="2" * 32,
+        kind=MailboxItemKind.ACTION_MESSAGE,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
+        requested_enabled_execution_options=[],
+        sender_user_id=None,
+        order_group="3" * 32,
+        order_sequence=0,
+        content="",
+        idempotency_key="routine-judgment:check-a",
+        metadata={},
+        action={"type": "routine_judgment", "judgment_id": "check-a"},
+        attachments=[],
+        file_parts=[],
+        created_at=datetime.datetime(2026, 10, 18, tzinfo=datetime.UTC),
+    )
+    assert not mailbox_item_is_publicly_presentable(mailbox_item)
+    assert mailbox_item_to_live_event(mailbox_item) is None
+    with pytest.raises(ValueError, match="not publicly presentable"):
+        mailbox_item_to_pending_projection(mailbox_item)
+
+
 def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> None:
     """Pending terminal result exposes the complete agent message payload."""
     event = mailbox_item_to_live_event(

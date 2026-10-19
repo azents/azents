@@ -1,10 +1,10 @@
 """Completed database-only Routine definition owner operations."""
 
 from dataclasses import dataclass
+from typing import Annotated
 
-import sqlalchemy as sa
+from fastapi import Depends
 
-from azents.core.enums import AgentLifecycleStatus, AgentSessionStatus
 from azents.core.routine import (
     MAX_ROUTINES_PER_SESSION,
     RoutineChanges,
@@ -12,35 +12,48 @@ from azents.core.routine import (
     RoutineDefinition,
     RoutineLimitReached,
     RoutineScope,
-    RoutineUnavailable,
+    RoutineWorkRecord,
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
-from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.routine.definition import RoutineDefinitionRepository
-from azents.repos.session_execution.ownership import fence_owned_session_mutation
+from azents.repos.routine.records import RoutineWorkRecordRepository
+from azents.repos.routine.scope import fence_routine_scope, require_routine_scope
+
+
+@dataclass(frozen=True)
+class RoutineInspection:
+    """Current exact content and a bounded recent work-record page."""
+
+    definition: RoutineDefinition
+    records: tuple[RoutineWorkRecord, ...]
 
 
 @dataclass(frozen=True)
 class RoutineOperations:
     """Keep transaction handles private to persistence composition."""
 
-    session_manager: SessionManager[WriteSession]
-    read_session_manager: SessionManager[ReadSession]
-    definitions: RoutineDefinitionRepository
+    session_manager: Annotated[
+        SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
+    definitions: Annotated[RoutineDefinitionRepository, Depends()]
+    records: Annotated[RoutineWorkRecordRepository, Depends()]
 
     async def list_routines(self, *, scope: RoutineScope) -> list[RoutineDefinition]:
         """Read the inventory after checking its exact current owners."""
         async with self.read_session_manager() as session:
-            await self._require_scope(session, scope=scope)
+            await require_routine_scope(session, scope=scope)
             return await self.definitions.list_for_session(session, scope=scope)
 
     async def get(self, *, scope: RoutineScope, slug: str) -> RoutineDefinition | None:
         """Read an exact definition without a write transaction or row gate."""
         async with self.read_session_manager() as session:
-            await self._require_scope(session, scope=scope)
+            await require_routine_scope(session, scope=scope)
             return await self.definitions.get(session, scope=scope, slug=slug)
 
     async def create(
@@ -52,13 +65,27 @@ class RoutineOperations:
     ) -> RoutineDefinition:
         """Serialize the Session limit with archive and competing creation."""
         async with self.session_manager() as session:
-            await self._fence_scope(session, scope=scope, owner=owner)
+            await fence_routine_scope(session, scope=scope, owner=owner)
             if (
                 await self.definitions.count(session, scope=scope)
                 >= MAX_ROUTINES_PER_SESSION
             ):
                 raise RoutineLimitReached("The Session already has 20 Routines.")
             return await self.definitions.create(session, scope=scope, content=content)
+
+    async def inspect(
+        self, *, scope: RoutineScope, slug: str, record_limit: int
+    ) -> RoutineInspection | None:
+        """Read current content and records without exporting a transaction handle."""
+        async with self.read_session_manager() as session:
+            await require_routine_scope(session, scope=scope)
+            definition = await self.definitions.get(session, scope=scope, slug=slug)
+            if definition is None:
+                return None
+            records = await self.records.list_recent(
+                session, scope=scope, routine_id=definition.id, limit=record_limit
+            )
+            return RoutineInspection(definition=definition, records=tuple(records))
 
     async def update(
         self,
@@ -71,7 +98,7 @@ class RoutineOperations:
     ) -> RoutineDefinition:
         """Commit exact compare-and-update under the current Session owner."""
         async with self.session_manager() as session:
-            await self._fence_scope(session, scope=scope, owner=owner)
+            await fence_routine_scope(session, scope=scope, owner=owner)
             return await self.definitions.update(
                 session, scope=scope, slug=slug, expected=expected, changes=changes
             )
@@ -85,60 +112,5 @@ class RoutineOperations:
     ) -> RoutineDefinition:
         """Commit definition removal without deleting admitted execution state."""
         async with self.session_manager() as session:
-            await self._fence_scope(session, scope=scope, owner=owner)
+            await fence_routine_scope(session, scope=scope, owner=owner)
             return await self.definitions.delete(session, scope=scope, slug=slug)
-
-    async def _require_scope(
-        self, session: ReadSession, *, scope: RoutineScope
-    ) -> None:
-        """Fail closed for a wrong Workspace, Agent, or inactive Session."""
-        found = await session.read_session.scalar(
-            sa.select(RDBAgentSession.id)
-            .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
-            .where(
-                RDBAgentSession.id == scope.session_id,
-                RDBAgentSession.agent_id == scope.agent_id,
-                RDBAgentSession.workspace_id == scope.workspace_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgent.workspace_id == scope.workspace_id,
-                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
-            )
-        )
-        if found is None:
-            raise RoutineUnavailable("Routine Session is not active or authorized.")
-
-    async def _fence_scope(
-        self,
-        session: WriteSession,
-        *,
-        scope: RoutineScope,
-        owner: SessionExecutionOwner | None,
-    ) -> None:
-        """Preserve Agent-to-Session ordering and fence the actual mutation."""
-        if owner is not None and owner.session_id != scope.session_id:
-            raise RoutineUnavailable("Routine execution owner does not match Session.")
-        agent = await session.write_session.scalar(
-            sa.select(RDBAgent.id)
-            .where(
-                RDBAgent.id == scope.agent_id,
-                RDBAgent.workspace_id == scope.workspace_id,
-                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
-            )
-            .with_for_update(read=True, key_share=True)
-        )
-        if agent is None:
-            raise RoutineUnavailable("Routine Agent is not active or authorized.")
-        target = await session.write_session.scalar(
-            sa.select(RDBAgentSession.id)
-            .where(
-                RDBAgentSession.id == scope.session_id,
-                RDBAgentSession.agent_id == scope.agent_id,
-                RDBAgentSession.workspace_id == scope.workspace_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-            )
-            .with_for_update()
-        )
-        if target is None:
-            raise RoutineUnavailable("Routine Session is not active or authorized.")
-        if owner is not None:
-            await fence_owned_session_mutation(session, owner)

@@ -94,6 +94,7 @@ from azents.testing.model_selection import (
     make_test_selectable_model_option_dicts,
     make_test_selectable_model_options,
 )
+from azents.testing.routine import make_test_routine_execution
 
 
 @asynccontextmanager
@@ -257,6 +258,7 @@ def _service(
     chat_write_request_repository = ChatWriteRequestRepository()
     return ChatWriteService(
         operations=ChatWriteOperationsRepository(
+            routine_execution_repository=make_test_routine_execution(),
             agent_repository=agent_repository,
             agent_session_repository=agent_session_repository,
             workspace_user_repository=effective_workspace_user_repository,
@@ -582,6 +584,7 @@ def _control_service(
     write_repository = writes
     service = ChatWriteService(
         operations=ChatWriteOperationsRepository(
+            routine_execution_repository=make_test_routine_execution(),
             agent_repository=agent_repository,
             agent_session_repository=agent_session_repository,
             workspace_user_repository=workspace_user_repository,
@@ -1126,6 +1129,7 @@ class TestChatWriteService:
         calls: list[str] = []
         service = ChatWriteService(
             operations=ChatWriteOperationsRepository(
+                routine_execution_repository=make_test_routine_execution(),
                 agent_repository=AgentRepository(),
                 agent_session_repository=_SubagentLockRepository(calls),
                 workspace_user_repository=_WorkspaceUserRepository(),
@@ -1178,6 +1182,7 @@ class TestChatWriteService:
         """Reject existing idempotency records from another explicit session."""
         service = ChatWriteService(
             operations=ChatWriteOperationsRepository(
+                routine_execution_repository=make_test_routine_execution(),
                 agent_repository=AgentRepository(),
                 agent_session_repository=AgentSessionRepository(),
                 workspace_user_repository=_WorkspaceUserRepository(),

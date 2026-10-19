@@ -14,6 +14,10 @@ from azents.core.enums import (
 from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.routine_execution import (
+    RoutineExecutionRef,
+    validate_routine_execution_refs,
+)
 from azents.engine.events.types import FileOutputPart
 
 
@@ -118,6 +122,32 @@ class ScheduledTaskContinuationMailboxPayload(MailboxPayloadBase):
         return self
 
 
+class RoutineMailboxPayload(MailboxPayloadBase):
+    """Shared typed occurrence authority for ordinary Routine FIFO inputs."""
+
+    executions: tuple[RoutineExecutionRef, ...]
+
+    @model_validator(mode="after")
+    def validate_routine_presentation(self) -> "RoutineMailboxPayload":
+        """Require one canonical presentation and unique occurrence identities."""
+        validate_routine_execution_refs(self.executions)
+        if len(self.items) != 1:
+            raise ValueError("Routine mailbox input requires one presentation.")
+        return self
+
+
+class RoutineTriggerMailboxPayload(RoutineMailboxPayload):
+    """Initial jointly selected Routine work consumed by ordinary execution."""
+
+    type: Literal["routine_trigger"]
+
+
+class RoutineContinuationMailboxPayload(RoutineMailboxPayload):
+    """Incomplete Routine work consumed at an ordinary idle continuation."""
+
+    type: Literal["routine_continuation"]
+
+
 class AgentCreateGitWorktreeContinuationResult(BaseModel):
     """Bounded model-facing result for an Agent worktree create action."""
 
@@ -204,6 +234,8 @@ MailboxEnvelopePayload: TypeAlias = Annotated[
     | ExternalChannelContinuationMailboxPayload
     | ScheduledTaskTriggerMailboxPayload
     | ScheduledTaskContinuationMailboxPayload
+    | RoutineTriggerMailboxPayload
+    | RoutineContinuationMailboxPayload
     | TurnActionContinuationMailboxPayload
     | AgentMessageMailboxPayload
     | ExternalChannelMessageMailboxPayload
@@ -268,6 +300,8 @@ def mailbox_payload_from_fields(
         raise ValueError(
             "TurnAction continuation admission requires its closed typed payload"
         )
+    if kind in {MailboxItemKind.ROUTINE_TRIGGER, MailboxItemKind.ROUTINE_CONTINUATION}:
+        raise ValueError("Routine admission requires its closed typed payload.")
     if kind is MailboxItemKind.AGENT_MESSAGE:
         return AgentMessageMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:

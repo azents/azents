@@ -68,6 +68,8 @@ _ACTIVITY_EVENT_KINDS = frozenset(
         EventKind.SCHEDULED_TASK_TRIGGER,
         EventKind.SCHEDULED_TASK_CONTINUATION,
         EventKind.SCHEDULED_TASK_RESULT,
+        EventKind.ROUTINE_TRIGGER,
+        EventKind.ROUTINE_CONTINUATION,
         EventKind.ACTION_MESSAGE,
         EventKind.AGENT_MESSAGE,
         EventKind.ASSISTANT_MESSAGE,

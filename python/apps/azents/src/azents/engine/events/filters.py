@@ -47,7 +47,9 @@ from azents.engine.events.types import (
     OutputContentPart,
     OutputTextPart,
     ProviderToolCallPayload,
+    RoutineInputPayload,
     RoutineJudgmentPayload,
+    RoutineNotificationPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
     ScheduledTaskTriggerPayload,
@@ -708,9 +710,13 @@ def _model_visible_event_value(event: Event) -> object | None:
         }
     if isinstance(
         payload,
-        ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+        RoutineInputPayload
+        | ScheduledTaskTriggerPayload
+        | ScheduledTaskContinuationPayload,
     ):
         return {"role": "user", "content": payload.content}
+    if isinstance(payload, RoutineNotificationPayload):
+        return {"role": "assistant", "content": payload.content}
     if isinstance(payload, ScheduledTaskResultPayload):
         return {
             "role": "assistant",
@@ -801,12 +807,18 @@ def _model_visible_event_text(
         )
     if isinstance(
         payload,
-        ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+        RoutineInputPayload
+        | ScheduledTaskTriggerPayload
+        | ScheduledTaskContinuationPayload,
     ):
         return _format_continuity_block(
             "User",
             payload.content,
             include_label=include_label,
+        )
+    if isinstance(payload, RoutineNotificationPayload):
+        return _format_continuity_block(
+            "Assistant", payload.content, include_label=include_label
         )
     if isinstance(payload, ScheduledTaskResultPayload):
         return _format_continuity_block(

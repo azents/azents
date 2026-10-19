@@ -32,6 +32,7 @@ from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     CreateGitWorktreeAction,
+    RoutineJudgmentAction,
 )
 from azents.engine.events.types import Event
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -813,4 +814,42 @@ async def test_runner_git_operations_execute_outside_database_transactions(
     )
     assert outcome.completed
     create.assert_awaited_once()
+    fixture.assert_closed()
+
+
+async def test_worktree_recovery_preserves_other_operation_domains(
+    worktree_operations: WorktreeOperationsFixture,
+) -> None:
+    fixture = worktree_operations
+    scenario = fixture.scenario
+    before = await fixture.repository.list_live_actions(session_id=scenario.session_id)
+    action = RoutineJudgmentAction(judgment_id=uuid4().hex)
+    actions = ActionExecutionRepository()
+    async with fixture.write_manager() as session:
+        execution = await actions.create(
+            session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=scenario.session_id,
+                mailbox_item_id=uuid4().hex,
+                sender_user_id=None,
+                action_type=action.type,
+                action=action.model_dump(mode="json"),
+                status=ActionExecutionStatus.PENDING,
+                owner_generation=scenario.owner_generation,
+            ),
+        )
+    after = await fixture.repository.list_live_actions(session_id=scenario.session_id)
+    assert after == before
+    await scenario.service.cancel_live_action_executions(
+        session_id=scenario.session_id,
+        owner_generation=scenario.owner_generation,
+        reason="Ordinary recovery.",
+        on_history_event_appended=None,
+        on_action_execution_removed=None,
+        predecessor_run_id=None,
+    )
+    async with fixture.read_manager() as session:
+        retained = await actions.get_by_id(session, action_execution_id=execution.id)
+        assert retained is not None and retained.status is ActionExecutionStatus.PENDING
     fixture.assert_closed()

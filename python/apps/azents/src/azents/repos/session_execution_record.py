@@ -17,6 +17,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.compacted_event_retention import record_compaction_displacement
+from azents.repos.routine.preserved import archived_routine_execution_allowed
 
 
 class SessionExecutionRecordRepository:
@@ -40,7 +41,20 @@ class SessionExecutionRecordRepository:
                 ).where(RDBAgentSession.id == root_id)
             )
         ).one_or_none()
-        if root is None or root.status is not AgentSessionStatus.ACTIVE:
+        archived_routine = (
+            current.id == root_id
+            and current.status is AgentSessionStatus.ARCHIVED
+            and await session.write_session.scalar(
+                sa.select(RDBAgentSession.id).where(
+                    RDBAgentSession.id == session_id,
+                    archived_routine_execution_allowed(),
+                )
+            )
+            is not None
+        )
+        if root is None or (
+            root.status is not AgentSessionStatus.ACTIVE and not archived_routine
+        ):
             raise ValueError("Root AgentSession is not active")
         if (
             root.agent_id != current.agent_id
@@ -52,7 +66,10 @@ class SessionExecutionRecordRepository:
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                sa.or_(
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    archived_routine_execution_allowed(),
+                ),
             )
             .values(owner_generation=RDBAgentSession.owner_generation + 1)
             .returning(RDBAgentSession.owner_generation)
@@ -67,7 +84,10 @@ class SessionExecutionRecordRepository:
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                sa.or_(
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    archived_routine_execution_allowed(),
+                ),
             )
             .values(
                 run_state=AgentSessionRunState.RUNNING,

@@ -1843,7 +1843,11 @@ class ChatOperationsRepository:
                     run=run,
                     goal=goal,
                     todo=todo,
-                    action_executions=tuple(action_executions),
+                    action_executions=tuple(
+                        projection
+                        for projection in action_executions
+                        if projection.execution.chat_visible
+                    ),
                 )
             )
 

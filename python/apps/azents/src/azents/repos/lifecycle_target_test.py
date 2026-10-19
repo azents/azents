@@ -38,6 +38,7 @@ from azents.repos.session_lifecycle_operations import (
     SessionLifecycleOperationsRepository,
 )
 from azents.services.archived_session_retention_test import _create_root
+from azents.testing.routine import make_test_routine_lifecycle
 
 
 class SeededInternalSession(NamedTuple):
@@ -56,6 +57,7 @@ def lifecycle_pipeline() -> SessionLifecycleOperationsRepository:
         retention_repository=ArchivedSessionRetentionRepository(),
         external_channel_repository=ExternalChannelLifecycleRepository.create(),
         scheduled_task_repository=ScheduledTaskLifecycleRepository.create(),
+        routine_repository=make_test_routine_lifecycle(),
     )
 
 

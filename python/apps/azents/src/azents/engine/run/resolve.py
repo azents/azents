@@ -92,6 +92,7 @@ from azents.engine.tools.external_channel import (
     ExternalChannelToolkitProvider,
 )
 from azents.engine.tools.goal import GoalToolkit, GoalToolkitProvider
+from azents.engine.tools.routine import RoutineToolkit, RoutineToolkitProvider
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
@@ -1390,6 +1391,7 @@ async def resolve_agent_tools(
     mcp_proxy_url: str | None,
     runtime_domain_config: RuntimeDomainConfig,
     workspace_handle: str | None,
+    routine_toolkit_provider: RoutineToolkitProvider | None,
     builtin_toolkit_provider: BuiltinToolkitProvider | None = None,
     claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
@@ -2037,6 +2039,52 @@ async def resolve_agent_tools(
                 False,
                 None,
                 scheduled_modes,
+            )
+        )
+
+    # Auto-bound Toolkit: root-owned Routine management and per-item completion
+    routine_modes = _ROOT_EXECUTION_MODES
+    if routine_toolkit_provider is not None and _allows_execution_mode(
+        routine_modes,
+        execution_mode,
+    ):
+        routine_config = RoutineToolkitProvider.validate_config({})
+        routine_context = ResolveContext(
+            toolkit_id="",
+            toolkit_name="routine",
+            credentials_json=None,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            web_url=web_url,
+            oauth_secret_key=oauth_secret_key,
+            workspace_id=context.workspace_id,
+            workspace_handle=workspace_handle,
+            effect_admission=None,
+        )
+        routine_resolved = await _resolve_toolkit_with_logging(
+            agent_id=agent_id,
+            context=context,
+            source="auto",
+            slug="routine",
+            provider=routine_toolkit_provider,
+            toolkit_name="routine",
+            resolve=routine_toolkit_provider.resolve(routine_config, routine_context),
+        )
+        if (
+            isinstance(routine_resolved, RoutineToolkit)
+            and instruction_context_store is not None
+        ):
+            routine_resolved.set_runtime_context_store(instruction_context_store)
+        pending.append(
+            (
+                routine_toolkit_provider,
+                routine_resolved,
+                routine_config,
+                "routine",
+                None,
+                False,
+                None,
+                routine_modes,
             )
         )
 
