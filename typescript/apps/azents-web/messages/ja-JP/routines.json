@@ -1,0 +1,93 @@
+{
+  "title": "ルーチン",
+  "description": "このセッションの継続的な目標と作業記録を確認します。定義の管理はAgentに依頼してください。",
+  "inventory": "セッションのルーチン",
+  "empty": "このセッションにはルーチンがありません。継続的に確認したい目標について、Agentに条件付きの確認を依頼してください。",
+  "selectRoutine": "ルーチンを選択すると、目標と作業記録を確認できます。",
+  "loading": "ルーチンを読み込み中…",
+  "unavailable": "ルーチンの情報を取得できません",
+  "refresh": "更新",
+  "back": "ルーチン一覧に戻る",
+  "objective": "目標",
+  "sources": "現在のソース",
+  "manualSource": "実行可能なタイミングで定期的に確認",
+  "noSources": "ソースが未設定のため、自動確認の対象には選ばれません。",
+  "latestExecution": "直近の実行",
+  "notExecuted": "未実行",
+  "admittedAt": "待機開始",
+  "startedAt": "作業開始",
+  "completedAt": "終了",
+  "records": "作業記録（{count}件）",
+  "noRecords": "完了した作業の記録はまだありません。",
+  "result": "記録された結果",
+  "nextHint": "次回の確認へのヒント",
+  "notification": "通知の選択",
+  "notifyYes": "通知を要求",
+  "notifyNo": "通知の要求なし",
+  "message": "通知メッセージ",
+  "delivery": "確認された配信状態",
+  "outcomes": {
+    "finished": "目標達成",
+    "failed": "目標未達成"
+  },
+  "phases": {
+    "admitted": "待機中",
+    "started": "作業未完了",
+    "completed": "作業を記録済み",
+    "cancelled": "キャンセル済み"
+  },
+  "deliveryStates": {
+    "not_requested": "要求なし",
+    "unobserved": "配信結果未確認",
+    "delivered": "配信済み",
+    "failed": "配信失敗"
+  },
+  "input": {
+    "trigger": "ルーチンの作業",
+    "continuation": "ルーチンの作業を継続",
+    "unavailable": "実行対象となったルーチンのコンテキストを取得できません。"
+  },
+  "tool": {
+    "routineTitle": "タイトル",
+    "requested": "依頼した作業",
+    "observedResult": "確認された結果",
+    "previousContent": "比較用に渡した既存の内容",
+    "requestedChanges": "依頼した変更",
+    "noChanges": "内容の変更は依頼されていません。",
+    "argumentsPending": "引数はまだ準備されていません。",
+    "sessionInventory": "現在のセッションのルーチン一覧を取得",
+    "recordLimit": "作業記録は最大{count}件",
+    "emptyInventory": "返されたルーチンはありません。",
+    "notFound": "ルーチンが見つからないか、取得できません。",
+    "admittedContext": "実行確定時の元のコンテキスト",
+    "sourceEvents": "確定したソースイベント",
+    "previousWork": "このコンテキストに含まれる前回の作業",
+    "newCompletion": "この実行項目を完了し、結果を保存しました。",
+    "existingCompletion": "この項目は完了済みです。通知を繰り返さず、保存された結果を返しました。",
+    "resultPending": "完了した結果を待っています。",
+    "noObservedResult": "完了した結果は確認できません。依頼した内容だけでは実際の結果を確認できません。"
+  },
+  "judgment": {
+    "label": "ルーチン",
+    "unavailable": "判断の詳細を取得できません。",
+    "considered": "判断対象のルーチン",
+    "selected": "作業対象に選択",
+    "noAction": "作業対象に未選択",
+    "noDecision": "有効な判断結果なし",
+    "model": "呼び出し時のモデル",
+    "unknown": "情報なし",
+    "usageUnavailable": "呼び出しの使用量情報はありません。",
+    "callUsage": "判断呼び出しの使用量",
+    "tokens": "合計 {total} · 入力 {prompt} · 出力 {completion}",
+    "cached": "キャッシュ読み取り",
+    "cacheCreated": "キャッシュ書き込み",
+    "reasoning": "推論トークン",
+    "cost": "記録された費用",
+    "separateUsage": "この判断呼び出しのみの使用量です。通常のターンの使用量は変更しません。",
+    "states": {
+      "completed": "判断完了",
+      "failed": "判断失敗",
+      "cancelled": "判断キャンセル済み"
+    }
+  }
+}

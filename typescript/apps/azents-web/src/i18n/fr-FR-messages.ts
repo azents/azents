@@ -13,6 +13,7 @@ import memberProfile from "../../messages/fr-FR/memberProfile.json";
 import metadata from "../../messages/fr-FR/metadata.json";
 import oauth from "../../messages/fr-FR/oauth.json";
 import oauthCallback from "../../messages/fr-FR/oauthCallback.json";
+import routines from "../../messages/fr-FR/routines.json";
 import runtimeLifecycle from "../../messages/fr-FR/runtimeLifecycle.json";
 import runtimeMetrics from "../../messages/fr-FR/runtimeMetrics.json";
 import runtimeWeb from "../../messages/fr-FR/runtimeWeb.json";
@@ -40,6 +41,7 @@ const messages = composeMessages([
   ["metadata", metadata],
   ["oauth", oauth],
   ["oauthCallback", oauthCallback],
+  ["routines", routines],
   ["runtimeLifecycle", runtimeLifecycle],
   ["runtimeMetrics", runtimeMetrics],
   ["runtimeWeb", runtimeWeb],

@@ -178,3 +178,38 @@ format, ty and skill packaging passed. These matrices overlap and are not
 additive. Bounded same-reviewer confirmation closed all three findings without
 remaining issues. Commit and Phase 3 PR creation are next. Phase 4 has not
 started. Design delta: None.
+
+Phase 3 was subsequently committed as `746f26b80` with all repository hooks
+passed, pushed normally and opened as
+[PR #2335](https://github.com/azents/azents/pull/2335) against phase 2. The worktree
+was clean. CI run `39157639739` is running; success is not yet claimed. Phase 4
+starts on `feat/routine-261018-4-inspection` from that exact commit, with its
+[tracked execution plan](session-routines-phase-4-inspection.md) recorded before
+implementation. Scope is M8 read-only inspection, judgment disclosure and
+semantic localized tool activity, integrating existing contracts and canonical
+public Session authorization. Execution ownership and notification policy remain
+unchanged. Root owns all implementation and validation; the same single reviewer
+reviews the stable complete phase diff. Design delta: None.
+
+Phase 4 now includes exact-authorized read-only APIs and generated clients,
+responsive Session inspection, typed passive judgment with call-owned usage,
+seven-tool semantic Routine activity and aligned four-locale copy. Root's
+integrated checks passed backend 114, client 16, Web 756, Session-core 67 and
+Chromium Storybook 30 tests; the suites overlap earlier evidence. Native
+desktop/mobile checks covered 80 component states and keyboard/mobile Back
+behavior. The single review found one truthful-status correction: persisted
+`started` means incomplete work even after a host Run fails. Neutral labels and
+real failure/explicit-retry read regressions address it without changing Run
+ownership or API contracts. Focused regression checks and rebuilt native
+responsive checks passed; bounded same-reviewer confirmation closed the finding
+without further issues. The Phase 4 hook commit and PR are next.
+
+All four branches were mechanically rebased onto main `2bdbcc2e1`. Range-diff
+equivalence and hooks passed, Phase 4 WIP was preserved/restored, and Phase 1-3
+PR heads were pushed with exact old-tip leases. Phase 3's rebased CI run
+`39163260578` succeeded at `9c61a3796`; Phase 1's run `39163261314` failed the
+unchanged duration gate (Web call total 544.019623s versus main 413.575784s,
++31.54%, threshold 496.2909408s), while functional lanes passed. This does not
+erase the preserved old Phase 3 same-SHA failures. No gate threshold, scope,
+production execution policy or deployment changed. Full-stack CI acceptance,
+Phase 5 product QA/spec promotion and plan cleanup remain incomplete.

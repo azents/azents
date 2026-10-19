@@ -13,6 +13,7 @@ import memberProfile from "../../messages/ko-KR/memberProfile.json";
 import metadata from "../../messages/ko-KR/metadata.json";
 import oauth from "../../messages/ko-KR/oauth.json";
 import oauthCallback from "../../messages/ko-KR/oauthCallback.json";
+import routines from "../../messages/ko-KR/routines.json";
 import runtimeLifecycle from "../../messages/ko-KR/runtimeLifecycle.json";
 import runtimeMetrics from "../../messages/ko-KR/runtimeMetrics.json";
 import runtimeWeb from "../../messages/ko-KR/runtimeWeb.json";
@@ -40,6 +41,7 @@ const messages = composeMessages([
   ["metadata", metadata],
   ["oauth", oauth],
   ["oauthCallback", oauthCallback],
+  ["routines", routines],
   ["runtimeLifecycle", runtimeLifecycle],
   ["runtimeMetrics", runtimeMetrics],
   ["runtimeWeb", runtimeWeb],

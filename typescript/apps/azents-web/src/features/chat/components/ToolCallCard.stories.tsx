@@ -3,6 +3,12 @@ import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
 import {
+  routineCallFixture,
+  routineCompletionFixture,
+  routineDefinitionFixture,
+  routineWorkFixture,
+} from "../routineToolFixtures";
+import {
   attachmentToolCall,
   completedToolCall,
   failedToolCall,
@@ -10,6 +16,7 @@ import {
   preparingToolCall,
   runningToolCall,
 } from "../story-fixtures";
+import type { RoutineWorkView } from "../routineToolPresentation";
 import type { ActiveToolCall } from "@azents/session-core/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -38,6 +45,195 @@ const longJavaScriptFileContent = Array.from(
   (_, index) =>
     `export const mobileViewport${index + 1} = { width: 390, height: 844 };`,
 ).join("\n");
+
+const routineUpdateInput = {
+  slug: "traffic",
+  expected: routineDefinitionFixture.content,
+  changes: { title: "Verified traffic anomalies" },
+};
+const updatedRoutine = {
+  ...routineDefinitionFixture,
+  content: {
+    ...routineDefinitionFixture.content,
+    ...routineUpdateInput.changes,
+  },
+};
+const failedRoutineWork: RoutineWorkView = {
+  ...routineWorkFixture,
+  objective_outcome: "failed",
+  notify: true,
+  message:
+    "The investigation could not be completed because the approved source is unavailable.",
+};
+
+export const RoutineCreated: Story = {
+  args: {
+    toolCall: routineCallFixture(
+      "create_routine",
+      routineDefinitionFixture.content,
+      "completed",
+      routineDefinitionFixture,
+    ),
+  },
+};
+export const RoutinePreparing: Story = {
+  args: {
+    toolCall: {
+      ...routineCallFixture("create_routine", {}, "preparing", null),
+      arguments: "{",
+    },
+  },
+};
+export const RoutineRunning: Story = {
+  args: {
+    toolCall: routineCallFixture(
+      "create_routine",
+      routineDefinitionFixture.content,
+      "running",
+      null,
+    ),
+  },
+};
+export const RoutineUpdate: Story = {
+  args: {
+    toolCall: routineCallFixture(
+      "update_routine",
+      routineUpdateInput,
+      "completed",
+      updatedRoutine,
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Updated Routine/ }),
+    );
+    await expect(
+      canvas.getByText("Existing content supplied for comparison"),
+    ).toBeVisible();
+    await expect(canvas.getByText("Requested changes")).toBeVisible();
+    await expect(canvas.getByText("Observed result")).toBeVisible();
+    await expect(
+      canvas.getByText("Traffic anomalies", { exact: true }),
+    ).toBeVisible();
+  },
+};
+export const RoutineRejectedUpdate: Story = {
+  args: {
+    toolCall: {
+      ...routineCallFixture(
+        "update_routine",
+        routineUpdateInput,
+        "failed",
+        null,
+      ),
+      result:
+        "Routine content changed. Read the current content before updating.",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Routine update failed/ }),
+    );
+    await expect(
+      canvas.queryByText("Updated Routine", { exact: true }),
+    ).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Observed result")).not.toBeInTheDocument();
+    await expect(canvas.getByText("Requested changes")).toBeVisible();
+  },
+};
+export const RoutineCancelledUpdate: Story = {
+  args: {
+    toolCall: routineCallFixture(
+      "update_routine",
+      routineUpdateInput,
+      "cancelled",
+      null,
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Routine update stopped/ }),
+    );
+    await expect(
+      canvas.queryByText("Updated Routine", { exact: true }),
+    ).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Observed result")).not.toBeInTheDocument();
+    await expect(
+      canvas.getByText(
+        "No completed result was observed. Requested content is not an actual result.",
+      ),
+    ).toBeVisible();
+  },
+};
+export const RoutineObjectiveAndDeliveryFailure: Story = {
+  args: {
+    toolCall: routineCallFixture(
+      "record_routine_result",
+      {
+        slug: "traffic",
+        execution_id: "occurrence-a",
+        work: failedRoutineWork,
+      },
+      "completed",
+      {
+        created: true,
+        execution: {
+          ...routineCompletionFixture,
+          work: failedRoutineWork,
+          delivery_status: "failed",
+          delivery_error: "The current Primary is unavailable.",
+        },
+      },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Recorded Routine result/ }),
+    );
+    await expect(canvas.getByText("Delivery failed")).toBeVisible();
+    await expect(canvas.getAllByText("Objective failed")).toHaveLength(2);
+    await expect(canvas.getByText("Observed delivery")).toBeVisible();
+  },
+};
+export const RoutineExistingCompletion: Story = {
+  args: {
+    toolCall: routineCallFixture(
+      "record_routine_result",
+      {
+        slug: "traffic",
+        execution_id: "occurrence-a",
+        work: {
+          ...routineWorkFixture,
+          result: "A changed request, not the saved result.",
+        },
+      },
+      "completed",
+      { created: false, execution: routineCompletionFixture },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Recorded Routine result/ }),
+    );
+    await expect(
+      canvas.getByText("A changed request, not the saved result."),
+    ).toBeVisible();
+    await expect(canvas.getByText(routineWorkFixture.result)).toBeVisible();
+    await expect(
+      canvas.getByText(
+        "This occurrence was already complete. Its saved result was returned without repeating notification.",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText("Notification message"),
+    ).not.toBeInTheDocument();
+  },
+};
 
 export const Preparing = {
   args: {

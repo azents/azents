@@ -25,6 +25,7 @@ import {
   IconGitBranch,
   IconPencil,
   IconPhoto,
+  IconRepeat,
   IconRobot,
   IconSearch,
   IconSend,
@@ -46,6 +47,7 @@ import {
 } from "./activityRowPresentation";
 import { ChatCodeBlock } from "./ChatCodeBlock";
 import { FileAttachmentList } from "./FileAttachmentList";
+import { RoutineToolDetails } from "./RoutineToolDetails";
 import { SkillContentPanel } from "./SkillContentPanel";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
 import { ToolFailureOutput } from "./ToolFailureOutput";
@@ -139,6 +141,14 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
     case "deleteScheduledTask":
     case "submitScheduledTaskResult":
       return <IconCalendarClock size={activityRowIconSize} />;
+    case "createRoutine":
+    case "listRoutines":
+    case "inspectRoutine":
+    case "updateRoutine":
+    case "deleteRoutine":
+    case "readRoutineContext":
+    case "recordRoutineResult":
+      return <IconRepeat size={activityRowIconSize} />;
     case "runtimeWeb":
       return <IconWorld size={activityRowIconSize} />;
   }
@@ -203,6 +213,13 @@ function presentationQualifier(
     case "createGitWorktree":
     case "removeGitWorktree":
     case "toolSearch":
+    case "createRoutine":
+    case "listRoutines":
+    case "inspectRoutine":
+    case "updateRoutine":
+    case "deleteRoutine":
+    case "readRoutineContext":
+    case "recordRoutineResult":
     case "addScheduledTask":
     case "listScheduledTasks":
     case "deleteScheduledTask":
@@ -659,6 +676,8 @@ function presentationDetail(
         </Stack>
       );
     }
+    case "routine":
+      return <RoutineToolDetails detail={presentation.detail} />;
     case "semantic":
       return (
         <Stack gap="sm">

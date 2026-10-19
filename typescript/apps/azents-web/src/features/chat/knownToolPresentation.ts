@@ -1,6 +1,11 @@
 import { parseV4APatch } from "@azents/session-core/v4aPatchPresentation";
 import { z } from "zod";
 import { fileCodeLanguage } from "./fileCodeLanguage.ts";
+import { routineToolPresentation } from "./routineToolPresentation.ts";
+import type {
+  RoutineToolAction,
+  RoutineToolDetail,
+} from "./routineToolPresentation.ts";
 import type { ActiveToolCall, TodoStatus } from "@azents/session-core/types";
 import type { V4APatchFile } from "@azents/session-core/v4aPatchPresentation";
 
@@ -12,6 +17,7 @@ export type KnownToolPresentationReason =
   | "adapter-error";
 
 export type KnownToolAction =
+  | RoutineToolAction
   | "read"
   | "grep"
   | "glob"
@@ -171,6 +177,7 @@ export interface RuntimeWebDetail {
 }
 
 export type KnownToolDetail =
+  | RoutineToolDetail
   | OutputDetail
   | DiffDetail
   | PatchDetail
@@ -1021,6 +1028,14 @@ function skillResult(
 export function knownToolPresentation(
   toolCall: ActiveToolCall,
 ): KnownToolPresentationResult {
+  try {
+    const routine = routineToolPresentation(toolCall);
+    if (routine !== null) {
+      return routine;
+    }
+  } catch {
+    return generic("adapter-error");
+  }
   if (
     toolCall.toolkitSource !== null &&
     typeof toolCall.toolkitSource !== "undefined" &&

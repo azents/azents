@@ -22,6 +22,7 @@ import {
   IconClock,
   IconMessageCircle,
   IconPencil,
+  IconRepeat,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -43,6 +44,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { MessageActionRow } from "./MessageActionRow";
 import classes from "./MessageBubble.module.css";
 import { MessageMetadataSurface } from "./MessageMetadataFooter";
+import { RoutineJudgmentDisclosure } from "./RoutineJudgmentDisclosure";
 import { RunRetryCard } from "./RunRetryCard";
 import { ScheduledTaskMessageDisclosure } from "./ScheduledTaskMessageDisclosure";
 import type { ChatMessage } from "@azents/session-core/types";
@@ -532,6 +534,7 @@ export const MessageBubble = memo(function MessageBubble({
   additionalActions = null,
 }: MessageBubbleProps): React.ReactElement | null {
   const t = useTranslations("chat");
+  const tRoutines = useTranslations("routines");
   const messageOpacity = opacity ?? (dimmed ? 0.45 : 1);
 
   // tool, system, and completion marker messages hide
@@ -604,6 +607,35 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <Box opacity={messageOpacity}>
         <InterruptedControlMessage />
+      </Box>
+    );
+  }
+
+  if (message.role === "routine_judgment") {
+    return (
+      <Box opacity={messageOpacity}>
+        <RoutineJudgmentDisclosure judgment={message.routineJudgment ?? null} />
+      </Box>
+    );
+  }
+
+  if (
+    message.role === "routine_trigger" ||
+    message.role === "routine_continuation"
+  ) {
+    return (
+      <Box opacity={messageOpacity}>
+        <AgentMessageDisclosure
+          title={tRoutines(
+            message.role === "routine_trigger"
+              ? "input.trigger"
+              : "input.continuation",
+          )}
+          content={
+            message.routineInput?.content ?? tRoutines("input.unavailable")
+          }
+          icon={<IconRepeat size={rem(14)} />}
+        />
       </Box>
     );
   }

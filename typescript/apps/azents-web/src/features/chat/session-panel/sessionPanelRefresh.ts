@@ -1,7 +1,7 @@
 import type { SessionPanelView } from "./sessionPanel";
 
 export type SessionPanelInvalidationTarget =
-  "channels" | "context" | "subagents" | "terminal";
+  "channels" | "context" | "subagents" | "terminal" | "routines";
 
 export function sessionPanelInvalidationPlan(
   view: SessionPanelView,
@@ -15,6 +15,8 @@ export function sessionPanelInvalidationPlan(
       return ["subagents"];
     case "channels":
       return ["channels"];
+    case "routines":
+      return ["routines"];
     case "scheduled-tasks":
     case "browser":
       return [];

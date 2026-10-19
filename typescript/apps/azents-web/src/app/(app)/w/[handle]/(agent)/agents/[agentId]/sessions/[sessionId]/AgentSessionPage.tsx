@@ -6,6 +6,7 @@ import { AgentChatTabPage } from "@/features/chat/AgentChatTabPage";
 import { ScheduledTasksPage } from "@/features/scheduled-tasks/ScheduledTasksPage";
 import { SessionBrowserPage } from "@/features/session-browser/SessionBrowserPage";
 import { SessionChannelsPage } from "@/features/session-channels/SessionChannelsPage";
+import { SessionRoutinesPage } from "@/features/session-routines/SessionRoutinesPage";
 import type { AgentChatContainerProps } from "@/features/chat/containers/useAgentChatContainer";
 import type { SupportingPanelProps } from "@/features/chat/session-panel/supportingPanel";
 import type { ReactNode } from "react";
@@ -35,6 +36,8 @@ function supportingContent({
       return <AgentSubagentsPage {...supportingProps} />;
     case "channels":
       return <SessionChannelsPage {...supportingProps} />;
+    case "routines":
+      return <SessionRoutinesPage agent={agent} sessionId={sessionId} />;
     case "scheduled-tasks":
       return (
         <ScheduledTasksPage

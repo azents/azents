@@ -151,6 +151,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_session_model_availability**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_model_availability) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability | Get Agent Session Model Availability
 *ChatV1Api* | [**chat_v1_get_agent_session_project_defaults**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
+*ChatV1Api* | [**chat_v1_get_agent_session_routine**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_routine) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug} | Get Agent Session Routine
 *ChatV1Api* | [**chat_v1_get_agent_session_sidebar**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_sidebar) | **GET** /chat/v1/agents/{agent_id}/sessions/sidebar | Get Agent Session Sidebar
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
 *ChatV1Api* | [**chat_v1_get_agent_workspace_repository_type**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace_repository_type) | **GET** /chat/v1/agents/{agent_id}/workspace/repository-type | Get Agent Workspace Repository Type
@@ -161,6 +162,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
 *ChatV1Api* | [**chat_v1_list_agent_project_presets**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
 *ChatV1Api* | [**chat_v1_list_agent_projects**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
+*ChatV1Api* | [**chat_v1_list_agent_session_routines**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_session_routines) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/routines | List Agent Session Routines
 *ChatV1Api* | [**chat_v1_list_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
 *ChatV1Api* | [**chat_v1_list_agent_user_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_user_sessions) | **GET** /chat/v1/agents/{agent_id}/user-sessions | List Agent User Sessions
 *ChatV1Api* | [**chat_v1_list_history_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
@@ -819,6 +821,7 @@ Class | Method | HTTP request | Description
  - [ManagedWork](azentspublicclient/docs/ManagedWork.md)
  - [ManagedWorkSource](azentspublicclient/docs/ManagedWorkSource.md)
  - [ManagedWorkTask](azentspublicclient/docs/ManagedWorkTask.md)
+ - [ManualRoutineSource](azentspublicclient/docs/ManualRoutineSource.md)
  - [MeResponse](azentspublicclient/docs/MeResponse.md)
  - [MemoryCreateRequest](azentspublicclient/docs/MemoryCreateRequest.md)
  - [MemoryListResponse](azentspublicclient/docs/MemoryListResponse.md)
@@ -919,6 +922,15 @@ Class | Method | HTTP request | Description
  - [ResponseChatV1ReadAgentWorkspacePath](azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md)
  - [ResponseLlmProviderIntegrationV1GetSubscriptionUsage](azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md)
  - [ResponseModeRequest](azentspublicclient/docs/ResponseModeRequest.md)
+ - [RoutineContent](azentspublicclient/docs/RoutineContent.md)
+ - [RoutineDefinitionResponse](azentspublicclient/docs/RoutineDefinitionResponse.md)
+ - [RoutineDeliveryStatus](azentspublicclient/docs/RoutineDeliveryStatus.md)
+ - [RoutineDetailResponse](azentspublicclient/docs/RoutineDetailResponse.md)
+ - [RoutineExecutionResponse](azentspublicclient/docs/RoutineExecutionResponse.md)
+ - [RoutineListResponse](azentspublicclient/docs/RoutineListResponse.md)
+ - [RoutineObjectiveOutcome](azentspublicclient/docs/RoutineObjectiveOutcome.md)
+ - [RoutineWorkRecordResponse](azentspublicclient/docs/RoutineWorkRecordResponse.md)
+ - [RoutineWorkResult](azentspublicclient/docs/RoutineWorkResult.md)
  - [RunnerSystemMetricAvailability](azentspublicclient/docs/RunnerSystemMetricAvailability.md)
  - [RunnerSystemMetricsScope](azentspublicclient/docs/RunnerSystemMetricsScope.md)
  - [RuntimeBrowserReasonCode](azentspublicclient/docs/RuntimeBrowserReasonCode.md)

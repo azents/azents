@@ -6,6 +6,7 @@ export const sessionPanelViews = [
   "subagents",
   "channels",
   "scheduled-tasks",
+  "routines",
   "runtime",
   "metrics",
   "terminal",

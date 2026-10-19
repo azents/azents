@@ -75,6 +75,14 @@ from azents.core.model_availability import (
     SessionModelAvailability,
 )
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.routine import (
+    RoutineContent,
+    RoutineDefinition,
+    RoutineDeliveryStatus,
+    RoutineWorkRecord,
+    RoutineWorkResult,
+)
+from azents.core.routine_execution import RoutineExecutionState
 from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
@@ -2504,3 +2512,86 @@ class WsTicketResponse(BaseModel):
     ticket: str = Field(
         description="Short-lived HMAC-signed ticket, valid for 30 seconds"
     )
+
+
+class RoutineDefinitionResponse(BaseModel):
+    """Current definition content for read-only Session inspection."""
+
+    id: str
+    slug: str
+    content: RoutineContent
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @classmethod
+    def from_domain(cls, definition: RoutineDefinition) -> Self:
+        """Project exact content without exporting internal scope authority."""
+        return cls(
+            id=definition.id,
+            slug=definition.slug,
+            content=definition.content,
+            created_at=definition.created_at,
+            updated_at=definition.updated_at,
+        )
+
+
+class RoutineListResponse(BaseModel):
+    """Bounded inventory for one exact authorized Session."""
+
+    items: list[RoutineDefinitionResponse]
+
+
+class RoutineExecutionResponse(BaseModel):
+    """Most recent occurrence timing and status, not execution authority."""
+
+    execution_id: str
+    phase: Literal["admitted", "started", "completed", "cancelled"]
+    admitted_at: datetime.datetime
+    started_at: datetime.datetime | None
+    completed_at: datetime.datetime | None
+
+    @classmethod
+    def from_domain(cls, execution: RoutineExecutionState) -> Self:
+        """Leave immutable context and Run/owner fences internal."""
+        return cls(
+            execution_id=execution.context.execution_id,
+            phase=execution.phase,
+            admitted_at=execution.context.admitted_at,
+            started_at=execution.started_at,
+            completed_at=execution.completed_at,
+        )
+
+
+class RoutineWorkRecordResponse(BaseModel):
+    """Objective outcome, recorded work and notification evidence stay distinct."""
+
+    id: str
+    routine_id: str
+    execution_id: str
+    started_at: datetime.datetime
+    completed_at: datetime.datetime
+    work: RoutineWorkResult
+    delivery_status: RoutineDeliveryStatus
+    delivery_error: str | None
+
+    @classmethod
+    def from_domain(cls, record: RoutineWorkRecord) -> Self:
+        """Preserve the saved outcome without interpreting delivery as success."""
+        return cls(
+            id=record.id,
+            routine_id=record.routine_id,
+            execution_id=record.execution_id,
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+            work=record.work,
+            delivery_status=record.delivery_status,
+            delivery_error=record.delivery_error,
+        )
+
+
+class RoutineDetailResponse(BaseModel):
+    """Current content, most recent occurrence and retained execution records."""
+
+    routine: RoutineDefinitionResponse
+    execution: RoutineExecutionResponse | None
+    records: list[RoutineWorkRecordResponse]

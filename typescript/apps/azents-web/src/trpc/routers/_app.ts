@@ -14,6 +14,7 @@ import { joinRequestRouter } from "./joinRequest";
 import { llmProviderIntegrationRouter } from "./llm-provider-integration";
 import { memberProfileRouter } from "./member-profile";
 import { personalToolkitRouter } from "./personal-toolkit";
+import { routineRouter } from "./routine";
 import { runtimeProfileRouter } from "./runtime-profile";
 import { runtimeWebRouter } from "./runtime-web";
 import { scheduledTaskRouter } from "./scheduledTask";
@@ -37,6 +38,7 @@ export const appRouter = router({
   llmProviderIntegration: llmProviderIntegrationRouter,
   memberProfile: memberProfileRouter,
   personalToolkit: personalToolkitRouter,
+  routine: routineRouter,
   runtimeProfile: runtimeProfileRouter,
   runtimeWeb: runtimeWebRouter,
   scheduledTask: scheduledTaskRouter,
