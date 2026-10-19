@@ -152,7 +152,7 @@ async def test_next_check_preserves_discovery_and_requests_remaining_due_work(
         assert state is not None and state.state.queued_judgment_id is not None
 
 
-@pytest.mark.parametrize("interval_minutes", [5, 30, 60])
+@pytest.mark.parametrize("interval_minutes", [30, 60, 180])
 async def test_consecutive_no_action_judgments_schedule_from_each_completion(
     rdb_session_manager: SessionManager[WriteSession],
     interval_minutes: int,

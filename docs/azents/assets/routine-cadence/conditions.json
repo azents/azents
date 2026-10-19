@@ -1,0 +1,78 @@
+[
+  {
+    "file": "cadence-light-1100.png",
+    "viewport": {
+      "width": 1100,
+      "height": 1000
+    },
+    "colorScheme": "light",
+    "dpr": 1,
+    "locale": "en-US",
+    "classification": "real AgentForm component render, Storybook product providers/fonts",
+    "minimum": "30",
+    "errors": [],
+    "value": "180",
+    "font": "\"Geist Storybook\", BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontSize": "14px",
+    "fonts": "loaded",
+    "overflow": false,
+    "theme": "light"
+  },
+  {
+    "file": "cadence-light-390.png",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "colorScheme": "light",
+    "dpr": 1,
+    "locale": "en-US",
+    "classification": "real AgentForm component render, Storybook product providers/fonts",
+    "minimum": "30",
+    "errors": [],
+    "value": "180",
+    "font": "\"Geist Storybook\", BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontSize": "16px",
+    "fonts": "loaded",
+    "overflow": false,
+    "theme": "light"
+  },
+  {
+    "file": "cadence-dark-1100.png",
+    "viewport": {
+      "width": 1100,
+      "height": 1000
+    },
+    "colorScheme": "dark",
+    "dpr": 1,
+    "locale": "en-US",
+    "classification": "real AgentForm component render, Storybook product providers/fonts",
+    "minimum": "30",
+    "errors": [],
+    "value": "180",
+    "font": "\"Geist Storybook\", BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontSize": "14px",
+    "fonts": "loaded",
+    "overflow": false,
+    "theme": "dark"
+  },
+  {
+    "file": "cadence-dark-390.png",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "colorScheme": "dark",
+    "dpr": 1,
+    "locale": "en-US",
+    "classification": "real AgentForm component render, Storybook product providers/fonts",
+    "minimum": "30",
+    "errors": [],
+    "value": "180",
+    "font": "\"Geist Storybook\", BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontSize": "16px",
+    "fonts": "loaded",
+    "overflow": false,
+    "theme": "dark"
+  }
+]

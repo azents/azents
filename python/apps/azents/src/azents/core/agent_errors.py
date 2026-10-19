@@ -8,3 +8,8 @@ class NotFound:
     """Agent not found."""
 
     agent_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class InvalidRoutineCadence:
+    """The effective minimum action delay exceeds the checking interval."""

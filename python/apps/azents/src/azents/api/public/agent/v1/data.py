@@ -3,7 +3,7 @@
 import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing_extensions import Self, TypedDict
 
 from azents.core.agent import (
@@ -138,7 +138,13 @@ class AgentResponse(BaseModel):
         description="Inactivity period before automatic Session archive",
     )
     routine_check_interval_minutes: int = Field(
-        ge=1, le=1440, strict=True, description="Routine checking interval in minutes"
+        ge=30, le=1440, strict=True, description="Routine checking interval in minutes"
+    )
+    routine_min_action_delay_minutes: int = Field(
+        ge=30,
+        le=1440,
+        strict=True,
+        description="Minimum Routine action delay in minutes",
     )
     subagent_settings: SubagentSettings
     avatar: UploadedImage | None = None
@@ -191,6 +197,7 @@ class AgentResponse(BaseModel):
             max_turns=data.max_turns,
             auto_archive_ttl_days=data.auto_archive_ttl_days,
             routine_check_interval_minutes=data.routine_check_interval_minutes,
+            routine_min_action_delay_minutes=data.routine_min_action_delay_minutes,
             subagent_settings=data.subagent_settings,
             avatar=data.avatar,
             created_at=data.created_at,
@@ -344,15 +351,29 @@ class AgentCreateRequest(BaseModel):
         description="Inactivity period before automatic Session archive",
     )
     routine_check_interval_minutes: int = Field(
-        default=30,
-        ge=1,
+        default=180,
+        ge=30,
         le=1440,
         strict=True,
         description="Routine checking interval in minutes",
     )
+    routine_min_action_delay_minutes: int = Field(
+        default=30,
+        ge=30,
+        le=1440,
+        strict=True,
+        description="Minimum Routine action delay in minutes",
+    )
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
+
+    @model_validator(mode="after")
+    def validate_routine_cadence(self) -> Self:
+        """Reject invalid complete cadence before creating an Agent."""
+        if self.routine_min_action_delay_minutes > self.routine_check_interval_minutes:
+            raise ValueError("Minimum Routine action delay must not exceed tick.")
+        return self
 
 
 class AgentUpdateRequest(TypedDict, total=False, closed=True):
@@ -403,11 +424,15 @@ class AgentUpdateRequest(TypedDict, total=False, closed=True):
     routine_check_interval_minutes: Annotated[
         int,
         Field(
-            ge=1,
+            ge=30,
             le=1440,
             strict=True,
             description="Routine checking interval in minutes",
         ),
+    ]
+    routine_min_action_delay_minutes: Annotated[
+        int,
+        Field(ge=30, le=1440, strict=True),
     ]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")

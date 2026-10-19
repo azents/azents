@@ -219,7 +219,10 @@ export function useAgentFormContainer(
 
   const onSubmit = useCallback(
     (values: AgentFormValues): void => {
-      if (typeof values.routine_check_interval_minutes !== "number") {
+      if (
+        typeof values.routine_check_interval_minutes !== "number" ||
+        typeof values.routine_min_action_delay_minutes !== "number"
+      ) {
         return;
       }
       setMutationState({ type: "SUBMITTING" });
@@ -240,6 +243,8 @@ export function useAgentFormContainer(
           handle,
           agentId,
           routine_check_interval_minutes: values.routine_check_interval_minutes,
+          routine_min_action_delay_minutes:
+            values.routine_min_action_delay_minutes,
           name: values.name,
           description: values.description ?? null,
           selectable_model_options: selectableModelOptions,
@@ -263,6 +268,8 @@ export function useAgentFormContainer(
         createMutation.mutate({
           handle,
           routine_check_interval_minutes: values.routine_check_interval_minutes,
+          routine_min_action_delay_minutes:
+            values.routine_min_action_delay_minutes,
           name: values.name,
           description: values.description,
           selectable_model_options: selectableModelOptions,

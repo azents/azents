@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self, TypedDict
 
 from azents.core.agent import (
@@ -72,6 +72,7 @@ class AgentOutput(BaseModel):
     max_turns: int | None
     auto_archive_ttl_days: int
     routine_check_interval_minutes: int
+    routine_min_action_delay_minutes: int
     subagent_settings: SubagentSettings
     avatar: UploadedImage | None
     created_at: datetime.datetime
@@ -151,6 +152,7 @@ class AgentOutput(BaseModel):
             max_turns=data.max_turns,
             auto_archive_ttl_days=data.auto_archive_ttl_days,
             routine_check_interval_minutes=data.routine_check_interval_minutes,
+            routine_min_action_delay_minutes=data.routine_min_action_delay_minutes,
             subagent_settings=data.subagent_settings,
             avatar=avatar,
             created_at=data.created_at,
@@ -235,10 +237,22 @@ class AgentCreateInput(BaseModel):
         gt=0,
         description="Inactivity period before automatic Session archive",
     )
-    routine_check_interval_minutes: int = Field(default=30, ge=1, le=1440, strict=True)
+    routine_check_interval_minutes: int = Field(
+        default=180, ge=30, le=1440, strict=True
+    )
+    routine_min_action_delay_minutes: int = Field(
+        default=30, ge=30, le=1440, strict=True
+    )
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
+
+    @model_validator(mode="after")
+    def validate_routine_cadence(self) -> Self:
+        """Validate the complete cadence on internal creation too."""
+        if self.routine_min_action_delay_minutes > self.routine_check_interval_minutes:
+            raise ValueError("Minimum Routine action delay must not exceed tick.")
+        return self
 
 
 class AgentUpdateInput(TypedDict, total=False):
@@ -284,7 +298,8 @@ class AgentUpdateInput(TypedDict, total=False):
         int,
         Field(gt=0, description="Inactivity period before automatic Session archive"),
     ]
-    routine_check_interval_minutes: Annotated[int, Field(ge=1, le=1440, strict=True)]
+    routine_check_interval_minutes: Annotated[int, Field(ge=30, le=1440, strict=True)]
+    routine_min_action_delay_minutes: Annotated[int, Field(ge=30, le=1440, strict=True)]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")
     ]
