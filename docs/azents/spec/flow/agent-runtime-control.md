@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/runtime/control_protocol/grpc/runtime_stream_session_server.py
+  - python/apps/azents/src/azents/runtime/control_protocol/grpc/runtime_stream_session_server_test.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
@@ -109,8 +111,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-15
-spec_version: 106
+last_verified_at: 2026-10-19
+spec_version: 107
 ---
 
 # Agent Runtime Control
@@ -346,6 +348,13 @@ Disconnected source notification queues do not interrupt Runner/registry/owner
 release. All binding and capacity releases run even if an earlier cleanup fails;
 unexpected errors remain observable. Joined owner state is removed when its
 Runner Web connection ends so same-generation reconnect can acquire a new epoch.
+
+Logical stream release completes its existing Runner routing, Browser guard and
+broker-capacity cleanup before propagating caller cancellation. Removing the
+public binding or decrementing the process stream gauge is not cleanup completion.
+The original caller identity is retained when cleanup runs in a shielded task,
+so a Browser guard releasing its own stream cannot cancel or await itself.
+Repeated release remains idempotent and cannot release a replacement stream.
 
 Hop credit translation uses per-stream consumed-byte deltas. A fresh Runner
 session never inherits the historical absolute total of a still-live Gateway

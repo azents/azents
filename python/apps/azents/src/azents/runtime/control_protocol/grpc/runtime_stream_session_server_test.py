@@ -1944,6 +1944,88 @@ async def test_relay_runner_round_trip_restores_source_stream_and_epoch() -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("caller_is_guard", [False, True])
+@pytest.mark.parametrize("blocked_cleanup", ["runner", "broker"])
+@pytest.mark.parametrize("cancel_count", [1, 3])
+async def test_cancelled_stream_release_finishes_runner_and_capacity_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    caller_is_guard: bool,
+    blocked_cleanup: Literal["runner", "broker"],
+    cancel_count: int,
+) -> None:
+    data_plane, _lifecycle = _local_data_plane()
+    owner = _owner()
+    runner = await data_plane.register_runner(
+        RuntimeStreamAcceptedRunnerSession(
+            owner=owner,
+            runner_boot_id="runner-boot",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        )
+    )
+    source = await data_plane.register_source(
+        session_id="gateway-session", peer_boot_id="gateway-boot", owner=None
+    )
+    await data_plane.handle(
+        source,
+        _open_envelope(
+            session_id="gateway-session", peer_boot_id="gateway-boot", stream_id=1
+        ),
+    )
+    key = BrokerStreamKey(source.source_key, 1)
+    assert key in data_plane.bindings
+    broker = data_plane.bindings[key].broker
+    assert broker is not None
+    blocked_lock = runner.lock if blocked_cleanup == "runner" else broker.lock
+    entered = asyncio.Event()
+    waits: asyncio.Queue[None] = asyncio.Queue()
+    release: asyncio.Task[None] | None = None
+    original_close = data_plane.resources.close_stream
+    original_shield = asyncio.shield
+
+    def observe_shield[T](future: Awaitable[T]) -> asyncio.Future[T]:
+        result = original_shield(future)
+        if asyncio.current_task() is release:
+            waits.put_nowait(None)
+        return result
+
+    def close_stream() -> None:
+        original_close()
+        entered.set()
+
+    monkeypatch.setattr(data_plane.resources, "close_stream", close_stream)
+    monkeypatch.setattr(asyncio, "shield", observe_shield)
+    try:
+        async with asyncio.timeout(5), blocked_lock:
+            release = asyncio.create_task(data_plane._release(key))
+            if caller_is_guard:
+                data_plane.browser_guards[key] = release
+            await entered.wait()
+            await waits.get()
+            for _ in range(cancel_count):
+                release.cancel()
+                await waits.get()
+                assert not release.done()
+        with pytest.raises(asyncio.CancelledError):
+            await release
+        assert data_plane.bindings == {}
+        assert data_plane.resources.snapshot().active_streams == 0
+        assert runner.source_ids == {}
+        assert (
+            sum(
+                item.active_streams
+                for item in await data_plane.capacity_registry.snapshots()
+            )
+            == 0
+        )
+        await data_plane._release(key)
+        assert data_plane.resources.snapshot().active_streams == 0
+    finally:
+        await data_plane.unregister_source(source)
+        await data_plane.close()
+
+
+@pytest.mark.asyncio
 async def test_async_relay_disconnect_resets_and_releases_source_binding() -> None:
     data_plane = _data_plane()
     owner = _owner()
