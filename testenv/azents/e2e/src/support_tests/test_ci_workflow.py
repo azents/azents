@@ -1,5 +1,12 @@
 """Contract tests for E2E CI workflow configuration."""
 
+import os
+import subprocess
+import textwrap
+from pathlib import Path
+
+import pytest
+
 from support.consts import REPOSITORY_ROOT
 
 _WORKFLOW_PATH = REPOSITORY_ROOT / ".github/workflows/ci.yaml"
@@ -173,6 +180,104 @@ def test_duration_gate_compares_base_once_without_retry() -> None:
     assert gate.count("ci_duration_gate gate") == 1
     assert "gh run rerun" not in aggregate
     assert "DURATION_RESULT: ${{ steps.duration.outcome }}" in aggregate
+
+
+def test_web_lane_has_one_isolated_stack_and_retains_the_complete_plan() -> None:
+    """Bound in-runner contention without changing scope, retries or authority."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    lane = workflow.split("  ci_e2e_run:\n", 1)[1].split("\n  ci_e2e_aggregate:\n", 1)[
+        0
+    ]
+    run = _step_block(lane, "Run E2E lane")
+    assert "parallel_args=()" in run
+    assert "if [ \"$AZENTS_E2E_IMAGE_BUILD_PROFILE\" = 'web' ]; then" in run
+    assert "-n 1 --dist loadfile --no-loadscope-reorder --max-worker-restart=0" in run
+    assert 'mapfile -t test_files < "e2e-plan/${{ matrix.plan_file }}"' in run
+    assert '"${test_files[@]}"' in run
+    assert "-p scripts.ci.pytest_timing -p support.e2e_parallel" in run
+    assert 'exit "$pytest_status"' in run
+    assert "pytest_execution=(-n 2 --dist loadfile --max-worker-restart=0)" in workflow
+    capacity = _step_block(lane, "Capture E2E runner capacity")
+    diagnostics = _step_block(lane, "Capture E2E diagnostics")
+    assert (
+        'capture_runner_observation "$report_dir/runner-cpu.json" lscpu --json'
+        in capacity
+    )
+    assert "if: always()" in diagnostics
+    assert "for resource in cpu memory io; do" in capacity
+    assert "for resource in cpu memory io; do" in diagnostics
+    assert '"/proc/pressure/${resource}"' in capacity
+    assert '"/proc/pressure/${resource}"' in diagnostics
+    assert "runner-memory-before.txt" in capacity
+    assert "runner-memory-after.txt" in diagnostics
+
+
+@pytest.mark.parametrize("observation_exit", [0, 9])
+def test_runner_observations_preserve_pytest_failure_and_remaining_diagnostics(
+    tmp_path: Path, observation_exit: int
+) -> None:
+    """Execute the real shell blocks with unavailable optional capacity tools."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name in ("lscpu", "free", "cat"):
+        tool = tools / name
+        tool.write_text(
+            f"#!/bin/sh\nprintf 'resource observation\\n'\nexit {observation_exit}\n"
+        )
+        tool.chmod(0o755)
+    for name, body in {
+        "docker": "printf 'docker diagnostics retained\\n'",
+        "python": "printf 'summary retained\\n'",
+        "uv": ('printf \'%s\\n\' "$@" > "$RUNNER_TEMP/pytest-args.txt"\nexit 17'),
+    }.items():
+        tool = tools / name
+        tool.write_text(f"#!/bin/sh\n{body}\n")
+        tool.chmod(0o755)
+    repository = tmp_path / "repository"
+    (repository / "testenv/azents/e2e").mkdir(parents=True)
+    (repository / "e2e-plan").mkdir()
+    (repository / "e2e-plan/web.txt").write_text("test_first.py\ntest_second.py\n")
+    env = {
+        **os.environ,
+        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_WORKSPACE": str(repository),
+        "AZENTS_E2E_IMAGE_BUILD_PROFILE": "web",
+    }
+
+    def execute(name: str) -> subprocess.CompletedProcess[str]:
+        step = _step_block(workflow, name)
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        script = (
+            script.replace("${{ matrix.lane }}", "web-1")
+            .replace("${{ matrix.plan_file }}", "web.txt")
+            .replace("${{ job.status }}", "failure")
+        )
+        return subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", script],
+            cwd=repository,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert execute("Capture E2E runner capacity").returncode == 0
+    assert execute("Run E2E lane").returncode == 17
+    diagnostics = execute("Capture E2E diagnostics")
+    assert diagnostics.returncode == 0
+    assert "summary retained" in diagnostics.stdout
+    args = (tmp_path / "pytest-args.txt").read_text().splitlines()
+    assert args[-2:] == ["test_first.py", "test_second.py"]
+    root = tmp_path / "e2e-observability/web-1"
+    observations = list(root.glob("runner-*"))
+    assert len(observations) == 9
+    for observation in observations:
+        assert ("Observation unavailable" in observation.read_text()) == (
+            observation_exit != 0
+        )
+    assert "docker diagnostics retained" in (root / "docker-ps.txt").read_text()
 
 
 def test_comment_and_status_are_rechecked_when_base_ci_completes() -> None:

@@ -640,8 +640,10 @@ Always-on required CI does not depend on external credentials.
   resize, replay, Ctrl-C, termination, and production rate limits retain their
   existing contracts.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
-  That existing job uses two pytest workers with complete-file distribution and
-  independent database, network, service, browser, Runtime, and temporary fixtures.
+  That existing job uses one isolated pytest worker with complete-file distribution
+  and database, network, service, browser, Runtime, and temporary fixtures. Only one
+  full product stack runs at a time on the hosted runner. Lane artifacts retain CPU
+  topology, memory and before/after CPU, memory and I/O pressure for comparisons.
   Web plan files retain descending existing measured call weights (or declared
   source fallback) with path tie-breaking. The standard file scheduler keeps this
   plan order with `--no-loadscope-reorder` rather than re-sorting by testcase count;
@@ -657,10 +659,11 @@ Always-on required CI does not depend on external credentials.
   receipts matching that worker's pre-build plan. Prepared images permit an explicit
   zero-local-build plan. Validated image receipts are published atomically into the
   existing aggregate file without replacing prior evidence; raw sources are retained.
-  Native duration includes both workers' startup, collection, cleanup, and evidence
-  merging. Fixture work can overlap and is not additive elapsed time. The same
-  runner/job/matrix/image producers are retained; duplicate fixture processes raise
-  concurrent CPU and memory use within that runner's allocation.
+  Native duration includes the worker and controller startup, collection, cleanup,
+  and evidence merging. Fixture work can overlap and is not additive elapsed time.
+  The same runner/job/matrix/image producers are retained. Runner-capacity
+  observations are supplemental: unavailable tools or pressure files are recorded
+  explicitly without skipping pytest or stopping Docker diagnostics and summaries.
 - Required Brave Search journeys admit the five independent success Sessions before
   waiting for their persisted terminal run markers and idle projections. Every
   created Session is registered for draining before input admission; definite
