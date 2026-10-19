@@ -592,7 +592,9 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
     assert reset_call.args[0].write_session is reset_transaction
     assert reset_call.kwargs == {"owner": drain, "items": [row]}
     queue_repository.finish_batch.assert_not_awaited()
-    agent_session_repository.admit_input_wakeup.assert_not_awaited()
+    agent_session_repository.admit_input_wakeup.assert_awaited_once_with(
+        transaction, "session-1"
+    )
     wake_dispatcher.dispatch.assert_not_awaited()
 
 

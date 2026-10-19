@@ -575,6 +575,18 @@ class ExternalChannelIngressDrainRepository:
                 else "hidden"
             )
             if created_trigger is not None:
+                # Match Session-owned mutations: Session row before Toolkit State.
+                # Cursor/queue failure below still rolls this wake admission back.
+                admitted_session = (
+                    await self.agent_session_repository.admit_input_wakeup(
+                        session,
+                        batch.session_id,
+                    )
+                )
+                if admitted_session is None:
+                    await session.write_session.rollback()
+                    await self._reset_claim(batch)
+                    return IngressBatchFinalization.uncommitted(stale=True)
                 if target_resource is None or target_binding is None:
                     raise RuntimeError(
                         "External Channel final control ownership disappeared."
@@ -632,16 +644,6 @@ class ExternalChannelIngressDrainRepository:
                     await self._reset_claim(batch)
                     return IngressBatchFinalization.uncommitted(stale=True)
             if created_trigger is not None:
-                admitted_session = (
-                    await self.agent_session_repository.admit_input_wakeup(
-                        session,
-                        batch.session_id,
-                    )
-                )
-                if admitted_session is None:
-                    await session.write_session.rollback()
-                    await self._reset_claim(batch)
-                    return IngressBatchFinalization.uncommitted(stale=True)
                 wake = IngressWakeIntent(
                     mailbox_item_id=created_trigger.mailbox_item.id,
                     session_id=batch.session_id,
