@@ -6,8 +6,8 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
+from tests.required.public.test_session_browser_confidential import _BrowserVerification
 from tests.web.public import test_session_browser as browser
-from tests.web.public.test_session_browser_confidential import _BrowserVerification
 
 
 def test_actual_enable_browser_decodes_capability_and_keeps_extensions_opaque(
