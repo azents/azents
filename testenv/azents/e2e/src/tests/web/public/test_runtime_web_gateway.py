@@ -1514,12 +1514,12 @@ def _login(driver: WebDriver, *, email: str) -> None:
     """Authenticate through the exact configured Main Web origin."""
     driver.get(f"{_MAIN_ORIGIN}/login")
     _submit_password_login(driver, email=email)
-    WebDriverWait(driver, 30).until(ec.url_contains("/workspaces"))
+    WebDriverWait(driver, 30, poll_frequency=0.1).until(ec.url_contains("/workspaces"))
 
 
 def _submit_password_login(driver: WebDriver, *, email: str) -> None:
     """Submit the current login form without changing its return destination."""
-    wait = WebDriverWait(driver, 30)
+    wait = WebDriverWait(driver, 30, poll_frequency=0.1)
     email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
     email_input.send_keys(email)
     if not driver.find_elements(By.NAME, "password"):
@@ -1531,7 +1531,7 @@ def _submit_password_login(driver: WebDriver, *, email: str) -> None:
 
 def _activate_in_browser(driver: WebDriver, *, service_url: str) -> None:
     """Turn On one Off service through its authenticated public URL."""
-    wait = WebDriverWait(driver, 60)
+    wait = WebDriverWait(driver, 60, poll_frequency=0.1)
     driver.get(service_url)
     try:
         wait.until(
@@ -1807,7 +1807,7 @@ def _open_application_in_browser(
     endpoint_url: str,
 ) -> None:
     """Open the application after authoritative approval synchronization."""
-    wait = WebDriverWait(driver, 60)
+    wait = WebDriverWait(driver, 60, poll_frequency=0.1)
     driver.get(endpoint_url)
     try:
         wait.until(
@@ -2383,9 +2383,11 @@ def test_runtime_web_authentication_without_next_assets(
                 assert driver.current_url == destination
                 assert driver.get_cookie("__Http-Azents-Runtime-Web") is not None
                 driver.back()
-                WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
+                WebDriverWait(driver, 30, poll_frequency=0.1).until(
+                    ec.url_to_be(previous_url)
+                )
                 driver.forward()
-                WebDriverWait(driver, 60).until(
+                WebDriverWait(driver, 60, poll_frequency=0.1).until(
                     lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination
@@ -2395,16 +2397,20 @@ def test_runtime_web_authentication_without_next_assets(
                 # Leaving the current document avoids a same-document hash navigation.
                 driver.get("about:blank")
                 driver.get(destination)
-                WebDriverWait(driver, 30).until(ec.url_contains("/login"))
+                WebDriverWait(driver, 30, poll_frequency=0.1).until(
+                    ec.url_contains("/login")
+                )
                 _submit_password_login(driver, email=workspace.email)
-                WebDriverWait(driver, 60).until(
+                WebDriverWait(driver, 60, poll_frequency=0.1).until(
                     lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination
                 # Repeat with normal asset loading and only Runtime identity absent.
                 driver.delete_cookie("__Http-Azents-Runtime-Web")
                 driver.get(f"{_MAIN_ORIGIN}/workspaces")
-                WebDriverWait(driver, 30).until(ec.url_contains("/workspaces"))
+                WebDriverWait(driver, 30, poll_frequency=0.1).until(
+                    ec.url_contains("/workspaces")
+                )
                 previous_url = driver.current_url
                 # A real click ensures this is not Chrome's automatic skipping of
                 # non-user-activated history entries after scripted navigation.
@@ -2419,14 +2425,16 @@ def test_runtime_web_authentication_without_next_assets(
                     destination,
                 )
                 driver.find_element(By.ID, "history-service-link").click()
-                WebDriverWait(driver, 60).until(
+                WebDriverWait(driver, 60, poll_frequency=0.1).until(
                     lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination
                 driver.back()
-                WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
+                WebDriverWait(driver, 30, poll_frequency=0.1).until(
+                    ec.url_to_be(previous_url)
+                )
                 driver.forward()
-                WebDriverWait(driver, 60).until(
+                WebDriverWait(driver, 60, poll_frequency=0.1).until(
                     lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination

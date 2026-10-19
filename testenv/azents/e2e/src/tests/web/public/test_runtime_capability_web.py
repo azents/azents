@@ -84,6 +84,7 @@ def _wait(driver: WebDriver) -> WebDriverWait[WebDriver]:
     return WebDriverWait(
         driver,
         20,
+        poll_frequency=0.1,
         ignored_exceptions=(StaleElementReferenceException,),
     )
 
@@ -116,7 +117,7 @@ def _assert_visible_text(
     timeout_seconds: int = 20,
 ) -> None:
     """Wait for exact visible text."""
-    WebDriverWait(driver, timeout_seconds).until(
+    WebDriverWait(driver, timeout_seconds, poll_frequency=0.1).until(
         ec.visibility_of_element_located((By.XPATH, f"//*[normalize-space()={text!r}]"))
     )
 
