@@ -1242,7 +1242,8 @@ class ExternalChannelWorkRepository:
                 RDBExternalChannelBinding.agent_session_id == session_id,
                 RDBExternalChannelBinding.disconnected_at.is_(None),
             )
-            .with_for_update()
+            # Work owns this Binding while Session FK checks remain admissible.
+            .with_for_update(key_share=True)
         )
         if binding is None:
             raise ValueError("External Channel binding is not active.")

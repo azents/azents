@@ -2616,7 +2616,8 @@ class ExternalChannelRepository:
                 RDBAgent.id == route.agent_id,
                 RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             )
-            .with_for_update()
+            # Exclude lifecycle writers while admitting live Agent FK references.
+            .with_for_update(key_share=True)
         )
         return agent is not None
 
@@ -3459,7 +3460,8 @@ class ExternalChannelRepository:
                 RDBExternalChannelBinding.resource_id == resource_id,
                 RDBExternalChannelBinding.disconnected_at.is_(None),
             )
-            .with_for_update()
+            # Session primary-Binding FK checks must coexist with this fence.
+            .with_for_update(key_share=True)
         )
         return self._as(ExternalChannelBinding, rdb)
 
@@ -3473,7 +3475,8 @@ class ExternalChannelRepository:
         rdb = await session.write_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(RDBExternalChannelBinding.id == binding_id)
-            .with_for_update()
+            # Retain mutation exclusion without blocking Session FK KEY SHARE.
+            .with_for_update(key_share=True)
         )
         return self._as(ExternalChannelBinding, rdb)
 
