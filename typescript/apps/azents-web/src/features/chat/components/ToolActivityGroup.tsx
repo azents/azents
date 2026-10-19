@@ -145,6 +145,7 @@ export function ToolActivityGroupView({
       <Box data-tool-activity-id={activity.id}>
         <ActivityRow
           ariaLabel={ariaLabel}
+          detailInset="xs"
           primary={summary}
           disclosure={{ opened, onToggle: toggle }}
           action={authorizationAction}

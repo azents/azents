@@ -1,9 +1,10 @@
-import { Button, Stack } from "@mantine/core";
+import { Box, Button, Stack } from "@mantine/core";
 import { useState } from "react";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { createChatMessage } from "../story-fixtures";
-import { ToolActivityGroup } from "./ToolActivityGroup";
+import { activityRowDetailInset } from "./activityRowPresentation";
+import { ToolActivityGroup, ToolActivityGroupView } from "./ToolActivityGroup";
 import type { ToolActivityGroup as ToolActivityGroupModel } from "@azents/session-core/toolActivityPresentation";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -284,6 +285,73 @@ export const RestoredReasoningAndActivityDetails = {
     ).toBeVisible();
     await expect(canvas.getByLabelText("Running…")).toBeVisible();
     await expect(canvas.getByLabelText("Failed")).toBeVisible();
+  },
+} satisfies Story;
+
+export const RestoredRunIndentation = {
+  args: { activity },
+  render: () => (
+    <Box>
+      <Box data-group-indent-reference w="xs" h={0} aria-hidden />
+      <Box
+        data-content-indent-reference
+        w={activityRowDetailInset}
+        h={0}
+        aria-hidden
+      />
+      <ToolActivityGroupView
+        activity={activity}
+        opened
+        toggle={() => {}}
+        groupDurationSeconds={null}
+      />
+    </Box>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const group = canvasElement.querySelector("[data-tool-activity-id]");
+    const list = group?.querySelector("[data-chat-activity-events]");
+    const header = group?.querySelector("[data-chat-row-header]");
+    const groupReference = canvasElement.querySelector(
+      "[data-group-indent-reference]",
+    );
+    const contentReference = canvasElement.querySelector(
+      "[data-content-indent-reference]",
+    );
+    if (!group || !list || !header || !groupReference || !contentReference) {
+      throw new Error("Missing Run indentation fixture");
+    }
+    const groupInset = groupReference.getBoundingClientRect().width;
+    await expect(
+      list.getBoundingClientRect().x - header.getBoundingClientRect().x,
+    ).toBeCloseTo(groupInset);
+    const headers = Array.from(list.querySelectorAll("[data-chat-row-header]"));
+    await expect(headers).toHaveLength(activity.events.length);
+    for (const nested of headers) {
+      await expect(nested.getBoundingClientRect().x).toBeCloseTo(
+        list.getBoundingClientRect().x,
+      );
+    }
+    await userEvent.click(
+      canvas.getByRole("button", {
+        name: /Preparing the activity presentation/,
+      }),
+    );
+    await waitFor(async () => {
+      const detail = list.querySelector("[data-chat-row-detail]");
+      const nestedHeader = headers[0];
+      if (!detail || !nestedHeader) {
+        throw new Error("Missing nested content detail");
+      }
+      await expect(
+        detail.getBoundingClientRect().x +
+          parseFloat(getComputedStyle(detail).paddingLeft) -
+          nestedHeader.getBoundingClientRect().x,
+      ).toBeCloseTo(contentReference.getBoundingClientRect().width);
+    });
+    await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(
+      canvasElement.clientWidth,
+    );
   },
 } satisfies Story;
 

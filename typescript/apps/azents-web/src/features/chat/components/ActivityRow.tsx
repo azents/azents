@@ -23,6 +23,7 @@ import {
   chatChevronTransition,
   chatCollapseTransitionProps,
 } from "./collapsiblePresentation";
+import type { MantineSpacing } from "@mantine/core";
 import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from "react";
 
 interface ActivityRowProps {
@@ -32,6 +33,7 @@ interface ActivityRowProps {
   detail?: ReactNode;
   detailAriaLabel?: string;
   detailId?: string;
+  detailInset?: MantineSpacing;
   expandedPrimary?: string;
   icon: ReactNode;
   primary: string;
@@ -58,6 +60,7 @@ export function ActivityRow({
   detail,
   detailAriaLabel,
   detailId,
+  detailInset = activityRowDetailInset,
   expandedPrimary,
   icon,
   primary,
@@ -262,7 +265,7 @@ export function ActivityRow({
         >
           <Box
             data-chat-row-detail
-            pl={activityRowDetailInset}
+            pl={detailInset}
             pr="xs"
             pt="xs"
             {...(collapseFromDetail

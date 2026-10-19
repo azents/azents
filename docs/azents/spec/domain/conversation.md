@@ -1225,7 +1225,9 @@ input. Dashed compaction boundaries, interruption rules, authorization alerts, a
 cards retain their semantic treatments inside the common timeline frame.
 
 Run-group interiors use `ActivityEventList` to dispatch reasoning, Skill, client/provider tools,
-and control events without adding another transcript-item gap. `ChatDetailPanel` owns common
+and control events without adding another transcript-item gap. The group's child list uses
+the compact Mantine `xs` inset; individual activity content retains its canonical detail inset.
+`ChatDetailPanel` owns common
 border, radius, padding, width, and optional bounded scrolling for disclosure bodies, including
 reasoning, Skill and tool details. Content-specific code, diff, media, checklist, raw-data and
 failure renderers remain inside this surface. Activity summaries retain failed-event counts
