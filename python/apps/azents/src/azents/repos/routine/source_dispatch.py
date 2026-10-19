@@ -9,7 +9,6 @@ from fastapi import Depends
 
 from azents.core.enums import AgentLifecycleStatus, AgentSessionStatus, SessionAgentKind
 from azents.core.routine import (
-    ROUTINE_MIN_ACTION_DELAY,
     RoutineScope,
 )
 from azents.rdb.deps import get_read_only_session_manager
@@ -38,7 +37,8 @@ def _checking_opportunities(
         sa.func.greatest(
             last_tick
             + RDBAgent.routine_check_interval_minutes * datetime.timedelta(minutes=1),
-            last_action + ROUTINE_MIN_ACTION_DELAY,
+            last_action
+            + RDBAgent.routine_min_action_delay_minutes * datetime.timedelta(minutes=1),
         ),
         now,
         type_=sa.DateTime(timezone=True),

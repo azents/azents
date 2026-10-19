@@ -66,13 +66,14 @@ class AgentResponse(BaseModel):
     tool_search_enabled: StrictBool
     max_turns: Optional[StrictInt]
     auto_archive_ttl_days: StrictInt = Field(description="Inactivity period before automatic Session archive")
-    routine_check_interval_minutes: Annotated[int, Field(le=1440, strict=True, ge=1)] = Field(description="Routine checking interval in minutes")
+    routine_check_interval_minutes: Annotated[int, Field(le=1440, strict=True, ge=30)] = Field(description="Routine checking interval in minutes")
+    routine_min_action_delay_minutes: Annotated[int, Field(le=1440, strict=True, ge=30)] = Field(description="Minimum Routine action delay in minutes")
     subagent_settings: SubagentSettings
     avatar: Optional[UploadedImage] = None
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "toolkit_management_available", "terminal_enabled", "browser_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "routine_check_interval_minutes", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "toolkit_management_available", "terminal_enabled", "browser_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "routine_check_interval_minutes", "routine_min_action_delay_minutes", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     @field_validator('runtime_profile_configuration_status')
     def runtime_profile_configuration_status_validate_enum(cls, value):
@@ -260,6 +261,7 @@ class AgentResponse(BaseModel):
             "max_turns": obj.get("max_turns"),
             "auto_archive_ttl_days": obj.get("auto_archive_ttl_days"),
             "routine_check_interval_minutes": obj.get("routine_check_interval_minutes"),
+            "routine_min_action_delay_minutes": obj.get("routine_min_action_delay_minutes"),
             "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None,
             "avatar": UploadedImage.from_dict(obj["avatar"]) if obj.get("avatar") is not None else None,
             "created_at": obj.get("created_at"),

@@ -176,6 +176,9 @@ class RDBAgent(RDBModel):
         server_default="30",
     )
     routine_check_interval_minutes: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=180, server_default="180"
+    )
+    routine_min_action_delay_minutes: Mapped[int] = mapped_column(
         sa.Integer, nullable=False, default=30, server_default="30"
     )
     subagent_settings: Mapped[dict[str, Any]] = mapped_column(
@@ -241,7 +244,9 @@ class RDBAgent(RDBModel):
         name="ck_agents_auto_archive_ttl_days_positive",
     )
     CK_ROUTINE_CHECK_INTERVAL_RANGE = sa.CheckConstraint(
-        "routine_check_interval_minutes BETWEEN 1 AND 1440",
+        "routine_min_action_delay_minutes >= 30 "
+        "AND routine_min_action_delay_minutes <= routine_check_interval_minutes "
+        "AND routine_check_interval_minutes <= 1440",
         name="ck_agents_routine_check_interval_range",
     )
     CK_SELECTABLE_MODEL_OPTIONS_SHAPE = sa.CheckConstraint(

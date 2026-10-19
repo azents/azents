@@ -91,6 +91,7 @@ class AgentRepository:
             max_turns=create.max_turns,
             auto_archive_ttl_days=create.auto_archive_ttl_days,
             routine_check_interval_minutes=create.routine_check_interval_minutes,
+            routine_min_action_delay_minutes=create.routine_min_action_delay_minutes,
             subagent_settings=create.subagent_settings.model_dump(mode="json"),
         )
         await mark_model_candidate_chain_write(session)
@@ -295,6 +296,10 @@ class AgentRepository:
             db_values["routine_check_interval_minutes"] = update[
                 "routine_check_interval_minutes"
             ]
+        if "routine_min_action_delay_minutes" in update:
+            db_values["routine_min_action_delay_minutes"] = update[
+                "routine_min_action_delay_minutes"
+            ]
         if "subagent_settings" in update:
             db_values["subagent_settings"] = update["subagent_settings"].model_dump(
                 mode="json"
@@ -441,6 +446,7 @@ class AgentRepository:
             max_turns=rdb.max_turns,
             auto_archive_ttl_days=rdb.auto_archive_ttl_days,
             routine_check_interval_minutes=rdb.routine_check_interval_minutes,
+            routine_min_action_delay_minutes=rdb.routine_min_action_delay_minutes,
             subagent_settings=subagent_settings,
             avatar=avatar,
             created_at=rdb.created_at,

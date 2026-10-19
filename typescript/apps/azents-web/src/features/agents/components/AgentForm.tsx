@@ -401,7 +401,7 @@ export function AgentForm({
               <NumberInput
                 label={t("routineCheckIntervalLabel")}
                 description={t("routineCheckIntervalDescription")}
-                min={1}
+                min={30}
                 max={1440}
                 step={1}
                 allowDecimal={false}
@@ -415,6 +415,36 @@ export function AgentForm({
                   );
                 }}
                 error={form.errors.routine_check_interval_minutes}
+              />
+            )}
+
+            {showProfile && (
+              <NumberInput
+                label={t("routineMinActionDelayLabel")}
+                description={t("routineMinActionDelayDescription")}
+                min={30}
+                max={1440}
+                step={1}
+                allowDecimal={false}
+                allowNegative={false}
+                clampBehavior="none"
+                value={form.values.routine_min_action_delay_minutes}
+                onChange={(value) => {
+                  form.setValues((values) => ({
+                    ...values,
+                    routine_min_action_delay_minutes:
+                      typeof value === "number" ? value : "",
+                    routine_check_interval_minutes:
+                      typeof value === "number" &&
+                      Number.isInteger(value) &&
+                      value >= 30 &&
+                      value <= 1440 &&
+                      typeof values.routine_check_interval_minutes === "number"
+                        ? Math.max(values.routine_check_interval_minutes, value)
+                        : values.routine_check_interval_minutes,
+                  }));
+                }}
+                error={form.errors.routine_min_action_delay_minutes}
               />
             )}
 

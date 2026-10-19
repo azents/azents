@@ -110,6 +110,8 @@ async def _subject(session: WriteSession) -> RoutineScope:
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Routine test agent",
+        routine_check_interval_minutes=30,
+        routine_min_action_delay_minutes=30,
         model_selection=model,
         lightweight_model_selection=model,
         selectable_model_options=make_test_selectable_model_option_dicts(

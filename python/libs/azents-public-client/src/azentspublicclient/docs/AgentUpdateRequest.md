@@ -24,6 +24,7 @@ Name | Type | Description | Notes
 **max_turns** | **int** |  | [optional] 
 **auto_archive_ttl_days** | **int** | Inactivity period before automatic Session archive | [optional] 
 **routine_check_interval_minutes** | **int** | Routine checking interval in minutes | [optional] 
+**routine_min_action_delay_minutes** | **int** |  | [optional] 
 **subagent_settings** | [**SubagentSettings**](SubagentSettings.md) | Subagent execution settings | [optional] 
 
 ## Example

@@ -92,6 +92,7 @@ function createAgent(input: AgentFixtureInput): EnrichedAgent {
     max_turns: null,
     auto_archive_ttl_days: 30,
     routine_check_interval_minutes: 30,
+    routine_min_action_delay_minutes: 30,
     subagent_settings: { max_subagents: 3, max_depth: 1 },
     avatar: null,
     created_at: "2026-04-28T09:00:00.000Z",

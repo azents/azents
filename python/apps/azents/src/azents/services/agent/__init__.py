@@ -21,7 +21,7 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
-from azents.core.agent_errors import NotFound
+from azents.core.agent_errors import InvalidRoutineCadence, NotFound
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
@@ -417,6 +417,7 @@ class AgentService:
             max_turns=create.max_turns,
             auto_archive_ttl_days=create.auto_archive_ttl_days,
             routine_check_interval_minutes=create.routine_check_interval_minutes,
+            routine_min_action_delay_minutes=create.routine_min_action_delay_minutes,
             subagent_settings=create.subagent_settings,
         )
         create_result = await self.repository.create(
@@ -520,7 +521,8 @@ class AgentService:
         | InvalidModelParameters
         | RuntimeProfileSelectionInvalid
         | RuntimeProfileSelectionVersionRequired
-        | RuntimeProfileSelectionVersionConflict,
+        | RuntimeProfileSelectionVersionConflict
+        | InvalidRoutineCadence,
     ]:
         """Update Agent by ID."""
         existing = await self.repository.get_by_id(agent_id)
@@ -643,6 +645,10 @@ class AgentService:
             repo_update["routine_check_interval_minutes"] = update[
                 "routine_check_interval_minutes"
             ]
+        if "routine_min_action_delay_minutes" in update:
+            repo_update["routine_min_action_delay_minutes"] = update[
+                "routine_min_action_delay_minutes"
+            ]
         if "subagent_settings" in update:
             repo_update["subagent_settings"] = update["subagent_settings"]
 
@@ -697,6 +703,8 @@ class AgentService:
                         return Failure(NotBelongToWorkspace(agent_id=agent_id))
                     case AgentOperationNotAdmin():
                         return Failure(NotAdmin(agent_id=agent_id))
+                    case InvalidRoutineCadence():
+                        return Failure(error)
                     case AgentOperationRuntimeProfileInvalid(code):
                         return Failure(RuntimeProfileSelectionInvalid(code=code))
                     case AgentOperationRuntimeProfileVersionRequired():

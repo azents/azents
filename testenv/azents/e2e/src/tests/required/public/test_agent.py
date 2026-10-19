@@ -251,7 +251,8 @@ class TestAgentCrud:
         assert created.description == "test agent"
         assert created.type == AgentType.PUBLIC
         assert created.enabled is True
-        assert created.routine_check_interval_minutes == 30
+        assert created.routine_check_interval_minutes == 180
+        assert created.routine_min_action_delay_minutes == 30
 
         fetched = agent_api.agent_v1_get_agent(
             agent_id=created.id, handle=handle, _headers=headers
@@ -259,14 +260,49 @@ class TestAgentCrud:
         assert fetched.id == created.id
         assert fetched.name == "My Agent"
         assert fetched.system_prompt == "You are a helper."
-        assert fetched.routine_check_interval_minutes == 30
+        assert fetched.routine_check_interval_minutes == 180
+        assert fetched.routine_min_action_delay_minutes == 30
         configured = agent_api.agent_v1_update_agent(
             agent_id=created.id,
             handle=handle,
-            agent_update_request=AgentUpdateRequest(routine_check_interval_minutes=5),
+            agent_update_request=AgentUpdateRequest(
+                routine_check_interval_minutes=120,
+                routine_min_action_delay_minutes=60,
+            ),
             _headers=headers,
         )
-        assert configured.routine_check_interval_minutes == 5
+        assert configured.routine_check_interval_minutes == 120
+        assert configured.routine_min_action_delay_minutes == 60
+        raised = agent_api.agent_v1_update_agent(
+            agent_id=created.id,
+            handle=handle,
+            agent_update_request=AgentUpdateRequest(
+                routine_min_action_delay_minutes=240
+            ),
+            _headers=headers,
+        )
+        assert raised.routine_check_interval_minutes == 240
+        assert raised.routine_min_action_delay_minutes == 240
+        lowered = agent_api.agent_v1_update_agent(
+            agent_id=created.id,
+            handle=handle,
+            agent_update_request=AgentUpdateRequest(
+                routine_min_action_delay_minutes=60
+            ),
+            _headers=headers,
+        )
+        assert lowered.routine_check_interval_minutes == 240
+        assert lowered.routine_min_action_delay_minutes == 60
+        with pytest.raises(ApiException) as invalid:
+            agent_api.agent_v1_update_agent(
+                agent_id=created.id,
+                handle=handle,
+                agent_update_request=AgentUpdateRequest(
+                    routine_check_interval_minutes=30
+                ),
+                _headers=headers,
+            )
+        assert invalid.value.status == 400
         agent_api.agent_v1_update_agent(
             agent_id=created.id,
             handle=handle,
@@ -276,7 +312,8 @@ class TestAgentCrud:
         reloaded = agent_api.agent_v1_get_agent(
             agent_id=created.id, handle=handle, _headers=headers
         )
-        assert reloaded.routine_check_interval_minutes == 5
+        assert reloaded.routine_check_interval_minutes == 240
+        assert reloaded.routine_min_action_delay_minutes == 60
 
     def test_list_agents(
         self,
@@ -469,7 +506,9 @@ class TestAgentAdminPermission:
                 agent_id=agent_id,
                 handle=handle,
                 agent_update_request=AgentUpdateRequest(
-                    name="Hacked", routine_check_interval_minutes=1
+                    name="Hacked",
+                    routine_check_interval_minutes=60,
+                    routine_min_action_delay_minutes=60,
                 ),
                 _headers={"Authorization": f"Bearer {member_token}"},
             )

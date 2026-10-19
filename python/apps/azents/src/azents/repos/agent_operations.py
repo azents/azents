@@ -7,6 +7,7 @@ from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.agent_errors import InvalidRoutineCadence
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import AgentRuntimeCapability, WorkspaceUserRole
@@ -130,6 +131,7 @@ class AgentRuntimeProfileSelectionChange:
 
 AgentUpdateOperationError = (
     AgentOperationNotFound
+    | InvalidRoutineCadence
     | AgentOperationWorkspaceMismatch
     | AgentOperationNotAdmin
     | AgentOperationRuntimeProfileInvalid
@@ -305,6 +307,33 @@ class AgentOperationsRepository:
             if authority.failure:
                 return Failure(authority.error)
             locked = authority.value
+            if (
+                "routine_check_interval_minutes" in update
+                or "routine_min_action_delay_minutes" in update
+            ):
+                current = await self.agent_repository.lock_by_id(session, agent_id)
+                if current is None:
+                    return Failure(AgentOperationNotFound(agent_id=agent_id))
+                locked = current
+            if "routine_min_action_delay_minutes" in update:
+                update = {
+                    **update,
+                    "routine_check_interval_minutes": max(
+                        update.get(
+                            "routine_check_interval_minutes",
+                            locked.routine_check_interval_minutes,
+                        ),
+                        update["routine_min_action_delay_minutes"],
+                    ),
+                }
+            if update.get(
+                "routine_min_action_delay_minutes",
+                locked.routine_min_action_delay_minutes,
+            ) > update.get(
+                "routine_check_interval_minutes",
+                locked.routine_check_interval_minutes,
+            ):
+                return Failure(InvalidRoutineCadence())
             if runtime_profile_change is not None:
                 capability_error = _runtime_capability_update_error(
                     locked.runtime_capability

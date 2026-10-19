@@ -6,10 +6,12 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from azcommon.result import Success
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_errors import InvalidRoutineCadence
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -20,7 +22,7 @@ from azents.core.enums import (
 )
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
-from azents.repos.agent.data import Agent, AgentCreate
+from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
 from azents.repos.agent_decommission import AgentDecommissionRepository
@@ -75,10 +77,108 @@ def _agent() -> Agent:
         max_turns=None,
         auto_archive_ttl_days=30,
         routine_check_interval_minutes=30,
+        routine_min_action_delay_minutes=30,
         avatar=None,
         created_at=now,
         updated_at=now,
     )
+
+
+@pytest.mark.parametrize(
+    ("tick", "delay", "update", "expected_tick"),
+    [
+        (180, 30, {"routine_min_action_delay_minutes": 240}, 240),
+        (180, 30, {"routine_min_action_delay_minutes": 60}, 180),
+        (240, 120, {"routine_min_action_delay_minutes": 30}, 240),
+        (
+            180,
+            30,
+            {
+                "routine_check_interval_minutes": 60,
+                "routine_min_action_delay_minutes": 120,
+            },
+            120,
+        ),
+        (
+            180,
+            30,
+            {
+                "routine_check_interval_minutes": 240,
+                "routine_min_action_delay_minutes": 60,
+            },
+            240,
+        ),
+        (180, 120, {"routine_check_interval_minutes": 60}, None),
+    ],
+)
+async def test_delay_updates_raise_tick_without_mutating_input(
+    tick: int, delay: int, update: AgentUpdate, expected_tick: int | None
+) -> None:
+    """Normalize only delay-supplying patches against the fenced current pair."""
+    agent = _agent().model_copy(
+        update={
+            "routine_check_interval_minutes": tick,
+            "routine_min_action_delay_minutes": delay,
+        }
+    )
+    original = update.copy()
+    async with AsyncSession() as raw:
+        session = ReadWriteSession(raw)
+
+        @asynccontextmanager
+        async def manager() -> AsyncIterator[WriteSession]:
+            yield session
+
+        agents = AsyncMock(spec=AgentRepository)
+        agents.get_by_id.return_value = agent
+        agents.lock_by_id.return_value = agent
+        agents.update_by_id.return_value = Success(agent)
+        users = AsyncMock(spec=WorkspaceUserRepository)
+        users.get.return_value = SimpleNamespace(
+            workspace_id=agent.workspace_id, role=WorkspaceUserRole.OWNER
+        )
+        repository = AgentOperationsRepository(
+            session_manager=manager,
+            credential_cipher=CredentialCipher(Fernet.generate_key().decode()),
+            agent_repository=agents,
+            admin_repository=AsyncMock(spec=AgentAdminRepository),
+            workspace_model_settings_repository=AsyncMock(
+                spec=WorkspaceModelSettingsRepository
+            ),
+            workspace_user_repository=users,
+            agent_decommission_repository=AsyncMock(spec=AgentDecommissionRepository),
+            archived_session_retention_repository=AsyncMock(
+                spec=ArchivedSessionRetentionRepository
+            ),
+            agent_session_repository=AsyncMock(spec=AgentSessionRepository),
+            runtime_profile_repository=AsyncMock(spec=RuntimeProfileRepository),
+            runtime_profile_availability_repository=AsyncMock(
+                spec=RuntimeProfileAvailabilityRepository
+            ),
+        )
+        result = await repository.update_by_id(
+            agent_id=agent.id,
+            workspace_id=agent.workspace_id,
+            workspace_user_id="owner",
+            update=update,
+            runtime_profile_change=None,
+            model_configuration_changed=False,
+            valid_model_target_labels=["default"],
+            model_target_label="default",
+            reasoning_effort=None,
+        )
+        assert update == original
+        agents.lock_by_id.assert_awaited_once_with(session, agent.id)
+        if expected_tick is None:
+            assert result.failure and isinstance(result.error, InvalidRoutineCadence)
+            agents.update_by_id.assert_not_awaited()
+        else:
+            assert result.success
+            agents.update_by_id.assert_awaited_once_with(
+                session,
+                agent.id,
+                {**original, "routine_check_interval_minutes": expected_tick},
+            )
 
 
 async def test_agent_atomic_operations_close_before_returning() -> None:

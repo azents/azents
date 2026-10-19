@@ -63,7 +63,8 @@ const initialValues: AgentFormValues = {
   tool_search_enabled: true,
   max_turns: null,
   auto_archive_ttl_days: 30,
-  routine_check_interval_minutes: 30,
+  routine_check_interval_minutes: 180,
+  routine_min_action_delay_minutes: 30,
   subagent_max_subagents: 3,
   subagent_max_depth: 1,
 };
@@ -86,7 +87,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
           errors[path] =
             path === "routine_check_interval_minutes"
               ? t("routineCheckIntervalError")
-              : issue.message;
+              : path === "routine_min_action_delay_minutes"
+                ? t("routineMinActionDelayError")
+                : issue.message;
         }
       }
       return errors;
@@ -123,6 +126,8 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
         max_turns: agent.max_turns ?? null,
         auto_archive_ttl_days: agent.auto_archive_ttl_days,
         routine_check_interval_minutes: agent.routine_check_interval_minutes,
+        routine_min_action_delay_minutes:
+          agent.routine_min_action_delay_minutes,
         subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
         subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
       });

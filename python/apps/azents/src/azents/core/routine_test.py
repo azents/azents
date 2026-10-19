@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from azents.core.routine import (
     MAX_ROUTINE_WORK_RECORDS,
     MAX_ROUTINES_PER_SESSION,
-    ROUTINE_MIN_ACTION_DELAY,
     ROUTINE_TICK_INTERVAL,
     ManualRoutineSource,
     RoutineChanges,
@@ -33,7 +32,6 @@ def test_initial_limits_and_distinct_timing_concepts() -> None:
     assert MAX_ROUTINES_PER_SESSION == 20
     assert MAX_ROUTINE_WORK_RECORDS == 100
     assert ROUTINE_TICK_INTERVAL == datetime.timedelta(minutes=30)
-    assert ROUTINE_MIN_ACTION_DELAY == datetime.timedelta(minutes=30)
 
 
 def test_exact_update_preserves_unrelated_content() -> None:

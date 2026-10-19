@@ -25,8 +25,8 @@ code_paths:
 api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug}
-last_verified_at: 2026-10-19
-spec_version: 2
+last_verified_at: 2026-10-20
+spec_version: 3
 ---
 
 # Session Routine Domain Spec
@@ -75,19 +75,27 @@ use the existing execution-generation fences.
 
 Settled judgment advances the Session checking checkpoint to completion time;
 the next regular opportunity follows the Agent's `routine_check_interval_minutes`
-(default 30; whole minutes from 1 to 1440), independently of selected-work
-completion. Agent administrators edit it in profile settings through the existing
-Agent save flow. Omitted updates preserve it; null, fractional, boolean and
-out-of-range values are rejected. Source collection also advances the checkpoint while a judgment is
+(new-Agent default 180 minutes), independently of selected-work completion.
+The separate Agent `routine_min_action_delay_minutes` uses the existing
+last-action reference and defaults to 30 minutes.
+Agent administrators edit both in profile settings through the existing save
+flow. Strict whole-minute values satisfy `30 <= minimum delay <= tick <= 1440`.
+Supplying minimum delay automatically raises tick when needed, using the supplied
+tick or the current stored tick. Reducing delay never reduces tick. Tick-only
+inversions, invalid create pairs, null, fractional, boolean and out-of-range
+values are rejected. Other omitted values are preserved. Source collection also advances the checkpoint while a judgment is
 queued. Selection respects the later of the checking and minimum-action-delay
 boundaries. No-action and failed judgment advance the checking checkpoint but
 do not advance the last-action reference. The shared Scheduler uses the earliest
 eligible Session time, capped at the regular 30-minute discovery interval.
-Due selection and fenced admission read the same current Agent value. Changes
+Due selection and fenced admission read the same current Agent values. Changes
 apply at the next scheduled scan, which may take up to the discovery interval
 plus normal scheduling latency, and do not cancel queued or running judgments.
-The separate minimum action delay remains 30 minutes; short check intervals do
-not guarantee investigations or notifications at that frequency.
+Capture and final settlement re-read the current minimum delay at their existing
+action-admission gates. Tick is not a second execution gate for already captured
+judgment. Existing Agents transfer old tick to minimum delay with a 30-minute
+floor, then set new tick to at least 180 minutes. Neither setting guarantees
+investigations or notifications at that frequency.
 An early scan schedules the remaining delay instead of another full interval;
 normal scheduler polling and FIFO work may add latency. Source evidence remains
 durable and ongoing incomplete occurrences are excluded from selection.

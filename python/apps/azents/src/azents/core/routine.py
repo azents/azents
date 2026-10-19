@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 MAX_ROUTINES_PER_SESSION = 20
 MAX_ROUTINE_WORK_RECORDS = 100
 ROUTINE_TICK_INTERVAL = datetime.timedelta(minutes=30)
-ROUTINE_MIN_ACTION_DELAY = datetime.timedelta(minutes=30)
 
 
 class RoutineObjectiveOutcome(enum.StrEnum):

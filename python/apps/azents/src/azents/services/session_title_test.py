@@ -1515,6 +1515,7 @@ class _AgentRepository(AgentRepository):
             external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
             auto_archive_ttl_days=30,
             routine_check_interval_minutes=30,
+            routine_min_action_delay_minutes=30,
             enabled=True,
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
             type=AgentType.PUBLIC,

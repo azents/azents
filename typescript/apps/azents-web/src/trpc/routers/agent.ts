@@ -163,6 +163,8 @@ export const agentRouter = router({
             selectable_model_options: input.selectable_model_options,
             routine_check_interval_minutes:
               input.routine_check_interval_minutes,
+            routine_min_action_delay_minutes:
+              input.routine_min_action_delay_minutes,
             main_model_label: input.main_model_label,
             lightweight_model_label: input.lightweight_model_label,
             description: input.description ?? null,
@@ -205,6 +207,8 @@ export const agentRouter = router({
             description: input.description,
             routine_check_interval_minutes:
               input.routine_check_interval_minutes,
+            routine_min_action_delay_minutes:
+              input.routine_min_action_delay_minutes,
             ...("selectable_model_options" in input
               ? { selectable_model_options: input.selectable_model_options }
               : {}),

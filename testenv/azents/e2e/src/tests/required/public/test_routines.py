@@ -201,6 +201,8 @@ def prepare_routine_session(
         handle=setup.workspace_handle,
         agent_update_request=AgentUpdateRequest(
             selectable_model_options=single_candidate_model_options(selection),
+            routine_check_interval_minutes=30,
+            routine_min_action_delay_minutes=30,
         ),
         _headers=headers,
     )

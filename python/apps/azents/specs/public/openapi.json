@@ -24690,9 +24690,17 @@
           "routine_check_interval_minutes": {
             "type": "integer",
             "maximum": 1440.0,
-            "minimum": 1.0,
+            "minimum": 30.0,
             "title": "Routine Check Interval Minutes",
             "description": "Routine checking interval in minutes",
+            "default": 180
+          },
+          "routine_min_action_delay_minutes": {
+            "type": "integer",
+            "maximum": 1440.0,
+            "minimum": 30.0,
+            "title": "Routine Min Action Delay Minutes",
+            "description": "Minimum Routine action delay in minutes",
             "default": 30
           },
           "subagent_settings": {
@@ -25225,9 +25233,16 @@
           "routine_check_interval_minutes": {
             "type": "integer",
             "maximum": 1440.0,
-            "minimum": 1.0,
+            "minimum": 30.0,
             "title": "Routine Check Interval Minutes",
             "description": "Routine checking interval in minutes"
+          },
+          "routine_min_action_delay_minutes": {
+            "type": "integer",
+            "maximum": 1440.0,
+            "minimum": 30.0,
+            "title": "Routine Min Action Delay Minutes",
+            "description": "Minimum Routine action delay in minutes"
           },
           "subagent_settings": {
             "$ref": "#/components/schemas/SubagentSettings"
@@ -25288,6 +25303,7 @@
           "max_turns",
           "auto_archive_ttl_days",
           "routine_check_interval_minutes",
+          "routine_min_action_delay_minutes",
           "subagent_settings",
           "created_at",
           "updated_at"
@@ -27406,9 +27422,15 @@
           "routine_check_interval_minutes": {
             "type": "integer",
             "maximum": 1440.0,
-            "minimum": 1.0,
+            "minimum": 30.0,
             "title": "Routine Check Interval Minutes",
             "description": "Routine checking interval in minutes"
+          },
+          "routine_min_action_delay_minutes": {
+            "type": "integer",
+            "maximum": 1440.0,
+            "minimum": 30.0,
+            "title": "Routine Min Action Delay Minutes"
           },
           "subagent_settings": {
             "$ref": "#/components/schemas/SubagentSettings",

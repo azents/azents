@@ -153,8 +153,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-19
-spec_version: 98
+last_verified_at: 2026-10-20
+spec_version: 99
 ---
 
 # Agent Domain Spec
@@ -174,13 +174,20 @@ Session or Agent settings operates on the same Agent-owned service.
 
 `agents` row has following core fields.
 
-Agent profile settings include `routine_check_interval_minutes`, a required
-whole-minute value from 1 to 1440 with default 30 for existing and new Agents.
-It is persisted and returned through the existing authorized Agent create/read/
-partial-update path. Omitted updates preserve it; explicit null and invalid
-values are rejected. The Routine source scan and fenced admission use this
-Agent-owned value; see the [Routine spec](routine.md) for unchanged discovery
-latency, minimum action delay and judgment semantics.
+Agent profile settings include `routine_check_interval_minutes` (tick) and
+`routine_min_action_delay_minutes`. Both are strict whole-minute integers with
+`30 <= minimum action delay <= tick <= 1440`. New Agents default to tick 180
+and minimum delay 30. Existing Agents transfer their old tick to minimum delay
+with a 30-minute floor, then set tick to the greater of that delay and 180.
+Both values use the existing authorized create/read/partial-update path.
+Omitted fields are retained, except that supplying minimum delay automatically
+raises tick to `max(supplied or stored tick, supplied delay)`. Lowering delay does
+not lower tick. Tick-only updates below stored delay, invalid create pairs, null,
+fractional and boolean values are rejected. Partial cadence updates serialize on
+the current Agent mutation fence before normalization and merged-pair validation,
+and a database CHECK enforces the same invariant. The form raises tick on valid
+delay edits. See the [Routine spec](routine.md) for their separate references
+and unchanged discovery, judgment and notification semantics.
 
 | Field | Meaning |
 |---|---|
@@ -867,6 +874,10 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-20** (spec_version 99) — Separated configurable Routine minimum
+  action delay from tick, enforced the paired invariant, and transferred old
+  tick choices to minimum delay with new tick at least three hours. Saving
+  minimum delay raises tick automatically when needed without lowering it.
 - **2026-10-19** (spec_version 98) — Added the Agent-owned Routine checking
   interval to profile settings and existing create/read/partial-update contracts,
   preserving the 30-minute default and independent minimum action delay.
