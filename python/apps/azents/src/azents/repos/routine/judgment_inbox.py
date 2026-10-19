@@ -420,7 +420,7 @@ class RoutineJudgmentInboxRepository:
                 session,
                 scope=scope,
                 state=RoutineCheckState(
-                    last_tick_at=check.state.last_tick_at,
+                    last_tick_at=now,
                     last_action_at=now if admitted else check.state.last_action_at,
                     source_inputs=tuple(remaining),
                     queued_judgment_id=None,

@@ -41,6 +41,7 @@ from azents.repos.routine.judgment_inbox import (
 )
 from azents.repos.routine.persistence_test import _content, _operations, _subject
 from azents.repos.routine.records import RoutineWorkRecordRepository
+from azents.repos.routine.source_dispatch import RoutineSourceRepository
 from azents.repos.routine.state import RoutineStateRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.toolkit_state import ToolkitStateRepository
@@ -211,6 +212,7 @@ async def test_action_promotion_capture_and_atomic_settlement(
     async with manager() as session:
         check = await repo.states.get_check(session, scope=scope)
         assert check is not None and check.state.queued_judgment_id is None
+        assert check.state.last_tick_at == NOW + datetime.timedelta(minutes=31)
         assert check.state.last_action_at == (
             NOW + datetime.timedelta(minutes=31) if act else None
         )
@@ -235,9 +237,19 @@ async def test_action_promotion_capture_and_atomic_settlement(
         now=NOW + datetime.timedelta(minutes=31),
     )
     assert repeated.observation == final.observation and repeated.admission is None
+    sources = RoutineSourceRepository(session_manager=manager)
+    assert await sources.next_check_at(
+        now=NOW + datetime.timedelta(minutes=31)
+    ) == NOW + datetime.timedelta(minutes=61)
+    assert (
+        await sources.list_due_scopes(
+            now=NOW + datetime.timedelta(minutes=60), limit=64
+        )
+        == []
+    )
 
 
-async def test_delay_preserves_source_without_creating_an_exact_threshold_job(
+async def test_inbox_preserves_early_source_without_duplicate_action(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     scope = await subject(rdb_session_manager)

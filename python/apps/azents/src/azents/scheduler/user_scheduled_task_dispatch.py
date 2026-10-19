@@ -76,10 +76,11 @@ async def user_scheduled_task_dispatch_handler(
     dispatcher = await context.container.solve(get_user_scheduled_task_dispatcher)
     summary = await dispatcher.dispatch_once(lease_owner=context.lease_owner)
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )

@@ -192,6 +192,13 @@ attempt start time, lease owner, manual-trigger flag, an execution key scoped to
 and an absolute deadline derived from the task timeout. The Scheduler waits for the structured Runtime
 outcome before recording success or failure.
 
+The handler returns a validated `TaskResult` envelope with opaque `summary` and
+required nullable timezone-aware `next_run_at`. Null retains completion time plus
+the definition interval. An explicit time controls the next successful
+execution; already-past times become eligible at completion and are picked up by
+normal polling. Invalid result envelopes fail the task. Existing failure retry
+policy, database claim identity and lease recovery are unchanged.
+
 The current backend is the AppContext-owned `LocalJobRuntime`. It executes registered handlers with
 bounded process-local concurrency, enforces the absolute deadline and cancellation grace, and creates
 one task-local DI container for each execution. The `scheduler.task` adapter resolves the current
@@ -586,14 +593,22 @@ executes Routine work. Code-job leases remain code-job infrastructure, not a
 Routine judgment owner or domain retry contract.
 
 The supported `manual` source contributes candidates at regular eligible checks;
-it is not a manual-run endpoint. Tick cadence and minimum action delay are
-separate 30-minute references. Creation and no-action do not advance the action
-reference, and delayed evidence waits for a later tick rather than an exact-time
-wake-up. Empty source sets and ongoing incomplete work do not create new work.
+it is not a manual-run endpoint. Tick cadence and minimum action delay remain
+30-minute boundaries. Settled judgment advances the checking checkpoint, so the
+next opportunity follows judge completion rather than the preceding source tick
+or eventual ordinary-work completion. No-action and failed judgments leave the
+last-action reference unchanged. The dispatcher returns the earliest eligible
+Session time through the common Scheduler's explicit next-time result, capped at
+the regular discovery interval. An early scan waits the remaining delay rather
+than another full interval. Normal scheduler polling still applies.
+Empty source sets and ongoing incomplete work do not create new work.
 Testenv-only exact-aware dispatch delegates to the same service and returns
 admission counts; it does not manufacture judgment or completion.
 
 ## Changelog
+
+- 2026-10-19: Support typed task-directed next execution times; align Routine
+  checks with judgment completion while retaining other tasks' fixed delay.
 
 - 2026-10-19: Add source-only Routine dispatch through the ordinary Session inbox;
   retain Scheduled Task and maintenance-job authorities.
