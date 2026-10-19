@@ -315,6 +315,17 @@ class AgentOperationsRepository:
                 if current is None:
                     return Failure(AgentOperationNotFound(agent_id=agent_id))
                 locked = current
+            if "routine_min_action_delay_minutes" in update:
+                update = {
+                    **update,
+                    "routine_check_interval_minutes": max(
+                        update.get(
+                            "routine_check_interval_minutes",
+                            locked.routine_check_interval_minutes,
+                        ),
+                        update["routine_min_action_delay_minutes"],
+                    ),
+                }
             if update.get(
                 "routine_min_action_delay_minutes",
                 locked.routine_min_action_delay_minutes,

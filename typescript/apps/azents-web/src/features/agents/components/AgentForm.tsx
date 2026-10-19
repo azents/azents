@@ -430,10 +430,19 @@ export function AgentForm({
                 clampBehavior="none"
                 value={form.values.routine_min_action_delay_minutes}
                 onChange={(value) => {
-                  form.setFieldValue(
-                    "routine_min_action_delay_minutes",
-                    typeof value === "number" ? value : "",
-                  );
+                  form.setValues((values) => ({
+                    ...values,
+                    routine_min_action_delay_minutes:
+                      typeof value === "number" ? value : "",
+                    routine_check_interval_minutes:
+                      typeof value === "number" &&
+                      Number.isInteger(value) &&
+                      value >= 30 &&
+                      value <= 1440 &&
+                      typeof values.routine_check_interval_minutes === "number"
+                        ? Math.max(values.routine_check_interval_minutes, value)
+                        : values.routine_check_interval_minutes,
+                  }));
                 }}
                 error={form.errors.routine_min_action_delay_minutes}
               />

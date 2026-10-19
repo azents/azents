@@ -517,7 +517,7 @@
     "routineCheckIntervalDescription": "Time between checks; default 180 minutes (3 hours). Must be at least the minimum delay and at most 1440 minutes. Changes apply on the next scheduled scan, not immediately.",
     "routineCheckIntervalError": "Enter a whole number from 30 to 1440.",
     "routineMinActionDelayLabel": "Minimum Routine action delay (minutes)",
-    "routineMinActionDelayDescription": "Time between investigation admissions; default 30 minutes. Must be at least 30 minutes and no greater than tick. Neither setting schedules execution or notifications.",
+    "routineMinActionDelayDescription": "Time between investigation admissions; default 30 minutes, minimum 30. Increasing delay automatically raises tick when needed; decreasing it does not lower tick. Neither setting schedules execution or notifications.",
     "routineMinActionDelayError": "Enter a whole number of at least 30, no greater than tick.",
     "autoArchiveTtlDaysDescription": "Archive inactive sessions after this many days. Pinned sessions are excluded.",
     "typeLabel": "Visibility",

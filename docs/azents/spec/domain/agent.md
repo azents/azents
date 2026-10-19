@@ -180,10 +180,13 @@ Agent profile settings include `routine_check_interval_minutes` (tick) and
 and minimum delay 30. Existing Agents transfer their old tick to minimum delay
 with a 30-minute floor, then set tick to the greater of that delay and 180.
 Both values use the existing authorized create/read/partial-update path.
-Omitted fields are retained; null, fractional, boolean and invalid effective
-pairs are rejected. Partial cadence updates serialize on the current Agent
-mutation fence before merged-pair validation, and a database CHECK enforces the
-same invariant. See the [Routine spec](routine.md) for their separate references
+Omitted fields are retained, except that supplying minimum delay automatically
+raises tick to `max(supplied or stored tick, supplied delay)`. Lowering delay does
+not lower tick. Tick-only updates below stored delay, invalid create pairs, null,
+fractional and boolean values are rejected. Partial cadence updates serialize on
+the current Agent mutation fence before normalization and merged-pair validation,
+and a database CHECK enforces the same invariant. The form raises tick on valid
+delay edits. See the [Routine spec](routine.md) for their separate references
 and unchanged discovery, judgment and notification semantics.
 
 | Field | Meaning |
@@ -873,7 +876,8 @@ Following contracts do not exist in current system.
 
 - **2026-10-20** (spec_version 99) — Separated configurable Routine minimum
   action delay from tick, enforced the paired invariant, and transferred old
-  tick choices to minimum delay with new tick at least three hours.
+  tick choices to minimum delay with new tick at least three hours. Saving
+  minimum delay raises tick automatically when needed without lowering it.
 - **2026-10-19** (spec_version 98) — Added the Agent-owned Routine checking
   interval to profile settings and existing create/read/partial-update contracts,
   preserving the 30-minute default and independent minimum action delay.

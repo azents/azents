@@ -47,7 +47,7 @@ async def test_concurrent_partial_cadence_updates_revalidate_fenced_pair(
     latest_db_schema: None,
     minimum_first: bool,
 ) -> None:
-    """The second writer gets a normal validation failure, never a CHECK abort."""
+    """Delay raises the refreshed tick; tick-only inversion remains invalid."""
     del latest_db_schema
     async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
         scope = await _subject(ReadWriteSession(raw))
@@ -133,7 +133,14 @@ async def test_concurrent_partial_cadence_updates_revalidate_fenced_pair(
                 )
                 await holder.commit()
             result = pending.result()
-            assert result.failure and isinstance(result.error, InvalidRoutineCadence)
+            if minimum_first:
+                assert result.failure and isinstance(
+                    result.error, InvalidRoutineCadence
+                )
+            else:
+                assert result.success
+                assert result.value.routine_check_interval_minutes == 120
+                assert result.value.routine_min_action_delay_minutes == 120
         async with AsyncSession(rdb_engine) as raw:
             row = (
                 await raw.execute(
@@ -143,7 +150,7 @@ async def test_concurrent_partial_cadence_updates_revalidate_fenced_pair(
                     ).where(RDBAgent.id == scope.agent_id)
                 )
             ).one()
-            assert row == ((120, 180) if minimum_first else (30, 60))
+            assert row == ((120, 180) if minimum_first else (120, 120))
     finally:
         async with rdb_engine.begin() as cleanup:
             await cleanup.execute(

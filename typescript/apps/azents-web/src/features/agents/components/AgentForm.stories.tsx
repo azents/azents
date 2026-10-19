@@ -420,7 +420,27 @@ export const RoutineCheckInterval = {
     await userEvent.type(input, "60");
     await userEvent.clear(minimum);
     await userEvent.type(minimum, "90");
-    const submitted = 3;
+    await expect(input).toHaveValue("90");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        routine_check_interval_minutes: 90,
+        routine_min_action_delay_minutes: 90,
+      }),
+    );
+    await userEvent.clear(minimum);
+    await userEvent.type(minimum, "60");
+    await expect(input).toHaveValue("90");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        routine_check_interval_minutes: 90,
+        routine_min_action_delay_minutes: 60,
+      }),
+    );
+    await userEvent.clear(input);
+    await userEvent.type(input, "30");
+    const submitted = 5;
     await userEvent.click(canvas.getByRole("button", { name: "Save" }));
     await expect(
       canvas.getByText(
@@ -428,8 +448,8 @@ export const RoutineCheckInterval = {
       ),
     ).toBeVisible();
     await expect(args.onSubmit).toHaveBeenCalledTimes(submitted);
-    await userEvent.clear(minimum);
-    await userEvent.type(minimum, "60");
+    await userEvent.clear(input);
+    await userEvent.type(input, "60");
     await userEvent.click(canvas.getByRole("button", { name: "Save" }));
     await expect(args.onSubmit).toHaveBeenLastCalledWith(
       expect.objectContaining({

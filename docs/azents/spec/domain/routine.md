@@ -80,8 +80,10 @@ The separate Agent `routine_min_action_delay_minutes` uses the existing
 last-action reference and defaults to 30 minutes.
 Agent administrators edit both in profile settings through the existing save
 flow. Strict whole-minute values satisfy `30 <= minimum delay <= tick <= 1440`.
-Omitted updates preserve values; null, fractional, boolean, out-of-range and
-inverted effective pairs are rejected. Source collection also advances the checkpoint while a judgment is
+Supplying minimum delay automatically raises tick when needed, using the supplied
+tick or the current stored tick. Reducing delay never reduces tick. Tick-only
+inversions, invalid create pairs, null, fractional, boolean and out-of-range
+values are rejected. Other omitted values are preserved. Source collection also advances the checkpoint while a judgment is
 queued. Selection respects the later of the checking and minimum-action-delay
 boundaries. No-action and failed judgment advance the checking checkpoint but
 do not advance the last-action reference. The shared Scheduler uses the earliest
