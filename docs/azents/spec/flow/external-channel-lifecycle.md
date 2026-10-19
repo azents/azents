@@ -66,8 +66,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-18
-spec_version: 51
+last_verified_at: 2026-10-19
+spec_version: 52
 ---
 
 # External Channel Lifecycle
@@ -403,7 +403,25 @@ not recreate removed scheduling authority. Permanent purge waits for preserved
 started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
+## Routine and Primary Lifecycle
+
+Session Primary Binding authority is cleared by exact disconnect/termination and
+physical deletion while unrelated Bindings remain connected. Existing-data
+backfill only accepts an unambiguous connected owner; it cannot select or remove
+connections to resolve ambiguity.
+
+[Routine lifecycle](../domain/routine.md) is an owner-scoped participant in
+archive/purge. Archive removes definitions/records, source checks and pre-start
+work. Already-started Routine-only work may finish under the original owner
+fences, without recreating removed state. Unrelated active work blocks archive.
+Restore does not recreate Routines. Purge waits for preserved started work, then
+rechecks namespace absence before finalization. Judgment history follows normal
+event retention; Routine observation alone does not refresh autoarchive activity.
+
 ## Changelog
+
+- 2026-10-19: Add Primary cleanup and Routine participant
+  archive/restore/preserved-work/purge boundaries.
 
 - **2026-10-18** (spec_version 51) — Added atomic Primary clearing to Binding
   termination and included the affected completed terminal database owners in

@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-10-05
-spec_version: 29
+last_verified_at: 2026-10-19
+spec_version: 30
 code_paths:
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/services/agent/**
@@ -183,7 +183,27 @@ cd typescript && corepack pnpm --filter @azents/web format:check
 cd typescript && corepack pnpm --filter @azents/web typecheck
 ```
 
+## Routine Observations
+
+The Context inspector and normal usage gauge continue to use ordinary turn
+accounting and latest normal prompt evidence. A
+[Routine judgment](../domain/routine.md) is displayed as its own collapsed
+transcript disclosure, with durable/live considered candidates, decisions,
+diagnostic status, model and nullable per-call usage. Its usage is never added
+to `ChatMessage.usage` or used as the Context inspector's latest ordinary usage.
+Missing or invalid evidence renders unavailable/diagnostic state, not successful
+no-action.
+
+The separate read-only `?page=routines` supporting panel keeps Chat mounted.
+Its exact-Session list/detail reads show current definitions, latest occurrence
+and retained records; no mutation or manual-run controls are provided. Keyboard
+and reload preserve normal native disclosure semantics; ordinary tools remain
+separate from the judgment observation.
+
 ## Changelog
+
+- 2026-10-19: Add isolated Routine judgment disclosure and read-only Session
+  inspection without changing ordinary Context usage/prompt baselines.
 
 - **2026-10-05** — v28. Moved the authorized Context snapshot read into a
   completed read-only repository operation before service rendering.

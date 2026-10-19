@@ -197,8 +197,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-18
-spec_version: 194
+last_verified_at: 2026-10-19
+spec_version: 195
 ---
 
 # Conversation & Events
@@ -1364,8 +1364,8 @@ error message when diagram rendering fails.
 
 Chat route and collaboration inputs are prepared before model-call boundaries. The supported
 Mailbox kinds are `user_message`, `goal_continuation`, `turn_action_continuation`,
-`external_channel_continuation`, `action_message`, `agent_message`, and
-`external_channel_message`. Every mailbox envelope carries explicit scheduling intent and an
+`external_channel_continuation`, `routine_trigger`, `routine_continuation`,
+`action_message`, `agent_message`, and `external_channel_message`. Every mailbox envelope carries explicit scheduling intent and an
 immutable typed payload whose ordered items use stable `(mailbox_item_id, item_key)` identity.
 Broker wake-ups are payload-free signals and never carry model input.
 
@@ -1688,7 +1688,30 @@ events do not project into ordinary chat-message rows. Pending live projections
 identify trigger and continuation work with dedicated Scheduled Task
 presentations.
 
+## Session Routine Events and Lifecycle
+
+[Session Routines](routine.md) belong to the exact Session. Source checks enter
+the existing FIFO as an internal `routine_judgment` action, not a public input
+variant or an independently owned Run. `routine_trigger` and
+`routine_continuation` carry ordinary inference-producing admitted work.
+`routine_judgment` is durable neutral observation: considered candidates,
+Structured decisions or diagnostic failure, model and nullable per-call usage.
+It is projected live and after reload without ordinary turn/Chat usage or normal
+activity-clock effects. `routine_notification` is the chat delivery projection
+when the originating Session has no Primary channel.
+
+Public Routine inspection authorizes the requested active Session and exact
+Agent/Workspace/member boundary, returning 404 without cross-Session fallback.
+Archive removes definitions, retained records and pre-start work. Preserved
+started Routine-only work may finish without recreating removed data; unrelated
+active work still blocks archive. Restore does not reconstruct Routine state.
+Purge waits for preserved work and verifies namespace absence. Team Primary
+archive protection is unchanged.
+
 ## 13. Changelog
+
+- 2026-10-19: Add Routine inbox/observation/work projections, exact Session
+  inspection and archive/restore/purge boundaries.
 
 - **2026-10-18** (spec_version 194) — Added nullable Session Primary Binding
   authority, atomic origin/disconnect integration and guarded existing-data

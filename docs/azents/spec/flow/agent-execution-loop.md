@@ -193,8 +193,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/packages/azents-session-core/src/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-17
-spec_version: 220
+last_verified_at: 2026-10-19
+spec_version: 221
 ---
 
 # Agent Execution Loop
@@ -2015,7 +2015,33 @@ Goal state cannot reinterpret or re-trigger that event. Chat and public API
 projections retain the dedicated kind, and the UI labels it with a channel/message
 icon.
 
+## Routine Judgment and Ordinary Work
+
+[Routine source checks](../domain/routine.md) enqueue an internal action through
+the ordinary inbox. The existing owner executes judgment at a FIFO/Run boundary,
+without a separate worker, lease, retry lifecycle or execution owner. The action
+is neutral: no ordinary turn, foreground inference preparation, usage/system-prompt
+snapshot, activity refresh or worktree-terminal effect. Later user input does not
+invalidate a captured valid decision. Owner recovery and explicit Stop use the
+same generation fences as ordinary work.
+
+Judgment prepares canonical Session context and a supported Structured result
+with zero executable tools. Candidate IDs/objectives are captured, and invalid,
+incomplete or unavailable provider evidence produces failure rather than no-action.
+Native client credential/endpoint defaults are filtered as transport configuration
+before semantic request normalization; the normalizer's credential guard remains.
+Judgment-call usage belongs only to its durable observation.
+
+Selected work enters the normal Run/tool loop with original admitted contexts.
+Recording one result closes only that occurrence, not the Run or Channel Work.
+The oldest incomplete occurrence drives normal idle continuation. Explicit retry
+rebinds only incomplete work and preserves its saved profile; stale owners cannot
+complete or notify again.
+
 ## Changelog
+
+- 2026-10-19: Document FIFO-hosted Routine judgment, isolated evidence and ordinary
+  per-occurrence work/continuation.
 
 - **2026-10-09** (spec_version 220) — Recover sampling input overflow through
   one forced shared compaction across all provider lowerers, and finalize

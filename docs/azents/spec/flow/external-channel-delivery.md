@@ -64,8 +64,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-16
-spec_version: 69
+last_verified_at: 2026-10-19
+spec_version: 70
 ---
 
 # External Channel Delivery and Channel Work
@@ -715,7 +715,25 @@ revoked authority is returned as a sanitized outcome and creates no retry,
 outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
+## Routine Result Notification
+
+[Routine result recording](../domain/routine.md) commits canonical work before
+attempting its independently requested notification. Dispatch resolves the
+originating Session's current authorized Primary channel Binding. No Primary
+publishes to that Session chat; an existing invalid, replaced, disconnected or
+failed Primary does not authorize fallback or retry. Objective outcome, stored
+work and delivery observation are distinct.
+
+This is one post-commit publication attempt, not a new Channel Work lifecycle.
+Duplicate completion returns canonical stored work without resending. Uncertain
+or failed publication remains evidence, not an outbox retry queue. Existing
+Slack/Discord connection, route, resource and provider-effect authority remain
+required; the Routine cannot choose a new destination or complete ordinary Work.
+
 ## Changelog
+
+- 2026-10-19: Document current-Primary, one-attempt Routine notification without
+  Channel Work terminalization, fallback or uncertain replay.
 
 - **2026-10-07** (spec_version 68) — Recreate Discord Trackers for ordered task-title
   list changes regardless of reply presence; retain in-place edits for status and

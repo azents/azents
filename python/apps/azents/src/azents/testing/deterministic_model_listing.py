@@ -8,7 +8,10 @@ from azents.core.llm_catalog import (
     ModelModality,
     ModelReasoningEffort,
 )
-from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_evidence import (
+    ProviderCapabilityEvidence,
+    absent_catalog_fact,
+)
 from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
@@ -21,6 +24,7 @@ from azents.services.model_listing.data import (
 
 DETERMINISTIC_FIXTURE_NAME_PREFIX = "__testenv_model_listing:"
 DeterministicFixtureVariant = Literal[
+    "deterministic-routine",
     "deterministic-success",
     "deterministic-model-settings",
     "deterministic-context-ranges",
@@ -34,6 +38,7 @@ DeterministicFixtureVariant = Literal[
     "deterministic-title-plain",
 ]
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
+    "deterministic-routine",
     "deterministic-success",
     "deterministic-model-settings",
     "deterministic-context-ranges",
@@ -127,7 +132,8 @@ def build_deterministic_listing(
                 )
             ]
         case (
-            "deterministic-success"
+            "deterministic-routine"
+            | "deterministic-success"
             | "deterministic-model-settings"
             | "deterministic-context-ranges"
             | "deterministic-two-integrations"
@@ -435,6 +441,11 @@ def _candidate(
         ),
         output_modalities=_declared(("text",)),
         function_calling=_declared(True),
+        structured_response=(
+            _declared(True)
+            if source == "testenv_fixture:deterministic-routine"
+            else absent_catalog_fact()
+        ),
         reasoning=_declared(not lightweight),
         reasoning_efforts=_declared(efforts),
         reasoning_summaries=_declared(not lightweight),

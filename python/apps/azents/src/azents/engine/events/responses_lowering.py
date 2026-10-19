@@ -326,11 +326,7 @@ class ResponsesRequestLowerer:
         if output.description is not None:
             output_format["description"] = output.description
         kwargs = {**self._lower_model_kwargs(), "text": {"format": output_format}}
-        controls = {
-            key: value
-            for key, value in kwargs.items()
-            if key not in self._credential_kwargs
-        }
+        controls = self._request_control_options(kwargs)
         effective = normalize_effective_model_request(
             dialect="native_responses",
             options=controls,
@@ -505,11 +501,10 @@ class ResponsesRequestLowerer:
             native_replay_context=native_replay_context,
         )
 
-    def _resolve_support_context(
-        self, kwargs: dict[str, object], *, tools: Sequence[dict[str, object]]
-    ) -> ModelSupportContext:
-        """Validate controls and resolve the same context used for rich input."""
-        options = {
+    @staticmethod
+    def _request_control_options(kwargs: Mapping[str, object]) -> dict[str, object]:
+        """Separate all client configuration, including environment defaults."""
+        return {
             key: value
             for key, value in kwargs.items()
             if key
@@ -523,6 +518,12 @@ class ResponsesRequestLowerer:
                 "custom_llm_provider",
             }
         }
+
+    def _resolve_support_context(
+        self, kwargs: dict[str, object], *, tools: Sequence[dict[str, object]]
+    ) -> ModelSupportContext:
+        """Validate controls and resolve the same context used for rich input."""
+        options = self._request_control_options(kwargs)
         if (
             "parallel_tool_calls" not in options
             and not self._model_capabilities.supports(

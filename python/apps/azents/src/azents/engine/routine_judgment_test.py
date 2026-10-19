@@ -14,6 +14,7 @@ from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.core.routine_judgment_test import candidate
 from azents.engine.events.openai_responses import (
     OpenAIResponsesClient,
+    OpenAIResponsesRequest,
     OpenAISDKResponsesClient,
 )
 from azents.engine.events.types import Event, UserMessagePayload
@@ -105,6 +106,23 @@ def prepared(model: RoutineJudgmentModel) -> RoutineJudgmentRequest:
         native_replay_context="canonical-history",
         model_file_resolver=None,
     )
+
+
+def test_openai_endpoint_configuration_is_not_a_structured_request_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Environment client defaults cannot block a credential-free request intent."""
+    monkeypatch.setenv("AZ_OPENAI_BASE_URL", "https://fixture.invalid/v1")
+    request = prepared(selection(LLMProvider.OPENAI))
+    assert isinstance(request, OpenAIResponsesRequest)
+    assert request.tools == []
+    text = request.options["text"]
+    assert text is not None
+    formatting = text["format"]
+    assert isinstance(formatting, dict) and formatting["type"] == "json_schema"
+    assert "base_url" not in request.options
+    assert "api_base" not in request.options
+    assert "api_key" not in request.options
 
 
 @pytest.mark.parametrize(

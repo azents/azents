@@ -70,10 +70,8 @@ def test_proxy_import_is_stdlib_only_without_starting_a_listener(
     (application / "support").mkdir(parents=True)
     script_path = application / "proxy.py"
     shutil.copyfile(source, script_path)
-    shutil.copyfile(
-        source.with_name("browser_confidential_fixture.py"),
-        application / "support" / "browser_confidential_fixture.py",
-    )
+    for module in ["browser_confidential_fixture.py", "routine_model_fixture.py"]:
+        shutil.copyfile(source.with_name(module), application / "support" / module)
     smoke = """
 import dataclasses
 import json

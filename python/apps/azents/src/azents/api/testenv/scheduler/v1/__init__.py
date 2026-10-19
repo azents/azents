@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from azents.scheduler.deps import get_scheduler_service
+from azents.scheduler.routine_source_dispatch import get_routine_source_dispatcher
 from azents.scheduler.service import SchedulerService
 from azents.scheduler.user_scheduled_task_dispatch import (
     get_user_scheduled_task_dispatcher,
@@ -15,6 +16,7 @@ from azents.scheduler.user_scheduled_task_dispatch import (
 from azents.services.historical_memory.sampling import (
     HistoricalMemorySamplingService,
 )
+from azents.services.routine.source_dispatch import RoutineSourceDispatcher
 from azents.services.scheduled_task.service import ScheduledTaskDispatcher
 from azents.utils.fastapi.route import RouteMounter
 
@@ -63,6 +65,24 @@ class HistoricalMemorySampleRequest(BaseModel):
     agent_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     now: AwareDatetime
     consolidate: bool
+
+
+class RoutineSourceDispatchRequest(BaseModel):
+    """An exact source tick; normal Worker ownership still executes judgment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    now: AwareDatetime
+
+
+class RoutineSourceDispatchResponse(BaseModel):
+    """Admission counts only, never synthetic judgment or completion evidence."""
+
+    now: datetime.datetime
+    checked: int
+    enqueued: int
+    unavailable: int
+    deadline_reached: bool
 
 
 class HistoricalMemorySampleResponse(BaseModel):
@@ -132,6 +152,22 @@ async def dispatch_scheduled_tasks(
         skipped=summary.skipped,
         wake_failed=summary.wake_failed,
     )
+
+
+@router.post("/routines/dispatch")
+async def dispatch_routine_sources(
+    body: RoutineSourceDispatchRequest,
+    dispatcher: Annotated[
+        RoutineSourceDispatcher, Depends(get_routine_source_dispatcher)
+    ],
+) -> RoutineSourceDispatchResponse:
+    """Admit one deterministic tick through the actual source/inbox service."""
+    now = body.now.astimezone(datetime.UTC)
+    summary = await dispatcher.dispatch_once(
+        now=now,
+        deadline=datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=10),
+    )
+    return RoutineSourceDispatchResponse(now=now, **dataclasses.asdict(summary))
 
 
 def mount(mounter: RouteMounter) -> None:

@@ -225,6 +225,7 @@ def _active_choice(
 @pytest.mark.parametrize(
     "variant",
     [
+        "deterministic-routine",
         "deterministic-success",
         "deterministic-model-settings",
         "deterministic-brave-text-only",
@@ -253,6 +254,9 @@ def test_fixture_publication_capture_and_active_dispatch_share_authoritative_fac
         published = ModelCapabilities.model_validate(entry.normalized_capabilities)
         active = _active_choice(entry, candidate)
         assert active.capabilities == published == candidate.normalized_capabilities
+        assert active.capabilities.structured_response is (
+            variant == "deterministic-routine"
+        )
         assert active.capabilities.supports(ModelCapabilityFeature.FUNCTION_CALLING)
         request = normalize_effective_model_request(
             dialect="native_responses",

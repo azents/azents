@@ -122,8 +122,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-10-07
-spec_version: 86
+last_verified_at: 2026-10-19
+spec_version: 87
 ---
 
 # External Channel
@@ -710,7 +710,27 @@ a later change rejects stale settlement but does not replay or retract an effect
 already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
+## Session Primary and Routine Notification
+
+The Session owns nullable `primary_channel_binding_id`, distinct from its
+Team Primary kind. Channel-created Sessions designate their originating Binding
+in the owner transaction; web-only Sessions have none. Resolution revalidates
+exact Session, Agent, Workspace, connection, route and resource authority.
+Disconnect/termination/deletion clear obsolete Primary references without
+disconnecting other Bindings or imposing one Binding per Session. Existing-data
+backfill preserves every Binding and rejects ambiguous connected owners before
+mutation.
+
+[Routine completion](routine.md) resolves current Primary for one post-commit
+notification attempt. No Primary means the originating Session chat. An existing
+invalid, disconnected or failed Primary is failure evidence, not authority for
+fallback, uncertain replay or a second copy. Routine completion does not finish
+ordinary External Channel Work or add a destination selector.
+
 ## Changelog
+
+- 2026-10-19: Document Session Primary authority and independent Routine
+  notification, including no-fallback/no-retry delivery.
 
 - **2026-10-07** (spec_version 86) — Base Discord Tracker relocation on ordered task
   titles independently of reply presence, retaining hosts for status and metadata edits.
