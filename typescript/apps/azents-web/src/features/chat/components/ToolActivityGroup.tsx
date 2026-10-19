@@ -1,35 +1,19 @@
 "use client";
 
-import {
-  Box,
-  Collapse,
-  Group,
-  Loader,
-  rem,
-  Stack,
-  Text,
-  UnstyledButton,
-} from "@mantine/core";
-import { IconCheck, IconChevronRight } from "@tabler/icons-react";
+import { Box, Loader, rem, Text } from "@mantine/core";
+import { IconCheck } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
-import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
-import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
 import { useToolActivityGroup } from "../containers/useToolActivityGroup";
-import { ActivityMessageRow } from "./ActivityMessageRow";
+import { ActivityEventList } from "./ActivityEventList";
+import { ActivityRow } from "./ActivityRow";
 import {
-  activityRowChevronSize,
   activityRowIconSize,
   activityRowSummarySize,
 } from "./activityRowPresentation";
 import inlineControlClasses from "./ChatInlineControl.module.css";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-} from "./collapsiblePresentation";
+import { ChatTimelineItem } from "./ChatTimelineItem";
 import { formatElapsedDuration } from "./elapsedDuration";
-import { ReasoningActivityRow } from "./ReasoningActivityRow";
-import { SkillLoadedActivityRow } from "./SkillLoadedActivityRow";
 import type { ToolActivityGroupViewProps } from "../containers/useToolActivityGroup";
 import type {
   ActivityCategory,
@@ -39,7 +23,6 @@ import type {
 interface CategorySummary extends ActivityCategory {
   count: number;
 }
-
 const MAX_VISIBLE_CATEGORIES = 5;
 
 function categorySummaries(events: ActivityEvent[]): CategorySummary[] {
@@ -106,34 +89,6 @@ function categoryLabel(
   }
 }
 
-function eventDetail(event: ActivityEvent): React.ReactElement | null {
-  if (event.kind === "tool" && event.toolCall) {
-    return event.toolCall.type === "client" ? (
-      <ToolCallCardContainer toolCall={event.toolCall.toolCall} />
-    ) : (
-      <ProviderToolCallCardContainer toolCall={event.toolCall.toolCall} />
-    );
-  }
-  if (event.kind === "reasoning") {
-    return (
-      <ReasoningActivityRow
-        reasoningSummary={
-          event.message?.reasoningSummary ?? event.message?.content ?? ""
-        }
-      />
-    );
-  }
-  if (event.kind === "skill") {
-    return (
-      <SkillLoadedActivityRow
-        content={event.message?.content ?? ""}
-        name={event.message?.metadata?.name ?? null}
-      />
-    );
-  }
-  return <ActivityMessageRow event={event} />;
-}
-
 export function ToolActivityGroupView({
   activity,
   authorizationAction,
@@ -159,20 +114,19 @@ export function ToolActivityGroupView({
   ];
   const hiddenCategoryCount = Math.max(
     0,
-    labels.length - MAX_VISIBLE_CATEGORIES,
+    categoryLabels.length - MAX_VISIBLE_CATEGORIES,
   );
-  const visibleLabels = labels.slice(0, MAX_VISIBLE_CATEGORIES);
   const summary = [
-    ...visibleLabels,
+    ...categoryLabels.slice(0, MAX_VISIBLE_CATEGORIES),
     ...(hiddenCategoryCount > 0
       ? [t("overflowCategories", { count: hiddenCategoryCount })]
       : []),
+    ...(failedCount > 0 ? [t("failedCount", { count: failedCount })] : []),
   ].join(" · ");
   const groupDuration =
     groupDurationSeconds === null
       ? null
       : formatElapsedDuration(groupDurationSeconds);
-  const accessibilitySummary = labels.join(" · ");
   const stateSummary = authorizationAction
     ? t("approvalNeeded")
     : active
@@ -180,121 +134,55 @@ export function ToolActivityGroupView({
       : t("complete");
   const ariaLabel = [
     t("title"),
-    accessibilitySummary,
+    labels.join(" · "),
     stateSummary,
     groupDuration,
   ]
     .filter((value): value is string => value !== null && value.length > 0)
     .join(": ");
-
-  const header = (
-    <Stack gap={rem(2)} miw={0} w="100%">
-      <Group
-        gap={rem(6)}
-        wrap="nowrap"
-        miw={0}
-        className={inlineControlClasses.root}
-      >
-        {hasDetails ? (
-          <IconChevronRight
-            aria-hidden="true"
-            size={activityRowChevronSize}
-            color="var(--mantine-color-dimmed)"
-            style={{
-              flexShrink: 0,
-              transform: opened ? "rotate(90deg)" : "none",
-              transition: chatChevronTransition,
-            }}
-          />
-        ) : null}
-        {active && hasDetails ? (
-          <Box
-            aria-label="Live activity is running"
-            h={rem(16)}
-            role="status"
-            w={rem(activityRowIconSize)}
-            style={{
-              alignItems: "center",
-              display: "inline-flex",
-              flexShrink: 0,
-              justifyContent: "center",
-            }}
-          >
-            <Loader
-              aria-hidden="true"
-              color="var(--mantine-color-dimmed)"
-              size={rem(activityRowIconSize)}
-            />
-          </Box>
-        ) : !active ? (
-          <IconCheck
-            aria-label={t("complete")}
-            size={activityRowIconSize}
-            color="var(--mantine-color-dimmed)"
-            style={{ flexShrink: 0 }}
-          />
-        ) : null}
-        {summary.length > 0 ? (
-          <Text
-            size={activityRowSummarySize}
-            c="dimmed"
-            fw={500}
-            truncate
-            flex={1}
-            miw={0}
-            className={inlineControlClasses.label}
-          >
-            {summary}
-          </Text>
-        ) : null}
-        {groupDuration !== null ? (
-          <Text
-            size={activityRowSummarySize}
-            c="dimmed"
-            ff="monospace"
-            className={inlineControlClasses.label}
-            style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
-          >
-            {groupDuration}
-          </Text>
-        ) : null}
-      </Group>
-    </Stack>
-  );
-
   return (
-    <Box mb={rem(4)} opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
-      <Group gap="xs" wrap="nowrap" data-tool-activity-id={activity.id}>
-        {hasDetails ? (
-          <UnstyledButton
-            flex={1}
-            miw={0}
-            onClick={toggle}
-            aria-expanded={opened}
-            aria-label={ariaLabel}
-          >
-            {header}
-          </UnstyledButton>
-        ) : (
-          <Box flex={1} miw={0} aria-label={ariaLabel}>
-            {header}
-          </Box>
-        )}
-        {authorizationAction}
-      </Group>
-
-      <Collapse
-        expanded={opened}
-        keepMounted={false}
-        {...chatCollapseTransitionProps}
-      >
-        <Stack gap={0} mt={rem(2)} pl="xs">
-          {activity.events.map((event) => (
-            <Box key={event.id}>{eventDetail(event)}</Box>
-          ))}
-        </Stack>
-      </Collapse>
-    </Box>
+    <ChatTimelineItem kind="activity" opacity={dimmed ? 0.45 : 1}>
+      <Box data-tool-activity-id={activity.id}>
+        <ActivityRow
+          ariaLabel={ariaLabel}
+          primary={summary}
+          disclosure={{ opened, onToggle: toggle }}
+          action={authorizationAction}
+          icon={
+            active && hasDetails ? (
+              <Box aria-label="Live activity is running" role="status">
+                <Loader
+                  aria-hidden="true"
+                  color="var(--mantine-color-dimmed)"
+                  size={rem(activityRowIconSize)}
+                />
+              </Box>
+            ) : !active ? (
+              <IconCheck
+                aria-label={t("complete")}
+                size={activityRowIconSize}
+              />
+            ) : null
+          }
+          status={
+            groupDuration === null ? null : (
+              <Text
+                size={activityRowSummarySize}
+                c="dimmed"
+                ff="monospace"
+                className={inlineControlClasses.label}
+                style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
+              >
+                {groupDuration}
+              </Text>
+            )
+          }
+          detail={
+            hasDetails ? <ActivityEventList events={activity.events} /> : null
+          }
+        />
+      </Box>
+    </ChatTimelineItem>
   );
 }
 

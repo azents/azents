@@ -1,8 +1,5 @@
-import { Box, Paper, rem, ScrollArea } from "@mantine/core";
-import {
-  activityDetailScrollAreaProps,
-  activityDetailScrollbarSize,
-} from "./activityRowPresentation";
+import { Box, rem } from "@mantine/core";
+import { ChatDetailPanel } from "./ChatDetailPanel";
 import { MarkdownContent } from "./MarkdownContent";
 import classes from "./SkillLoadedActivityRow.module.css";
 import type { ReactElement } from "react";
@@ -21,30 +18,21 @@ function stripMarkdownFrontmatter(content: string): string {
 }
 
 /** Shared Skill body presentation used by Skill events and load_skill calls. */
-export function SkillContentPanel({
+export function SkillContentBody({
   content,
 }: SkillContentPanelProps): ReactElement {
   const body = stripMarkdownFrontmatter(content);
   return (
-    <Paper
-      withBorder
-      radius="md"
-      p="sm"
-      maw={rem(720)}
-      bg="var(--mantine-color-body)"
-      style={{ minWidth: 0, overflow: "hidden" }}
-    >
-      <ScrollArea.Autosize
-        mah={rem(360)}
-        scrollbars="y"
-        scrollbarSize={activityDetailScrollbarSize}
-        style={{ maxWidth: "100%" }}
-        {...activityDetailScrollAreaProps}
-      >
-        <Box className={classes.body}>
-          <MarkdownContent>{body}</MarkdownContent>
-        </Box>
-      </ScrollArea.Autosize>
-    </Paper>
+    <Box className={classes.body}>
+      <MarkdownContent>{body}</MarkdownContent>
+    </Box>
+  );
+}
+
+export function SkillContentPanel(props: SkillContentPanelProps): ReactElement {
+  return (
+    <ChatDetailPanel maxHeight={rem(360)}>
+      <SkillContentBody {...props} />
+    </ChatDetailPanel>
   );
 }

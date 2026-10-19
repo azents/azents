@@ -31,6 +31,7 @@ const item = (
 });
 
 const meta = {
+  tags: ["ci-contract"],
   title: "chat/PendingMailboxBubble",
   component: PendingMailboxBubble,
   args: {
@@ -79,7 +80,9 @@ export const AgentMessage: Story = {
     ).toBeNull();
     await userEvent.click(trigger);
     await expect(
-      canvas.getByText("A collaborating agent supplied additional context."),
+      await canvas.findByText(
+        "A collaborating agent supplied additional context.",
+      ),
     ).toBeVisible();
   },
 };
@@ -132,7 +135,7 @@ export const ExternalChannel: Story = {
     ).not.toBeInTheDocument();
     await userEvent.click(trigger);
     await expect(
-      canvas.getByText("The original message is unavailable."),
+      await canvas.findByText("The original message is unavailable."),
     ).toBeVisible();
   },
 };
@@ -230,7 +233,6 @@ export const CleanupWorktreesAction: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("Pending action")).toBeVisible();
     await expect(canvas.getByText("/cleanup-worktrees")).toBeVisible();
   },
 };

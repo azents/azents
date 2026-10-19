@@ -59,6 +59,7 @@ const terminalFailure: FailedRunFailureMetadata = {
 };
 
 const meta = {
+  tags: ["ci-contract"],
   title: "chat/RunRetryCard",
   decorators: [
     (Story) => (

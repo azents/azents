@@ -1,6 +1,8 @@
 /** common layout for input-buffer bubbles. */
 
-import { Box, Group, Paper, rem, Stack, Text } from "@mantine/core";
+import { Box, Group, rem, Stack, Text } from "@mantine/core";
+import { ChatHumanMessageBody } from "./ChatHumanMessageBody";
+import { chatHumanMessageMaxWidth, ChatTimelineItem } from "./ChatTimelineItem";
 import { extractFilename, FileAttachmentList } from "./FileAttachmentList";
 import { MarkdownContent } from "./MarkdownContent";
 import type { ChatAction, FileAttachment } from "@azents/session-core/types";
@@ -79,42 +81,28 @@ export function InputBufferBubbleFrame({
   const files = attachmentFiles ?? attachments.map(toPendingAttachment);
 
   return (
-    <Group
-      align="flex-start"
-      gap="sm"
-      justify="flex-end"
-      wrap="nowrap"
-      mb="md"
-      w="100%"
-      style={{ minWidth: 0 }}
-    >
-      <Box maw="75%" style={{ minWidth: 0 }}>
-        {files.length > 0 && (
-          <FileAttachmentList files={files} presentation="compact" />
-        )}
-        <Paper
-          px="sm"
-          py="2xs"
-          radius="lg"
-          bg="blue.6"
-          c="white"
-          style={{
-            width: "fit-content",
-            maxWidth: "100%",
-            minWidth: 0,
-            overflowWrap: "anywhere",
-            borderTopRightRadius: rem(4),
-            marginLeft: "auto",
-            opacity,
-          }}
-        >
-          <Stack gap={rem(8)} align="flex-start">
-            {action && <ActionPill action={action} />}
-            <MarkdownContent>{content}</MarkdownContent>
-          </Stack>
-        </Paper>
-        {actions}
-      </Box>
-    </Group>
+    <ChatTimelineItem>
+      <Group
+        align="flex-start"
+        gap="sm"
+        justify="flex-end"
+        wrap="nowrap"
+        w="100%"
+        style={{ minWidth: 0 }}
+      >
+        <Box maw={chatHumanMessageMaxWidth} style={{ minWidth: 0 }}>
+          {files.length > 0 && (
+            <FileAttachmentList files={files} presentation="compact" />
+          )}
+          <ChatHumanMessageBody opacity={opacity}>
+            <Stack gap={rem(8)} align="flex-start">
+              {action && <ActionPill action={action} />}
+              <MarkdownContent>{content}</MarkdownContent>
+            </Stack>
+          </ChatHumanMessageBody>
+          {actions}
+        </Box>
+      </Group>
+    </ChatTimelineItem>
   );
 }

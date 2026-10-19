@@ -13,3 +13,10 @@
 .label {
   line-height: rem(16px);
 }
+
+.icon > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  stroke-width: 1.8;
+}

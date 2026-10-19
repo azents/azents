@@ -1,30 +1,13 @@
 "use client";
 
-import {
-  Badge,
-  Box,
-  Collapse,
-  Group,
-  Loader,
-  rem,
-  Stack,
-  Text,
-  UnstyledButton,
-} from "@mantine/core";
-import {
-  IconAlertCircle,
-  IconCheck,
-  IconChevronRight,
-  IconX,
-} from "@tabler/icons-react";
+import { Badge, Box, Group, Loader, rem, Stack, Text } from "@mantine/core";
+import { IconAlertCircle, IconCheck, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { useCleanupActionDetails } from "../containers/useCleanupActionDetails";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-  chatCollapsibleChevronSize,
-} from "./collapsiblePresentation";
+import { ActivityRow } from "./ActivityRow";
+import { ChatDetailPanel } from "./ChatDetailPanel";
+import { ChatTimelineItem } from "./ChatTimelineItem";
 import type { ActionExecutionProjection } from "@azents/session-core/types";
 import type { ReactNode } from "react";
 
@@ -346,54 +329,26 @@ export function CleanupActionExecutionTimelineCardView({
   const detailsId = `action-execution-details-${execution.id}`;
 
   return (
-    <Box
-      my={rem(3)}
-      pl="sm"
-      py={rem(5)}
-      style={{
-        borderLeft: `${rem(2)} solid var(--mantine-color-${color}-6)`,
-      }}
-    >
-      <Stack gap="xs">
-        <UnstyledButton
-          aria-controls={detailsId}
-          aria-expanded={detailsOpened}
-          onClick={toggle}
-          style={{ display: "block", textAlign: "left", width: "100%" }}
-        >
+    <ChatTimelineItem kind="activity">
+      <ActivityRow
+        disclosure={{ opened: detailsOpened, onToggle: toggle }}
+        detailId={detailsId}
+        ariaLabel={`${t("cleanup.title")}: ${statusLabel(execution.status, t)}`}
+        primary={t("cleanup.title")}
+        icon={statusIcon(execution.status)}
+        status={
+          <Badge
+            size="xs"
+            color={color}
+            variant="light"
+            leftSection={statusIcon(execution.status)}
+            style={{ flexShrink: 0 }}
+          >
+            {statusLabel(execution.status, t)}
+          </Badge>
+        }
+        summaryDetail={
           <Stack gap="xs">
-            <Group
-              justify="space-between"
-              align="center"
-              gap="xs"
-              wrap="nowrap"
-            >
-              <Group gap={rem(4)} miw={0} wrap="nowrap">
-                <IconChevronRight
-                  aria-hidden="true"
-                  color="var(--mantine-color-dimmed)"
-                  size={chatCollapsibleChevronSize}
-                  style={{
-                    flexShrink: 0,
-                    transform: detailsOpened ? "rotate(90deg)" : "none",
-                    transition: chatChevronTransition,
-                  }}
-                />
-                <Text size="xs" fw={700} c="dimmed" truncate>
-                  {t("cleanup.title")}
-                </Text>
-              </Group>
-              <Badge
-                size="xs"
-                color={color}
-                variant="light"
-                leftSection={statusIcon(execution.status)}
-                style={{ flexShrink: 0 }}
-              >
-                {statusLabel(execution.status, t)}
-              </Badge>
-            </Group>
-
             <Text size="xs" c="dimmed">
               {cleanupPhaseLabel(result?.phase ?? "unknown", t)}
             </Text>
@@ -432,84 +387,80 @@ export function CleanupActionExecutionTimelineCardView({
               </Text>
             ) : null}
           </Stack>
-        </UnstyledButton>
-
-        <Collapse
-          expanded={detailsOpened}
-          id={detailsId}
-          keepMounted={false}
-          {...chatCollapseTransitionProps}
-        >
-          <Stack
-            aria-label={t("cleanup.title")}
-            gap="xs"
-            pt={rem(2)}
-            role="button"
-            tabIndex={0}
-            onClick={close}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                close();
-              }
-            }}
-            style={{ cursor: "pointer" }}
-          >
-            {result?.candidates.map((candidate) => (
-              <Box
-                key={`${candidate.path}:${candidate.outcome}`}
-                px="xs"
-                py={rem(5)}
-                style={{
-                  borderRadius: rem(6),
-                  background: "var(--mantine-color-default-hover)",
-                }}
-              >
-                <Group
-                  justify="space-between"
-                  align="flex-start"
-                  gap="xs"
-                  wrap="nowrap"
+        }
+        detail={
+          <ChatDetailPanel>
+            <Stack
+              aria-label={t("cleanup.title")}
+              gap="xs"
+              pt={rem(2)}
+              role="button"
+              tabIndex={0}
+              onClick={close}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  close();
+                }
+              }}
+              style={{ cursor: "pointer" }}
+            >
+              {result?.candidates.map((candidate) => (
+                <Box
+                  key={`${candidate.path}:${candidate.outcome}`}
+                  px="xs"
+                  py={rem(5)}
+                  style={{
+                    borderRadius: rem(6),
+                    background: "var(--mantine-color-default-hover)",
+                  }}
                 >
-                  <Text
-                    size="xs"
-                    c="dimmed"
-                    style={{ minWidth: 0, overflowWrap: "anywhere" }}
+                  <Group
+                    justify="space-between"
+                    align="flex-start"
+                    gap="xs"
+                    wrap="nowrap"
                   >
-                    {candidate.path}
-                  </Text>
-                  <Badge
-                    size="xs"
-                    color={cleanupOutcomeColor(candidate.outcome)}
-                    variant="light"
-                    style={{ flexShrink: 0 }}
-                  >
-                    {cleanupOutcomeLabel(candidate.outcome, t)}
-                  </Badge>
-                </Group>
-                {candidate.summary ? (
-                  <Text size="xs" c="dimmed" mt={rem(3)}>
-                    {candidate.summary}
-                  </Text>
-                ) : null}
-              </Box>
-            ))}
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      style={{ minWidth: 0, overflowWrap: "anywhere" }}
+                    >
+                      {candidate.path}
+                    </Text>
+                    <Badge
+                      size="xs"
+                      color={cleanupOutcomeColor(candidate.outcome)}
+                      variant="light"
+                      style={{ flexShrink: 0 }}
+                    >
+                      {cleanupOutcomeLabel(candidate.outcome, t)}
+                    </Badge>
+                  </Group>
+                  {candidate.summary ? (
+                    <Text size="xs" c="dimmed" mt={rem(3)}>
+                      {candidate.summary}
+                    </Text>
+                  ) : null}
+                </Box>
+              ))}
 
-            {execution.failure_summary && isFailedStatus(execution.status) ? (
-              <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
-                {execution.failure_summary}
-              </Text>
-            ) : null}
-            {execution.cancellation_summary &&
-            execution.status === "cancelled" ? (
-              <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
-                {execution.cancellation_summary}
-              </Text>
-            ) : null}
-          </Stack>
-        </Collapse>
-      </Stack>
-    </Box>
+              {execution.failure_summary && isFailedStatus(execution.status) ? (
+                <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
+                  {execution.failure_summary}
+                </Text>
+              ) : null}
+              {execution.cancellation_summary &&
+              execution.status === "cancelled" ? (
+                <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+                  {execution.cancellation_summary}
+                </Text>
+              ) : null}
+            </Stack>
+          </ChatDetailPanel>
+        }
+      />
+    </ChatTimelineItem>
   );
 }
 
@@ -606,106 +557,102 @@ export function ActionExecutionTimelineCard({
   const baseRef = removal ? null : startingRef(commandArgv);
 
   return (
-    <Box
-      my={rem(3)}
-      pl="sm"
-      py={rem(5)}
-      style={{
-        borderLeft: `${rem(2)} solid var(--mantine-color-${color}-6)`,
-      }}
-    >
-      <Stack gap="xs">
-        <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
-          <Group gap="xs" miw={0} wrap="nowrap">
-            <Text size="xs" fw={700} c="dimmed" truncate>
-              {removal ? t("removalTitle") : t("title")}
-            </Text>
-            <Badge
-              size="xs"
-              color={color}
-              variant="light"
-              leftSection={statusIcon(execution.status)}
-            >
-              {statusLabel(execution.status, t)}
-            </Badge>
+    <ChatTimelineItem>
+      <ChatDetailPanel>
+        <Stack gap="xs">
+          <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
+            <Group gap="xs" miw={0} wrap="nowrap">
+              <Text size="xs" fw={700} c="dimmed" truncate>
+                {removal ? t("removalTitle") : t("title")}
+              </Text>
+              <Badge
+                size="xs"
+                color={color}
+                variant="light"
+                leftSection={statusIcon(execution.status)}
+              >
+                {statusLabel(execution.status, t)}
+              </Badge>
+            </Group>
           </Group>
-        </Group>
 
-        {commandArgv !== null ? (
-          <Stack gap={rem(4)}>
-            <Text size="xs" c="dimmed" fw={600}>
-              {t("command")}
+          {commandArgv !== null ? (
+            <Stack gap={rem(4)}>
+              <Text size="xs" c="dimmed" fw={600}>
+                {t("command")}
+              </Text>
+              <TerminalBlock>{commandLine(commandArgv)}</TerminalBlock>
+            </Stack>
+          ) : null}
+
+          {stdout !== null ? (
+            <Stack gap={rem(4)}>
+              <Text size="xs" c="dimmed" fw={600}>
+                {t("stdout")}
+              </Text>
+              <TerminalBlock>{stdout}</TerminalBlock>
+            </Stack>
+          ) : null}
+
+          {stderr !== null ? (
+            <Stack gap={rem(4)}>
+              <Text
+                size="xs"
+                c={isFailedStatus(execution.status) ? "red" : "dimmed"}
+                fw={600}
+              >
+                {t("stderr")}
+              </Text>
+              <TerminalBlock>{stderr}</TerminalBlock>
+            </Stack>
+          ) : null}
+
+          {execution.failure_summary && isFailedStatus(execution.status) ? (
+            <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
+              {execution.failure_summary}
             </Text>
-            <TerminalBlock>{commandLine(commandArgv)}</TerminalBlock>
-          </Stack>
-        ) : null}
+          ) : null}
 
-        {stdout !== null ? (
-          <Stack gap={rem(4)}>
-            <Text size="xs" c="dimmed" fw={600}>
-              {t("stdout")}
+          {execution.cancellation_summary &&
+          execution.status === "cancelled" ? (
+            <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+              {execution.cancellation_summary}
             </Text>
-            <TerminalBlock>{stdout}</TerminalBlock>
-          </Stack>
-        ) : null}
+          ) : null}
 
-        {stderr !== null ? (
-          <Stack gap={rem(4)}>
+          {commandCompleted?.exit_code !== null &&
+          typeof commandCompleted?.exit_code === "number" ? (
+            <Text size="xs" c="dimmed">
+              {t("exitCode", { code: commandCompleted.exit_code })}
+            </Text>
+          ) : null}
+
+          <Stack gap={rem(2)}>
             <Text
               size="xs"
               c={isFailedStatus(execution.status) ? "red" : "dimmed"}
               fw={600}
             >
-              {t("stderr")}
+              {resultLabel(actionExecution, commandCompleted, removal, t)}
             </Text>
-            <TerminalBlock>{stderr}</TerminalBlock>
+            {execution.status === "completed" && createdPath !== null ? (
+              <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
+                {t("projectRegistered", { path: createdPath })}
+              </Text>
+            ) : null}
+            {branchName !== null ? (
+              <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
+                {t("branch", { branch: branchName })}
+              </Text>
+            ) : null}
+            {baseRef !== null ? (
+              <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
+                {t("baseRef", { ref: baseRef })}
+              </Text>
+            ) : null}
           </Stack>
-        ) : null}
-
-        {execution.failure_summary && isFailedStatus(execution.status) ? (
-          <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
-            {execution.failure_summary}
-          </Text>
-        ) : null}
-
-        {execution.cancellation_summary && execution.status === "cancelled" ? (
-          <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
-            {execution.cancellation_summary}
-          </Text>
-        ) : null}
-
-        {commandCompleted?.exit_code !== null &&
-        typeof commandCompleted?.exit_code === "number" ? (
-          <Text size="xs" c="dimmed">
-            {t("exitCode", { code: commandCompleted.exit_code })}
-          </Text>
-        ) : null}
-
-        <Stack gap={rem(2)}>
-          <Text
-            size="xs"
-            c={isFailedStatus(execution.status) ? "red" : "dimmed"}
-            fw={600}
-          >
-            {resultLabel(actionExecution, commandCompleted, removal, t)}
-          </Text>
-          {execution.status === "completed" && createdPath !== null ? (
-            <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
-              {t("projectRegistered", { path: createdPath })}
-            </Text>
-          ) : null}
-          {branchName !== null ? (
-            <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
-              {t("branch", { branch: branchName })}
-            </Text>
-          ) : null}
-          {baseRef !== null ? (
-            <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
-              {t("baseRef", { ref: baseRef })}
-            </Text>
-          ) : null}
         </Stack>
-      </Stack>
-    </Box>
+      </ChatDetailPanel>
+    </ChatTimelineItem>
   );
 }

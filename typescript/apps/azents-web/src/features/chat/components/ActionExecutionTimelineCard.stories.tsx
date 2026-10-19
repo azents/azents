@@ -5,6 +5,7 @@ import type { JsonValue } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
+  tags: ["ci-contract"],
   component: ActionExecutionTimelineCard,
 } satisfies Meta<typeof ActionExecutionTimelineCard>;
 
@@ -112,11 +113,14 @@ export const CleanupMixedResultExpandsAndCollapses = {
   ...CleanupMixedResult,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const toggle = canvas.getByRole("button", { name: /cleanup worktrees/i });
+    const toggle = canvas.getByRole("button", {
+      name: /worktree cleanup.*failed/i,
+    });
+    await expect(toggle).toHaveAccessibleDescription(/\S/);
 
     await userEvent.click(toggle);
     await expect(
-      canvas.getByText("Git worktree removal failed."),
+      await canvas.findByText("Git worktree removal failed."),
     ).toBeVisible();
 
     await userEvent.click(canvas.getByText("Git worktree removal failed."));
@@ -140,9 +144,9 @@ export const CleanupMixedResultOnNarrowScreen = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(
-      canvas.getByRole("button", { name: /cleanup worktrees/i }),
+      canvas.getByRole("button", { name: /worktree cleanup.*failed/i }),
     );
-    await expect(canvas.getByText("Already absent")).toBeVisible();
+    await expect(await canvas.findByText("Already absent")).toBeVisible();
     await expect(canvas.getAllByText("Failed").length).toBeGreaterThan(0);
   },
 } satisfies Story;

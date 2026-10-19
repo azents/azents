@@ -5,6 +5,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const handleAuthorized = (): void => {};
 
 const meta = {
+  tags: ["ci-contract"],
   component: AuthorizationRequestBubble,
   decorators: [
     (Story) => (

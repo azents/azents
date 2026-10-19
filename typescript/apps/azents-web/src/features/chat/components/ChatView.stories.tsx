@@ -1,5 +1,6 @@
 import { Box, rem } from "@mantine/core";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { standardTranscriptMessages } from "../chatPresentationFixtures";
 import {
   completedToolCall,
   createChatMessage,
@@ -37,6 +38,7 @@ function timelineEvent(
 }
 
 const meta = {
+  tags: ["ci-contract"],
   component: ChatView,
   decorators: [
     (Story: () => ReactElement) => (
@@ -117,6 +119,22 @@ const longConversationMessages = Array.from({ length: 28 }, (_, index) =>
           : `I checked the workspace output for item ${index + 1}. The result includes enough detail to make this message wrap across multiple lines on a narrow mobile viewport.`,
   }),
 );
+
+export const StandardPresentationTranscript = {
+  tags: ["ci-contract"],
+  args: { ...baseArgs, messages: standardTranscriptMessages },
+  play: async ({ canvasElement }) => {
+    const rows = canvasElement.querySelectorAll("[data-chat-row-header]");
+    await expect(rows.length).toBeGreaterThanOrEqual(9);
+    const heights = Array.from(rows, (row) =>
+      Math.round(row.getBoundingClientRect().height),
+    );
+    await expect(new Set(heights).size).toBe(1);
+    await expect(canvasElement.scrollWidth <= canvasElement.clientWidth).toBe(
+      true,
+    );
+  },
+} satisfies Story;
 
 export const WithWorkspaceBrowser = {
   args: baseArgs,
@@ -236,14 +254,14 @@ export const MultiTurnToolActivity = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("Failed 1")).toBeVisible();
+    await expect(canvas.getByText(/Failed 1/)).toBeVisible();
     await expect(canvas.getByLabelText("Completed")).toBeVisible();
     await expect(canvas.queryByText(completedToolCall.name)).toBeNull();
 
     await userEvent.click(canvas.getByRole("button", { name: /Activity/ }));
-    await expect(canvas.getByText(completedToolCall.name)).toBeVisible();
-    await expect(canvas.getByText(failedToolCall.name)).toBeVisible();
-    await expect(canvas.getByText(runningToolCall.name)).toBeVisible();
+    await expect(await canvas.findByText(completedToolCall.name)).toBeVisible();
+    await expect(await canvas.findByText(failedToolCall.name)).toBeVisible();
+    await expect(await canvas.findByText(runningToolCall.name)).toBeVisible();
   },
 } satisfies Story;
 
@@ -652,22 +670,22 @@ export const AllActivityRenderers = {
     }
     await userEvent.click(firstActivity);
     await expect(
-      canvas.getByText("I will inspect the current renderer"),
+      await canvas.findByText(/I will inspect the current renderer/),
     ).toBeVisible();
     await userEvent.click(
-      canvas.getByRole("button", { name: /custom_database_query/ }),
+      canvas.getByRole("button", { name: /^custom_database_query/ }),
     );
-    await userEvent.click(canvas.getByRole("button", { name: /Edited file/ }));
+    await userEvent.click(canvas.getByRole("button", { name: /^Edited file/ }));
     await userEvent.click(
-      canvas.getByRole("button", { name: /Applied patch/ }),
+      canvas.getByRole("button", { name: /^Applied patch/ }),
     );
-    await userEvent.click(canvas.getByRole("button", { name: /Web search/ }));
-    await expect(canvas.getByText("Connection refused")).toBeVisible();
-    await expect(canvas.getByText("fw={600}")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: /^Web search/ }));
+    await expect(await canvas.findByText("Connection refused")).toBeVisible();
+    await expect(await canvas.findByText("fw={600}")).toBeVisible();
     await expect(
-      canvas.getByText("src/features/chat/components/PatchPreview.tsx"),
+      await canvas.findByText("src/features/chat/components/PatchPreview.tsx"),
     ).toBeVisible();
-    await expect(canvas.getByText("Azents overview")).toBeVisible();
+    await expect(await canvas.findByText("Azents overview")).toBeVisible();
     await expect(secondActivity).toHaveAttribute("aria-expanded", "false");
   },
 } satisfies Story;
@@ -860,7 +878,9 @@ export const SpecializedDeliverableAndApproval = {
       throw new Error("Expected the first activity disclosure");
     }
     await userEvent.click(firstActivity);
-    await expect(canvas.getByText("read")).toBeVisible();
+    await expect(
+      await canvas.findByRole("button", { name: /^Read ·/ }),
+    ).toBeVisible();
     await expect(canvas.getByText("generation.log")).toBeVisible();
   },
 } satisfies Story;
@@ -975,6 +995,7 @@ export const WithLiveRunRetry = {
 export const WithPreparingContext = {
   args: {
     ...baseArgs,
+    isModelResponsePending: true,
     isResponsePending: true,
     liveRun: {
       run_id: "run-preparing-context-story",
@@ -1010,6 +1031,7 @@ export const WithPreparingContext = {
 export const EmptyStreamingModelHidesWaitingRow = {
   args: {
     ...baseArgs,
+    isModelResponsePending: true,
     timelineEvents: [],
     messages: [],
     isResponsePending: true,
@@ -1042,6 +1064,7 @@ export const EmptyStreamingModelHidesWaitingRow = {
 export const StreamingModelWithPartialOutput = {
   args: {
     ...baseArgs,
+    isModelResponsePending: true,
     timelineEvents: [
       timelineEvent("streaming-user-input", "user_message", {
         content: "Explain the current model call state.",

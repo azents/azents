@@ -3,6 +3,7 @@ import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
+  tags: ["ci-contract"],
   title: "chat/OptimisticInputBubble",
   component: OptimisticInputBubble,
   args: {

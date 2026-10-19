@@ -7,6 +7,7 @@
 import { Box, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
 import styles from "./AgentRunIndicator.module.css";
+import { ChatTimelineItem } from "./ChatTimelineItem";
 import {
   formatElapsedDuration,
   startElapsedDurationTimer,
@@ -40,17 +41,23 @@ export function AgentRunIndicator({
   const durationSeconds = useVisibleEventSilenceDuration(lastEventReceivedAt);
 
   return (
-    <Box className={styles.root}>
-      <Box className={styles.dots} role="status" aria-label="Agent is working">
-        <span className={styles.dot} aria-hidden="true" />
-        <span className={styles.dot} aria-hidden="true" />
-        <span className={styles.dot} aria-hidden="true" />
+    <ChatTimelineItem kind="activity">
+      <Box className={styles.root}>
+        <Box
+          className={styles.dots}
+          role="status"
+          aria-label="Agent is working"
+        >
+          <span className={styles.dot} aria-hidden="true" />
+          <span className={styles.dot} aria-hidden="true" />
+          <span className={styles.dot} aria-hidden="true" />
+        </Box>
+        {durationSeconds !== null ? (
+          <Text className={styles.duration} c="dimmed" size="xs">
+            {formatElapsedDuration(durationSeconds)}
+          </Text>
+        ) : null}
       </Box>
-      {durationSeconds !== null ? (
-        <Text className={styles.duration} c="dimmed" size="xs">
-          {formatElapsedDuration(durationSeconds)}
-        </Text>
-      ) : null}
-    </Box>
+    </ChatTimelineItem>
   );
 }

@@ -1,8 +1,16 @@
 "use client";
 
-import { Box, Collapse, Group, rem, Text, UnstyledButton } from "@mantine/core";
+import {
+  Box,
+  Collapse,
+  Group,
+  rem,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   activityRowChevronSize,
   activityRowDetailInset,
@@ -23,9 +31,13 @@ interface ActivityRowProps {
   collapseFromDetail?: boolean;
   detail?: ReactNode;
   detailAriaLabel?: string;
+  detailId?: string;
   expandedPrimary?: string;
   icon: ReactNode;
   primary: string;
+  primaryTooltip?: string;
+  disclosure?: { opened: boolean; onToggle: () => void };
+  summaryDetail?: ReactNode;
   qualifier?: string | null;
   status?: ReactNode;
   subject?: string | null;
@@ -45,14 +57,30 @@ export function ActivityRow({
   collapseFromDetail = false,
   detail,
   detailAriaLabel,
+  detailId,
   expandedPrimary,
   icon,
   primary,
+  primaryTooltip,
+  disclosure,
+  summaryDetail,
   qualifier = null,
   status,
   subject = null,
 }: ActivityRowProps): ReactElement {
-  const [opened, setOpened] = useState(false);
+  const [internalOpened, setInternalOpened] = useState(false);
+  const generatedDetailId = useId();
+  const resolvedDetailId = detailId ?? generatedDetailId;
+  const opened = disclosure?.opened ?? internalOpened;
+  function setOpened(next: boolean): void {
+    if (disclosure) {
+      if (next !== opened) {
+        disclosure.onToggle();
+      }
+    } else {
+      setInternalOpened(next);
+    }
+  }
   const headerRef = useRef<HTMLButtonElement>(null);
   const hasDetail = detail !== null && typeof detail !== "undefined";
   const visiblePrimary = opened && expandedPrimary ? expandedPrimary : primary;
@@ -62,6 +90,7 @@ export function ActivityRow({
       ? !isElementVisibleInViewport(headerRef.current)
       : false;
     setOpened(false);
+    headerRef.current?.focus({ preventScroll: true });
     if (shouldScrollToHeader) {
       requestAnimationFrame(() => {
         headerRef.current?.scrollIntoView({
@@ -102,6 +131,7 @@ export function ActivityRow({
 
   const summary = (
     <Group
+      data-chat-row-header
       gap={rem(6)}
       wrap="nowrap"
       miw={0}
@@ -110,6 +140,7 @@ export function ActivityRow({
       <IconChevronRight
         aria-hidden="true"
         size={activityRowChevronSize}
+        stroke={1.8}
         color="var(--mantine-color-dimmed)"
         style={{
           flexShrink: 0,
@@ -119,6 +150,8 @@ export function ActivityRow({
         }}
       />
       <Box
+        data-chat-row-icon
+        className={inlineControlClasses.icon}
         c="dimmed"
         w={rem(activityRowIconSize)}
         h={rem(16)}
@@ -132,17 +165,24 @@ export function ActivityRow({
         {icon}
       </Box>
       <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
-        <Text
-          component="span"
-          size={activityRowSummarySize}
-          c="dimmed"
-          fw={500}
-          truncate
-          className={inlineControlClasses.label}
-          style={{ flexShrink: subject === null ? 1 : 0 }}
+        <Tooltip
+          label={primaryTooltip ?? visiblePrimary}
+          disabled={!primaryTooltip}
+          openDelay={500}
         >
-          {visiblePrimary}
-        </Text>
+          <Text
+            component="span"
+            size={activityRowSummarySize}
+            c="dimmed"
+            fw={500}
+            truncate
+            className={inlineControlClasses.label}
+            maw={subject === null ? "100%" : "50%"}
+            style={{ flexShrink: subject === null ? 1 : 0 }}
+          >
+            {visiblePrimary}
+          </Text>
+        </Tooltip>
         {subject !== null ? (
           <Text
             component="span"
@@ -187,11 +227,24 @@ export function ActivityRow({
             ref={headerRef}
             flex={1}
             miw={0}
-            onClick={() => setOpened((value) => !value)}
+            onClick={() => setOpened(!opened)}
             aria-expanded={opened}
+            aria-controls={resolvedDetailId}
             aria-label={ariaLabel}
+            {...(summaryDetail
+              ? { "aria-describedby": `${resolvedDetailId}-summary` }
+              : {})}
           >
             {summary}
+            {summaryDetail ? (
+              <Box
+                id={`${resolvedDetailId}-summary`}
+                pl={activityRowDetailInset}
+                pt="xs"
+              >
+                {summaryDetail}
+              </Box>
+            ) : null}
           </UnstyledButton>
         ) : (
           <Box flex={1} miw={0} aria-label={ariaLabel}>
@@ -202,11 +255,13 @@ export function ActivityRow({
       </Group>
       {hasDetail ? (
         <Collapse
+          id={resolvedDetailId}
           expanded={opened}
           keepMounted={false}
           {...chatCollapseTransitionProps}
         >
           <Box
+            data-chat-row-detail
             pl={activityRowDetailInset}
             pr="xs"
             pt="xs"

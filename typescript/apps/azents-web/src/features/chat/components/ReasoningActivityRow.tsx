@@ -1,14 +1,11 @@
 "use client";
 
-import { Box, rem, ScrollArea } from "@mantine/core";
+import { Box, rem } from "@mantine/core";
 import { IconBubble } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { ActivityRow } from "./ActivityRow";
-import {
-  activityDetailScrollAreaProps,
-  activityDetailScrollbarSize,
-} from "./activityRowPresentation";
+import { ChatDetailPanel } from "./ChatDetailPanel";
 import { MarkdownContent } from "./MarkdownContent";
 import type { ReactElement } from "react";
 
@@ -77,15 +74,11 @@ export function ReasoningActivityRow({
   const canExpand = sanitizedReasoningSummary.length > 0;
   const label = preview ?? t("thinkingLabel");
   const detail = canExpand ? (
-    <ScrollArea.Autosize
-      mah={rem(300)}
-      scrollbarSize={activityDetailScrollbarSize}
-      {...activityDetailScrollAreaProps}
-    >
+    <ChatDetailPanel maxHeight={rem(300)}>
       <Box c="dimmed">
         <MarkdownContent>{sanitizedReasoningSummary}</MarkdownContent>
       </Box>
-    </ScrollArea.Autosize>
+    </ChatDetailPanel>
   ) : null;
 
   return (

@@ -13,6 +13,7 @@ import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useRef } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
+import { ChatTimelineItem } from "./ChatTimelineItem";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
@@ -112,7 +113,7 @@ export function CompactionDivider({
   }
 
   return (
-    <Box mb="md">
+    <ChatTimelineItem kind="boundary">
       <Group gap="xs" align="center">
         <Box style={dashedLineStyle} />
         <Group ref={toggleItemRef} gap="xs" align="center">
@@ -148,6 +149,6 @@ export function CompactionDivider({
           </Box>
         </Collapse>
       )}
-    </Box>
+    </ChatTimelineItem>
   );
 }

@@ -3,6 +3,7 @@ import { AgentRunIndicator } from "./AgentRunIndicator";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
+  tags: ["ci-contract"],
   title: "Chat/AgentRunIndicator",
   component: AgentRunIndicator,
   args: {
