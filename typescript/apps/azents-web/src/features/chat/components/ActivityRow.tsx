@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Box,
   Collapse,
@@ -10,21 +9,23 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
-import { useId, useRef, useState } from "react";
+
 import {
   activityRowChevronSize,
   activityRowDetailInset,
   activityRowIconSize,
   activityRowSummarySize,
   activityRowVerticalPadding,
-} from "./activityRowPresentation";
-import inlineControlClasses from "./ChatInlineControl.module.css";
+} from "../../../shared/chat-presentation/components/activityRowPresentation";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
-} from "./collapsiblePresentation";
+} from "../../../shared/chat-presentation/components/collapsiblePresentation";
+import { useActivityRowController } from "../containers/useActivityRowController";
+import inlineControlClasses from "./ChatInlineControl.module.css";
+import type { ActivityRowViewProps } from "../containers/useActivityRowController";
 import type { MantineSpacing } from "@mantine/core";
-import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 interface ActivityRowProps {
   action?: ReactNode;
@@ -45,93 +46,33 @@ interface ActivityRowProps {
   subject?: string | null;
 }
 
-function isElementVisibleInViewport(element: HTMLElement): boolean {
-  const rect = element.getBoundingClientRect();
-  const viewportHeight =
-    window.innerHeight || document.documentElement.clientHeight;
-  return rect.top >= 0 && rect.bottom <= viewportHeight;
+/** Canonical row shell for chat reasoning, skill, and tool activity. */
+export function ActivityRow(props: ActivityRowProps): React.ReactElement {
+  return <ActivityRowView {...useActivityRowController(props)} />;
 }
 
-/** Canonical row shell for chat reasoning, skill, and tool activity. */
-export function ActivityRow({
+export function ActivityRowView({
   action,
   ariaLabel,
-  collapseFromDetail = false,
+  collapseFromDetail,
   detail,
   detailAriaLabel,
-  detailId,
-  detailInset = activityRowDetailInset,
-  expandedPrimary,
+  detailInset,
   icon,
-  primary,
   primaryTooltip,
-  disclosure,
   summaryDetail,
-  qualifier = null,
+  qualifier,
   status,
-  subject = null,
-}: ActivityRowProps): ReactElement {
-  const [internalOpened, setInternalOpened] = useState(false);
-  const generatedDetailId = useId();
-  const resolvedDetailId = detailId ?? generatedDetailId;
-  const opened = disclosure?.opened ?? internalOpened;
-  function setOpened(next: boolean): void {
-    if (disclosure) {
-      if (next !== opened) {
-        disclosure.onToggle();
-      }
-    } else {
-      setInternalOpened(next);
-    }
-  }
-  const headerRef = useRef<HTMLButtonElement>(null);
-  const hasDetail = detail !== null && typeof detail !== "undefined";
-  const visiblePrimary = opened && expandedPrimary ? expandedPrimary : primary;
-
-  function closeFromDetail(): void {
-    const shouldScrollToHeader = headerRef.current
-      ? !isElementVisibleInViewport(headerRef.current)
-      : false;
-    setOpened(false);
-    headerRef.current?.focus({ preventScroll: true });
-    if (shouldScrollToHeader) {
-      requestAnimationFrame(() => {
-        headerRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      });
-    }
-  }
-
-  function handleDetailClick(event: MouseEvent<HTMLDivElement>): void {
-    if (!collapseFromDetail) {
-      return;
-    }
-    const interactiveElement =
-      event.target instanceof Element
-        ? event.target.closest(
-            'a, button, input, select, textarea, [role="button"]',
-          )
-        : null;
-    if (interactiveElement && interactiveElement !== event.currentTarget) {
-      return;
-    }
-    closeFromDetail();
-  }
-
-  function handleDetailKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-    if (
-      !collapseFromDetail ||
-      event.target !== event.currentTarget ||
-      (event.key !== "Enter" && event.key !== " ")
-    ) {
-      return;
-    }
-    event.preventDefault();
-    closeFromDetail();
-  }
-
+  subject,
+  resolvedDetailId,
+  opened,
+  setOpened,
+  headerRef,
+  hasDetail,
+  visiblePrimary,
+  handleDetailClick,
+  handleDetailKeyDown,
+}: ActivityRowViewProps): ReactElement {
   const summary = (
     <Group
       data-chat-row-header

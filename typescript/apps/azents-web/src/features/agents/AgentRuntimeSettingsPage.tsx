@@ -3,10 +3,10 @@
 /** Agent Runtime settings page entry. */
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
 import { AgentRuntimeEnvironmentVariablesSection } from "./AgentRuntimeEnvironmentVariablesSection";
 import { AgentWorkspaceEnvironmentSection } from "./AgentWorkspaceEnvironmentSection";
 import { AgentRuntimeSettings } from "./components/AgentRuntimeSettings";
-import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import { useAgentRuntimeSettingsContainer } from "./containers/useAgentRuntimeSettingsContainer";
 import type { AgentRuntimeSettingsContainerOutput } from "./containers/useAgentRuntimeSettingsContainer";
 

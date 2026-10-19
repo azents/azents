@@ -42,3 +42,40 @@ void test("maps bounded invalid-path detail without exposing unrelated fields", 
 void test("does not project non-API errors", () => {
   assert.equal(projectApiError(new Error("Network failed.")), null);
 });
+
+void test("validation arrays project only validated messages and preserve bodies", () => {
+  const invalid = [
+    null,
+    0,
+    false,
+    "raw",
+    {},
+    { message: 123 },
+    { message: {} },
+  ];
+  for (const body of [invalid, { detail: invalid }]) {
+    const error = new ApiError(422, body);
+    assert.equal(error.message, "Invalid input.");
+    assert.equal(error.status, 422);
+    assert.equal(error.body, body);
+  }
+  assert.equal(
+    new ApiError(422, [
+      ...invalid,
+      { message: "First", opaque: true },
+      { message: "" },
+      { message: "Second" },
+    ]).message,
+    "First, Second",
+  );
+  assert.equal(
+    new ApiError(422, {
+      detail: [null, { msg: "Required", loc: ["field"] }, { msg: false }],
+    }).message,
+    "Required",
+  );
+  assert.equal(
+    new ApiError(409, { detail: { extra: "opaque" } }).message,
+    '{"extra":"opaque"}',
+  );
+});

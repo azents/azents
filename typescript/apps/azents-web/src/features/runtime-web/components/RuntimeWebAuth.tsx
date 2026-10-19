@@ -9,7 +9,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import type { RuntimeWebAuthState } from "../types";
+import type { RuntimeWebAuthState } from "../../../shared/runtime-web/types";
 
 interface RuntimeWebAuthProps {
   serviceId: string;

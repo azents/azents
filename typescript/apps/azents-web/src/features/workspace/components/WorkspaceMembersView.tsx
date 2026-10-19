@@ -1,11 +1,4 @@
 "use client";
-
-/**
- * Workspace member management UI component
- *
- * Displays member invitation form, member list, and pending invitation list.
- * Includes change role, delete member, and cancel invitation.
- */
 import {
   Alert,
   Badge,
@@ -22,12 +15,25 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
-import { useModals } from "@mantine/modals";
 import { IconSend, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+/**
+ * Workspace member management UI component
+ *
+ * Displays member invitation form, member list, and pending invitation list.
+ * Includes change role, delete member, and cancel invitation.
+ */
 import { formatLocalizedDate } from "@/shared/lib/date-format";
-import { useLocale } from "@/shared/providers/locale";
+
+import { useInvitationRowController } from "../containers/useInvitationRowController";
+import { useInviteFormController } from "../containers/useInviteFormController";
+import { useJoinRequestRowController } from "../containers/useJoinRequestRowController";
+import { useMemberRowController } from "../containers/useMemberRowController";
+
+import type { InvitationRowViewProps } from "../containers/useInvitationRowController";
+import type { InviteFormViewProps } from "../containers/useInviteFormController";
+import type { JoinRequestRowViewProps } from "../containers/useJoinRequestRowController";
+import type { MemberRowViewProps } from "../containers/useMemberRowController";
 import type { WorkspaceMembersContainerProps } from "../containers/useWorkspaceMembers";
 import type {
   InviteFormState,
@@ -39,20 +45,6 @@ import type {
   WorkspaceJoinRequest,
   WorkspaceMember,
 } from "../types";
-
-type InvitationRole = "member" | "manager";
-
-/** Role display label */
-function useRoleLabel(role: string): string {
-  const t = useTranslations("workspace.dashboard");
-  if (role === "owner") {
-    return t("roleOwner");
-  }
-  if (role === "manager") {
-    return t("roleManager");
-  }
-  return t("roleMember");
-}
 
 /** Role badge color */
 function roleBadgeColor(role: string): string {
@@ -91,38 +83,23 @@ function NotificationBanner({
 }
 
 /** Member invitation form */
-function InviteForm({
-  inviteFormState,
-  onInvite,
-  onClearInviteStatus,
-}: {
+function InviteForm(props: {
   inviteFormState: InviteFormState;
   onInvite: (email: string, role: "member" | "manager") => void;
   onClearInviteStatus: () => void;
 }): React.ReactElement {
-  const t = useTranslations("workspace.dashboard");
+  return <InviteFormView {...useInviteFormController(props)} />;
+}
 
-  const form = useForm<{ email: string; role: InvitationRole }>({
-    mode: "controlled",
-    initialValues: {
-      email: "",
-      role: "member",
-    },
-    validate: {
-      email: (value) => (value.trim() ? null : t("inviteEmailRequired")),
-    },
-  });
-
-  const isSending = inviteFormState.type === "SENDING";
-  const error = inviteFormState.type === "IDLE" ? inviteFormState.error : null;
-  const success =
-    inviteFormState.type === "IDLE" ? inviteFormState.success : null;
-
-  function handleSubmit(values: typeof form.values): void {
-    onInvite(values.email.trim(), values.role);
-    form.reset();
-  }
-
+export function InviteFormView({
+  onClearInviteStatus,
+  t,
+  form,
+  isSending,
+  error,
+  success,
+  handleSubmit,
+}: InviteFormViewProps): React.ReactElement {
   return (
     <Box
       style={{
@@ -207,13 +184,7 @@ function InviteForm({
 }
 
 /** Member row component */
-function MemberRow({
-  member,
-  isCurrentUser,
-  canManage,
-  onUpdateRole,
-  onRemoveMember,
-}: {
+function MemberRow(props: {
   member: WorkspaceMember;
   isCurrentUser: boolean;
   canManage: boolean;
@@ -223,14 +194,20 @@ function MemberRow({
   ) => void;
   onRemoveMember: (workspaceUserId: string) => void;
 }): React.ReactElement {
-  const t = useTranslations("workspace.dashboard");
-  const modals = useModals();
-  const { locale } = useLocale();
-  const roleLabel = useRoleLabel(member.role);
-  const isOwner = member.role === "owner";
-  // Management control condition: manager+ permission && not self && target is not owner
-  const showControls = canManage && !isCurrentUser && !isOwner;
+  return <MemberRowView {...useMemberRowController(props)} />;
+}
 
+export function MemberRowView({
+  member,
+  isCurrentUser,
+  canManage,
+  onUpdateRole,
+  t,
+  locale,
+  roleLabel,
+  showControls,
+  confirmMemberAction1,
+}: MemberRowViewProps): React.ReactElement {
   return (
     <Table.Tr>
       <Table.Td>
@@ -279,15 +256,7 @@ function MemberRow({
                 variant="subtle"
                 color="red"
                 leftSection={<IconTrash size={14} />}
-                onClick={() => {
-                  modals.openConfirmModal({
-                    title: t("removeMember"),
-                    children: t("removeMemberConfirm"),
-                    labels: { confirm: t("removeMember"), cancel: t("cancel") },
-                    confirmProps: { color: "red" },
-                    onConfirm: () => onRemoveMember(member.id),
-                  });
-                }}
+                onClick={() => confirmMemberAction1()}
               >
                 {t("removeMember")}
               </Button>
@@ -379,20 +348,22 @@ function MemberListSection({
 }
 
 /** Invitation row component */
-function InvitationRow({
-  invitation,
-  canManage,
-  onCancel,
-}: {
+function InvitationRow(props: {
   invitation: WorkspaceInvitation;
   canManage: boolean;
   onCancel: () => void;
 }): React.ReactElement {
-  const t = useTranslations("workspace.dashboard");
-  const modals = useModals();
-  const { locale } = useLocale();
-  const roleLabel = useRoleLabel(invitation.role);
+  return <InvitationRowView {...useInvitationRowController(props)} />;
+}
 
+export function InvitationRowView({
+  invitation,
+  canManage,
+  t,
+  locale,
+  roleLabel,
+  confirmInvitationAction1,
+}: InvitationRowViewProps): React.ReactElement {
   return (
     <Table.Tr>
       <Table.Td>
@@ -419,18 +390,7 @@ function InvitationRow({
             variant="subtle"
             color="red"
             leftSection={<IconTrash size={14} />}
-            onClick={() => {
-              modals.openConfirmModal({
-                title: t("cancelInvitation"),
-                children: t("cancelInvitationConfirm"),
-                labels: {
-                  confirm: t("cancelInvitation"),
-                  cancel: t("cancel"),
-                },
-                confirmProps: { color: "red" },
-                onConfirm: () => onCancel(),
-              });
-            }}
+            onClick={() => confirmInvitationAction1()}
           >
             {t("cancelInvitation")}
           </Button>
@@ -513,23 +473,25 @@ function PendingInvitationsSection({
 }
 
 /** Join request row component */
-function JoinRequestRow({
-  joinRequest,
-  onApprove,
-  onReject,
-  onMute,
-  onDelete,
-}: {
+function JoinRequestRow(props: {
   joinRequest: WorkspaceJoinRequest;
   onApprove: () => void;
   onReject: () => void;
   onMute: () => void;
   onDelete: () => void;
 }): React.ReactElement {
-  const t = useTranslations("workspace.dashboard");
-  const modals = useModals();
-  const { locale } = useLocale();
+  return <JoinRequestRowView {...useJoinRequestRowController(props)} />;
+}
 
+export function JoinRequestRowView({
+  joinRequest,
+  onMute,
+  t,
+  locale,
+  confirmJoinRequestAction1,
+  confirmJoinRequestAction2,
+  confirmJoinRequestAction3,
+}: JoinRequestRowViewProps): React.ReactElement {
   return (
     <Table.Tr>
       <Table.Td>
@@ -551,18 +513,7 @@ function JoinRequestRow({
             size="xs"
             variant="subtle"
             color="green"
-            onClick={() => {
-              modals.openConfirmModal({
-                title: t("approveRequest"),
-                children: t("approveConfirm"),
-                labels: {
-                  confirm: t("approveRequest"),
-                  cancel: t("cancel"),
-                },
-                confirmProps: { color: "green" },
-                onConfirm: () => onApprove(),
-              });
-            }}
+            onClick={() => confirmJoinRequestAction1()}
           >
             {t("approveRequest")}
           </Button>
@@ -570,18 +521,7 @@ function JoinRequestRow({
             size="xs"
             variant="subtle"
             color="red"
-            onClick={() => {
-              modals.openConfirmModal({
-                title: t("rejectRequest"),
-                children: t("rejectConfirm"),
-                labels: {
-                  confirm: t("rejectRequest"),
-                  cancel: t("cancel"),
-                },
-                confirmProps: { color: "red" },
-                onConfirm: () => onReject(),
-              });
-            }}
+            onClick={() => confirmJoinRequestAction2()}
           >
             {t("rejectRequest")}
           </Button>
@@ -592,18 +532,7 @@ function JoinRequestRow({
             size="xs"
             variant="subtle"
             color="red"
-            onClick={() => {
-              modals.openConfirmModal({
-                title: t("deleteRequest"),
-                children: t("deleteJoinRequestConfirm"),
-                labels: {
-                  confirm: t("deleteRequest"),
-                  cancel: t("cancel"),
-                },
-                confirmProps: { color: "red" },
-                onConfirm: () => onDelete(),
-              });
-            }}
+            onClick={() => confirmJoinRequestAction3()}
           >
             {t("deleteRequest")}
           </Button>

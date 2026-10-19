@@ -1,15 +1,16 @@
 "use client";
-
 /**
  * Global app layout component.
  *
  * Applies Mantine AppShell and hides the global top app bar on Agent-focused pages.
  */
 import { AppShell } from "@mantine/core";
-import { usePathname } from "next/navigation";
+
 import { AppBar } from "@/shared/components/AppBar";
 import { AccountLocaleSync } from "@/shared/providers/account-locale-sync";
 import { SidebarProvider } from "@/shared/providers/sidebar";
+import { useAppLayoutController } from "../containers/useAppLayoutController";
+import type { AppLayoutViewProps } from "../containers/useAppLayoutController";
 import type { ReactNode } from "react";
 
 interface AppLayoutProps {
@@ -17,21 +18,17 @@ interface AppLayoutProps {
   children: ReactNode;
 }
 
-export function AppLayout({
+export function AppLayout(props: AppLayoutProps): React.ReactElement {
+  return <AppLayoutView {...useAppLayoutController(props)} />;
+}
+
+export function AppLayoutView({
   authStatus,
   children,
-}: AppLayoutProps): React.ReactElement {
-  const pathname = usePathname();
-  const isAgentDetailRoute = /^\/w\/[^/]+\/agents\/(?!new(?:\/|$))[^/]+/.test(
-    pathname,
-  );
-  const headerHeight = isAgentDetailRoute ? 0 : 60;
-
-  // Show header bottom border on sidebar pages (workspace, account settings)
-  const withBorder =
-    (pathname.startsWith("/w/") && !isAgentDetailRoute) ||
-    pathname.startsWith("/account");
-
+  isAgentDetailRoute,
+  headerHeight,
+  withBorder,
+}: AppLayoutViewProps): React.ReactElement {
   return (
     <SidebarProvider>
       <AccountLocaleSync authStatus={authStatus} />

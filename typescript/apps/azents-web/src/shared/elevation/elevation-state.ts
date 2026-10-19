@@ -1,4 +1,4 @@
-import type { ElevationState } from "./types";
+import type { ElevationState } from "@/shared/elevation/types";
 import type { AuthMethod } from "@azents/public-client";
 
 export function synchronizeElevationState({

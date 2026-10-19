@@ -1,10 +1,4 @@
 "use client";
-
-/**
- * Account settings page UI component.
- *
- * Displays user email and join date. Layout only, planned for future expansion.
- */
 import {
   Button,
   Center,
@@ -18,17 +12,22 @@ import {
 } from "@mantine/core";
 import { IconCalendar, IconLanguage, IconMail } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+/**
+ * Account settings page UI component.
+ *
+ * Displays user email and join date. Layout only, planned for future expansion.
+ */
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import {
-  DEFAULT_LOCALE,
   isSupportedLocale,
   LOCALE_DISPLAY_NAMES,
   SUPPORTED_LOCALES,
   type SupportedLocale,
 } from "@/shared/lib/locale";
 import { useLocale } from "@/shared/providers/locale";
+import { useAccountLocaleFormController } from "../containers/useAccountLocaleFormController";
 import type { AccountContainerProps } from "../containers/useAccountContainer";
+import type { AccountLocaleFormViewProps } from "../containers/useAccountLocaleFormController";
 
 export function Account({
   state,
@@ -89,22 +88,17 @@ interface AccountLocaleFormProps {
   onSubmit: (locale: SupportedLocale) => void;
 }
 
-function AccountLocaleForm({
-  locale: initialLocale,
+function AccountLocaleForm(props: AccountLocaleFormProps): React.ReactElement {
+  return <AccountLocaleFormView {...useAccountLocaleFormController(props)} />;
+}
+
+export function AccountLocaleFormView({
   localeUpdate,
   onSubmit,
-}: AccountLocaleFormProps): React.ReactElement {
-  const t = useTranslations("account");
-  const [locale, setLocale] = useState<SupportedLocale>(
-    isSupportedLocale(initialLocale) ? initialLocale : DEFAULT_LOCALE,
-  );
-
-  useEffect(() => {
-    if (isSupportedLocale(initialLocale)) {
-      setLocale(initialLocale);
-    }
-  }, [initialLocale]);
-
+  t,
+  locale,
+  setLocale,
+}: AccountLocaleFormViewProps): React.ReactElement {
   return (
     <form
       onSubmit={(event) => {

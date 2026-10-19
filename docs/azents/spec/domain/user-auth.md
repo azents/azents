@@ -83,6 +83,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/signup/**
   - typescript/apps/azents-web/src/features/password-reset/**
   - typescript/apps/azents-web/src/features/security/**
+  - typescript/apps/azents-web/src/shared/auth/**
+  - typescript/apps/azents-web/src/shared/elevation/**
   - typescript/apps/azents-web/src/config/server.ts
   - typescript/apps/azents-web/src/app/(app)/api/chat/upload/route.ts
   - typescript/apps/azents-web/src/app/(app)/api/trpc/**

@@ -30,6 +30,7 @@ code_paths:
   - python/libs/azents-public-client/src/azentspublicclient/api/scheduled_task_v1_api.py
   - python/libs/azents-public-client/src/azentspublicclient/models/scheduled_task_*.py
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/apps/azents-web/src/shared/chat-presentation/**
   - typescript/apps/azents-web/src/features/scheduled-tasks/**
   - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/trpc/routers/scheduledTask.ts

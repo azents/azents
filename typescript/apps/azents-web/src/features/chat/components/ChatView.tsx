@@ -13,6 +13,10 @@ import {
 } from "@mantine/core";
 import { IconArrowDown, IconMessageOff } from "@tabler/icons-react";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import {
+  chatScrollOverscrollBehavior,
+  chatScrollViewportProps,
+} from "../../../shared/chat-presentation/components/activityRowPresentation";
 import { isCompactionInProgressMarker } from "../compactionPresentation";
 import { ChatInputContainer } from "../containers/ChatInputContainer";
 import {
@@ -21,10 +25,6 @@ import {
   useChatViewContainer,
 } from "../containers/useChatViewContainer";
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
-import {
-  chatScrollOverscrollBehavior,
-  chatScrollViewportProps,
-} from "./activityRowPresentation";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { CompactionDivider } from "./CompactionDivider";

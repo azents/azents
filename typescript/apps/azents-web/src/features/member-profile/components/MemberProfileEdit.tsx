@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Alert,
   Button,
@@ -14,13 +13,14 @@ import {
 } from "@mantine/core";
 import { IconAlertCircle, IconCheck, IconUser } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { useProfileFormController } from "../containers/useProfileFormController";
 /**
  * Member profile edit UI component.
  *
  * Provides name edit form.
  */
-import { useEffect, useState } from "react";
 import type { MemberProfileContainerProps } from "../containers/useMemberProfileContainer";
+import type { ProfileFormViewProps } from "../containers/useProfileFormController";
 import type { FormState } from "../types";
 
 export function MemberProfileEdit({
@@ -70,44 +70,20 @@ interface ProfileFormProps {
 }
 
 /** Profile edit form */
-function ProfileForm({
-  name: initialName,
+function ProfileForm(props: ProfileFormProps): React.ReactElement {
+  return <ProfileFormView {...useProfileFormController(props)} />;
+}
+
+export function ProfileFormView({
   formState,
-  onSubmit,
-  onResetForm,
-}: ProfileFormProps): React.ReactElement {
-  const t = useTranslations("memberProfile");
-  const [name, setName] = useState(initialName);
-  const [nameError, setNameError] = useState<string | null>(null);
-
-  // Synchronize form values when server data updates
-  useEffect(() => {
-    setName(initialName);
-  }, [initialName]);
-
-  // Reset notification after a short time on success
-  useEffect(() => {
-    if (formState.type === "SUCCESS") {
-      const timer = setTimeout(onResetForm, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [formState.type, onResetForm]);
-
-  const handleSubmit = (e: React.FormEvent): void => {
-    e.preventDefault();
-
-    const trimmedName = name.trim();
-    if (trimmedName.length === 0) {
-      setNameError(t("nameRequired"));
-      return;
-    }
-
-    setNameError(null);
-    onSubmit(trimmedName);
-  };
-
-  const isSubmitting = formState.type === "SUBMITTING";
-
+  t,
+  name,
+  setName,
+  nameError,
+  setNameError,
+  handleSubmit,
+  isSubmitting,
+}: ProfileFormViewProps): React.ReactElement {
   return (
     <form onSubmit={handleSubmit}>
       <Stack gap="md">

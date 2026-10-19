@@ -1,15 +1,11 @@
 "use client";
-
-/** Agent settings page header without session tabs. */
-
 import { ActionIcon, Badge, Box, Group, rem, Stack, Text } from "@mantine/core";
 import { IconMenu2 } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
+/** Agent settings page header without session tabs. */
 import { type ReactNode } from "react";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
-import { useAgentFocusedShellMobileNav } from "@/shared/agent-session/AgentFocusedShellMobileNav";
-import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
-import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
+import { useAgentSettingsHeaderController } from "./containers/useAgentSettingsHeaderController";
+import type { AgentSettingsHeaderViewProps } from "./containers/useAgentSettingsHeaderController";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHeaderProps {
@@ -17,16 +13,21 @@ interface AgentSettingsHeaderProps {
   controls?: ReactNode;
 }
 
-export function AgentSettingsHeader({
+export function AgentSettingsHeader(
+  props: AgentSettingsHeaderProps,
+): React.ReactElement {
+  return (
+    <AgentSettingsHeaderView {...useAgentSettingsHeaderController(props)} />
+  );
+}
+
+export function AgentSettingsHeaderView({
   agent,
   controls,
-}: AgentSettingsHeaderProps): React.ReactElement {
-  const t = useTranslations("workspace.agents.detail");
-  const mobileNav = useAgentFocusedShellMobileNav();
-  const modelSummary = formatModelSelectionSummary(
-    agentPrimaryModelSelection(agent),
-  );
-
+  t,
+  mobileNav,
+  modelSummary,
+}: AgentSettingsHeaderViewProps): React.ReactElement {
   return (
     <Box
       style={{

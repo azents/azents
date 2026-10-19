@@ -1,14 +1,15 @@
 "use client";
-
+import { Box, Drawer, Group, rem } from "@mantine/core";
 /**
  * Account settings shell component.
  *
  * Desktop: fixed left sidebar + right content area.
  * Mobile: toggle Drawer sidebar with AppBar Burger.
  */
-import { Box, Drawer, Group, rem } from "@mantine/core";
 import { AccountSidebar } from "@/shared/components/AccountSidebar";
-import { useSidebar } from "@/shared/providers/sidebar";
+
+import { useAccountShellController } from "../containers/useAccountShellController";
+import type { AccountShellViewProps } from "../containers/useAccountShellController";
 import type { ReactNode } from "react";
 
 interface AccountShellProps {
@@ -18,11 +19,15 @@ interface AccountShellProps {
 /** Sidebar width. */
 const SIDEBAR_WIDTH = rem(250);
 
-export function AccountShell({
-  children,
-}: AccountShellProps): React.ReactElement {
-  const { opened, close } = useSidebar();
+export function AccountShell(props: AccountShellProps): React.ReactElement {
+  return <AccountShellView {...useAccountShellController(props)} />;
+}
 
+export function AccountShellView({
+  children,
+  opened,
+  close,
+}: AccountShellViewProps): React.ReactElement {
   return (
     <>
       {/* Mobile Drawer */}

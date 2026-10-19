@@ -1,5 +1,4 @@
 "use client";
-
 import {
   ActionIcon,
   Alert,
@@ -34,12 +33,13 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
 import { AgentSettingsHeader } from "@/shared/agent-session/AgentSettingsHeader";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
-import { useLocale } from "@/shared/providers/locale";
 import { isAutoArchiveDueSoon } from "../auto-archive-urgency";
+import { useAgentSessionDirectoryController } from "../containers/useAgentSessionDirectoryController";
+import type { AgentSessionDirectoryQueryState } from "../agent-session-directory-state";
 import type { AgentSessionDirectoryStatus } from "../containers/useAgentSessionDirectoryContainer";
+import type { AgentSessionDirectoryViewProps } from "../containers/useAgentSessionDirectoryController";
 import type { SupportedLocale } from "@/shared/lib/locale";
 import type {
   AgentResponse,
@@ -52,11 +52,7 @@ export interface AgentSessionDirectoryProps {
   status: AgentSessionDirectoryStatus;
   page: number;
   pageSize: number;
-  sessions: AgentSessionResponse[];
-  totalCount: number;
-  currentArchiveRetentionDays: number | null;
-  loading: boolean;
-  error: string | null;
+  queryState: AgentSessionDirectoryQueryState;
   actionError: string | null;
   renamingSessionId: string | null;
   archivingSessionId: string | null;
@@ -100,77 +96,48 @@ function isDirectoryStatus(
   return value === "active" || value === "archived";
 }
 
-export function AgentSessionDirectory({
-  handle,
+export function AgentSessionDirectory(
+  props: AgentSessionDirectoryProps,
+): React.ReactElement {
+  return (
+    <AgentSessionDirectoryView {...useAgentSessionDirectoryController(props)} />
+  );
+}
+
+export function AgentSessionDirectoryView({
   agent,
   status,
   page,
-  pageSize,
-  sessions,
-  totalCount,
-  currentArchiveRetentionDays,
-  loading,
-  error,
+  queryState,
   actionError,
-  renamingSessionId,
   archivingSessionId,
-  pinningSessionId,
   restoringSessionId,
   onStatusChange,
   onPageChange,
   onCreateSession,
-  onRenameSession,
-  onArchiveSession,
-  onSetSessionPinned,
   onRestoreSession,
-}: AgentSessionDirectoryProps): React.ReactElement {
-  const t = useTranslations("workspace.agents.detail");
-  const { locale } = useLocale();
-  const [editingSession, setEditingSession] =
-    useState<AgentSessionResponse | null>(null);
-  const [editingTitle, setEditingTitle] = useState("");
-  const [archiveTarget, setArchiveTarget] =
-    useState<AgentSessionResponse | null>(null);
-  const basePath = `/w/${handle}/agents/${agent.id}`;
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const isArchived = status === "archived";
-  const renameBusy =
-    editingSession !== null && renamingSessionId === editingSession.id;
-
-  const handleOpenRename = (session: AgentSessionResponse): void => {
-    setEditingSession(session);
-    setEditingTitle(session.title ?? "");
-  };
-
-  const handleCloseRename = (): void => {
-    setEditingSession(null);
-    setEditingTitle("");
-  };
-
-  const handleSubmitRename = async (): Promise<void> => {
-    if (!editingSession || !editingTitle.trim()) {
-      return;
-    }
-    await onRenameSession(editingSession.id, editingTitle.trim());
-    handleCloseRename();
-  };
-
-  const handleClearTitle = async (): Promise<void> => {
-    if (!editingSession) {
-      return;
-    }
-    await onRenameSession(editingSession.id, null);
-    handleCloseRename();
-  };
-
-  const handleConfirmArchive = (): void => {
-    if (!archiveTarget) {
-      return;
-    }
-    onArchiveSession(archiveTarget.id);
-    setArchiveTarget(null);
-  };
-
+  t,
+  locale,
+  editingSession,
+  editingTitle,
+  setEditingTitle,
+  archiveTarget,
+  setArchiveTarget,
+  basePath,
+  totalPages,
+  isArchived,
+  renameBusy,
+  handleCloseRename,
+  handleSubmitRename,
+  handleClearTitle,
+  handleConfirmArchive,
+  pinningSessionId,
+  renamingSessionId,
+  onSetSessionPinned,
+  handleOpenRename,
+}: AgentSessionDirectoryViewProps): React.ReactElement {
+  const { sessions, totalCount, currentArchiveRetentionDays } =
+    queryState.snapshot;
   const renderActiveSession = (
     session: AgentSessionResponse,
   ): React.ReactElement => {
@@ -493,14 +460,14 @@ export function AgentSessionDirectory({
               )}
             </Group>
 
-            {loading && (
+            {queryState.type === "LOADING" && (
               <Center py="xl">
                 <Loader />
               </Center>
             )}
-            {error && (
+            {queryState.type !== "LOADED" && queryState.message && (
               <Alert color="red" icon={<IconAlertCircle size={rem(18)} />}>
-                {error}
+                {queryState.message}
               </Alert>
             )}
             {actionError && (
@@ -508,7 +475,7 @@ export function AgentSessionDirectory({
                 {actionError}
               </Alert>
             )}
-            {!loading && !error && sessions.length === 0 && (
+            {queryState.type === "LOADED" && sessions.length === 0 && (
               <Stack align="center" gap="xs" py="xl">
                 <IconArchive size={rem(28)} opacity={0.45} />
                 <Text c="dimmed">
@@ -518,7 +485,7 @@ export function AgentSessionDirectory({
                 </Text>
               </Stack>
             )}
-            {!loading && !error && sessions.length > 0 && (
+            {queryState.type === "LOADED" && sessions.length > 0 && (
               <Box
                 style={{
                   borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
@@ -540,7 +507,7 @@ export function AgentSessionDirectory({
               <Pagination
                 value={page}
                 total={totalPages}
-                disabled={loading}
+                disabled={queryState.type === "LOADING"}
                 onChange={onPageChange}
               />
               <Text size="sm" c="dimmed" aria-live="polite">

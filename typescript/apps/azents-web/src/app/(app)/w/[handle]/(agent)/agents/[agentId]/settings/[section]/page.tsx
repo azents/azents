@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
-import { AgentSettingsSectionPage } from "@/features/agents/AgentSettingsSectionPage";
+import { AgentSettingsSectionPage } from "@/app/composition/AgentSettingsSectionPage";
 import { trpc } from "@/trpc/server";
-import type { AgentSettingsSection } from "@/features/agents/AgentSettingsSectionPage";
+import type { AgentSettingsSection } from "@/app/composition/AgentSettingsSectionPage";
 
 function parseSection(value: string): AgentSettingsSection | null {
   switch (value) {

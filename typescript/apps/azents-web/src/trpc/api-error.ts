@@ -66,16 +66,37 @@ export function projectApiError(error: unknown): ApiErrorProjection | null {
   };
 }
 
+interface ValidationMessage {
+  message: string;
+}
+
+function decodeValidationMessage(
+  value: unknown,
+  field: "message" | "msg",
+): ValidationMessage | null {
+  const record = recordValue(value);
+  const message = record?.[field];
+  return typeof message === "string" && message.length > 0 ? { message } : null;
+}
+
+function validationMessages(
+  values: unknown[],
+  field: "message" | "msg",
+): string {
+  return (
+    values
+      .map((value) => decodeValidationMessage(value, field))
+      .filter((value) => value !== null)
+      .map((value) => value.message)
+      .join(", ") || "Invalid input."
+  );
+}
+
 /** Extract detail message from API error body */
 function extractDetail(error: unknown): string {
   // FastAPI validation error (array body: [{code, message, ...}])
   if (Array.isArray(error)) {
-    return (
-      error
-        .map((d: { message?: string }) => d.message)
-        .filter(Boolean)
-        .join(", ") || "Invalid input."
-    );
+    return validationMessages(error, "message");
   }
   if (typeof error === "object" && error !== null && "detail" in error) {
     const { detail } = error;
@@ -84,12 +105,7 @@ function extractDetail(error: unknown): string {
     }
     // FastAPI validation error ({detail: [{msg, ...}]})
     if (Array.isArray(detail)) {
-      return (
-        detail
-          .map((d: { msg?: string }) => d.msg)
-          .filter(Boolean)
-          .join(", ") || "Invalid input."
-      );
+      return validationMessages(detail, "msg");
     }
     // Structured application errors expose their bounded user-facing message.
     if (typeof detail === "object" && detail !== null) {

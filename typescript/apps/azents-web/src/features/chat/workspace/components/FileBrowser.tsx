@@ -42,7 +42,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useCallback, useMemo } from "react";
-import { chatChevronTransition } from "../../components/collapsiblePresentation";
+import { chatChevronTransition } from "../../../../shared/chat-presentation/components/collapsiblePresentation";
 import { buildFileTree, type FileTreeNode } from "../fileBrowserTree";
 import { WorkspaceUploadPanel } from "./WorkspaceUploadPanel";
 import type { WorkspacePanelTranslator } from "../containers/useWorkspacePanelTranslations";

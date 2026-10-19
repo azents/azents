@@ -1,6 +1,5 @@
 /* eslint-disable @next/next/no-img-element -- Exchange previews use dynamic proxy URLs */
 "use client";
-
 import {
   ActionIcon,
   Box,
@@ -13,7 +12,6 @@ import {
   ScrollArea,
   Text,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -21,15 +19,10 @@ import {
   IconFile,
   IconX,
 } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import {
-  type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
-  useEffect,
-  useRef,
-} from "react";
+
+import { useAttachmentPreviewViewerController } from "../containers/useAttachmentPreviewViewerController";
 import { AttachmentMarkdownPreview } from "./AttachmentMarkdownPreview";
-import { formatFileSize } from "./FileAttachmentList";
+import type { AttachmentPreviewViewerViewProps } from "../containers/useAttachmentPreviewViewerController";
 
 export type AttachmentPreviewContent =
   | {
@@ -70,15 +63,6 @@ interface AttachmentPreviewViewerProps {
   preview: AttachmentPreviewContent;
 }
 
-interface PointerOrigin {
-  x: number;
-  y: number;
-}
-
-const swipeThreshold = 48;
-const wheelThreshold = 30;
-const wheelCooldownMs = 400;
-
 function inlinePreviewUrl(url: string): string {
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}disposition=inline`;
@@ -93,107 +77,36 @@ function previewUsesImage(
   return preview.type === "image" || preview.type === "document-page";
 }
 
-export function AttachmentPreviewViewer({
+export function AttachmentPreviewViewer(
+  props: AttachmentPreviewViewerProps,
+): React.ReactElement {
+  return (
+    <AttachmentPreviewViewerView
+      {...useAttachmentPreviewViewerController(props)}
+    />
+  );
+}
+
+export function AttachmentPreviewViewerView({
   opened,
   onClose,
   onPrevious,
   onNext,
   position,
   name,
-  mediaType,
-  size,
   downloadUrl,
   preview,
-}: AttachmentPreviewViewerProps): React.ReactElement {
-  const t = useTranslations("chat.attachment");
-  const isMobile = useMediaQuery("(max-width: 48em)");
-  const pointerOriginRef = useRef<PointerOrigin | null>(null);
-  const swipedRef = useRef(false);
-  const lastWheelNavigationAtRef = useRef(0);
-
-  useEffect(() => {
-    if (!opened) {
-      return;
-    }
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "ArrowLeft" && onPrevious) {
-        event.preventDefault();
-        onPrevious();
-      } else if (event.key === "ArrowRight" && onNext) {
-        event.preventDefault();
-        onNext();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNext, onPrevious, opened]);
-
-  const detail = [mediaType, size == null ? null : formatFileSize(size)]
-    .filter(Boolean)
-    .join(" · ");
-  const imageUrl =
-    preview.type === "image"
-      ? preview.url
-      : preview.type === "document-page"
-        ? preview.imageUrl
-        : null;
-  const imageAlt =
-    preview.type === "image"
-      ? preview.altText
-      : preview.type === "document-page"
-        ? `${name} page ${preview.pageNumber}`
-        : "";
-
-  const handlePointerDown = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void => {
-    if (!event.isPrimary) {
-      return;
-    }
-    pointerOriginRef.current = { x: event.clientX, y: event.clientY };
-    swipedRef.current = false;
-  };
-  const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const origin = pointerOriginRef.current;
-    pointerOriginRef.current = null;
-    if (origin === null || !event.isPrimary) {
-      return;
-    }
-    const deltaX = event.clientX - origin.x;
-    const deltaY = event.clientY - origin.y;
-    if (
-      Math.abs(deltaX) < swipeThreshold ||
-      Math.abs(deltaX) <= Math.abs(deltaY)
-    ) {
-      return;
-    }
-    swipedRef.current = true;
-    if (deltaX > 0) {
-      onPrevious?.();
-    } else {
-      onNext?.();
-    }
-  };
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
-    if (
-      Math.abs(event.deltaX) < wheelThreshold ||
-      Math.abs(event.deltaX) <= Math.abs(event.deltaY)
-    ) {
-      return;
-    }
-    event.preventDefault();
-    const now = Date.now();
-    if (now - lastWheelNavigationAtRef.current < wheelCooldownMs) {
-      return;
-    }
-    lastWheelNavigationAtRef.current = now;
-    if (event.deltaX > 0) {
-      onNext?.();
-    } else {
-      onPrevious?.();
-    }
-  };
-
+  t,
+  isMobile,
+  detail,
+  imageUrl,
+  imageAlt,
+  handlePointerDown,
+  handlePointerUp,
+  handleWheel,
+  handlePreviewNative1,
+  handlePreviewNative2,
+}: AttachmentPreviewViewerViewProps): React.ReactElement {
   return (
     <Modal
       opened={opened}
@@ -274,18 +187,9 @@ export function AttachmentPreviewViewer({
           aria-label={t("previewContent")}
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
-          onPointerCancel={() => {
-            pointerOriginRef.current = null;
-          }}
+          onPointerCancel={() => handlePreviewNative1()}
           onWheel={handleWheel}
-          onClickCapture={(event) => {
-            if (!swipedRef.current) {
-              return;
-            }
-            event.preventDefault();
-            event.stopPropagation();
-            swipedRef.current = false;
-          }}
+          onClickCapture={(event) => handlePreviewNative2(event)}
           style={{
             display: "flex",
             flex: 1,

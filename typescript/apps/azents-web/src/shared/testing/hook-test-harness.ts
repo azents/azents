@@ -128,6 +128,7 @@ export class HookHarness {
     modules: Record<string, unknown>,
     window: unknown,
     document?: unknown,
+    globals: Record<string, unknown> = {},
   ): unknown {
     const exports: Record<string, unknown> = {};
     const cjsModule = { exports };
@@ -135,6 +136,7 @@ export class HookHarness {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
         target: ts.ScriptTarget.ES2022,
+        jsx: ts.JsxEmit.ReactJSX,
       },
     }).outputText;
     this.sandbox = createContext({
@@ -150,6 +152,7 @@ export class HookHarness {
       document,
       Promise,
       Date: FixtureDate,
+      ...globals,
     });
     new Script(source, { filename: path.pathname }).runInContext(this.sandbox);
     this.hook = cjsModule.exports[exportName];

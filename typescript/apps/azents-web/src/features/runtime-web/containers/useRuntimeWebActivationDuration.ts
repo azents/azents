@@ -5,7 +5,7 @@ import type {
   RuntimeWebActivationDurationProps,
   RuntimeWebActivationState,
   RuntimeWebDurationSeconds,
-} from "../types";
+} from "../../../shared/runtime-web/types";
 
 /** Transient duration selection stays synchronized with current service observations. */
 export function useRuntimeWebActivationDuration(

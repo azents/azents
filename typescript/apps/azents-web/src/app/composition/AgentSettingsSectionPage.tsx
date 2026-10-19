@@ -1,10 +1,10 @@
 import { ExternalChannelSettingsPage } from "@/features/external-channel-management/ExternalChannelSettingsPage";
-import { AgentAutomaticProjectsPage } from "./AgentAutomaticProjectsPage";
-import { AgentMemorySettingsPage } from "./AgentMemorySettingsPage";
-import { AgentRuntimeSettingsPage } from "./AgentRuntimeSettingsPage";
-import { AgentRuntimeWebServicesPage } from "./AgentRuntimeWebServicesPage";
-import { AgentSettingsPage } from "./AgentSettingsPage";
-import type { AgentFormSection } from "./components/AgentForm";
+import { AgentAutomaticProjectsPage } from "../../features/agents/AgentAutomaticProjectsPage";
+import { AgentMemorySettingsPage } from "../../features/agents/AgentMemorySettingsPage";
+import { AgentRuntimeSettingsPage } from "../../features/agents/AgentRuntimeSettingsPage";
+import { AgentRuntimeWebServicesPage } from "../../features/agents/AgentRuntimeWebServicesPage";
+import { AgentSettingsPage } from "../../features/agents/AgentSettingsPage";
+import type { AgentFormSection } from "../../features/agents/components/AgentForm";
 import type { AgentResponse } from "@azents/public-client";
 
 export type AgentSettingsSection =

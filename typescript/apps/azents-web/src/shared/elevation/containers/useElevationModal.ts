@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { synchronizeElevationState } from "../elevation-state";
-import type { ElevationState } from "../types";
+import type { ElevationState } from "@/shared/elevation/types";
 import type { AuthMethod } from "@azents/public-client";
 
 export interface ElevationModalContainerProps {

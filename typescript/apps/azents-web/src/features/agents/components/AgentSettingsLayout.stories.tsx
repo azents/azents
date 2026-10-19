@@ -1,6 +1,6 @@
 import { Box, Text } from "@mantine/core";
 import { expect, within } from "storybook/test";
-import { AgentSettingsLayout } from "./AgentSettingsLayout";
+import { AgentSettingsLayout } from "../../../shared/agent-session/AgentSettingsLayout";
 import type { AgentResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 

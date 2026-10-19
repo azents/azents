@@ -7,7 +7,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { redirect } from "next/navigation";
-import { LoginRequired } from "@/features/auth/components/LoginRequired";
+import { LoginRequired } from "@/shared/auth/components/LoginRequired";
 import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 import { trpc } from "@/trpc/server";
 

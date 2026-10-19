@@ -1,7 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
-import { LlmIntegrationsPage } from "@/features/llm-settings/LlmIntegrationsPage";
-import { WorkspaceModelSettingsPage } from "@/features/llm-settings/WorkspaceModelSettingsPage";
+import { WorkspaceSettingsSectionPage } from "@/features/llm-settings/WorkspaceSettingsSectionPage";
 import { trpc } from "@/trpc/server";
 
 type WorkspaceSettingsSection = "models" | "llm-integrations";
@@ -29,12 +28,13 @@ export default async function Page({
 
   try {
     const workspace = await trpc.workspace.get({ handle });
-    if (section === "models") {
-      return (
-        <WorkspaceModelSettingsPage handle={handle} workspace={workspace} />
-      );
-    }
-    return <LlmIntegrationsPage handle={handle} workspace={workspace} />;
+    return (
+      <WorkspaceSettingsSectionPage
+        section={section}
+        handle={handle}
+        workspace={workspace}
+      />
+    );
   } catch (error) {
     if (error instanceof TRPCError && error.code === "NOT_FOUND") {
       notFound();

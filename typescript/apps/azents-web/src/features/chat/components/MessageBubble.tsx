@@ -26,6 +26,7 @@ import {
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { memo } from "react";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
 import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
 import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
 import { continuationPresentation } from "../continuationPresentation";
@@ -42,7 +43,6 @@ import { chatHumanMessageMaxWidth, ChatTimelineItem } from "./ChatTimelineItem";
 import { ExternalChannelMessage } from "./ExternalChannelMessage";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
-import { MarkdownContent } from "./MarkdownContent";
 import { MessageActionRow } from "./MessageActionRow";
 import classes from "./MessageBubble.module.css";
 import { MessageMetadataSurface } from "./MessageMetadataFooter";

@@ -104,6 +104,9 @@ code_paths:
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/trpc/routers/terminal.ts
   - typescript/apps/azents-web/src/features/runtime-web/**
+  - typescript/apps/azents-web/src/shared/runtime-web/**
+  - typescript/apps/azents-web/src/shared/agent-session/**
+  - typescript/apps/azents-web/src/app/composition/AgentSettingsSectionPage.tsx
   - typescript/apps/azents-web/src/app/(app)/runtime-web/**
   - typescript/apps/azents-web/src/trpc/routers/runtime-web.ts
   - testenv/azents/e2e/src/support/runtime_profiles.py

@@ -1,7 +1,4 @@
 "use client";
-
-/** Runtime-backed existing-directory picker shared by Agent workspace surfaces. */
-
 import {
   ActionIcon,
   Alert,
@@ -23,11 +20,12 @@ import {
   IconFolderPlus,
   IconRefresh,
 } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
+/** Runtime-backed existing-directory picker shared by Agent workspace surfaces. */
 import Link from "next/link";
-import { useState } from "react";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
+import { useAgentWorkspaceDirectoryPickerModalController } from "../containers/useAgentWorkspaceDirectoryPickerModalController";
 import classes from "./AgentWorkspaceDirectoryPickerModal.module.css";
+import type { AgentWorkspaceDirectoryPickerModalViewProps } from "../containers/useAgentWorkspaceDirectoryPickerModalController";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
@@ -60,32 +58,35 @@ function parentPath(path: string): string | null {
   return trimmed.slice(0, index);
 }
 
-export function AgentWorkspaceDirectoryPickerModal({
+export function AgentWorkspaceDirectoryPickerModal(
+  props: AgentWorkspaceDirectoryPickerModalProps,
+): React.ReactElement {
+  return (
+    <AgentWorkspaceDirectoryPickerModalView
+      {...useAgentWorkspaceDirectoryPickerModalController(props)}
+    />
+  );
+}
+
+export function AgentWorkspaceDirectoryPickerModalView({
   opened,
   state,
-  onClose,
   onOpenDirectory,
   onSelectDirectory,
   onRefresh,
   onStartRuntime,
   onRestartRuntime,
   runtimeSettingsHref,
-  translationNamespace = "agentWorkspacePicker",
-}: AgentWorkspaceDirectoryPickerModalProps): React.ReactElement {
-  const t = useTranslations(translationNamespace);
-  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
-
-  const closePicker = (): void => {
-    setRestartConfirmOpen(false);
-    onClose();
-  };
-
+  t,
+  restartConfirmOpen,
+  setRestartConfirmOpen,
+  closePicker,
+}: AgentWorkspaceDirectoryPickerModalViewProps): React.ReactElement {
   const renderStatusViewport = (
     content: React.ReactNode,
   ): React.ReactElement => (
     <div className={classes.statusViewport}>{content}</div>
   );
-
   const renderCapabilityContent = (): React.ReactElement | null => {
     if (state.type === "RUNTIME_FREE") {
       return renderStatusViewport(

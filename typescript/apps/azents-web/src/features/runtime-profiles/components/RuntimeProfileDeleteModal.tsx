@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Alert,
   Button,
@@ -15,8 +14,9 @@ import {
   TextInput,
 } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+
+import { useRuntimeProfileDeleteModalController } from "../containers/useRuntimeProfileDeleteModalController";
+import type { RuntimeProfileDeleteModalViewProps } from "../containers/useRuntimeProfileDeleteModalController";
 import type { RuntimeProfileDeletionState } from "../types";
 import type { WorkspaceRuntimeProfileResponse } from "@azents/public-client";
 
@@ -26,28 +26,29 @@ interface RuntimeProfileDeleteModalProps {
   onConfirm: (profile: WorkspaceRuntimeProfileResponse) => void;
 }
 
-export function RuntimeProfileDeleteModal({
-  state,
+export function RuntimeProfileDeleteModal(
+  props: RuntimeProfileDeleteModalProps,
+): React.ReactElement {
+  return (
+    <RuntimeProfileDeleteModalView
+      {...useRuntimeProfileDeleteModalController(props)}
+    />
+  );
+}
+
+export function RuntimeProfileDeleteModalView({
   onClose,
   onConfirm,
-}: RuntimeProfileDeleteModalProps): React.ReactElement {
-  const t = useTranslations("workspace.runtimeProfiles");
-  const profile = state.type === "CLOSED" ? null : state.profile;
-  const isSubmitting = state.type === "SUBMITTING";
-  const [confirmationName, setConfirmationName] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
-
-  useEffect(() => {
-    setConfirmationName("");
-    setAcknowledged(false);
-  }, [profile?.id]);
-
-  const isConfirmed =
-    profile !== null &&
-    confirmationName === profile.display_name &&
-    acknowledged;
-  const error = state.type === "CONFIRMING" ? state.error : null;
-
+  t,
+  profile,
+  isSubmitting,
+  confirmationName,
+  setConfirmationName,
+  acknowledged,
+  setAcknowledged,
+  isConfirmed,
+  error,
+}: RuntimeProfileDeleteModalViewProps): React.ReactElement {
   return (
     <Modal
       centered

@@ -1,5 +1,4 @@
 "use client";
-
 import {
   ActionIcon,
   Alert,
@@ -22,9 +21,11 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
-import { Component, type ReactNode, useState } from "react";
+import { Component, type ReactNode } from "react";
 import { projectComposerSubscriptionIndicator } from "@/shared/subscription-usage/composerSubscriptionUsage";
 import { subscriptionUsageSummaryLimits } from "@/shared/subscription-usage/subscriptionUsage";
+import { useComposerSubscriptionUsagePopoverController } from "./containers/useComposerSubscriptionUsagePopoverController";
+import type { ComposerSubscriptionUsagePopoverViewProps } from "./containers/useComposerSubscriptionUsagePopoverController";
 import type {
   SubscriptionUsageSnapshot,
   SubscriptionUsageState,
@@ -174,14 +175,24 @@ export interface ComposerSubscriptionUsagePresentationProps {
   state: SubscriptionUsageState;
 }
 
-export function ComposerSubscriptionUsagePopover({
+export function ComposerSubscriptionUsagePopover(
+  props: ComposerSubscriptionUsagePopoverProps,
+): React.ReactElement | null {
+  return (
+    <ComposerSubscriptionUsagePopoverView
+      {...useComposerSubscriptionUsagePopoverController(props)}
+    />
+  );
+}
+
+export function ComposerSubscriptionUsagePopoverView({
   compact,
   onRefresh,
   state,
-}: ComposerSubscriptionUsagePopoverProps): React.ReactElement | null {
-  const [opened, setOpened] = useState(false);
-  const indicator = projectComposerSubscriptionIndicator(state);
-
+  opened,
+  setOpened,
+  indicator,
+}: ComposerSubscriptionUsagePopoverViewProps): React.ReactElement | null {
   if (indicator.type === "HIDDEN") {
     return null;
   }

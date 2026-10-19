@@ -3,7 +3,7 @@ import { Box, Code, rem, ScrollArea, Stack, Text } from "@mantine/core";
 import {
   activityDetailScrollAreaProps,
   activityDetailScrollbarSize,
-} from "./activityRowPresentation";
+} from "../../../shared/chat-presentation/components/activityRowPresentation";
 import type { ReactElement } from "react";
 
 export function ToolInputContent({ input }: { input: string }): ReactElement {

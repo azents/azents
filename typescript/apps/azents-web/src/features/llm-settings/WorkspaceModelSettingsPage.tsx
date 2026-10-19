@@ -2,8 +2,8 @@
 
 /** Focused Workspace model settings page entry. */
 
-import { WorkspaceSettingsLayout } from "@/features/workspace-settings/components/WorkspaceSettingsLayout";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { WorkspaceSettingsLayout } from "@/shared/workspace-settings/WorkspaceSettingsLayout";
 import { WorkspaceModelSettings } from "./components/WorkspaceModelSettings";
 import { useWorkspaceModelSettingsContainer } from "./containers/useWorkspaceModelSettingsContainer";
 import type { WorkspaceModelSettingsContainerOutput } from "./containers/useWorkspaceModelSettingsContainer";

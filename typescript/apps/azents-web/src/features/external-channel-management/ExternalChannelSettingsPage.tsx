@@ -1,6 +1,6 @@
 "use client";
 
-import { AgentSettingsLayout } from "@/features/agents/components/AgentSettingsLayout";
+import { AgentSettingsLayout } from "@/shared/agent-session/AgentSettingsLayout";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { ExternalChannelSettings } from "./components/ExternalChannelSettings";
 import { useExternalChannelSettingsContainer } from "./containers/useExternalChannelSettingsContainer";

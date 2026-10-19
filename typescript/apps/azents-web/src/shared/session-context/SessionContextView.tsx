@@ -1,6 +1,4 @@
 "use client";
-
-/** Agent session context inspector view. */
 import {
   Accordion,
   Alert,
@@ -28,9 +26,13 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+
+/** Agent session context inspector view. */
 import { formatLocalizedDate } from "@/shared/lib/date-format";
-import { useLocale } from "@/shared/providers/locale";
+import { useSessionRawEventsViewController } from "./containers/useSessionRawEventsViewController";
+import { useSessionSystemPromptViewController } from "./containers/useSessionSystemPromptViewController";
+import type { SessionRawEventsViewViewProps } from "./containers/useSessionRawEventsViewController";
+import type { SessionSystemPromptViewViewProps } from "./containers/useSessionSystemPromptViewController";
 import type {
   SessionContextResponse,
   SessionContextSystemPromptFragmentResponse,
@@ -310,44 +312,25 @@ export function SessionContextView({
   );
 }
 
-export function SessionSystemPromptView({
-  context,
-}: SessionSystemPromptViewProps): React.ReactElement {
-  const t = useTranslations("chat.context");
-  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
-  const systemPrompt = context.system_prompt ?? null;
-  const agentPrompt = systemPrompt?.agent_prompt ?? null;
-  const finalPrompt = systemPrompt?.final_prompt ?? null;
-  const promptDetails = [
-    ...(agentPrompt
-      ? [
-          {
-            id: promptDetailId("agent", agentPrompt.id),
-            prompt: agentPrompt,
-          },
-        ]
-      : []),
-    ...(systemPrompt?.toolkit_prompts.map((prompt) => ({
-      id: promptDetailId("toolkit", prompt.id),
-      prompt,
-    })) ?? []),
-    ...(systemPrompt?.injected_prompts.map((prompt) => ({
-      id: promptDetailId("injected", prompt.id),
-      prompt,
-    })) ?? []),
-    ...(finalPrompt
-      ? [
-          {
-            id: promptDetailId("final", finalPrompt.id),
-            prompt: finalPrompt,
-          },
-        ]
-      : []),
-  ];
-  const selectedPrompt =
-    promptDetails.find((detail) => detail.id === selectedPromptId)?.prompt ??
-    null;
+export function SessionSystemPromptView(
+  props: SessionSystemPromptViewProps,
+): React.ReactElement {
+  return (
+    <SessionSystemPromptViewView
+      {...useSessionSystemPromptViewController(props)}
+    />
+  );
+}
 
+export function SessionSystemPromptViewView({
+  t,
+  setSelectedPromptId,
+  systemPrompt,
+  agentPrompt,
+  finalPrompt,
+  promptDetails,
+  selectedPrompt,
+}: SessionSystemPromptViewViewProps): React.ReactElement {
   return (
     <Paper withBorder radius="md" p="md">
       <Stack gap="md">
@@ -492,13 +475,21 @@ export function SessionSystemPromptView({
   );
 }
 
-export function SessionRawEventsView({
-  context,
-}: SessionRawEventsViewProps): React.ReactElement {
-  const t = useTranslations("chat.context");
-  const { locale } = useLocale();
-  const [openedEventId, setOpenedEventId] = useState<string | null>(null);
+export function SessionRawEventsView(
+  props: SessionRawEventsViewProps,
+): React.ReactElement {
+  return (
+    <SessionRawEventsViewView {...useSessionRawEventsViewController(props)} />
+  );
+}
 
+export function SessionRawEventsViewView({
+  context,
+  t,
+  locale,
+  openedEventId,
+  setOpenedEventId,
+}: SessionRawEventsViewViewProps): React.ReactElement {
   return (
     <Paper withBorder radius="md" p="md">
       <Stack gap="md">

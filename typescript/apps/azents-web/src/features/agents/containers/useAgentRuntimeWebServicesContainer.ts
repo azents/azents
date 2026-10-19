@@ -1,8 +1,8 @@
 "use client";
 
-import { useRuntimeWebServicesContainer } from "@/features/runtime-web/containers/useRuntimeWebServicesContainer";
+import { useRuntimeWebServicesContainer } from "@/shared/runtime-web/containers/useRuntimeWebServicesContainer";
 import { trpc } from "@/trpc/client";
-import type { RuntimeWebServicesContainerOutput } from "@/features/runtime-web/containers/useRuntimeWebServicesContainer";
+import type { RuntimeWebServicesContainerOutput } from "@/shared/runtime-web/containers/useRuntimeWebServicesContainer";
 import type { AgentResponse } from "@azents/public-client";
 
 export interface AgentRuntimeWebServicesContainerProps {

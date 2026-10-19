@@ -2,7 +2,7 @@
 
 import { Group, rem } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { ChatCopyButton } from "./ChatCopyButton";
+import { ChatCopyButton } from "../../../shared/chat-presentation/components/ChatCopyButton";
 import classes from "./MessageActionRow.module.css";
 import { MessageMetadataFooter } from "./MessageMetadataFooter";
 import type {

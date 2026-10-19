@@ -6,9 +6,9 @@ import {
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { activityRowIconSize } from "../../../shared/chat-presentation/components/activityRowPresentation";
 import { continuationPresentation } from "../continuationPresentation";
 import { ActivityRow } from "./ActivityRow";
-import { activityRowIconSize } from "./activityRowPresentation";
 import type { ActivityEvent } from "@azents/session-core/toolActivityPresentation";
 import type { ReactElement } from "react";
 

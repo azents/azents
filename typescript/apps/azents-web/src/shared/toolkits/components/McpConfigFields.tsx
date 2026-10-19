@@ -28,66 +28,36 @@ import {
 import { IconPlugConnected } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 
-import { getString, getStringArray, isOneOf } from "@/shared/lib/unknown-value";
-
-type McpAuthType = "none" | "header" | "bearer" | "oauth2";
+import { projectMcpConfigFields } from "../containers/mcpConfigFieldsProjection";
+import type { McpConfigFieldsViewProps } from "../containers/mcpConfigFieldsProjection";
 
 const AUTH_TYPE_OPTIONS = ["none", "header", "bearer", "oauth2"] as const;
-const MCP_AUTH_TYPES: readonly McpAuthType[] = [
-  "none",
-  "header",
-  "bearer",
-  "oauth2",
-];
-
-function getMcpAuthType(value: unknown): McpAuthType {
-  return isOneOf(value, MCP_AUTH_TYPES) ? value : "none";
-}
 
 import type { McpConfigFieldsProps } from "../types";
 
 export function McpConfigFields(
   props: McpConfigFieldsProps,
 ): React.ReactElement {
-  const {
-    config,
-    onConfigChange,
-    credentials,
-    onCredentialsChange,
-    hasCredentials,
-    testState,
-    onTestConnection,
-  } = props;
+  return <McpConfigFieldsView {...projectMcpConfigFields(props)} />;
+}
+
+export function McpConfigFieldsView({
+  configView,
+  credentialsView,
+  hasCredentials,
+  testState,
+  onTestConnection,
+  canTest,
+  onSetConfig: setConfig,
+  onSetCredential: setCred,
+  onAuthTypeChange: handleAuthTypeChange,
+}: McpConfigFieldsViewProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits.mcp");
 
   const testResult = testState.type === "RESULT" ? testState.result : null;
-  const authType = getMcpAuthType(config.auth_type);
-
-  const setConfig = (key: string, value: unknown): void => {
-    onConfigChange({ ...config, [key]: value });
-  };
-
-  const setCred = (key: string, value: unknown): void => {
-    onCredentialsChange({ ...(credentials ?? {}), [key]: value });
-  };
-
-  const handleAuthTypeChange = (value: string | null): void => {
-    const newType = value ?? "none";
-    onConfigChange({
-      ...config,
-      auth_type: newType,
-    });
-
-    if (newType === "oauth2") {
-      onCredentialsChange(null);
-    } else {
-      // Synchronize credentials discriminator
-      onCredentialsChange({ type: newType });
-    }
-  };
-
-  const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
-  const serverUrl = getString(config.server_url);
+  const authType = configView.auth_type;
+  const timeoutValue = configView.timeout;
+  const serverUrl = configView.server_url;
   const isOAuth = authType === "oauth2";
 
   return (
@@ -119,13 +89,13 @@ export function McpConfigFields(
             description={t("headerNameDescription")}
             placeholder="Authorization"
             required
-            value={getString(config.header_name)}
+            value={configView.header_name}
             onChange={(e) => setConfig("header_name", e.currentTarget.value)}
           />
           <PasswordInput
             label={t("headerValueLabel")}
             placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-            value={getString(credentials?.value)}
+            value={credentialsView.value}
             onChange={(e) => setCred("value", e.currentTarget.value)}
           />
         </>
@@ -135,7 +105,7 @@ export function McpConfigFields(
         <PasswordInput
           label={t("bearerTokenLabel")}
           placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-          value={getString(credentials?.token)}
+          value={credentialsView.token}
           onChange={(e) => setCred("token", e.currentTarget.value)}
         />
       )}
@@ -145,13 +115,13 @@ export function McpConfigFields(
           <PasswordInput
             label={t("clientIdLabel")}
             placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-            value={getString(credentials?.client_id)}
+            value={credentialsView.client_id}
             onChange={(e) => setCred("client_id", e.currentTarget.value)}
           />
           <PasswordInput
             label={t("clientSecretLabel")}
             placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-            value={getString(credentials?.client_secret)}
+            value={credentialsView.client_secret}
             onChange={(e) => setCred("client_secret", e.currentTarget.value)}
           />
         </>
@@ -169,13 +139,13 @@ export function McpConfigFields(
           label={t("scopesLabel")}
           placeholder={t("scopesPlaceholder")}
           splitChars={[",", " ", "\n"]}
-          value={getStringArray(config.scopes)}
+          value={configView.scopes}
           onChange={(v) => setConfig("scopes", v)}
         />
       )}
 
       {/* Connection test */}
-      {serverUrl && ("owner" in props || props.handle) && (
+      {canTest && (
         <Button
           variant="light"
           leftSection={<IconPlugConnected size={16} />}
@@ -233,7 +203,7 @@ export function McpConfigFields(
                   <TextInput
                     label={t("tokenUrlLabel")}
                     placeholder="https://auth.example.com/token"
-                    value={getString(config.token_url)}
+                    value={configView.token_url}
                     onChange={(e) =>
                       setConfig("token_url", e.currentTarget.value)
                     }
@@ -241,7 +211,7 @@ export function McpConfigFields(
                   <TextInput
                     label={t("authUrlLabel")}
                     placeholder="https://auth.example.com/authorize"
-                    value={getString(config.auth_url)}
+                    value={configView.auth_url}
                     onChange={(e) =>
                       setConfig("auth_url", e.currentTarget.value)
                     }
@@ -250,7 +220,7 @@ export function McpConfigFields(
                     label={t("discoveryUrlLabel")}
                     description={t("discoveryUrlDescription")}
                     placeholder="https://auth.example.com/.well-known/oauth-authorization-server"
-                    value={getString(config.discovery_url)}
+                    value={configView.discovery_url}
                     onChange={(e) =>
                       setConfig("discovery_url", e.currentTarget.value)
                     }

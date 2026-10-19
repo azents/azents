@@ -30,11 +30,11 @@ import { useTranslations } from "next-intl";
 import { type ReactElement, useMemo } from "react";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { normalizeMarkdownToPlainText } from "@/shared/lib/markdown";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
 import {
   useGoalSection,
   useTodoPreviewBar,
 } from "../containers/useTodoPreviewBar";
-import { MarkdownContent } from "./MarkdownContent";
 import type {
   GoalSectionViewProps,
   TodoPreviewBarViewProps,

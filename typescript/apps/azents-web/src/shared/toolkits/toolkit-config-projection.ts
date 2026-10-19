@@ -35,6 +35,12 @@ const mcpSchema = z.object({
   scopes: strings,
   discovery_url: text,
 });
+export type McpConfigView = z.infer<typeof mcpSchema>;
+
+export function projectMcpConfig(value: unknown): McpConfigView {
+  return mcpSchema.parse(value);
+}
+
 const githubSchema = z.object({
   server_url: z.string().catch("https://api.githubcopilot.com/mcp/"),
   auth_type: z.literal("bearer").catch("bearer"),
@@ -65,7 +71,7 @@ export function projectToolkitConfig(
     case "shell":
       return { type: "shell", config: shellSchema.parse(value) };
     case "mcp":
-      return { type: "mcp", config: mcpSchema.parse(value) };
+      return { type: "mcp", config: projectMcpConfig(value) };
     case "github":
       return { type: "github", config: githubSchema.parse(value) };
     default:

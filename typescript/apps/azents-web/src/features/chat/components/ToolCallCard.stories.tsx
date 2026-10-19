@@ -577,7 +577,7 @@ export const CreateGitWorktree = {
       canvas.getByRole("button", { name: /^Requested Git worktree creation/ }),
     );
     await expect(
-      canvas.getByText("/workspace/agent/projects/azents"),
+      await canvas.findByText("/workspace/agent/projects/azents"),
     ).toBeVisible();
     await expect(canvas.getByText("request-create-1")).toBeVisible();
   },

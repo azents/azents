@@ -1,11 +1,10 @@
 "use client";
-
 /**
  * Password setup/change form.
  */
 import { Button, PasswordInput, Stack, Text } from "@mantine/core";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { usePasswordFormController } from "../containers/usePasswordFormController";
+import type { PasswordFormViewProps } from "../containers/usePasswordFormController";
 import type { PasswordManageState } from "../types";
 
 interface PasswordFormProps {
@@ -14,32 +13,22 @@ interface PasswordFormProps {
   onSetPassword: (password: string) => void;
 }
 
-export function PasswordForm({
+export function PasswordForm(props: PasswordFormProps): React.ReactElement {
+  return <PasswordFormView {...usePasswordFormController(props)} />;
+}
+
+export function PasswordFormView({
   hasPassword,
   state,
-  onSetPassword,
-}: PasswordFormProps): React.ReactElement {
-  const t = useTranslations("security");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
-
-  function handleSubmit(e: React.FormEvent): void {
-    e.preventDefault();
-    if (password.length < 8) {
-      setLocalError(t("passwordTooShort"));
-      return;
-    }
-    if (password !== confirmPassword) {
-      setLocalError(t("passwordMismatch"));
-      return;
-    }
-    setLocalError(null);
-    onSetPassword(password);
-  }
-
-  const error = localError ?? (state.type === "IDLE" ? state.error : null);
-
+  t,
+  password,
+  setPassword,
+  confirmPassword,
+  setConfirmPassword,
+  setLocalError,
+  handleSubmit,
+  error,
+}: PasswordFormViewProps): React.ReactElement {
   return (
     <Stack gap="md">
       <form onSubmit={handleSubmit}>

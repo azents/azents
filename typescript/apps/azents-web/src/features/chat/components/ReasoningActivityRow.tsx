@@ -4,9 +4,9 @@ import { Box, rem } from "@mantine/core";
 import { IconBubble } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
 import { ActivityRow } from "./ActivityRow";
 import { ChatDetailPanel } from "./ChatDetailPanel";
-import { MarkdownContent } from "./MarkdownContent";
 import type { ReactElement } from "react";
 
 interface ReasoningActivityRowProps {

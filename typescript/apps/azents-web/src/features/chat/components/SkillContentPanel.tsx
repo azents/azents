@@ -1,6 +1,6 @@
 import { Box, rem } from "@mantine/core";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
 import { ChatDetailPanel } from "./ChatDetailPanel";
-import { MarkdownContent } from "./MarkdownContent";
 import classes from "./SkillLoadedActivityRow.module.css";
 import type { ReactElement } from "react";
 

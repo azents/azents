@@ -1,11 +1,4 @@
 "use client";
-
-/**
- * Agent admin management section.
- *
- * Handles Admin list display + add/remove on edit page.
- */
-
 import {
   Alert,
   Button,
@@ -17,10 +10,15 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useAgentAdminSectionController } from "../containers/useAgentAdminSectionController";
+import type { AgentAdminSectionViewProps } from "../containers/useAgentAdminSectionController";
 import type { MemberItem } from "../containers/useAgentFormContainer";
 import type { AdminListState } from "../types";
+/**
+ * Agent admin management section.
+ *
+ * Handles Admin list display + add/remove on edit page.
+ */
 import type { AgentAdminResponse } from "@azents/public-client";
 
 interface AgentAdminSectionProps {
@@ -30,41 +28,22 @@ interface AgentAdminSectionProps {
   onRemoveAdmin: (admin: AgentAdminResponse) => void;
 }
 
-export function AgentAdminSection({
+export function AgentAdminSection(
+  props: AgentAdminSectionProps,
+): React.ReactElement {
+  return <AgentAdminSectionView {...useAgentAdminSectionController(props)} />;
+}
+
+export function AgentAdminSectionView({
   adminListState,
-  members,
-  onAddAdmin,
   onRemoveAdmin,
-}: AgentAdminSectionProps): React.ReactElement {
-  const t = useTranslations("workspace.agents");
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
-
-  // Only non-Admin members can be added
-  const availableMembers = useMemo(() => {
-    if (adminListState.type !== "READY") {
-      return [];
-    }
-    const adminUserIds = new Set(
-      adminListState.admins.map((a) => a.workspace_user_id),
-    );
-    return members
-      .filter((m) => !adminUserIds.has(m.id))
-      .map((m) => ({ value: m.id, label: `${m.name} (${m.role})` }));
-  }, [adminListState, members]);
-
-  // Member name lookup helper
-  const getMemberName = (workspaceUserId: string): string => {
-    const member = members.find((m) => m.id === workspaceUserId);
-    return member?.name ?? workspaceUserId;
-  };
-
-  const handleAddAdmin = (): void => {
-    if (selectedMemberId) {
-      onAddAdmin(selectedMemberId);
-      setSelectedMemberId(null);
-    }
-  };
-
+  t,
+  selectedMemberId,
+  setSelectedMemberId,
+  availableMembers,
+  getMemberName,
+  handleAddAdmin,
+}: AgentAdminSectionViewProps): React.ReactElement {
   return (
     <>
       <Divider />

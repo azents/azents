@@ -1,13 +1,4 @@
 "use client";
-
-/**
- * Global app bar component.
- *
- * Left/right content changes based on auth state and current path:
- * - Unauthenticated: logo + ColorModeSwitcher
- * - Authenticated: logo (→ /workspaces) + ColorModeSwitcher + user menu
- * - Inside workspace: logo + @handle + ColorModeSwitcher + user menu
- */
 import { ActionIcon, Box, Burger, Group, Menu, rem, Text } from "@mantine/core";
 import {
   IconExternalLink,
@@ -16,63 +7,41 @@ import {
   IconUser,
   IconUserCircle,
 } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
-import { useCallback } from "react";
+/**
+ * Global app bar component.
+ *
+ * Left/right content changes based on auth state and current path:
+ * - Unauthenticated: logo + ColorModeSwitcher
+ * - Authenticated: logo (→ /workspaces) + ColorModeSwitcher + user menu
+ * - Inside workspace: logo + @handle + ColorModeSwitcher + user menu
+ */
 import { AppLogo } from "@/shared/components/AppLogo";
 import { ColorModeSwitcher } from "@/shared/components/ColorModeSwitcher";
-import { useSidebar } from "@/shared/providers/sidebar";
-import { trpc } from "@/trpc/client";
+import { useAppBarController } from "../containers/useAppBarController";
+import type { AppBarViewProps } from "../containers/useAppBarController";
 
 interface AppBarProps {
   authStatus: "authenticated" | "unauthenticated";
 }
 
-/** Extract workspace handle from pathname */
-function extractWorkspaceHandle(pathname: string): string | null {
-  const match = pathname.match(/^\/w\/([^/]+)/);
-  return match?.[1] ?? null;
+export function AppBar(props: AppBarProps): React.ReactElement {
+  return <AppBarView {...useAppBarController(props)} />;
 }
 
-export function AppBar({ authStatus }: AppBarProps): React.ReactElement {
-  const t = useTranslations("appBar");
-  const router = useRouter();
-  const pathname = usePathname();
-  const { opened: sidebarOpened, toggle: toggleSidebar } = useSidebar();
-  const isAuthenticated = authStatus === "authenticated";
-  const { data: adminAccess, isPending: adminAccessPending } =
-    trpc.user.adminAccess.useQuery(
-      {},
-      {
-        enabled: isAuthenticated,
-        retry: false,
-      },
-    );
-  const workspaceHandle = extractWorkspaceHandle(pathname);
-  const isAgentDetailRoute = /^\/w\/[^/]+\/agents\/(?!new(?:\/|$))[^/]+/.test(
-    pathname,
-  );
-  /** Whether page has workspace/account sidebar */
-  const hasSidebar =
-    (workspaceHandle !== null && !isAgentDetailRoute) ||
-    pathname.startsWith("/account");
-
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => {
-      router.push("/");
-    },
-  });
-
-  const onLogout = useCallback((): void => {
-    logoutMutation.mutate();
-  }, [logoutMutation]);
-
-  const onAccount = useCallback((): void => {
-    router.push("/account");
-  }, [router]);
-
-  const logoHref = isAuthenticated ? "/workspaces" : "/";
-
+export function AppBarView({
+  t,
+  sidebarOpened,
+  toggleSidebar,
+  isAuthenticated,
+  adminAccess,
+  adminAccessPending,
+  workspaceHandle,
+  hasSidebar,
+  logoutMutation,
+  onLogout,
+  onAccount,
+  logoHref,
+}: AppBarViewProps): React.ReactElement {
   return (
     <Group h="100%" px="md" justify="space-between">
       <Group gap="sm">

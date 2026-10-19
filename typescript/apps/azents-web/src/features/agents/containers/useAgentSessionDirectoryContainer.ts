@@ -3,10 +3,9 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo } from "react";
 import { trpc } from "@/trpc/client";
-import type {
-  AgentResponse,
-  AgentSessionResponse,
-} from "@azents/public-client";
+import { projectAgentSessionDirectoryQueryState } from "../agent-session-directory-state";
+import type { AgentSessionDirectoryQueryState } from "../agent-session-directory-state";
+import type { AgentResponse } from "@azents/public-client";
 
 export const AGENT_SESSION_DIRECTORY_PAGE_SIZE = 25;
 
@@ -23,11 +22,7 @@ export interface AgentSessionDirectoryContainerOutput {
   status: AgentSessionDirectoryStatus;
   page: number;
   pageSize: number;
-  sessions: AgentSessionResponse[];
-  totalCount: number;
-  currentArchiveRetentionDays: number | null;
-  loading: boolean;
-  error: string | null;
+  queryState: AgentSessionDirectoryQueryState;
   actionError: string | null;
   renamingSessionId: string | null;
   archivingSessionId: string | null;
@@ -202,12 +197,16 @@ export function useAgentSessionDirectoryContainer({
     status,
     page,
     pageSize: AGENT_SESSION_DIRECTORY_PAGE_SIZE,
-    sessions: directoryQuery.data?.items ?? [],
-    totalCount,
-    currentArchiveRetentionDays:
-      directoryQuery.data?.current_archive_retention_days ?? null,
-    loading: directoryQuery.isPending,
-    error: directoryQuery.error?.message ?? null,
+    queryState: projectAgentSessionDirectoryQueryState(
+      {
+        sessions: directoryQuery.data?.items ?? [],
+        totalCount,
+        currentArchiveRetentionDays:
+          directoryQuery.data?.current_archive_retention_days ?? null,
+      },
+      directoryQuery.isPending,
+      directoryQuery.error?.message ?? null,
+    ),
     actionError,
     renamingSessionId: updateTitleMutation.isPending
       ? updateTitleMutation.variables.sessionId
