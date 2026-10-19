@@ -71,6 +71,7 @@ class AgentOutput(BaseModel):
     tool_search_enabled: bool
     max_turns: int | None
     auto_archive_ttl_days: int
+    routine_check_interval_minutes: int
     subagent_settings: SubagentSettings
     avatar: UploadedImage | None
     created_at: datetime.datetime
@@ -149,6 +150,7 @@ class AgentOutput(BaseModel):
             tool_search_enabled=data.tool_search_enabled,
             max_turns=data.max_turns,
             auto_archive_ttl_days=data.auto_archive_ttl_days,
+            routine_check_interval_minutes=data.routine_check_interval_minutes,
             subagent_settings=data.subagent_settings,
             avatar=avatar,
             created_at=data.created_at,
@@ -233,6 +235,7 @@ class AgentCreateInput(BaseModel):
         gt=0,
         description="Inactivity period before automatic Session archive",
     )
+    routine_check_interval_minutes: int = Field(default=30, ge=1, le=1440, strict=True)
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
@@ -281,6 +284,7 @@ class AgentUpdateInput(TypedDict, total=False):
         int,
         Field(gt=0, description="Inactivity period before automatic Session archive"),
     ]
+    routine_check_interval_minutes: Annotated[int, Field(ge=1, le=1440, strict=True)]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")
     ]

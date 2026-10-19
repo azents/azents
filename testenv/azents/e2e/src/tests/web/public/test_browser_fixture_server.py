@@ -9,8 +9,10 @@ from contextlib import closing
 
 import pytest
 
+from tests.required.public.test_session_browser_confidential import (
+    _APP as CONFIDENTIAL_APP,
+)
 from tests.web.public.test_session_browser import _APP as BROWSER_APP
-from tests.web.public.test_session_browser_confidential import _APP as CONFIDENTIAL_APP
 
 
 def _fixture_server(application: str) -> socketserver.TCPServer:

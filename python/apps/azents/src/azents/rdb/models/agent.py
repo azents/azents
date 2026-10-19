@@ -175,6 +175,9 @@ class RDBAgent(RDBModel):
         default=30,
         server_default="30",
     )
+    routine_check_interval_minutes: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=30, server_default="30"
+    )
     subagent_settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -237,6 +240,10 @@ class RDBAgent(RDBModel):
         "auto_archive_ttl_days > 0",
         name="ck_agents_auto_archive_ttl_days_positive",
     )
+    CK_ROUTINE_CHECK_INTERVAL_RANGE = sa.CheckConstraint(
+        "routine_check_interval_minutes BETWEEN 1 AND 1440",
+        name="ck_agents_routine_check_interval_range",
+    )
     CK_SELECTABLE_MODEL_OPTIONS_SHAPE = sa.CheckConstraint(
         "jsonb_typeof(selectable_model_options) = 'array' "
         "AND jsonb_array_length(selectable_model_options) BETWEEN 1 AND 10 "
@@ -273,6 +280,7 @@ class RDBAgent(RDBModel):
         CK_MODEL_NOT_NULL,
         CK_MAX_TURNS_POSITIVE,
         CK_AUTO_ARCHIVE_TTL_DAYS_POSITIVE,
+        CK_ROUTINE_CHECK_INTERVAL_RANGE,
         CK_SELECTABLE_MODEL_OPTIONS_SHAPE,
         CK_SUBAGENT_SETTINGS_SHAPE,
     )

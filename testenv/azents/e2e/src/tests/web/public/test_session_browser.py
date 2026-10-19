@@ -263,7 +263,7 @@ def _verify_live_panel(
         )
         == target.task_id
     )
-    wait = WebDriverWait(driver, 60)
+    wait = WebDriverWait(driver, 60, poll_frequency=0.1)
     preview = wait.until(
         ec.element_to_be_clickable(
             (
@@ -967,7 +967,7 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
             }
         )
     )
-    WebDriverWait(driver, 60).until(
+    WebDriverWait(driver, 60, poll_frequency=0.1).until(
         lambda _: driver.execute_script(
             "return new URLSearchParams(location.search).get('page') === 'files';"
         )

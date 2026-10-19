@@ -78,6 +78,7 @@ class TestAgentUpdateRequest(unittest.TestCase):
                 tool_search_enabled = True,
                 max_turns = 56,
                 auto_archive_ttl_days = 56,
+                routine_check_interval_minutes = 1.0,
                 subagent_settings = azentspublicclient.models.subagent_settings.SubagentSettings(
                     max_subagents = 0.0, 
                     max_depth = 0.0, )

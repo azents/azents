@@ -397,6 +397,27 @@ export function AgentForm({
               />
             )}
 
+            {showProfile && (
+              <NumberInput
+                label={t("routineCheckIntervalLabel")}
+                description={t("routineCheckIntervalDescription")}
+                min={1}
+                max={1440}
+                step={1}
+                allowDecimal={false}
+                allowNegative={false}
+                clampBehavior="none"
+                value={form.values.routine_check_interval_minutes}
+                onChange={(value) => {
+                  form.setFieldValue(
+                    "routine_check_interval_minutes",
+                    typeof value === "number" ? value : "",
+                  );
+                }}
+                error={form.errors.routine_check_interval_minutes}
+              />
+            )}
+
             {showModel && (
               <NumberInput
                 label={t("maxTurnsLabel")}

@@ -23,6 +23,7 @@ Name | Type | Description | Notes
 **tool_search_enabled** | **bool** | Tool Search enabled state | [optional] 
 **max_turns** | **int** |  | [optional] 
 **auto_archive_ttl_days** | **int** | Inactivity period before automatic Session archive | [optional] 
+**routine_check_interval_minutes** | **int** | Routine checking interval in minutes | [optional] 
 **subagent_settings** | [**SubagentSettings**](SubagentSettings.md) | Subagent execution settings | [optional] 
 
 ## Example

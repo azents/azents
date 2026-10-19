@@ -48,6 +48,12 @@ def test_held_runtime_tool_defers_judgment_and_stop_closes_incomplete_work(
         "session_id": setup.session_id,
     }
     headers = {"Authorization": f"Bearer {setup.access_token}"}
+    # Stop preserves definitions; retire this root before later global source scans.
+    request.addfinalizer(
+        lambda: ChatV1Api(public_api_client).chat_v1_archive_agent_session(
+            setup.agent_id, setup.session_id, _headers=headers
+        )
+    )
     resource = (
         f"{azents_public_server_url}/chat/v1/agents/{setup.agent_id}"
         f"/sessions/{setup.session_id}/routines"

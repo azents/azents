@@ -1,7 +1,7 @@
 ---
 title: "Agent Domain Spec"
 created: 2026-04-20
-updated: 2026-10-06
+updated: 2026-10-19
 tags: [backend, engine]
 spec_type: domain
 domain: agent
@@ -153,8 +153,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-15
-spec_version: 97
+last_verified_at: 2026-10-19
+spec_version: 98
 ---
 
 # Agent Domain Spec
@@ -173,6 +173,14 @@ Session or Agent settings operates on the same Agent-owned service.
 ### 1.1 Agent
 
 `agents` row has following core fields.
+
+Agent profile settings include `routine_check_interval_minutes`, a required
+whole-minute value from 1 to 1440 with default 30 for existing and new Agents.
+It is persisted and returned through the existing authorized Agent create/read/
+partial-update path. Omitted updates preserve it; explicit null and invalid
+values are rejected. The Routine source scan and fenced admission use this
+Agent-owned value; see the [Routine spec](routine.md) for unchanged discovery
+latency, minimum action delay and judgment semantics.
 
 | Field | Meaning |
 |---|---|
@@ -858,6 +866,10 @@ Following contracts do not exist in current system.
 - legacy persistent subagent-Agent model inheritance
 
 ## 8. Change History
+
+- **2026-10-19** (spec_version 98) — Added the Agent-owned Routine checking
+  interval to profile settings and existing create/read/partial-update contracts,
+  preserving the 30-minute default and independent minimum action delay.
 
 - **2026-10-06** (spec_version 95) — Replaced partial hierarchy NOWAIT admission
   with exact waiting locks and complete DB-operation recovery for both terminal

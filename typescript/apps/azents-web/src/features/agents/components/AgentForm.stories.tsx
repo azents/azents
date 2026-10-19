@@ -1,6 +1,6 @@
 import { rem } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { reasoningEffortLevels } from "@/shared/lib/reasoning-effort";
 import { renderStaticModelPicker } from "@/shared/model-options/components/model-option-editor-story-fixtures";
 import { SelectableModelOptionsEditorContainer } from "@/shared/model-options/containers/SelectableModelOptionsEditorContainer";
@@ -11,6 +11,7 @@ import {
 import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
+import { agentFormSchema } from "../schemas";
 import { AgentForm } from "./AgentForm";
 import type { AgentFormValues } from "../schemas";
 import type { AgentFormState } from "../types";
@@ -171,6 +172,7 @@ const baseAgent: AgentResponse = {
   tool_search_enabled: false,
   max_turns: null,
   auto_archive_ttl_days: 30,
+  routine_check_interval_minutes: 30,
   subagent_settings: { max_subagents: 3, max_depth: 1 },
   avatar: null,
   created_at: "2026-05-14T00:00:00Z",
@@ -248,6 +250,7 @@ function storyFormValues(formState: AgentFormState): AgentFormValues {
       tool_search_enabled: agent.tool_search_enabled,
       max_turns: agent.max_turns,
       auto_archive_ttl_days: agent.auto_archive_ttl_days,
+      routine_check_interval_minutes: agent.routine_check_interval_minutes,
       subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
       subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
     };
@@ -268,6 +271,7 @@ function storyFormValues(formState: AgentFormState): AgentFormValues {
     tool_search_enabled: true,
     max_turns: null,
     auto_archive_ttl_days: 30,
+    routine_check_interval_minutes: 30,
     subagent_max_subagents: 3,
     subagent_max_depth: 1,
   };
@@ -278,6 +282,13 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
   const form = useForm<AgentFormValues>({
     mode: "controlled",
     initialValues: storyFormValues(props.formState),
+    validate: {
+      routine_check_interval_minutes: (value) =>
+        agentFormSchema.shape.routine_check_interval_minutes.safeParse(value)
+          .success
+          ? null
+          : t("routineCheckIntervalError"),
+    },
   });
   const selectedMainModelOption = findSelectableModelOptionByLabel(
     form.values.selectable_model_options,
@@ -351,6 +362,57 @@ type Story = StoryObj<typeof meta>;
 
 export const DefaultPreselected = {} satisfies Story;
 
+export const RoutineCheckInterval = {
+  tags: ["ci-contract"],
+  args: { section: "profile", onSubmit: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText("Routine check interval (minutes)");
+    await expect(input).toHaveValue("30");
+    await userEvent.clear(input);
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(
+      canvas.getByText("Enter a whole number from 1 to 1440."),
+    ).toBeVisible();
+    await expect(args.onSubmit).not.toHaveBeenCalled();
+    await userEvent.type(input, "1441");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onSubmit).not.toHaveBeenCalled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "5");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ routine_check_interval_minutes: 5 }),
+    );
+    for (const value of ["1", "1440"]) {
+      await userEvent.clear(input);
+      await userEvent.type(input, value);
+      await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+      await expect(args.onSubmit).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          routine_check_interval_minutes: Number(value),
+        }),
+      );
+    }
+  },
+} satisfies Story;
+
+export const RoutineCheckIntervalSaved = {
+  tags: ["ci-contract"],
+  args: {
+    section: "profile",
+    formState: {
+      type: "EDIT",
+      agent: { ...baseAgent, routine_check_interval_minutes: 60 },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByLabelText("Routine check interval (minutes)"),
+    ).toHaveValue("60");
+  },
+} satisfies Story;
+
 export const Loading = {
   args: { formState: { type: "LOADING" } },
   play: async ({ canvasElement }) => {
@@ -370,6 +432,7 @@ export const NotFound = {
 } satisfies Story;
 
 export const MutationError = {
+  tags: ["ci-contract"],
   args: {
     mutationState: {
       type: "IDLE",
@@ -384,6 +447,7 @@ export const MutationError = {
 } satisfies Story;
 
 export const Submitting = {
+  tags: ["ci-contract"],
   args: { mutationState: { type: "SUBMITTING" } },
   play: async ({ canvasElement }) => {
     await expect(

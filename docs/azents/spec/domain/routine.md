@@ -26,7 +26,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug}
 last_verified_at: 2026-10-19
-spec_version: 1
+spec_version: 2
 ---
 
 # Session Routine Domain Spec
@@ -74,12 +74,20 @@ ordinary work finishes its current boundary before judgment. Recovery and Stop
 use the existing execution-generation fences.
 
 Settled judgment advances the Session checking checkpoint to completion time;
-the next regular opportunity is 30 minutes later, independently of selected-work
-completion. Source collection also advances the checkpoint while a judgment is
+the next regular opportunity follows the Agent's `routine_check_interval_minutes`
+(default 30; whole minutes from 1 to 1440), independently of selected-work
+completion. Agent administrators edit it in profile settings through the existing
+Agent save flow. Omitted updates preserve it; null, fractional, boolean and
+out-of-range values are rejected. Source collection also advances the checkpoint while a judgment is
 queued. Selection respects the later of the checking and minimum-action-delay
 boundaries. No-action and failed judgment advance the checking checkpoint but
 do not advance the last-action reference. The shared Scheduler uses the earliest
 eligible Session time, capped at the regular 30-minute discovery interval.
+Due selection and fenced admission read the same current Agent value. Changes
+apply at the next scheduled scan, which may take up to the discovery interval
+plus normal scheduling latency, and do not cancel queued or running judgments.
+The separate minimum action delay remains 30 minutes; short check intervals do
+not guarantee investigations or notifications at that frequency.
 An early scan schedules the remaining delay instead of another full interval;
 normal scheduler polling and FIFO work may add latency. Source evidence remains
 durable and ongoing incomplete occurrences are excluded from selection.
@@ -209,3 +217,7 @@ Development authority: [routine-261018/REQ](../../requirements/routine-261018-se
 [ADR-D2/D3/D4](../../adr/routine-261018-session-routines.md), and
 [Design revision 2](../../design/routine-261018-session-routines.md). M3 remains
 retired; judgment uses the ordinary inbox/Run mechanism.
+
+Agent cadence authority: [cadence-261019/REQ](../../requirements/cadence-261019-agent-routine-check-interval.md),
+[ADR-D1](../../adr/cadence-261019-agent-routine-check-interval.md), and
+[Design revision 1](../../design/cadence-261019-agent-routine-check-interval.md).

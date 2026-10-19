@@ -78,6 +78,7 @@ async def test_engine_reads_complete_their_sessions_before_returning() -> None:
         tool_search_enabled=True,
         max_turns=None,
         auto_archive_ttl_days=30,
+        routine_check_interval_minutes=30,
         avatar=None,
         created_at=now,
         updated_at=now,

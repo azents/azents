@@ -30,7 +30,7 @@ def test_routine_panel_and_collapsed_judgment_survive_reload(
     """Inspect tool-created data without a fixture-only presentation shortcut."""
     del azents_engine_worker_container
     driver = browser_driver
-    wait = WebDriverWait(driver, 30)
+    wait = WebDriverWait(driver, 30, poll_frequency=0.1)
 
     def inspect(setup: AgentSessionSetup) -> None:
         _login_main_web(driver, base_url=azents_main_web_url, email=setup.email)

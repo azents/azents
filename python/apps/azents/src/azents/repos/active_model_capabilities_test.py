@@ -465,6 +465,7 @@ def test_real_agent_workspace_orphan_refinements_adopt_current_facts() -> None:
         "terminal_enabled": True,
         "tool_search_enabled": True,
         "auto_archive_ttl_days": 30,
+        "routine_check_interval_minutes": 30,
         "created_at": _NOW,
         "updated_at": _NOW,
     }

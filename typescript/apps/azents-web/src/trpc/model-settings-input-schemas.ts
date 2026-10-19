@@ -64,6 +64,12 @@ export const agentCreateInputSchema = z
   .object({
     handle: z.string().min(1),
     name: z.string().min(1).max(100),
+    routine_check_interval_minutes: z
+      .number()
+      .int()
+      .min(1)
+      .max(1440)
+      .optional(),
     description: z.string().optional(),
     selectable_model_options: z
       .array(selectableModelOptionInputSchema)
@@ -90,6 +96,12 @@ export const agentUpdateInputSchema = z
     handle: z.string().min(1),
     agentId: z.string().min(1),
     name: z.string().min(1).max(100).optional(),
+    routine_check_interval_minutes: z
+      .number()
+      .int()
+      .min(1)
+      .max(1440)
+      .optional(),
     description: z.string().nullable().optional(),
     selectable_model_options: z
       .array(selectableModelOptionInputSchema)

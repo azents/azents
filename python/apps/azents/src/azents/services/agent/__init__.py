@@ -416,6 +416,7 @@ class AgentService:
             tool_search_enabled=create.tool_search_enabled,
             max_turns=create.max_turns,
             auto_archive_ttl_days=create.auto_archive_ttl_days,
+            routine_check_interval_minutes=create.routine_check_interval_minutes,
             subagent_settings=create.subagent_settings,
         )
         create_result = await self.repository.create(
@@ -638,6 +639,10 @@ class AgentService:
             repo_update["max_turns"] = update["max_turns"]
         if "auto_archive_ttl_days" in update:
             repo_update["auto_archive_ttl_days"] = update["auto_archive_ttl_days"]
+        if "routine_check_interval_minutes" in update:
+            repo_update["routine_check_interval_minutes"] = update[
+                "routine_check_interval_minutes"
+            ]
         if "subagent_settings" in update:
             repo_update["subagent_settings"] = update["subagent_settings"]
 

@@ -78,6 +78,7 @@ class Agent(BaseModel):
         gt=0,
         description="Inactivity period before automatic Session archive",
     )
+    routine_check_interval_minutes: int = Field(ge=1, le=1440, strict=True)
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings,
         description="Subagent execution settings",
@@ -146,6 +147,7 @@ class AgentCreate(BaseModel):
         gt=0,
         description="Inactivity period before automatic Session archive",
     )
+    routine_check_interval_minutes: int = Field(default=30, ge=1, le=1440, strict=True)
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
@@ -189,6 +191,7 @@ class AgentUpdate(TypedDict, total=False):
         int,
         Field(gt=0, description="Inactivity period before automatic Session archive"),
     ]
+    routine_check_interval_minutes: Annotated[int, Field(ge=1, le=1440, strict=True)]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")
     ]

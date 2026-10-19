@@ -21,7 +21,6 @@ from azents.core.mailbox_data import (
 )
 from azents.core.routine import (
     ROUTINE_MIN_ACTION_DELAY,
-    ROUTINE_TICK_INTERVAL,
     RoutineScope,
     RoutineUnavailable,
 )
@@ -44,6 +43,7 @@ from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.action_messages import RoutineJudgmentAction
 from azents.engine.events.types import Event, RoutineJudgmentPayload
 from azents.rdb.deps import get_session_manager
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -102,6 +102,9 @@ class RoutineJudgmentInboxRepository:
             target = await session.read_session.get(RDBAgentSession, scope.session_id)
             if target is None or target.stop_requested_at is not None:
                 return None
+            agent = await session.read_session.get(RDBAgent, scope.agent_id)
+            if agent is None:
+                raise RoutineUnavailable("Routine Agent is not active or authorized.")
             record = await self.states.get_check(session, scope=scope)
             previous = (
                 record.state
@@ -115,7 +118,8 @@ class RoutineJudgmentInboxRepository:
             )
             if (
                 previous.last_tick_at is not None
-                and now - previous.last_tick_at < ROUTINE_TICK_INTERVAL
+                and now - previous.last_tick_at
+                < datetime.timedelta(minutes=agent.routine_check_interval_minutes)
             ):
                 return None
             definitions = await self.definitions.list_for_session(session, scope=scope)

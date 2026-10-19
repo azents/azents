@@ -45,6 +45,7 @@ const agent: AgentResponse = {
   tool_search_enabled: false,
   max_turns: null,
   auto_archive_ttl_days: 30,
+  routine_check_interval_minutes: 30,
   subagent_settings: { max_subagents: 3, max_depth: 1 },
   created_at: "2026-08-01T08:00:00Z",
   updated_at: "2026-08-01T08:00:00Z",

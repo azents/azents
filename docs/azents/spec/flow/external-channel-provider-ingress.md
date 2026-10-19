@@ -114,8 +114,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-19
-spec_version: 70
+last_verified_at: 2026-10-20
+spec_version: 71
 ---
 
 # External Channel Provider Ingress
@@ -530,6 +530,13 @@ durable queue content.
     Channel Work state and prepares its progress projection. This retains the
     Session-row-before-Toolkit-State write order used by owned Session mutations
     and avoids an inverted lock dependency while active Work and ingress overlap.
+    Active-route Agent and Binding authorization fences use PostgreSQL
+    `FOR NO KEY UPDATE`: lifecycle/Binding writers and deletion remain excluded,
+    while Agent and primary-Binding foreign-key `KEY SHARE` checks remain
+    admissible. Direct Channel Action Binding admission uses the same lock mode.
+    This prevents foreign-key checks in owned Session/transcript and Work
+    transactions from closing a lock cycle with ingress; connection, route and
+    resource fencing and the conditional wake boundary remain unchanged.
     Cursor conflict or any later finalization failure still rolls back wake admission,
     mailbox rows and Work changes together; wake dispatch remains post-commit.
     Context-only creation, another Binding's input, provisioning or setup
@@ -714,6 +721,10 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+- **2026-10-20** (spec_version 71) — Kept route Agent and Binding mutation
+  exclusion compatible with live foreign-key references, preventing ingress wake
+  and Binding-owned Work commits from deadlocking with owned Session writes.
+
 - **2026-10-05** (spec_version 70) — Completed residual interaction admission/claim ownership and native read-only Discord callback/recovery observations before authentication, provider mutation and job wake.
 
 
