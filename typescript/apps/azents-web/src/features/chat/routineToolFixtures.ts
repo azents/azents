@@ -84,12 +84,7 @@ export function routineCallFixture(
     arguments: argumentsText,
     wireDialect: "json_function",
     status,
-    toolkitSource: {
-      toolkit_config_id: "routine-fixture",
-      toolkit_type: "routine",
-      toolkit_slug: "routine",
-      toolkit_name: "Routines",
-    },
+    toolkitSource: null,
     ...(typeof resultText === "string" ? { result: resultText } : {}),
   };
 }

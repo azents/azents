@@ -3,6 +3,14 @@
 from scripts.ci.observability import JUnitSummary
 
 STORIES = {
+    "src/features/chat/components/ToolCallCard.stories.tsx": (
+        "Routine Created",
+        "Routine Update",
+        "Routine Rejected Update",
+        "Routine Cancelled Update",
+        "Routine Objective And Delivery Failure",
+        "Routine Existing Completion",
+    ),
     "src/features/agents/components/AgentRuntimeSettings.stories.tsx": (
         "Runtime Free",
         "Managed",

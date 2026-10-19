@@ -357,12 +357,7 @@ void test("groups Routine tools separately without borrowing foreign Toolkit ide
     "read_routine_context",
     "record_routine_result",
   ]) {
-    const tool = clientToolMessage("tool-message", "call-1", name, {
-      toolkit_config_id: "routine",
-      toolkit_type: "routine",
-      toolkit_slug: "routine",
-      toolkit_name: "Routines",
-    });
+    const tool = clientToolMessage("tool-message", "call-1", name);
     const events = [
       event("call-1", "client_tool_call", {
         call_id: "call-1",

@@ -1,7 +1,8 @@
 """Database-only definition primitives for Routine owner operations."""
 
+import unicodedata
+
 import sqlalchemy as sa
-from azcommon.uuid import uuid7
 from sqlalchemy.sql import Select
 
 from azents.core.json_value import JSONValue
@@ -15,6 +16,21 @@ from azents.core.routine import (
 )
 from azents.rdb.models.routine import RDBRoutine
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+
+
+def routine_slug_base(title: str) -> str:
+    """Keep readable Unicode letters and numbers within the stored slug bound."""
+    words: list[str] = []
+    word: list[str] = []
+    for character in unicodedata.normalize("NFKC", title).casefold():
+        if character.isalnum():
+            word.append(character)
+        elif word:
+            words.append("".join(word))
+            word = []
+    if word:
+        words.append("".join(word))
+    return "-".join(words)[:64].rstrip("-") or "routine"
 
 
 def _source_values(content: RoutineContent) -> list[dict[str, JSONValue]]:
@@ -96,12 +112,15 @@ class RoutineDefinitionRepository:
         scope: RoutineScope,
         content: RoutineContent,
     ) -> RoutineDefinition:
-        """Mint a stable identifier rather than reusing a deleted title alias."""
+        """Create a readable stable slug under the already-locked Session owner."""
+        slug = routine_slug_base(content.title)
+        if await self.get(session, scope=scope, slug=slug) is not None:
+            raise ValueError(f"Routine slug '{slug}' already exists in this Session.")
         row = RDBRoutine(
             workspace_id=scope.workspace_id,
             agent_id=scope.agent_id,
             session_id=scope.session_id,
-            slug=f"routine-{uuid7().hex}",
+            slug=slug,
             title=content.title,
             objective=content.objective,
             sources=_source_values(content),

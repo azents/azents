@@ -60,10 +60,10 @@ void test("Routine tool identity requires both the reserved source slug and type
     arguments: "{}",
     status: "completed" as const,
   };
-  assert.equal(isRoutineToolCall(call), false);
-  assert.equal(isRoutineToolCall({ ...call, toolkitSource: null }), false);
+  assert.equal(isRoutineToolCall(call), true);
+  assert.equal(isRoutineToolCall({ ...call, toolkitSource: null }), true);
   for (const [toolkit_slug, toolkit_type, expected] of [
-    ["routine", "routine", true],
+    ["routine", "routine", false],
     ["routine", "mcp", false],
     ["foreign", "routine", false],
   ] as const) {

@@ -46,6 +46,15 @@ nonblank. The only supported source is `manual`: regular checking at eligible
 source ticks, not a user-facing run button. An empty source list supplies no
 candidate input. Creation does not immediately run judgment.
 
+New definitions derive their stable tool-facing slug from the title: Unicode NFKC
+normalization and case folding preserve letters and numbers, separator runs become
+hyphens, and the result is limited to 64 characters (`routine` when no letters or
+numbers remain). No UUID or collision suffix is appended. Creation rejects an
+existing slug in the same Session without overwriting it; different Sessions may
+use the same slug. The ordinary Session mutation fence serializes concurrent
+creation. Title edits retain the slug. Existing stored identifiers and admitted
+contexts remain unchanged.
+
 The automatically connected root Toolkit exposes `create_routine`,
 `list_routines`, `inspect_routine`, `update_routine`, `delete_routine`,
 `read_routine_context` and `record_routine_result`. Management uses the executing
@@ -150,6 +159,10 @@ decisions, status, model and per-call usage. Invalid/missing evidence is diagnos
 or unavailable. Routine tool details separate requested inputs from actual
 completed output: failed/rejected/cancelled/interrupted calls cannot imply a
 successful mutation, and duplicate completion displays canonical stored work.
+Routine tool recognition follows the built-in event contract: these auto-bound
+calls have no attached Toolkit source snapshot. A source-less reserved Routine
+name selects its dedicated card and activity category; an attached foreign or
+invalid source does not acquire built-in Routine presentation by reusing a name.
 
 Judgment events and usage do not enter ordinary model input, `ChatMessage.usage`,
 ordinary turn usage, normal system-prompt snapshots, Context breakdown, compaction

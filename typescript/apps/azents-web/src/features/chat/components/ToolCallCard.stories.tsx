@@ -67,6 +67,7 @@ const failedRoutineWork: RoutineWorkView = {
 };
 
 export const RoutineCreated: Story = {
+  tags: ["ci-contract"],
   args: {
     toolCall: routineCallFixture(
       "create_routine",
@@ -74,6 +75,16 @@ export const RoutineCreated: Story = {
       "completed",
       routineDefinitionFixture,
     ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Created Routine/ }),
+    );
+    await expect(await canvas.findByText("Observed result")).toBeVisible();
+    await expect(
+      canvas.getAllByText(routineDefinitionFixture.content.objective),
+    ).toHaveLength(2);
   },
 };
 export const RoutinePreparing: Story = {
@@ -95,6 +106,7 @@ export const RoutineRunning: Story = {
   },
 };
 export const RoutineUpdate: Story = {
+  tags: ["ci-contract"],
   args: {
     toolCall: routineCallFixture(
       "update_routine",
@@ -109,16 +121,17 @@ export const RoutineUpdate: Story = {
       canvas.getByRole("button", { name: /^Updated Routine/ }),
     );
     await expect(
-      canvas.getByText("Existing content supplied for comparison"),
+      await canvas.findByText("Existing content supplied for comparison"),
     ).toBeVisible();
-    await expect(canvas.getByText("Requested changes")).toBeVisible();
-    await expect(canvas.getByText("Observed result")).toBeVisible();
+    await expect(await canvas.findByText("Requested changes")).toBeVisible();
+    await expect(await canvas.findByText("Observed result")).toBeVisible();
     await expect(
       canvas.getByText("Traffic anomalies", { exact: true }),
     ).toBeVisible();
   },
 };
 export const RoutineRejectedUpdate: Story = {
+  tags: ["ci-contract"],
   args: {
     toolCall: {
       ...routineCallFixture(
@@ -140,10 +153,11 @@ export const RoutineRejectedUpdate: Story = {
       canvas.queryByText("Updated Routine", { exact: true }),
     ).not.toBeInTheDocument();
     await expect(canvas.queryByText("Observed result")).not.toBeInTheDocument();
-    await expect(canvas.getByText("Requested changes")).toBeVisible();
+    await expect(await canvas.findByText("Requested changes")).toBeVisible();
   },
 };
 export const RoutineCancelledUpdate: Story = {
+  tags: ["ci-contract"],
   args: {
     toolCall: routineCallFixture(
       "update_routine",
@@ -162,13 +176,14 @@ export const RoutineCancelledUpdate: Story = {
     ).not.toBeInTheDocument();
     await expect(canvas.queryByText("Observed result")).not.toBeInTheDocument();
     await expect(
-      canvas.getByText(
+      await canvas.findByText(
         "No completed result was observed. Requested content is not an actual result.",
       ),
     ).toBeVisible();
   },
 };
 export const RoutineObjectiveAndDeliveryFailure: Story = {
+  tags: ["ci-contract"],
   args: {
     toolCall: routineCallFixture(
       "record_routine_result",
@@ -194,12 +209,13 @@ export const RoutineObjectiveAndDeliveryFailure: Story = {
     await userEvent.click(
       canvas.getByRole("button", { name: /^Recorded Routine result/ }),
     );
-    await expect(canvas.getByText("Delivery failed")).toBeVisible();
+    await expect(await canvas.findByText("Delivery failed")).toBeVisible();
     await expect(canvas.getAllByText("Objective failed")).toHaveLength(2);
     await expect(canvas.getByText("Observed delivery")).toBeVisible();
   },
 };
 export const RoutineExistingCompletion: Story = {
+  tags: ["ci-contract"],
   args: {
     toolCall: routineCallFixture(
       "record_routine_result",
@@ -221,7 +237,7 @@ export const RoutineExistingCompletion: Story = {
       canvas.getByRole("button", { name: /^Recorded Routine result/ }),
     );
     await expect(
-      canvas.getByText("A changed request, not the saved result."),
+      await canvas.findByText("A changed request, not the saved result."),
     ).toBeVisible();
     await expect(canvas.getByText(routineWorkFixture.result)).toBeVisible();
     await expect(

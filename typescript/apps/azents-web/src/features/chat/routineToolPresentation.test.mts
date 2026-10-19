@@ -271,11 +271,8 @@ void test("untrusted source collisions and invalid cross-field outputs remain di
   );
   const sourceLess = { ...call };
   delete sourceLess.toolkitSource;
-  for (const untrusted of [sourceLess, { ...call, toolkitSource: null }]) {
-    assert.deepEqual(knownToolPresentation(untrusted), {
-      type: "generic",
-      reason: "unregistered",
-    });
+  for (const builtin of [sourceLess, { ...call, toolkitSource: null }]) {
+    assert.equal(detail(builtin).outcome.type, "COMPLETED");
   }
   assert.deepEqual(
     knownToolPresentation({
