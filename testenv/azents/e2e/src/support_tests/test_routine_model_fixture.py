@@ -85,6 +85,20 @@ def test_joint_judgment_uses_product_identity_previous_work_and_structured_shape
     assert evidence["setup_in_canonical_context"] is True
 
 
+def test_timing_first_prompt_with_current_time_is_a_judgment_request() -> None:
+    text = (
+        "Decide whether to start work now for each Session\nRoutine candidate.\n"
+        "Current time: 2026-10-19T09:58:00+00:00\n\nCandidates:\n"
+        + json.dumps([_candidate("a", previous=False, execution=False)])
+    )
+    request = _request(text)
+    assert request.kind == "judgment"
+    assert request.structured
+    result = fixture.plan(request)
+    assert isinstance(result, fixture.Text)
+    assert json.loads(result.text) == {"decisions": [{"routine_id": "a", "act": False}]}
+
+
 def test_work_runs_runtime_then_completes_only_one_admitted_occurrence() -> None:
     text = (
         "Continue work.\n"
