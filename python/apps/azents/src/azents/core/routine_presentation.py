@@ -2,6 +2,7 @@
 
 import datetime
 import json
+from textwrap import dedent
 
 from azents.core.routine_execution import RoutineExecutionRef, RoutineExecutionState
 
@@ -76,20 +77,21 @@ def render_routine_execution_input(
         }
         for state in full_contexts
     ]
-    content = (
-        "Continue these admitted Session Routine occurrences through ordinary "
-        "Agent execution. Use each stored objective and source context as given. "
-        "Record a result and next-check hint for each occurrence, including an "
-        "honest failed investigation. Choose notify separately; silent work is "
-        "valid. A result settles only that occurrence, not other Routine work, "
-        "ordinary Session work or Channel Work. Existing action permissions still "
-        "apply. Do not recreate objectives or infer a mandatory notification.\n\n"
-        "Admitted contexts:\n" + json.dumps(contexts, ensure_ascii=False)
-    )
+    content = dedent(
+        """\
+        Continue these admitted Session Routine occurrences through ordinary Agent execution. Use each stored objective and source context as given. Record a result and next-check hint for each occurrence, including an honest failed investigation. Choose notify separately; silent work is valid. A result settles only that occurrence, not other Routine work, ordinary Session work or Channel Work. Existing action permissions still apply. Do not recreate objectives or infer a mandatory notification.
+
+        Admitted contexts:
+        """  # noqa: E501
+    ) + json.dumps(contexts, ensure_ascii=False)
     if continuation and len(ordered) > 1:
         content += (
-            "\n\nOther incomplete occurrences (use the Routine context tool to "
-            "read another full admitted context):\n"
+            dedent(
+                """
+
+                Other incomplete occurrences (use the Routine context tool to read another full admitted context):
+                """  # noqa: E501
+            )
             + json.dumps(
                 [routine_execution_ref(state).model_dump() for state in ordered[1:]],
                 ensure_ascii=False,

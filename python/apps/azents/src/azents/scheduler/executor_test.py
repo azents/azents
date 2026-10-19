@@ -2,17 +2,17 @@
 
 import asyncio
 import datetime
-from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from azcommon import di
 
 from azents.job_runtime.types import JobExecutionContext, JobRequest
 from azents.scheduler.executor import execute_scheduled_task_job
 from azents.scheduler.types import RetryPolicy, ScheduledTaskDefinition, TaskResult
 
 
-def _context(container: object) -> JobExecutionContext:
+def _context(container: di.Container) -> JobExecutionContext:
     started_at = datetime.datetime(2026, 8, 10, tzinfo=datetime.UTC)
     return JobExecutionContext(
         request=JobRequest(
@@ -26,7 +26,7 @@ def _context(container: object) -> JobExecutionContext:
                 "manual_triggered": True,
             },
         ),
-        container=cast(Any, container),
+        container=container,
     )
 
 

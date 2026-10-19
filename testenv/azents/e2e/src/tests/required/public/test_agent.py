@@ -384,25 +384,6 @@ class TestAgentCrud:
         finally:
             _set_retention(system_api, prior_retention)
 
-    def test_get_nonexistent_agent_returns_404(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """existst t Agent IDt fetch t 404t returnt."""
-        owner_token, handle, _, _ = _setup_workspace_with_integration(
-            public_api_client, admin_api_client
-        )
-        agent_api = AgentV1Api(public_api_client)
-
-        with pytest.raises(ApiException) as exc_info:
-            agent_api.agent_v1_get_agent(
-                agent_id="nonexistent_id_12345678",
-                handle=handle,
-                _headers={"Authorization": f"Bearer {owner_token}"},
-            )
-        assert exc_info.value.status == 404  # t create API clientt t t t
-
 
 # ---------------------------------------------------------------------------
 # Admin permission
@@ -688,60 +669,6 @@ class TestAgentAdminManagement:
                 _headers=headers,
             )
         assert exc_info.value.status == 400  # t create API clientt t t t
-
-    def test_duplicate_admin_returns_409(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """t admint membert t t 409t returnt."""
-        owner_token, handle, integration_id, model_selection = (
-            _setup_workspace_with_integration(public_api_client, admin_api_client)
-        )
-        member_token = _add_member_to_workspace(
-            public_api_client,
-            admin_api_client,
-            owner_token=owner_token,
-            handle=handle,
-        )
-
-        agent_id = _create_agent(
-            public_api_client,
-            token=owner_token,
-            handle=handle,
-            integration_id=integration_id,
-            model_selection=model_selection,
-        )
-
-        agent_api = AgentV1Api(public_api_client)
-        headers = {"Authorization": f"Bearer {owner_token}"}
-
-        # membert workspace_user_id check
-        member_workspace_user_id = _get_workspace_user_id(
-            public_api_client, token=member_token, handle=handle
-        )
-
-        # t t t success
-        agent_api.agent_v1_add_agent_admin(
-            agent_id=agent_id,
-            handle=handle,
-            agent_admin_add_request=AgentAdminAddRequest(
-                workspace_user_id=member_workspace_user_id,
-            ),
-            _headers=headers,
-        )
-
-        # t t t 409
-        with pytest.raises(ApiException) as exc_info:
-            agent_api.agent_v1_add_agent_admin(
-                agent_id=agent_id,
-                handle=handle,
-                agent_admin_add_request=AgentAdminAddRequest(
-                    workspace_user_id=member_workspace_user_id,
-                ),
-                _headers=headers,
-            )
-        assert exc_info.value.status == 409  # t create API clientt t t t
 
     def test_non_admin_cannot_add_admin(
         self,

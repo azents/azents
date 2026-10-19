@@ -21,8 +21,10 @@ Choose by the output obligation, not merely a requested time or interval:
   into a mandatory-output Scheduled Task.
 - A one-off investigation does not automatically create a Routine.
 
-Explain the supported timing limits: source checking uses fixed 30-minute ticks,
-and the Session-wide 30-minute minimum action interval determines eligibility,
+Explain the supported timing limits: source checking uses the Agent's configured
+Routine checking interval (30 minutes by default, configurable from 1 to 1,440
+minutes), with regular discovery capped at 30 minutes. This checking cadence and
+the separate Session-wide 30-minute minimum action interval determine eligibility,
 not an exact execution time. Ordinary Session work can delay judgment at its FIFO boundary.
 Do not promise arbitrary per-Routine schedules or exact hourly execution.
 
