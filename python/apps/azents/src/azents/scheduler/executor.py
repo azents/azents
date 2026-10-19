@@ -49,6 +49,4 @@ async def execute_scheduled_task_job(
             container=context.container,
         )
     )
-    if result.summary is None:
-        return None
-    return validate_job_payload(result.summary)
+    return validate_job_payload(result.model_dump(mode="json"))

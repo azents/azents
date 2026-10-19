@@ -48,6 +48,7 @@ class CompletedOperations(SchedulerStateOperationRepository):
         self.lease_times: list[datetime.datetime] = []
         self.ensured_keys: list[tuple[str, ...]] = []
         self.success_summaries: list[dict[str, object] | None] = []
+        self.success_times: list[datetime.datetime] = []
         self.failure_codes: list[str] = []
         self.states: dict[str, ScheduledTaskState] = {}
         self.noops: set[str] = set()
@@ -108,6 +109,7 @@ class CompletedOperations(SchedulerStateOperationRepository):
     ) -> ScheduledTaskState | None:
         self.completed(f"success:{task_key}")
         self.success_summaries.append(result_summary)
+        self.success_times.append(next_run_at)
         return None
 
     async def mark_failure(
@@ -179,7 +181,10 @@ class RecordingRuntime(JobRuntime):
         handle = CompletedHandle(
             self.trace,
             key,
-            self.outcomes.get(key, JobOutcome.succeeded({"deleted": 3})),
+            self.outcomes.get(
+                key,
+                JobOutcome.succeeded({"summary": {"deleted": 3}, "next_run_at": None}),
+            ),
             self.errors.get(f"wait:{key}"),
         )
         self.handles.append(handle)
@@ -187,7 +192,7 @@ class RecordingRuntime(JobRuntime):
 
 
 async def _handler(context: TaskContext) -> TaskResult:
-    return TaskResult(summary={"task_key": context.task_key})
+    return TaskResult(next_run_at=None, summary={"task_key": context.task_key})
 
 
 def _definition(key: str, *, enabled: bool) -> ScheduledTaskDefinition:
@@ -552,7 +557,7 @@ async def test_real_scheduler_job_runtime_and_logs_follow_completed_pg_operation
         handler_calls.append(context.task_key)
         if fail:
             raise ValueError("handler failure")
-        return TaskResult(summary={"deleted": 3})
+        return TaskResult(next_run_at=None, summary={"deleted": 3})
 
     definition = dataclasses.replace(_definition(key, enabled=True), handler=handler)
     monkeypatch.setattr(
@@ -607,7 +612,7 @@ async def test_cancelled_real_scheduler_waiter_keeps_committed_lease_and_shielde
         started.set()
         await release.wait()
         finished.set()
-        return TaskResult(summary={"finished": True})
+        return TaskResult(next_run_at=None, summary={"finished": True})
 
     definition = dataclasses.replace(_definition(key, enabled=True), handler=handler)
     monkeypatch.setattr(
@@ -686,7 +691,7 @@ async def test_real_runtime_closed_submit_or_nullable_summary_preserves_settleme
     async def handler(context: TaskContext) -> TaskResult:
         boundary.assert_closed()
         handler_calls.append(context.task_key)
-        return TaskResult(summary=None)
+        return TaskResult(next_run_at=None, summary=None)
 
     definition = dataclasses.replace(_definition(key, enabled=True), handler=handler)
     monkeypatch.setattr(

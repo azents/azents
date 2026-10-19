@@ -35,7 +35,9 @@ async def test_execute_scheduled_task_job_reconstructs_task_local_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The adapter keeps the DI container outside the JSON-safe request."""
-    handler = AsyncMock(return_value=TaskResult(summary={"deleted": 3}))
+    handler = AsyncMock(
+        return_value=TaskResult(summary={"deleted": 3}, next_run_at=None)
+    )
     definition = ScheduledTaskDefinition(
         key="cleanup",
         description="Clean expired resources.",
@@ -54,7 +56,7 @@ async def test_execute_scheduled_task_job_reconstructs_task_local_context(
 
     result = await execute_scheduled_task_job(context)
 
-    assert result == {"deleted": 3}
+    assert result == {"summary": {"deleted": 3}, "next_run_at": None}
     handler.assert_awaited_once()
     handler_call = handler.await_args
     assert handler_call is not None

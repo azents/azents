@@ -44,6 +44,9 @@ async def test_handler_forwards_only_the_source_opportunity_and_existing_deadlin
     container = Mock(spec=di.Container)
     container.solve = AsyncMock(return_value=dispatcher)
     now = datetime.datetime(2026, 10, 18, tzinfo=datetime.UTC)
+    dispatcher.next_check_at = AsyncMock(
+        return_value=now + datetime.timedelta(minutes=30, seconds=7)
+    )
     deadline = now + datetime.timedelta(minutes=2)
     context = TaskContext(
         task_key="routine_source_dispatch",
@@ -56,6 +59,8 @@ async def test_handler_forwards_only_the_source_opportunity_and_existing_deadlin
     result = await routine_source_dispatch_handler(context)
     container.solve.assert_awaited_once_with(get_routine_source_dispatcher)
     dispatcher.dispatch_once.assert_awaited_once_with(now=now, deadline=deadline)
+    dispatcher.next_check_at.assert_awaited_once_with()
+    assert result.next_run_at == now + datetime.timedelta(minutes=30, seconds=7)
     assert result.summary == {
         "task_key": context.task_key,
         "attempt_started_at": now.isoformat(),

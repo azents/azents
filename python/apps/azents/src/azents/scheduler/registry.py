@@ -39,23 +39,25 @@ async def compacted_event_cleanup_handler(context: TaskContext) -> TaskResult:
     service = await context.container.solve(CompactedEventRetentionService)
     summary = await service.cleanup_once()
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )
 
 
 async def heartbeat_handler(context: TaskContext) -> TaskResult:
     """Return heartbeat execution summary."""
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
-        }
+        },
     )
 
 
@@ -64,6 +66,7 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
     service = await context.container.solve(SystemCatalogProjectionService)
     summaries = await service.sync_system_catalogs()
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
@@ -80,7 +83,7 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
                 }
                 for summary in summaries
             ],
-        }
+        },
     )
 
 
@@ -91,12 +94,13 @@ async def archived_session_retention_recalculation_handler(
     service = await context.container.solve(ArchivedSessionRetentionService)
     summary = await service.recalculate_once(lease_owner=context.lease_owner)
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )
 
 
@@ -108,12 +112,13 @@ async def archived_session_purge_handler(context: TaskContext) -> TaskResult:
         deadline=context.deadline,
     )
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )
 
 
@@ -122,12 +127,13 @@ async def session_auto_archive_handler(context: TaskContext) -> TaskResult:
     service = await context.container.solve(ChatSessionService)
     summary = await service.auto_archive_once()
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **summary,
-        }
+        },
     )
 
 
@@ -139,12 +145,13 @@ async def agent_decommission_handler(context: TaskContext) -> TaskResult:
         deadline=context.deadline,
     )
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )
 
 
@@ -156,12 +163,13 @@ async def agent_runtime_removal_handler(context: TaskContext) -> TaskResult:
         deadline=context.deadline,
     )
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )
 
 
@@ -173,12 +181,13 @@ async def owner_lifecycle_handler(context: TaskContext) -> TaskResult:
         deadline=context.deadline,
     )
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )
 
 
@@ -203,12 +212,13 @@ async def file_lifecycle_cleanup_handler(context: TaskContext) -> TaskResult:
         },
     )
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **result_counts,
-        }
+        },
     )
 
 
@@ -222,12 +232,13 @@ async def external_account_oauth_cleanup_handler(
         limit=500,
     )
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )
 
 
@@ -247,13 +258,14 @@ async def historical_memory_discovery_handler(
     )
     consolidation_summary = await consolidation.discover_once()
     return TaskResult(
+        next_run_at=None,
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
             **dataclasses.asdict(consolidation_summary),
-        }
+        },
     )
 
 

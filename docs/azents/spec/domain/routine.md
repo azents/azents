@@ -73,10 +73,16 @@ The ordinary Session owner and FIFO/Run boundary execute the action; earlier
 ordinary work finishes its current boundary before judgment. Recovery and Stop
 use the existing execution-generation fences.
 
-Source cadence and the minimum action delay are both 30 minutes but have distinct
-references. No-action does not advance the last-action reference. Delay preserves
-source input for a later checking opportunity; it does not schedule an exact
-threshold wake-up. Ongoing incomplete occurrences are excluded from selection.
+Settled judgment advances the Session checking checkpoint to completion time;
+the next regular opportunity is 30 minutes later, independently of selected-work
+completion. Source collection also advances the checkpoint while a judgment is
+queued. Selection respects the later of the checking and minimum-action-delay
+boundaries. No-action and failed judgment advance the checking checkpoint but
+do not advance the last-action reference. The shared Scheduler uses the earliest
+eligible Session time, capped at the regular 30-minute discovery interval.
+An early scan schedules the remaining delay instead of another full interval;
+normal scheduler polling and FIFO work may add latency. Source evidence remains
+durable and ongoing incomplete occurrences are excluded from selection.
 Captured candidates and source evidence are stable for one judgment. New user
 input during the call remains available and does not invalidate or repeat an
 otherwise valid decision; later source evidence is retained separately.

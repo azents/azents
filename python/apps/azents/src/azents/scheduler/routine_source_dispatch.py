@@ -36,10 +36,11 @@ async def routine_source_dispatch_handler(context: TaskContext) -> TaskResult:
         now=context.attempt_started_at, deadline=context.deadline
     )
     return TaskResult(
+        next_run_at=await dispatcher.next_check_at(),
         summary={
             "task_key": context.task_key,
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
-        }
+        },
     )

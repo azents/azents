@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from azcommon import di
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 RetryPolicyKind = Literal["next_interval", "bounded_backoff"]
 
@@ -31,11 +32,12 @@ class TaskContext:
     container: di.Container
 
 
-@dataclass(frozen=True)
-class TaskResult:
-    """Scheduled task execution result."""
+class TaskResult(BaseModel):
+    """Validated scheduler result with an optional explicit success schedule."""
 
+    model_config = ConfigDict(extra="forbid", frozen=True)
     summary: dict[str, Any] | None = None
+    next_run_at: AwareDatetime | None
 
 
 TaskHandler = Callable[[TaskContext], Awaitable[TaskResult]]

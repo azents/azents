@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.routine import RoutineUnavailable
+from azents.core.routine import ROUTINE_TICK_INTERVAL, RoutineUnavailable
 from azents.repos.routine.judgment_inbox import RoutineJudgmentInboxRepository
 from azents.repos.routine.source_dispatch import RoutineSourceRepository
 
@@ -29,6 +29,17 @@ class RoutineSourceDispatcher:
     broker: SessionBroker
     clock: Callable[[], datetime.datetime]
     batch_size: int
+
+    async def next_check_at(self) -> datetime.datetime:
+        """Use the common Scheduler for the earliest due or discovery opportunity."""
+        now = self.clock()
+        next_check = await self.sources.next_check_at(now=now)
+        discovery_at = now + ROUTINE_TICK_INTERVAL
+        return (
+            discovery_at
+            if next_check is None
+            else max(now, min(next_check, discovery_at))
+        )
 
     async def dispatch_once(
         self, *, now: datetime.datetime, deadline: datetime.datetime

@@ -166,14 +166,18 @@ class SchedulerService:
                     error_code=outcome.error_code or outcome.status.value,
                     message=outcome.error_message or "Scheduled task execution failed.",
                 )
-            result = TaskResult(summary=outcome.result)
+            result = TaskResult.model_validate(outcome.result)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             await self._record_failure(definition, state, exc, log=L)
             return
         finished_at = _utcnow()
-        next_run_at = finished_at + definition.interval
+        next_run_at = (
+            finished_at + definition.interval
+            if result.next_run_at is None
+            else max(finished_at, result.next_run_at)
+        )
         await self.repository.mark_success(
             task_key=definition.key,
             lease_owner=self.scheduler_id,
