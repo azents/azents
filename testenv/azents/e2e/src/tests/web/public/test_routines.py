@@ -55,12 +55,11 @@ def test_routine_panel_and_collapsed_judgment_survive_reload(
             Path(root).mkdir(parents=True, exist_ok=True)
             driver.save_screenshot(str(Path(root) / "routine-web-panel.png"))
         driver.get(path)
-        summaries = (By.XPATH, "//details/summary[.//*[normalize-space()='Routine']]")
+        summaries = (By.CSS_SELECTOR, "button[aria-label='Routine'][aria-expanded]")
         wait.until(lambda current: len(current.find_elements(*summaries)) == 2)
         disclosures = driver.find_elements(*summaries)
         assert all(
-            not item.find_element(By.XPATH, "..").get_attribute("open")
-            for item in disclosures
+            item.get_attribute("aria-expanded") == "false" for item in disclosures
         )
         disclosures[0].send_keys(Keys.ENTER)
         wait.until(
@@ -73,7 +72,7 @@ def test_routine_panel_and_collapsed_judgment_survive_reload(
         driver.refresh()
         wait.until(lambda current: len(current.find_elements(*summaries)) == 2)
         assert all(
-            not item.find_element(By.XPATH, "..").get_attribute("open")
+            item.get_attribute("aria-expanded") == "false"
             for item in driver.find_elements(*summaries)
         )
 

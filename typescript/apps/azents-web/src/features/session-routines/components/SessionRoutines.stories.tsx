@@ -1,7 +1,15 @@
-import { rem } from "@mantine/core";
-import { useRef, useState } from "react";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { Box, rem } from "@mantine/core";
+import { useState } from "react";
+import {
+  expect,
+  fireEvent,
+  fn,
+  userEvent,
+  waitFor,
+  within,
+} from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { useRoutinePanelNavigation } from "../containers/useRoutinePanelNavigation";
 import { SessionRoutines } from "./SessionRoutines";
 import type { SessionRoutinesContainerOutput } from "../containers/useSessionRoutinesContainer";
 import type {
@@ -66,7 +74,9 @@ const meta = {
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(1100)}>
-        <Story />
+        <Box h={rem(560)} style={{ display: "flex", flexDirection: "column" }}>
+          <Story />
+        </Box>
       </StorybookCanvas>
     ),
   ],
@@ -76,9 +86,11 @@ const meta = {
     selectedSlug: null,
     selectedTitle: null,
     detailHeading: { current: null },
+    viewportRef: fn(),
+    refreshState: { type: "IDLE" },
     onSelect: fn(),
     onBack: fn(),
-    onRefresh: fn(),
+    onRefresh: fn(() => Promise.resolve()),
   },
 } satisfies Meta<typeof SessionRoutines>;
 export default meta;
@@ -87,11 +99,33 @@ type Story = StoryObj<typeof meta>;
 function WithHeadingRef(
   props: SessionRoutinesContainerOutput,
 ): React.ReactElement {
-  const heading = useRef<HTMLHeadingElement | null>(null);
-  return <SessionRoutines {...props} detailHeading={heading} />;
+  const navigation = useRoutinePanelNavigation({
+    selectedSlug: props.selectedSlug,
+    onSelect: props.onSelect,
+    onBack: props.onBack,
+    onRefresh: props.onRefresh,
+  });
+  return <SessionRoutines {...props} {...navigation} />;
 }
 
-export const Inventory: Story = {};
+export const Inventory: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByRole("heading", { name: "Routines" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.getByText(
+        "Ongoing tasks the Agent checks and acts on when needed.",
+      ),
+    ).toBeVisible();
+    const list = canvas.getByRole("navigation", { name: "Session Routines" });
+    await expect(within(list).getAllByRole("button")).toHaveLength(2);
+    await expect(
+      within(list).queryByText(routine.slug),
+    ).not.toBeInTheDocument();
+  },
+};
 export const Loading: Story = { args: { state: { type: "LOADING" } } };
 export const Empty: Story = { args: { state: { type: "LOADED", items: [] } } };
 export const Unavailable: Story = {
@@ -224,23 +258,34 @@ export const LongContent: Story = {
 function Interactive(
   props: SessionRoutinesContainerOutput,
 ): React.ReactElement {
-  const [selected, setSelected] = useState(false);
-  const heading = useRef<HTMLHeadingElement | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const selected =
+    props.state.type === "LOADED"
+      ? (props.state.items.find((item) => item.slug === selectedSlug) ?? null)
+      : null;
+  const navigation = useRoutinePanelNavigation({
+    selectedSlug,
+    onSelect: (slug, trigger) => {
+      props.onSelect(slug, trigger);
+      setSelectedSlug(slug);
+    },
+    onBack: () => {
+      props.onBack();
+      setSelectedSlug(null);
+    },
+    onRefresh: props.onRefresh,
+  });
   return (
     <SessionRoutines
       {...props}
-      selectedSlug={selected ? routine.slug : null}
-      selectedTitle={selected ? routine.content.title : null}
-      detail={selected ? { type: "LOADED", data: detail } : { type: "NONE" }}
-      detailHeading={heading}
-      onSelect={(slug, trigger) => {
-        props.onSelect(slug, trigger);
-        setSelected(true);
-      }}
-      onBack={() => {
-        props.onBack();
-        setSelected(false);
-      }}
+      selectedSlug={selectedSlug}
+      selectedTitle={selected?.content.title ?? null}
+      detail={
+        selected
+          ? { type: "LOADED", data: { ...detail, routine: selected } }
+          : { type: "NONE" }
+      }
+      {...navigation}
     />
   );
 }
@@ -255,5 +300,190 @@ export const KeyboardSelection: Story = {
     await expect(
       canvas.getByRole("heading", { name: "Traffic anomalies" }),
     ).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: "Traffic anomalies" }),
+    ).toHaveFocus();
+    const viewport = canvas.getByRole("region", { name: "Session Routines" });
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 90)],
+      cancelable: true,
+    });
+    await expect(await canvas.findByText("Release to refresh")).toBeVisible();
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).toHaveBeenCalledTimes(1);
+  },
+};
+
+function touchAt(target: HTMLElement, x: number, y: number): Touch {
+  return new Touch({ identifier: 1, target, clientX: x, clientY: y });
+}
+
+export const PullToRefresh: Story = {
+  args: { onRefresh: fn(() => Promise.resolve()) },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const viewport = canvas.getByRole("region", { name: "Session Routines" });
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 90)],
+      cancelable: true,
+    });
+    await expect(await canvas.findByText("Release to refresh")).toBeVisible();
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(canvas.queryByText("Refreshing…")).not.toBeInTheDocument(),
+    );
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 40)],
+      cancelable: true,
+    });
+    await expect(await canvas.findByText("Pull to refresh")).toBeVisible();
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 90)],
+      cancelable: true,
+    });
+    await expect(await canvas.findByText("Release to refresh")).toBeVisible();
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).toHaveBeenCalledTimes(2);
+  },
+};
+
+export const PullCancellation: Story = {
+  args: { onRefresh: fn(() => Promise.resolve()) },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const viewport = canvas.getByRole("region", { name: "Session Routines" });
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 40)],
+      cancelable: true,
+    });
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).not.toHaveBeenCalled();
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 120, 90)],
+      cancelable: true,
+    });
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).not.toHaveBeenCalled();
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 90)],
+      cancelable: true,
+    });
+    await fireEvent.touchCancel(viewport);
+    await expect(args.onRefresh).not.toHaveBeenCalled();
+  },
+};
+
+export const ScrolledGesture: Story = {
+  args: {
+    onRefresh: fn(() => Promise.resolve()),
+    state: {
+      type: "LOADED",
+      items: Array.from({ length: 20 }, (_, index) => ({
+        ...routine,
+        id: `routine-${index}`,
+        slug: `routine-${index}`,
+      })),
+    },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const viewport = canvas.getByRole("region", { name: "Session Routines" });
+    viewport.scrollTop = 100;
+    await expect(viewport.scrollTop).toBeGreaterThan(0);
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 90)],
+      cancelable: true,
+    });
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).not.toHaveBeenCalled();
+  },
+};
+
+export const RefreshFailure: Story = {
+  args: {
+    onRefresh: fn(() => Promise.reject(new Error("Refresh failed"))),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Refresh" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "Could not refresh. Try again.",
+    );
+  },
+};
+
+export const UpwardGesture: Story = {
+  play: async ({ args, canvasElement }) => {
+    const viewport = within(canvasElement).getByRole("region", {
+      name: "Session Routines",
+    });
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 90)],
+    });
+    const move = new TouchEvent("touchmove", {
+      touches: [touchAt(viewport, 20, 10)],
+      cancelable: true,
+      bubbles: true,
+    });
+    await fireEvent(viewport, move);
+    await expect(move.defaultPrevented).toBe(false);
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).not.toHaveBeenCalled();
+  },
+};
+
+export const RefreshInProgress: Story = {
+  args: { onRefresh: fn(() => new Promise<void>(() => {})) },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Refresh" }));
+    await expect(await canvas.findByText("Refreshing…")).toBeVisible();
+    const viewport = canvas.getByRole("region", { name: "Session Routines" });
+    await fireEvent.touchStart(viewport, {
+      touches: [touchAt(viewport, 20, 10)],
+    });
+    await fireEvent.touchMove(viewport, {
+      touches: [touchAt(viewport, 20, 90)],
+      cancelable: true,
+    });
+    await fireEvent.touchEnd(viewport, { touches: [] });
+    await expect(args.onRefresh).toHaveBeenCalledTimes(1);
+  },
+};
+
+export const NavigationContext: Story = {
+  render: (args) => <Interactive {...args} />,
+  args: {
+    state: {
+      type: "LOADED",
+      items: Array.from({ length: 20 }, (_, index) => ({
+        ...routine,
+        id: `routine-${index}`,
+        slug: `routine-${index}`,
+        content: { ...routine.content, title: `Traffic check ${index + 1}` },
+      })),
+    },
   },
 };

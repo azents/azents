@@ -196,9 +196,12 @@ no-action.
 
 The separate read-only `?page=routines` supporting panel keeps Chat mounted.
 Its exact-Session list/detail reads show current definitions, latest occurrence
-and retained records; no mutation or manual-run controls are provided. Keyboard
-and reload preserve normal native disclosure semantics; ordinary tools remain
-separate from the judgment observation.
+and retained records; no mutation or manual-run controls are provided. Judgment
+uses the shared activity-row button and keyboard disclosure behavior, with a
+read-only decision checklist and initially collapsed state on reload. The panel
+supports top-of-list pull-to-refresh, an accessible refresh icon, and back-icon
+navigation that restores list scroll and focus. Ordinary tools remain separate
+from the judgment observation.
 
 ## Changelog
 

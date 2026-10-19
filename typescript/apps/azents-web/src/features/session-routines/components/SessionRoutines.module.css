@@ -1,12 +1,13 @@
 .root {
   min-width: 0;
   width: 100%;
+  min-height: 100%;
 }
 
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--mantine-spacing-lg);
+  gap: var(--mantine-spacing-md);
   min-width: 0;
 }
 
@@ -15,12 +16,23 @@
   min-width: 0;
 }
 
+.listPane {
+  border: rem(1px) solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  overflow: hidden;
+  align-self: start;
+}
+
 .item {
   width: 100%;
   min-width: 0;
   padding: var(--mantine-spacing-sm);
-  border-radius: var(--mantine-radius-sm);
+  border-bottom: rem(1px) solid var(--mantine-color-default-border);
   text-align: start;
+}
+
+.item:last-child {
+  border-bottom: 0;
 }
 
 .item[aria-pressed="true"] {
@@ -29,6 +41,11 @@
 
 .item:hover {
   background: var(--mantine-color-default-hover);
+}
+
+.detailHeader {
+  padding-bottom: var(--mantine-spacing-xs);
+  border-bottom: rem(1px) solid var(--mantine-color-default-border);
 }
 
 .prose {
@@ -48,7 +65,21 @@
   overflow-wrap: anywhere;
 }
 
+@media (pointer: coarse) {
+  .refresh:not(:focus-visible) {
+    position: absolute;
+    width: rem(1px);
+    height: rem(1px);
+    clip-path: inset(50%);
+    overflow: hidden;
+  }
+}
+
 @mixin smaller-than $mantine-breakpoint-sm {
+  .intro[data-detail="true"] {
+    display: none;
+  }
+
   .layout {
     grid-template-columns: minmax(0, 1fr);
   }
