@@ -1,5 +1,6 @@
 """Canonical context preparation for the tool-free Routine judgment operation."""
 
+import datetime
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
@@ -92,6 +93,7 @@ async def prepare_canonical_routine_judgment(
     model_selection: AgentModelSelection,
     transcript: Sequence[Event],
     candidates: tuple[RoutineJudgmentCandidate, ...],
+    current_time: datetime.datetime,
     context: TurnContext,
     model_file_service: ModelFileDownloader,
 ) -> PreparedRoutineJudgment:
@@ -163,6 +165,7 @@ async def prepare_canonical_routine_judgment(
         transcript=transcript,
         system_prompt=prompt.prompt or "",
         candidates=candidates,
+        current_time=current_time,
         session_id=run_request.session_id,
         native_replay_context=catalog.native_replay_context,
         model_file_resolver=resolver,

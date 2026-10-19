@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import datetime
 import json
+import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -252,6 +253,7 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
         watchdog=make_test_model_stream_watchdog(),
         model_file_service=UnusedFileDownloader(),
     )
+    request_started_at = datetime.datetime.now(datetime.UTC)
     call = service.execute(
         scope=scope,
         action=action,
@@ -345,6 +347,11 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
     assert (settled.admission is not None) == act
     assert "run_id" not in payload.model_dump()
     if wire:
+        time_match = re.search(rb"Current time: ([0-9T:.+-]+)", wire[0])
+        assert time_match is not None
+        current_time = datetime.datetime.fromisoformat(time_match[1].decode())
+        assert current_time.utcoffset() == datetime.timedelta(0)
+        assert request_started_at <= current_time <= datetime.datetime.now(datetime.UTC)
         assert b'"tools"' not in wire[0]
         assert b"Watch official launch announcements." in wire[0]
         assert b"Only notify about confirmed news." in wire[0]

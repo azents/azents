@@ -116,6 +116,7 @@ class RoutineJudgmentService:
                 model_selection=context.model_selection,
                 transcript=transcript,
                 candidates=captured.candidates,
+                current_time=datetime.datetime.now(datetime.UTC),
                 context=context.turn,
                 model_file_service=self.model_file_service,
             )

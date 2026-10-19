@@ -6,7 +6,7 @@ from pydantic import TypeAdapter
 
 from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
-from azents.core.routine_judgment_test import candidate
+from azents.core.routine_judgment_test import JUDGMENT_TIME, candidate
 from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_factories import get_model_sdk_factories
 from azents.engine.providers.bedrock_lifecycle_test import bedrock_call
@@ -76,6 +76,7 @@ async def test_bedrock_judgment_uses_only_the_structured_output_tool() -> None:
         transcript=history(),
         system_prompt="Session context.",
         candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
         session_id="judgment-session",
         native_replay_context=None,
         model_file_resolver=None,
@@ -114,6 +115,10 @@ async def test_bedrock_judgment_uses_only_the_structured_output_tool() -> None:
         assert tool["name"] == "json_tool_call"
         assert "routine_id" in str(tool["inputSchema"])
         assert "Watch official launch announcements." in str(body["messages"])
+        assert "Current time: 2026-10-19T09:58:00+00:00" in str(body["messages"])
+        assert "requested interval has not elapsed, set act=false" in str(
+            body["messages"]
+        )
         assert boundary.boundary.body.closed.is_set()
     finally:
         boundary.boundary.release_all()

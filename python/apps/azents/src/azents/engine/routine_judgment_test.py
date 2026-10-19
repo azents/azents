@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 from azents.core.enums import EventKind, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.openai_client_config import OpenAIResponsesClientConfig
-from azents.core.routine_judgment_test import candidate
+from azents.core.routine_judgment_test import JUDGMENT_TIME, candidate
 from azents.engine.events.openai_responses import (
     OpenAIResponsesClient,
     OpenAIResponsesRequest,
@@ -102,6 +102,7 @@ def prepared(model: RoutineJudgmentModel) -> RoutineJudgmentRequest:
         transcript=history(),
         system_prompt="Ordinary Session context, not a flattened helper prompt.",
         candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
         session_id="judgment-session",
         native_replay_context="canonical-history",
         model_file_resolver=None,
@@ -182,6 +183,7 @@ async def test_actual_sdk_wire_preserves_history_schema_usage_and_owned_cleanup(
         transcript=history(),
         system_prompt="Ordinary Session context, not a flattened helper prompt.",
         candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
         session_id="judgment-session",
         native_replay_context="canonical-history",
         model_file_resolver=None,
@@ -212,6 +214,8 @@ async def test_actual_sdk_wire_preserves_history_schema_usage_and_owned_cleanup(
     wire = str(captured[0])
     assert "Watch official launch announcements." in wire
     assert "Only notify about confirmed news." in wire
+    assert "Current time: 2026-10-19T09:58:00+00:00" in wire
+    assert "requested interval has not elapsed, set act=false" in wire
     assert "routine_id" in wire and "boolean" in wire
     match protocol:
         case "responses":
@@ -264,6 +268,7 @@ async def test_invalid_completed_output_keeps_usage_and_is_not_no_action(
         transcript=history(),
         system_prompt="Session context.",
         candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
         session_id="judgment-session",
         native_replay_context=None,
         model_file_resolver=None,
@@ -320,6 +325,7 @@ async def test_incomplete_native_stream_is_not_accepted_and_client_is_closed() -
         transcript=history(),
         system_prompt="Session context.",
         candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
         session_id="judgment-session",
         native_replay_context=None,
         model_file_resolver=None,

@@ -18,7 +18,7 @@ from azents.core.model_capability_contract import (
     ModelFeatureCondition,
     ModelRequestConstraints,
 )
-from azents.core.routine_judgment_test import candidate
+from azents.core.routine_judgment_test import JUDGMENT_TIME, candidate
 from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
@@ -129,6 +129,7 @@ def test_judgment_retains_ordinary_custom_history_without_tool_authority(
         transcript=transcript,
         system_prompt="Session context.",
         candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
         session_id="judgment-session",
         native_replay_context=None,
         model_file_resolver=None,
