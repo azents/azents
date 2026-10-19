@@ -379,6 +379,7 @@ class EventKind(enum.StrEnum):
     SCHEDULED_TASK_TRIGGER = "scheduled_task_trigger"
     SCHEDULED_TASK_CONTINUATION = "scheduled_task_continuation"
     SCHEDULED_TASK_RESULT = "scheduled_task_result"
+    ROUTINE_JUDGMENT = "routine_judgment"
     GOAL_UPDATED = "goal_updated"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"

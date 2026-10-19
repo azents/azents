@@ -34,6 +34,10 @@ from azents.core.inference_profile import (
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_operation import ModelOperationState
+from azents.core.routine_judgment import (
+    RoutineJudgmentConsidered,
+    RoutineJudgmentDecision,
+)
 from azents.core.vfs import VfsProjection
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.action_messages import ActionMessagePayload
@@ -657,6 +661,38 @@ class TokenUsagePayload(BaseModel):
     )
 
 
+class RoutineJudgmentPayload(BaseModel):
+    """Purpose-owned observation; its usage never identifies an ordinary Run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    judgment_id: str = Field(min_length=1)
+    considered: tuple[RoutineJudgmentConsidered, ...]
+    status: Literal["completed", "failed", "cancelled"]
+    decision: RoutineJudgmentDecision | None
+    error: str | None
+    usage: TokenUsagePayload | None
+
+    @model_validator(mode="after")
+    def validate_observation(self) -> "RoutineJudgmentPayload":
+        """Keep failed judgment distinct from a valid all-no-action decision."""
+        ids = [candidate.routine_id for candidate in self.considered]
+        if not ids or len(ids) != len(set(ids)):
+            raise ValueError("Judgment observation requires unique considered items.")
+        if self.status == "completed":
+            if self.decision is None or self.error is not None:
+                raise ValueError(
+                    "Completed judgment requires a decision without error."
+                )
+            if {item.routine_id for item in self.decision.decisions} != set(ids):
+                raise ValueError("Judgment decision does not match considered items.")
+        elif self.decision is not None or self.error is None or not self.error.strip():
+            raise ValueError(
+                "Unsuccessful judgment requires an error without decision."
+            )
+        return self
+
+
 class TurnMarkerPayload(BaseModel):
     """Turn marker payload."""
 
@@ -815,6 +851,7 @@ EventPayload = (
     | ScheduledTaskTriggerPayload
     | ScheduledTaskContinuationPayload
     | ScheduledTaskResultPayload
+    | RoutineJudgmentPayload
     | AssistantMessagePayload
     | ReasoningPayload
     | ClientToolCallPayload
@@ -845,6 +882,7 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.SCHEDULED_TASK_TRIGGER: ScheduledTaskTriggerPayload,
     EventKind.SCHEDULED_TASK_CONTINUATION: ScheduledTaskContinuationPayload,
     EventKind.SCHEDULED_TASK_RESULT: ScheduledTaskResultPayload,
+    EventKind.ROUTINE_JUDGMENT: RoutineJudgmentPayload,
     EventKind.ACTION_EXECUTION_RESULT: ActionExecutionResultPayload,
     EventKind.SKILL_LOADED: SkillLoadedPayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,
@@ -895,7 +933,13 @@ def public_event_payload(
     exclude_none: bool = True,
 ) -> dict[str, object]:
     """Project an Event payload without internal Scheduled cycle identity."""
-    serialized = dict(payload.model_dump(mode="json", exclude_none=exclude_none))
+    serialized = dict(
+        payload.model_dump(
+            mode="json",
+            exclude_none=exclude_none
+            and not isinstance(payload, RoutineJudgmentPayload),
+        )
+    )
     if kind in {
         EventKind.SCHEDULED_TASK_TRIGGER,
         EventKind.SCHEDULED_TASK_CONTINUATION,

@@ -13,6 +13,7 @@ ModelStreamCallKind = Literal[
     "compaction",
     "session_title",
     "historical_memory",
+    "routine_judgment",
 ]
 
 

@@ -47,6 +47,7 @@ from azents.engine.events.types import (
     OutputContentPart,
     OutputTextPart,
     ProviderToolCallPayload,
+    RoutineJudgmentPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
     ScheduledTaskTriggerPayload,
@@ -683,6 +684,8 @@ def _render_continuity_event(
 def _model_visible_event_value(event: Event) -> object | None:
     """Return model-visible structured content for token estimation."""
     payload = event.payload
+    if isinstance(payload, RoutineJudgmentPayload):
+        return None
     if isinstance(payload, ExternalChannelMessagePayload):
         return external_channel_message_visible_value(payload)
     if event.kind == EventKind.GOAL_CONTINUATION and isinstance(

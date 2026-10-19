@@ -107,3 +107,21 @@ promotion. The completed snapshot and useful verification evidence remain.
 2026-10-18 KST: Design approved and implementation requested. One read-only
 reviewer assigned and ready. Exact main unchanged after explicit-refspec fetch.
 Phase 1 is preparing; no implementation tests or product behavior claimed yet.
+
+2026-10-18 KST, phase 1 delivery: [PR #2328](https://github.com/azents/azents/pull/2328)
+opened from `c925300a1`. Definition/record/Primary foundation was validated with
+330 tests, full backend ty and commit hooks; independent P2 findings were closed.
+CI exposed one historical Memory migration fixture coupled to current Session
+ORM. The root-owned test-only correction `ab7834c36` passed the exact PostgreSQL
+test and hooks, received clean bounded review from the same reviewer, and was
+fast-forwarded onto the foundation branch. No production behavior was changed.
+
+2026-10-18 KST, phase 2 implementation: canonical Structured/no-tools operation,
+isolated typed observation/usage, PostgreSQL event migration and generated clients
+are implemented. Two independent P2 findings were corrected and closed by targeted
+same-reviewer verification: full custom-call history preservation and actual
+Structured/output-tool capability context. Root validation passed 1570 integrated
+backend tests, full backend ty/Ruff/format, generated-client template tests (16),
+forced web/admin/session-core type checks and Session core tests (58)/lint/format.
+Phase 2 is ready for commit/rebase/PR. Scheduler/admission/notification activation,
+inspection UI and product E2E remain phases 3-5. Design delta: None.
