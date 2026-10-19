@@ -1,13 +1,14 @@
 "use client";
 
-import { Carousel, type CarouselProps } from "@mantine/carousel";
+import { Carousel } from "@mantine/carousel";
 import { Box, Container, Group, rem, Stack, Text, Title } from "@mantine/core";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Image from "next/image";
-import { type KeyboardEvent, useRef, useState, type WheelEvent } from "react";
+import { useArchitectureDeepDive } from "../containers/useArchitectureDeepDive";
 import classes from "./ArchitectureDeepDiveSection.module.css";
 import { SectionHeader } from "./SectionHeader";
+import type { ArchitectureDeepDiveViewProps } from "../containers/useArchitectureDeepDive";
 
 const SLIDES = [
   {
@@ -25,7 +26,6 @@ const SLIDES = [
 ] as const;
 
 type SlideId = (typeof SLIDES)[number]["id"];
-type CarouselApi = Parameters<NonNullable<CarouselProps["getEmblaApi"]>>[0];
 
 function ArchitectureSlide({
   image,
@@ -122,68 +122,21 @@ function ArchitectureSlide({
 }
 
 export function ArchitectureDeepDiveSection(): React.ReactElement {
+  return (
+    <ArchitectureDeepDiveView
+      {...useArchitectureDeepDive({ slideCount: SLIDES.length })}
+    />
+  );
+}
+
+export function ArchitectureDeepDiveView({
+  activeIndex,
+  onSlideChange,
+  getEmblaApi,
+  handleKeyDown,
+  handleWheel,
+}: ArchitectureDeepDiveViewProps): React.ReactElement {
   const t = useTranslations("architectureDeepDive");
-  const emblaRef = useRef<CarouselApi | null>(null);
-  const lastWheelAtRef = useRef(0);
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const embla = emblaRef.current;
-    if (!embla) {
-      return;
-    }
-
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      embla.scrollPrev();
-    }
-
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      embla.scrollNext();
-    }
-
-    if (event.key === "Home") {
-      event.preventDefault();
-      embla.scrollTo(0);
-    }
-
-    if (event.key === "End") {
-      event.preventDefault();
-      embla.scrollTo(SLIDES.length - 1);
-    }
-  };
-
-  const handleWheel = (event: WheelEvent<HTMLDivElement>): void => {
-    const embla = emblaRef.current;
-    if (!embla) {
-      return;
-    }
-
-    const strongestDelta =
-      Math.abs(event.deltaX) > Math.abs(event.deltaY)
-        ? event.deltaX
-        : event.deltaY;
-
-    if (Math.abs(strongestDelta) < 28) {
-      return;
-    }
-
-    event.preventDefault();
-
-    const now = Date.now();
-    if (now - lastWheelAtRef.current < 420) {
-      return;
-    }
-    lastWheelAtRef.current = now;
-
-    if (strongestDelta > 0) {
-      embla.scrollNext();
-    } else {
-      embla.scrollPrev();
-    }
-  };
-
   return (
     <Box
       component="section"
@@ -212,16 +165,14 @@ export function ArchitectureDeepDiveSection(): React.ReactElement {
             <Carousel
               controlSize={48}
               emblaOptions={{ align: "center", loop: true }}
-              getEmblaApi={(embla) => {
-                emblaRef.current = embla;
-              }}
+              getEmblaApi={getEmblaApi}
               getIndicatorProps={(index) => ({
                 "aria-label": t("controls.goToSlide", {
                   slide: String(index + 1),
                 }),
               })}
               includeGapInSize={false}
-              onSlideChange={setActiveIndex}
+              onSlideChange={onSlideChange}
               onWheel={handleWheel}
               slideGap="lg"
               slideSize="100%"

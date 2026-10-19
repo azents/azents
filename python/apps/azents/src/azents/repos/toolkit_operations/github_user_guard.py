@@ -1,5 +1,6 @@
 """Bind user-credential mutation guards to current locked Toolkit facts."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import sqlalchemy as sa
@@ -28,6 +29,24 @@ _adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(
     GitHubSecrets, config=ConfigDict(hide_input_in_errors=True)
 )
 _USER_MODES = frozenset(("github_app_user", "github_app_platform_user"))
+
+
+@dataclass(frozen=True)
+class _UserRegistrationModeChange:
+    guarded: bool
+    changed: bool
+
+
+def _user_registration_mode_change(
+    config: Mapping[str, object],
+    update: ToolkitUpdate,
+) -> _UserRegistrationModeChange:
+    """Project current/requested mode decisions without closing config fields."""
+    current = config.get("github_auth_type")
+    if current not in _USER_MODES:
+        return _UserRegistrationModeChange(False, False)
+    requested = update.get("config", config).get("github_auth_type")
+    return _UserRegistrationModeChange(True, requested != current)
 
 
 @dataclass(frozen=True)
@@ -100,11 +119,10 @@ async def guard_locked_user_registration_update(
     """Check a current canonical parent already locked by its exact owner adapter."""
     if current.toolkit_type != "github":
         return
-    old_mode = current.config.get("github_auth_type")
-    if old_mode not in _USER_MODES:
+    mode_change = _user_registration_mode_change(current.config, update)
+    if not mode_change.guarded:
         return
-    new_mode = update.get("config", current.config).get("github_auth_type")
-    changed = new_mode != old_mode
+    changed = mode_change.changed
     if "credentials" in update:
         changed = changed or _registration_identity(
             update["credentials"]

@@ -13,10 +13,20 @@ import {
 } from "@mantine/core";
 import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { trackCtaClick } from "@/shared/lib/analytics";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { SITE_LINKS } from "@/shared/lib/links";
+import { useHeroSection } from "../containers/useHeroSection";
+import type { HeroSectionViewProps } from "../containers/useHeroSection";
 
-export function HeroSection(): React.ReactElement {
+export const HeroSection = createReactContainer(
+  "HeroSection",
+  useHeroSection,
+  HeroSectionView,
+);
+
+export function HeroSectionView({
+  onGithub,
+}: HeroSectionViewProps): React.ReactElement {
   const t = useTranslations("hero");
 
   return (
@@ -90,13 +100,7 @@ export function HeroSection(): React.ReactElement {
               component="a"
               href={SITE_LINKS.github}
               leftSection={<IconBrandGithub size={20} />}
-              onClick={() =>
-                trackCtaClick({
-                  ctaId: "hero_github",
-                  ctaLocation: "hero",
-                  destinationUrl: SITE_LINKS.github,
-                })
-              }
+              onClick={onGithub}
               radius="md"
               size="lg"
               target="_blank"

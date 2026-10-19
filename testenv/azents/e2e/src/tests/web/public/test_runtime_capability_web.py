@@ -200,33 +200,18 @@ def _close_mobile_session_panel(driver: WebDriver) -> bool:
     return False
 
 
-def _assert_mobile_session_panel(driver: WebDriver) -> None:
-    """Keep the conversation draft while switching full-width panel contents."""
+def _navigate_mobile_session_panel(driver: WebDriver) -> None:
+    """Retain the deployed mobile panel-to-route bridge during Runtime lifecycle."""
     driver.set_window_size(390, 844)
     toggle = (By.CSS_SELECTOR, "button[aria-label='Toggle session panel']")
     close = (By.CSS_SELECTOR, "button[aria-label='Close session panel']")
     _wait(driver).until(_close_mobile_session_panel)
-    composer = _wait(driver).until(
-        ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea"))
-    )
-    composer.send_keys(Keys.CONTROL, "a")
-    composer.send_keys("Keep this draft while inspecting the session")
     _wait(driver).until(
         lambda current: next(
             (item for item in current.find_elements(*toggle) if item.is_displayed()),
             False,
         )
     ).click()
-    _wait(driver).until(
-        ec.element_to_be_clickable(
-            (By.CSS_SELECTOR, "button[aria-label='Scroll to more tabs']")
-        )
-    ).click()
-    _wait(driver).until(
-        ec.visibility_of_element_located(
-            (By.CSS_SELECTOR, "button[aria-label='Scroll to previous tabs']")
-        )
-    )
     services_tab = driver.find_element(
         By.CSS_SELECTOR, "[role='tab'][aria-label='Services']"
     )
@@ -247,24 +232,7 @@ def _assert_mobile_session_panel(driver: WebDriver) -> None:
     )
     context_tab.click()
     _wait(driver).until(ec.url_contains("page=context"))
-    _wait(driver).until(
-        lambda current: current.execute_script(
-            "const p=document.querySelector('[role=tabpanel][id$=\"-content\"]');"
-            "return p && Math.abs(p.getBoundingClientRect().width-innerWidth)<1"
-        )
-    )
-    assert not driver.find_elements(By.CSS_SELECTOR, "[role='tab'][aria-label='Chat']")
-    assert driver.execute_script(
-        "return document.documentElement.scrollWidth <= innerWidth"
-    )
     _wait(driver).until(ec.element_to_be_clickable(close)).click()
-    composer = _wait(driver).until(
-        ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea"))
-    )
-    assert composer.get_attribute("value") == (
-        "Keep this draft while inspecting the session"
-    )
-    composer.clear()
     # Closing hides the panel before its asynchronous route update completes.
     # Settle that navigation before changing the responsive layout.
     _wait(driver).until(
@@ -666,7 +634,7 @@ def test_runtime_free_add_and_remove_progress(
         )
     )
     session_url = browser_driver.current_url
-    _assert_mobile_session_panel(browser_driver)
+    _navigate_mobile_session_panel(browser_driver)
     _open_services_tab(browser_driver)
     _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "System metrics", timeout_seconds=120)
@@ -709,7 +677,7 @@ def test_runtime_free_add_and_remove_progress(
     )
     browser_driver.set_window_size(1440, 1000)
     browser_driver.get(session_url)
-    _assert_mobile_session_panel(browser_driver)
+    _navigate_mobile_session_panel(browser_driver)
     browser_driver.set_window_size(1440, 1000)
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"

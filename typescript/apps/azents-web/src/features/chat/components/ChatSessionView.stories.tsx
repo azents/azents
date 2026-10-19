@@ -1,6 +1,6 @@
 import { Box } from "@mantine/core";
 import { useRef, useState } from "react";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { createChatMessage } from "../story-fixtures";
 import { workspacePanelStoryFixture } from "../workspace-story-fixture";
 import { ChatSessionView } from "./ChatSessionView";
@@ -468,11 +468,55 @@ export const MobilePanel = {
     }
     await expect(title).toHaveTextContent("Tools");
     await expect(panel.getBoundingClientRect().top).toBeGreaterThan(0);
+    const canvas = within(canvasElement);
+    await expect(
+      Math.abs(panel.getBoundingClientRect().width - window.innerWidth),
+    ).toBeLessThan(1);
+    await expect(canvas.queryByRole("tab", { name: "Chat" })).toBeNull();
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+      window.innerWidth,
+    );
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Scroll to more tabs" }),
+    );
+    await expect(
+      await canvas.findByRole("button", { name: "Scroll to previous tabs" }),
+    ).toBeVisible();
   },
 } satisfies Story;
 
 export const MobileChat = {
   args: { terminalMobile: true, panel: { ...args.panel, opened: false } },
+  globals: { viewport: { value: "mobile1", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const composer = canvasElement.querySelector(
+      'textarea[name="chat-message"]',
+    );
+    if (!(composer instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected the conversation composer.");
+    }
+    const draft = "Keep this draft while inspecting the session";
+    await userEvent.type(composer, draft);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Toggle session panel" }),
+    );
+    await userEvent.click(canvas.getByRole("tab", { name: "Services" }));
+    await expect(canvas.getByRole("tab", { name: "Services" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await userEvent.click(canvas.getByRole("tab", { name: "Context" }));
+    await expect(canvas.getByRole("tab", { name: "Context" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Close session panel" }),
+    );
+    await expect(composer).toBeVisible();
+    await expect(composer).toHaveValue(draft);
+  },
 } satisfies Story;
 
 export const RuntimePanel = {
