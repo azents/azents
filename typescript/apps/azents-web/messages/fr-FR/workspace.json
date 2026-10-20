@@ -1574,6 +1574,8 @@
       "popupClosed": "La fenêtre d’autorisation a été fermée. Réessayez.",
       "authorizationStartFailed": "Impossible de lancer l’autorisation. Réessayez.",
       "detach": "Dissocier",
+      "detachTitle": "Retirer le toolkit de cet agent",
+      "detachDescription": "Retirer {name} de cet agent ? Le toolkit partagé et ses identifiants resteront disponibles dans l’espace de travail.",
       "edit": "Modifier",
       "disable": "Désactiver",
       "enable": "Activer",

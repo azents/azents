@@ -1574,6 +1574,8 @@
       "popupClosed": "인증 창이 닫혔습니다. 다시 시도해 주세요.",
       "authorizationStartFailed": "인증을 시작하지 못했습니다. 다시 시도해 주세요.",
       "detach": "연결 해제",
+      "detachTitle": "이 에이전트에서 툴킷 제거",
+      "detachDescription": "이 에이전트에서 {name} 툴킷의 연결을 해제할까요? 공유 툴킷과 자격 증명은 워크스페이스에 그대로 남습니다.",
       "edit": "수정",
       "disable": "비활성화",
       "enable": "활성화",

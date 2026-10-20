@@ -1,5 +1,13 @@
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
+/** A successful removal closes its editor without disturbing a later editor. */
+export function removedToolkitEditor(
+  current: AgentToolkitEditorState,
+  submitted: AgentToolkitEditorState,
+): AgentToolkitEditorState {
+  return current === submitted ? { type: "CLOSED" } : current;
+}
+
 /** A write completes only the editor that submitted it. */
 export function completedToolkitEditor(
   current: AgentToolkitEditorState,

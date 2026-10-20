@@ -41,7 +41,6 @@ export interface ManagedToolkitCardProps {
   workspaceEditHref: string;
   onAuthorize: () => void;
   onDetails: () => void;
-  onDetach: () => void;
   onEdit: () => void;
   onToggle: () => void;
   onDelete: () => void;
@@ -165,6 +164,19 @@ export function ManagedToolkitCard(
             {t("catalog.details")}
           </Button>
           <AuthorizationAction {...props} />
+          <Button
+            variant="subtle"
+            color="red"
+            size="xs"
+            onClick={props.onDelete}
+            disabled={props.pending || props.authorizationPending}
+          >
+            {t(
+              props.item.ownership_scope === "workspace_shared"
+                ? "detach"
+                : "delete",
+            )}
+          </Button>
         </>
       }
     />
@@ -227,7 +239,7 @@ export function ToolkitConnectionDetails(
               variant="subtle"
               color="red"
               disabled={props.pending || props.authorizationPending}
-              onClick={props.onDetach}
+              onClick={props.onDelete}
             >
               {t("detach")}
             </Button>
@@ -341,11 +353,6 @@ export function ManagedAgentToolkitSectionView(
       workspaceEditHref: `/w/${props.handle}/toolkits/${item.toolkit.id}/edit`,
       onAuthorize: () => props.onAuthorize(item),
       onDetails: () => props.onDetails(item.toolkit.id),
-      onDetach: () => {
-        if (item.agent_toolkit_id) {
-          props.onDetach(item.agent_toolkit_id);
-        }
-      },
       onEdit: () => props.onEdit(item.toolkit.id),
       onToggle: () => props.onToggle(item),
       onDelete: () => props.onRequestDelete(item),
@@ -635,7 +642,15 @@ export function ManagedAgentToolkitSectionView(
       <Modal
         opened={props.deleteTarget != null}
         onClose={props.onCancelDelete}
-        title={t("toolkitManagement.deleteTitle")}
+        title={t(
+          props.deleteTarget?.ownership_scope === "workspace_shared"
+            ? "toolkitManagement.detachTitle"
+            : "toolkitManagement.deleteTitle",
+        )}
+        closeOnClickOutside={false}
+        closeOnEscape={!props.deletePending}
+        withCloseButton={!props.deletePending}
+        closeButtonProps={{ "aria-label": tWizard("close") }}
         centered
       >
         <Stack>
@@ -643,12 +658,19 @@ export function ManagedAgentToolkitSectionView(
             <Alert color="red">{props.mutationState.message}</Alert>
           )}
           <Text size="sm">
-            {t("toolkitManagement.deleteDescription", {
-              name: props.deleteTarget?.toolkit.name ?? "",
-            })}
+            {t(
+              props.deleteTarget?.ownership_scope === "workspace_shared"
+                ? "toolkitManagement.detachDescription"
+                : "toolkitManagement.deleteDescription",
+              { name: props.deleteTarget?.toolkit.name ?? "" },
+            )}
           </Text>
           <Group justify="flex-end">
-            <Button variant="default" onClick={props.onCancelDelete}>
+            <Button
+              variant="default"
+              onClick={props.onCancelDelete}
+              disabled={props.deletePending}
+            >
               {t("cancel")}
             </Button>
             <Button
@@ -656,7 +678,11 @@ export function ManagedAgentToolkitSectionView(
               loading={props.deletePending}
               onClick={props.onConfirmDelete}
             >
-              {t("toolkitManagement.deleteConfirm")}
+              {t(
+                props.deleteTarget?.ownership_scope === "workspace_shared"
+                  ? "toolkitManagement.detach"
+                  : "toolkitManagement.deleteConfirm",
+              )}
             </Button>
           </Group>
         </Stack>

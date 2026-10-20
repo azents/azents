@@ -31,6 +31,7 @@ import {
   completedToolkitEditor,
   decodeAgentToolkitOAuthCallback,
   projectAgentToolkitManagementState,
+  removedToolkitEditor,
 } from "../agentToolkitManagementState";
 import type {
   AgentToolkitEditorState,
@@ -75,7 +76,6 @@ export interface AgentToolkitManagementContainerOutput extends AgentToolkitManag
   onCreateAbandonReady?: (abandon: (() => void) | null) => void;
   onRetryRead: () => void;
   onAttach: (toolkitId: string) => void;
-  onDetach: (agentToolkitId: string) => void;
   onToggle: (item: AgentToolkitManagementItemResponse) => void;
   onRequestDelete: (item: AgentToolkitManagementItemResponse) => void;
   onCancelDelete: () => void;
@@ -100,6 +100,8 @@ export function useAgentToolkitManagementContainer({
   const abandonCreate = useRef<(() => void) | null>(null);
   const [deleteTarget, setDeleteTarget] =
     useState<AgentToolkitManagementItemResponse | null>(null);
+  const removalInFlight = useRef(false);
+  const removalEditor = useRef<AgentToolkitEditorState>(editor);
   const [authorizationPendingId, setAuthorizationPendingId] = useState<
     string | null
   >(null);
@@ -205,10 +207,18 @@ export function useAgentToolkitManagementContainer({
   const detachMutation = trpc.toolkit.detachFromAgent.useMutation({
     onSuccess: async () => {
       setMutationState({ type: "IDLE" });
+      setEditor((current) =>
+        removedToolkitEditor(current, removalEditor.current),
+      );
+      setDeleteTarget(null);
+      setGithubUserPopup(null);
       await invalidate();
     },
     onError: (error) =>
       setMutationState({ type: "ERROR", message: error.message }),
+    onSettled: () => {
+      removalInFlight.current = false;
+    },
   });
   const updateMutation = trpc.toolkit.updateAgentConfig.useMutation({
     onSuccess: async () => {
@@ -227,10 +237,15 @@ export function useAgentToolkitManagementContainer({
         utils.toolkit.githubUser.review.invalidate(),
         utils.toolkit.getAgentConfig.invalidate(),
       ]);
+      removalInFlight.current = false;
     },
     onSuccess: async () => {
       setMutationState({ type: "IDLE" });
+      setEditor((current) =>
+        removedToolkitEditor(current, removalEditor.current),
+      );
       setDeleteTarget(null);
+      setGithubUserPopup(null);
       await invalidate();
     },
     onError: (error) =>
@@ -382,7 +397,8 @@ export function useAgentToolkitManagementContainer({
       editor.type === "CREATE" && usesToolkitCreationWizard(editor.toolkitType);
     if (
       (newWizard ? createPublicationPending : setupPending) ||
-      attachMutation.isPending
+      attachMutation.isPending ||
+      removalInFlight.current
     ) {
       return;
     }
@@ -417,7 +433,7 @@ export function useAgentToolkitManagementContainer({
     attachPendingId: attachMutation.isPending
       ? attachMutation.variables.toolkitId
       : null,
-    deletePending: deleteMutation.isPending,
+    deletePending: deleteMutation.isPending || detachMutation.isPending,
     canAuthorizeShared,
     authorizationPendingId,
     githubUserPopup,
@@ -472,10 +488,6 @@ export function useAgentToolkitManagementContainer({
         });
       }
     },
-    onDetach: (agentToolkitId) => {
-      setMutationState({ type: "IDLE" });
-      detachMutation.mutate({ handle, agentId, agentToolkitId });
-    },
     onToggle: (item) => {
       setMutationState({ type: "IDLE" });
       updateMutation.mutate({
@@ -486,12 +498,34 @@ export function useAgentToolkitManagementContainer({
       });
     },
     onRequestDelete: (item) => {
+      if (removalInFlight.current || setupPending) {
+        return;
+      }
       setMutationState({ type: "IDLE" });
       setDeleteTarget(item);
     },
-    onCancelDelete: () => setDeleteTarget(null),
+    onCancelDelete: () => {
+      if (!removalInFlight.current) {
+        setDeleteTarget(null);
+        setMutationState({ type: "IDLE" });
+      }
+    },
     onConfirmDelete: () => {
-      if (deleteTarget) {
+      if (deleteTarget && !removalInFlight.current) {
+        removalEditor.current = editor;
+        if (deleteTarget.ownership_scope === "workspace_shared") {
+          if (deleteTarget.agent_toolkit_id) {
+            removalInFlight.current = true;
+            setMutationState({ type: "IDLE" });
+            detachMutation.mutate({
+              handle,
+              agentId,
+              agentToolkitId: deleteTarget.agent_toolkit_id,
+            });
+          }
+          return;
+        }
+        removalInFlight.current = true;
         setMutationState({ type: "IDLE" });
         deleteMutation.mutate({
           handle,
