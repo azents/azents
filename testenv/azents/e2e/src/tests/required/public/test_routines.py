@@ -306,13 +306,18 @@ def run_routine_journey(
     assert all(detail(item.slug).execution is None for item in definitions)
 
     def dispatch(now: str) -> None:
-        response = requests.post(
-            f"{azents_admin_server_url}/scheduler/v1/routines/dispatch",
-            json={"now": now},
-            timeout=30,
-        )
-        response.raise_for_status()
-        assert response.json()["enqueued"] == 1
+        barrier = openai_proxy_url + model.JUDGMENT_BARRIER_PATH
+        requests.post(barrier, timeout=10).raise_for_status()
+        try:
+            response = requests.post(
+                f"{azents_admin_server_url}/scheduler/v1/routines/dispatch",
+                json={"now": now},
+                timeout=30,
+            )
+            response.raise_for_status()
+            assert response.json()["enqueued"] == 1
+        finally:
+            requests.post(barrier + "/release", timeout=10).raise_for_status()
 
     def context() -> SessionContextResponse:
         response = requests.get(

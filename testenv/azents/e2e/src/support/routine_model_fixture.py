@@ -24,6 +24,7 @@ HOLD = "ROUTINE_E2E_HOLD_ORDINARY_TOOL"
 HOLD_DONE = "ROUTINE_E2E_HELD_TOOL_FINISHED"
 CHANNEL_SETUP = "ROUTINE_E2E_CHANNEL_SETUP"
 RUNTIME_BARRIER_PATH = "/v1/_routine_runtime_barrier"
+JUDGMENT_BARRIER_PATH = "/v1/_routine_judgment_barrier"
 HOLD_COMMAND = (
     'python -c "import urllib.request; '
     f"urllib.request.urlopen('http://openai-proxy:8081{RUNTIME_BARRIER_PATH}/wait',"
@@ -427,11 +428,7 @@ def plan(request: Request) -> Text | Call:
                 "next_hint": "The single local check is complete; do not repeat it.",
                 "notify": notify,
                 "message": "ROUTINE_E2E_NOTIFICATION" if notify else None,
-                "files": (
-                    ["/tmp/routine-e2e-proof.txt"]
-                    if notify and CHANNEL_SETUP not in request.prior_text
-                    else None
-                ),
+                "files": ["/tmp/routine-e2e-proof.txt"] if notify else None,
             },
         )
     return Text(f"resp_routine_e2e_settled_{execution}", "ROUTINE_E2E_TURN_SETTLED")
