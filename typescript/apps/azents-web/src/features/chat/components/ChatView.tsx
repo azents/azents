@@ -27,6 +27,7 @@ import {
 } from "./activityRowPresentation";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
+import classes from "./ChatView.module.css";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
 import { MessageBubble } from "./MessageBubble";
@@ -162,6 +163,8 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           position: "relative",
           overflow: "hidden",
           touchAction: "pinch-zoom",
+          "--chat-composer-top-inset": rem(composerOverlay.cardTopInset),
+          "--chat-composer-bottom-inset": rem(composerOverlay.cardBottomInset),
         }}
       >
         {/* message area */}
@@ -172,6 +175,10 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           viewportRef={viewportRef}
           overscrollBehavior={chatScrollOverscrollBehavior}
           viewportProps={chatScrollViewportProps}
+          classNames={{
+            viewport: classes.timelineViewport,
+            scrollbar: classes.timelineScrollbar,
+          }}
           styles={{ root: { minWidth: 0 }, viewport: { minWidth: 0 } }}
         >
           <Box

@@ -591,6 +591,116 @@ export const OverlayWithoutVisualViewport = {
   },
 } satisfies Story;
 
+export const FadeScrollbarDemo = {
+  ...MobileKeyboardDemo,
+  play: async ({ canvasElement }) => {
+    const column = canvasElement.querySelector("[data-chat-gesture-column]");
+    const input = canvasElement.querySelector('textarea[name="chat-message"]');
+    const card = canvasElement.querySelector("[data-chat-composer-card]");
+    const viewport = canvasElement.querySelector("[data-chat-scroll-viewport]");
+    if (
+      !(column instanceof HTMLElement) ||
+      !(card instanceof HTMLElement) ||
+      !(input instanceof HTMLTextAreaElement) ||
+      !(viewport instanceof HTMLElement)
+    ) {
+      throw new Error(
+        "Expected the chat column, composer card and vertical scrollbar.",
+      );
+    }
+    await userEvent.hover(
+      column.querySelector("[data-chat-scroll-viewport]") ?? column,
+    );
+    await waitFor(() =>
+      expect(
+        column.querySelector(
+          '.mantine-ScrollArea-scrollbar[data-orientation="vertical"]',
+        ),
+      ).not.toBeNull(),
+    );
+    const track = column.querySelector(
+      '.mantine-ScrollArea-scrollbar[data-orientation="vertical"]',
+    );
+    if (!(track instanceof HTMLElement)) {
+      throw new Error("Expected the mounted vertical scrollbar.");
+    }
+    await waitFor(() =>
+      expect(getComputedStyle(track).display).not.toBe("none"),
+    );
+    const assertBoundaries = async (): Promise<void> => {
+      await userEvent.hover(viewport);
+      await waitFor(() =>
+        expect(
+          Math.abs(
+            track.getBoundingClientRect().bottom -
+              card.getBoundingClientRect().top,
+          ),
+        ).toBeLessThan(1),
+      );
+      const probe = document.createElement("div");
+      probe.style.position = "absolute";
+      probe.style.visibility = "hidden";
+      column.append(probe);
+      try {
+        probe.style.height = "var(--chat-composer-top-inset)";
+        await expect(
+          Math.abs(
+            probe.getBoundingClientRect().height -
+              (column.getBoundingClientRect().bottom -
+                card.getBoundingClientRect().top),
+          ),
+        ).toBeLessThan(1);
+        probe.style.height = "var(--chat-composer-bottom-inset)";
+        await expect(
+          Math.abs(
+            probe.getBoundingClientRect().height -
+              (column.getBoundingClientRect().bottom -
+                card.getBoundingClientRect().bottom),
+          ),
+        ).toBeLessThan(1);
+      } finally {
+        probe.remove();
+      }
+    };
+    await assertBoundaries();
+    await expect(getComputedStyle(viewport).maskImage).toContain(
+      "linear-gradient",
+    );
+    await expect(getComputedStyle(card).maskImage).toBe("none");
+    await expect(getComputedStyle(track).maskImage).toBe("none");
+    const initialHeight = card.getBoundingClientRect().height;
+    await userEvent.clear(input);
+    await userEvent.type(
+      input,
+      "First line{Shift>}{Enter}{/Shift}Second line{Shift>}{Enter}{/Shift}Third line",
+    );
+    await waitFor(() =>
+      expect(card.getBoundingClientRect().height).toBeGreaterThan(
+        initialHeight,
+      ),
+    );
+    await assertBoundaries();
+    viewport.scrollTop = viewport.scrollHeight;
+    const last = viewport.querySelector("[data-chat-timeline-content]")
+      ?.lastElementChild?.lastElementChild;
+    if (!(last instanceof HTMLElement)) {
+      throw new Error("Expected the last conversation item.");
+    }
+    await waitFor(() =>
+      expect(last.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        card.getBoundingClientRect().top,
+      ),
+    );
+    await userEvent.clear(input);
+    await assertBoundaries();
+  },
+} satisfies Story;
+
+export const DesktopComposerFade = {
+  ...FadeScrollbarDemo,
+  args: { ...MobileKeyboardDemo.args, terminalMobile: false },
+} satisfies Story;
+
 export const ChatPanOwnership = {
   ...MobileKeyboardDemo,
   play: async ({ canvasElement }) => {

@@ -11,6 +11,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/components/AppLayout.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatComposerOverlay.ts
+  - typescript/apps/azents-web/src/features/chat/components/ChatView.module.css
   - typescript/apps/azents-web/src/features/chat/components/ChatTimelineItem.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatDetailPanel.tsx
   - typescript/apps/azents-web/src/features/chat/components/ActivityRow.tsx
@@ -560,6 +561,11 @@ the chat column's lower edge. The surrounding layer is transparent and lets poin
 gestures reach the timeline; the input card retains its own background and controls.
 The timeline reserves the measured composer height at its end so the final message can
 scroll above the input, including when multiline input or attachments change that height.
+The vertical timeline scrollbar ends at the input card's top edge without reducing
+the conversation's scroll viewport. Conversation items remain fully opaque above that
+edge and fade linearly to transparent at the card's bottom edge. This alpha mask affects
+only the timeline, not the composer or scrollbar. The track and mask boundaries follow
+the measured card height as multiline input, attachments or composer status change.
 The layout does not track `VisualViewport` or infer keyboard geometry. Draft screens
 retain their native bottom composer and independently scrollable setup content.
 
