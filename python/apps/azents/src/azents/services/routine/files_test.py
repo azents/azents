@@ -45,8 +45,12 @@ def subject() -> Subject:
 async def test_channel_files_use_authorized_existing_transfer() -> None:
     f = subject()
     f.transfers.prepare_outbound.return_value = ()
+    file = _make_exchange_file(filename="report.txt", size_bytes=5)
+    f.exchange.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=file)
+    )
     result = await f.service.prepare(
-        paths=["exchange://fixture"],
+        paths=[file.uri],
         binding_id="binding",
         execution_id="execution",
         authority=_authority(),
@@ -57,7 +61,7 @@ async def test_channel_files_use_authorized_existing_transfer() -> None:
         session_id=_authority().session_id,
         agent_id=_authority().agent_id,
         binding_id="binding",
-        paths=["exchange://fixture"],
+        paths=[file.uri],
         file_storage=None,
         authority=_authority(),
     )
@@ -113,8 +117,12 @@ async def test_invalid_sources_are_not_read(path: str) -> None:
         )
 
 
-async def test_failed_preparation_retry_can_publish_changed_file() -> None:
+@pytest.mark.parametrize("binding_id", [None, "binding"])
+async def test_failed_preparation_retry_can_publish_changed_file(
+    binding_id: str | None,
+) -> None:
     f = subject()
+    f.transfers.prepare_outbound.return_value = ()
     publish = AsyncMock()
     file = _make_exchange_file(filename="report.txt", size_bytes=5)
     publish.publish.return_value = file
@@ -132,7 +140,7 @@ async def test_failed_preparation_retry_can_publish_changed_file() -> None:
     with pytest.raises(ValueError, match="not found"):
         await f.service.prepare(
             paths=["/tmp/report.txt", "/tmp/missing.txt"],
-            binding_id=None,
+            binding_id=binding_id,
             execution_id="execution",
             authority=_authority(),
             runtime=runtime,
@@ -144,7 +152,7 @@ async def test_failed_preparation_retry_can_publish_changed_file() -> None:
     storage.add_file("/tmp/missing.txt", b"fixed")
     second = await f.service.prepare(
         paths=["/tmp/report.txt", "/tmp/missing.txt"],
-        binding_id=None,
+        binding_id=binding_id,
         execution_id="execution",
         authority=_authority(),
         runtime=runtime,
@@ -152,4 +160,16 @@ async def test_failed_preparation_retry_can_publish_changed_file() -> None:
     retried = publish.publish.call_args_list[1].args[0]
     assert retried.expected_size == len(b"changed bytes")
     assert retried.publication_id != request.publication_id
-    assert len(second.attachments) == 2
+    if binding_id is None:
+        assert len(second.attachments) == 2
+        f.transfers.prepare_outbound.assert_not_awaited()
+    else:
+        assert second.attachments == ()
+        f.transfers.prepare_outbound.assert_awaited_once_with(
+            session_id=_authority().session_id,
+            agent_id=_authority().agent_id,
+            binding_id=binding_id,
+            paths=[file.uri, file.uri],
+            file_storage=None,
+            authority=_authority(),
+        )

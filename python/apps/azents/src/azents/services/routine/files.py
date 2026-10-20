@@ -45,18 +45,6 @@ class RoutineFileService:
         runtime: RuntimeInstructionContext | None,
     ) -> RoutineNotificationFiles:
         """Validate all requested sources before canonical completion."""
-        if binding_id is not None:
-            manifests = await self.transfers.prepare_outbound(
-                session_id=authority.session_id,
-                agent_id=authority.agent_id,
-                binding_id=binding_id,
-                paths=paths,
-                file_storage=None if runtime is None else runtime.file_storage,
-                authority=authority,
-            )
-            return RoutineNotificationFiles(
-                binding_id=binding_id, manifests=manifests, attachments=()
-            )
         attachments: list[Attachment] = []
         for path in paths:
             if path.startswith("exchange://"):
@@ -121,6 +109,18 @@ class RoutineFileService:
                     source="record_routine_result",
                 )
             )
+        if binding_id is None:
+            return RoutineNotificationFiles(
+                binding_id=None, manifests=(), attachments=tuple(attachments)
+            )
+        manifests = await self.transfers.prepare_outbound(
+            session_id=authority.session_id,
+            agent_id=authority.agent_id,
+            binding_id=binding_id,
+            paths=[attachment.uri for attachment in attachments],
+            file_storage=None,
+            authority=authority,
+        )
         return RoutineNotificationFiles(
-            binding_id=None, manifests=(), attachments=tuple(attachments)
+            binding_id=binding_id, manifests=manifests, attachments=()
         )

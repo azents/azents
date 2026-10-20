@@ -167,6 +167,9 @@ is a post-commit, one-attempt effect with separate observation; uncertain or fai
 publication is not an automatic retry queue. Objective outcome, record success
 and delivery status remain distinct. Files are prepared with existing Runtime
 transfer/Exchange authority before completion, outside database transactions.
+Runtime sources are first published as verified Exchange objects for both
+destinations; external uploads consume those authorized immutable sources rather
+than holding a Runtime transfer open through provider completion.
 Preparation failure leaves work incomplete. File-bearing delivery is pinned to
 the observed Primary (including its absence) and rejects a destination change.
 Channel notifications use existing outbound file manifests; Session chat

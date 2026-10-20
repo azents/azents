@@ -382,12 +382,32 @@ def run_routine_journey(
             return None
         return snapshots if _live_idle(**common) else None
 
-    snapshots = wait_until(
-        completed,
-        timeout=120,
-        interval=0.5,
-        message="Independent Routine records and continuation did not finish",
-    )
+    try:
+        snapshots = wait_until(
+            completed,
+            timeout=120,
+            interval=0.5,
+            message="Independent Routine records and continuation did not finish",
+        )
+    except TimeoutError:
+        _write_evidence(
+            setup.session_id,
+            "completion-timeout",
+            {
+                "snapshots": [
+                    detail(item.slug).model_dump(mode="json") for item in definitions
+                ],
+                "idle": _live_idle(**common),
+                "tool_results": [
+                    ToolResultObservation.model_validate(item.payload).model_dump(
+                        mode="json"
+                    )
+                    for item in _history(**common).items
+                    if item.kind == "client_tool_result"
+                ],
+            },
+        )
+        raise
     assert snapshots is not None
     by_title = {item.routine.content.title: item for item in snapshots}
     alpha, beta = by_title["ROUTINE_E2E Alpha"], by_title["ROUTINE_E2E Beta"]
