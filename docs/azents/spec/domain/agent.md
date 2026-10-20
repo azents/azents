@@ -699,6 +699,12 @@ current-generation Runtime terminal-delete acknowledgement before finalization. 
 remains a content-free tombstone; no public immediate-delete or request-specific purge-deadline
 path exists.
 
+Runtime recreation operation items retain the Runtime ID as immutable historical target
+evidence, not a foreign-key ownership claim on the live Runtime row. Terminal Runtime
+deletion and Agent finalization preserve those items, operation counters, and other
+Agents' targets. A recreation worker encountering an already deleted Runtime completes
+the item as failed with `runtime_not_found`, without dispatching Runtime work.
+
 Scheduler claim, phase/retry updates, root retirement, direct-root cleanup
 preparation and finalization finish in complete repository-owned database
 operations. Root and Runtime resource-binding descriptions use native read-only
