@@ -90,7 +90,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/packages/azents-session-core/src/toolActivityPresentation.ts
-last_verified_at: 2026-10-15
+last_verified_at: 2026-10-20
 spec_version: 61
 ---
 
@@ -176,6 +176,12 @@ publication identity, and cleanup responsibility; it never persists the signed c
 Prepare and finalize remain uploader/Agent-authorized; root/session claiming occurs at
 input acceptance rather than upload preparation. Repeated finalize recovers the same
 publication, including uncertain metadata commits, rather than publishing twice.
+Agent-owned preparation and final publication serialize with the canonical active-Agent
+row under the [deletion read-only contract](../domain/agent-deletion.md#public-status-and-read-only-admission).
+If deletion begins after external upload/copy, final attachment is rejected with the
+safe lifecycle conflict and no new ExchangeFile or preview attaches. The existing
+upload-operation cleanup identity remains responsible for abandoned external targets;
+this does not promise atomic object-store rollback or disable native deletion cleanup.
 The finalized-publication observer uses an ordinary read-only scope without upload
 or Agent row locks. It retains exact uploader, Agent/Workspace membership,
 publication identity, manifest, availability, expiry and blob-deletion checks;

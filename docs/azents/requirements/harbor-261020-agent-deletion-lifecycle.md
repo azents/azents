@@ -1,6 +1,7 @@
 ---
 title: "Testable Agent Deletion Lifecycle Requirements"
 created: 2026-10-20
+implemented: 2026-10-20
 tags: [agent, lifecycle, backend, testing]
 document_role: primary
 document_type: requirements
@@ -194,5 +195,5 @@ an error.
 The requester confirmed requirements REQ-1 through REQ-7 on 2026-10-20 (KST),
 before ADR decisions and implementation of the lifecycle abstraction began.
 The requester accepted the existing design direction and explicitly added REQ-8 and
-REQ-9 on 2026-10-20 (KST). The updated complete Design will be presented for final
-confirmation; no new product decision is inferred beyond those requested outcomes.
+REQ-9 on 2026-10-20 (KST), then approved the complete revision-2 Design and requested
+implementation the same day. No additional product outcome was inferred.

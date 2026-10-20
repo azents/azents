@@ -1,6 +1,7 @@
 ---
 title: "Testable Agent Deletion Lifecycle Design"
 created: 2026-10-20
+implemented: 2026-10-20
 tags: [agent, lifecycle, backend, testing]
 document_role: primary
 document_type: design
@@ -11,7 +12,8 @@ snapshot_id: harbor-261020
 
 - Requirements: `harbor-261020/REQ-1` through `REQ-9`, requester-confirmed.
 - Technical decisions: `harbor-261020/ADR-D1` through `ADR-D4`, delegated.
-- Implementation state: approved for implementation; implementation is not yet verified.
+- Implementation state: implemented and locally verified; current behavior is recorded
+  in the Agent deletion Living Spec. Merge and production rollout are separate actions.
 - Revision 2 adds the requested deleting/error labels and read-only behavior to the
   previously endorsed lifecycle design.
 

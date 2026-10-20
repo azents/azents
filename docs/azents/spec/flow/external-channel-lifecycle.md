@@ -66,7 +66,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-19
+last_verified_at: 2026-10-20
 spec_version: 52
 ---
 
@@ -83,6 +83,15 @@ outside active database transactions. Single-connection disconnect retains two
 separate durable stages: beginning DISCONNECTING, then completing lifecycle cleanup
 and terminal state. A second-stage failure does not undo the first committed stage.
 Provider terminal controls run only after both stages finish successfully.
+
+User-originated Agent-owned management also follows the
+[Agent deletion read-only boundary](../domain/agent-deletion.md#public-status-and-read-only-admission).
+Single App configuration and Slack/Discord validation or activation derive ownership
+from persisted mode/route state and acquire the active-Agent fence before child writes
+and final publication. Shared Multi App configuration is not disabled by deletion of
+one routed Agent. A Discord activation denied at final publication clears its exact
+provisional callback before propagating the lifecycle conflict. Native disconnect,
+Gateway reconciliation and deletion cleanup retain their explicit lifecycle authority.
 
 Binding termination atomically clears that Binding's Session Primary reference.
 Because archive locks Session before Binding while terminal management can already
