@@ -17,6 +17,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/session_lifecycle_schema.py
   - python/apps/azents/src/azents/repos/agent_mutation_guard.py
+  - python/apps/azents/src/azents/core/agent_mutation.py
+  - python/apps/azents/src/azents/rdb/models/agent_decommission.py
+  - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/external_channel/agent_mutation.py
   - python/apps/azents/src/azents/api/agent_mutation_errors.py
   - python/apps/azents/src/azents/services/agent/**
   - typescript/apps/azents-web/src/shared/agent-session/AgentDeletionStatus.tsx
@@ -97,6 +101,14 @@ Native Terminal/Browser authorities continue to reject decommissioning Agents an
 not restore deleted Runtime resources merely to render an inspection view.
 Workspace-owned connections and personal Toolkit configuration remain independently
 manageable; adding Agent-scoped associations still requires an active Agent.
+
+Single App channel configuration, Slack validation and Discord activation derive
+their Agent scope from the persisted App mode and route, and fence both preparation
+and final health/callback publication. Workspace-owned Multi App configuration remains
+separate. If Discord final activation loses Agent authority after provider setup, the
+existing exact credential/generation/selector cleanup removes the provisional callback
+before the original lifecycle denial is re-raised; the denial is not a new provider
+failure diagnostic. Native Gateway and canonical deletion cleanup keep their authority.
 
 Web cards, sidebar rows and desktop/mobile shared headers show a localized Deleting or
 Deletion error badge in preference to operational enabled/disabled labels. The stored
