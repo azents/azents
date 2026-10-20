@@ -115,9 +115,16 @@ const updateSchema = identitySchema.extend({
   changes: changesSchema,
 });
 const executionInputSchema = identitySchema.extend({ execution_id: nonblank });
-const recordInputSchema = executionInputSchema.extend({
-  work: routineWorkSchema,
-});
+const recordInputSchema = executionInputSchema
+  .extend({
+    ...routineWorkSchema.shape,
+    files: z.array(nonblank).min(1).max(20).nullable(),
+  })
+  .refine((value) =>
+    value.notify
+      ? value.message !== null && value.message.trim().length > 0
+      : value.message === null && value.files === null,
+  );
 
 export type RoutineToolAction =
   | "createRoutine"
@@ -243,7 +250,13 @@ function requestFor(
             type: "recordRoutineResult",
             slug: input.data.slug,
             executionId: input.data.execution_id,
-            work: input.data.work,
+            work: {
+              objective_outcome: input.data.objective_outcome,
+              result: input.data.result,
+              next_hint: input.data.next_hint,
+              notify: input.data.notify,
+              message: input.data.message,
+            },
           }
         : null;
     }

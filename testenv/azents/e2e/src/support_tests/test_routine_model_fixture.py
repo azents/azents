@@ -118,12 +118,15 @@ def test_work_runs_runtime_then_completes_only_one_admitted_occurrence() -> None
     result = fixture.plan(request)
     assert isinstance(result, fixture.Call) and result.name == "record_routine_result"
     assert result.arguments["execution_id"] == "execution-Alpha"
-    assert result.arguments["work"] == {
+    assert result.arguments == {
+        "slug": "Alpha",
+        "execution_id": "execution-Alpha",
         "objective_outcome": "finished",
         "result": "ROUTINE_E2E_RESULT_Alpha",
         "next_hint": "The single local check is complete; do not repeat it.",
         "notify": False,
         "message": None,
+        "files": None,
     }
     final = fixture.plan(_request(text, completed=(command.call_id, result.call_id)))
     assert isinstance(final, fixture.Text)
@@ -140,12 +143,15 @@ def test_work_runs_runtime_then_completes_only_one_admitted_occurrence() -> None
     assert isinstance(second_command, fixture.Call)
     second = fixture.plan(_request(continuation, completed=(second_command.call_id,)))
     assert isinstance(second, fixture.Call)
-    assert second.arguments["work"] == {
+    assert second.arguments == {
+        "slug": "Beta",
+        "execution_id": "execution-Beta",
         "objective_outcome": "failed",
         "result": "ROUTINE_E2E_RESULT_Beta",
         "next_hint": "The single local check is complete; do not repeat it.",
         "notify": True,
         "message": "ROUTINE_E2E_NOTIFICATION",
+        "files": ["/tmp/routine-e2e-proof.txt"],
     }
 
 

@@ -68,6 +68,7 @@ from azents.services.github_platform_system_setting.runtime import (
 from azents.services.github_user_oauth.runtime import GitHubUserRuntimeService
 from azents.services.google_oauth.runtime import GoogleRuntimeService
 from azents.services.memory_vfs import MemoryVfsReadBackend
+from azents.services.routine.files import RoutineFileService
 from azents.services.routine.notification import RoutineNotificationService
 from azents.services.runtime_web.service import (
     RuntimeWebService,
@@ -175,10 +176,14 @@ def get_routine_toolkit_provider(
     operations: Annotated[RoutineOperations, Depends()],
     completion: Annotated[RoutineCompletionRepository, Depends()],
     notifications: Annotated[RoutineNotificationService, Depends()],
+    files: Annotated[RoutineFileService, Depends()],
 ) -> RoutineToolkitProvider:
     """Wire exact root Routine operations and immediate post-commit delivery."""
     return RoutineToolkitProvider(
-        operations=operations, completion=completion, notifications=notifications
+        operations=operations,
+        completion=completion,
+        notifications=notifications,
+        files=files,
     )
 
 
