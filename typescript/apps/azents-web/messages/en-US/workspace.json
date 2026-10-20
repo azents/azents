@@ -1571,6 +1571,8 @@
       "popupClosed": "The authorization window was closed. Try again.",
       "authorizationStartFailed": "Could not start authorization. Try again.",
       "detach": "Detach",
+      "detachTitle": "Remove toolkit from this agent",
+      "detachDescription": "Remove {name} from this agent? The shared toolkit and its credentials will remain available in the workspace.",
       "edit": "Edit",
       "disable": "Disable",
       "enable": "Enable",

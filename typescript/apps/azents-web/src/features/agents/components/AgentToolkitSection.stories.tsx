@@ -48,7 +48,6 @@ const meta = {
     workspaceEditHref: "/w/acme/toolkits/toolkit-1/edit",
     onAuthorize: fn(),
     onDetails: fn(),
-    onDetach: () => {},
     onEdit: () => {},
     onToggle: () => {},
     onDelete: () => {},

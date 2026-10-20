@@ -1571,6 +1571,8 @@
       "popupClosed": "認証ウィンドウが閉じられました。もう一度お試しください。",
       "authorizationStartFailed": "認証を開始できませんでした。もう一度お試しください。",
       "detach": "接続解除",
+      "detachTitle": "このエージェントからツールキットを削除",
+      "detachDescription": "このエージェントから {name} の接続を解除しますか？共有ツールキットと認証情報はワークスペースに残ります。",
       "edit": "編集",
       "disable": "無効化",
       "enable": "有効化",
