@@ -41,6 +41,9 @@ function detailRecord(body: unknown): Record<string, unknown> | null {
 
 function detailCode(detail: Record<string, unknown> | null): string | null {
   const code = detail?.code;
+  if (code === "agent_decommissioning") {
+    return code;
+  }
   if (
     typeof code === "string" &&
     code.startsWith("automatic_session_projects_")
@@ -133,6 +136,16 @@ export function mapExpectedError(
   expected: Partial<Record<number, TRPCErrorCode>>,
 ): unknown {
   if (error instanceof ApiError) {
+    if (
+      error.status === 409 &&
+      detailCode(detailRecord(error.body)) === "agent_decommissioning"
+    ) {
+      return new TRPCError({
+        code: "CONFLICT",
+        message: error.message,
+        cause: error,
+      });
+    }
     const code = expected[error.status];
     if (code) {
       return new TRPCError({ code, message: error.message, cause: error });

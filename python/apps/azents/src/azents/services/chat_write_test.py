@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import NamedTuple
-from unittest.mock import create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 import sqlalchemy as sa
@@ -100,26 +100,26 @@ from azents.testing.routine import make_test_routine_execution
 @asynccontextmanager
 async def _session_manager_double() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder DB session for service-double tests."""
-    async with AsyncSession() as _raw_session:
-        session = ReadWriteSession(_raw_session)
-        yield session
+    raw = AsyncMock(spec=AsyncSession)
+    raw.scalar.return_value = AgentLifecycleStatus.ACTIVE
+    yield ReadWriteSession(raw)
 
 
 class _SubagentLockRepository(AgentSessionRepository):
-    """AgentSessionRepository double returning a locked subagent session."""
+    """Reject a subagent during authorization before mutation locks."""
 
     def __init__(self, calls: list[str]) -> None:
         """Store call log."""
         self.calls = calls
 
-    async def lock_by_id(
+    async def get_by_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
-        """Return a subagent AgentSession for idle-control lock attempts."""
+        """Return a subagent AgentSession for idle-control admission."""
         del session
-        self.calls.append("lock_by_id")
+        self.calls.append("get_by_id")
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
             owner_generation=0,
@@ -1090,7 +1090,8 @@ class TestChatWriteService:
         assert edit.mailbox_item is None
         assert retry.request.created is False
         assert retry.failed_event_id == "failed-event-1"
-        assert command_users.calls == edit_users.calls == retry_users.calls == 1
+        # Authorize before the parent lock and recheck after acquiring Session locks.
+        assert command_users.calls == edit_users.calls == retry_users.calls == 2
         assert command_writes.lookup_calls == edit_writes.lookup_calls == 1
         assert retry_writes.lookup_calls == 1
 
@@ -1173,7 +1174,7 @@ class TestChatWriteService:
             assert str(exc) == "Subagent sessions are read-only"
         else:
             raise AssertionError("Expected ValueError")
-        assert calls == ["lock_by_id"]
+        assert calls == ["get_by_id"]
 
     async def test_idempotency_record_for_another_session_is_rejected(
         self,

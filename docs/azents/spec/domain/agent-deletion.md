@@ -16,6 +16,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_decommission_operations.py
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/session_lifecycle_schema.py
+  - python/apps/azents/src/azents/repos/agent_mutation_guard.py
+  - python/apps/azents/src/azents/api/agent_mutation_errors.py
+  - python/apps/azents/src/azents/services/agent/**
+  - typescript/apps/azents-web/src/shared/agent-session/AgentDeletionStatus.tsx
+  - typescript/apps/azents-web/src/shared/agent-session/useAgentLifecycle.ts
 last_verified_at: 2026-10-20
 spec_version: 1
 ---
@@ -64,6 +69,44 @@ participant/phase attribution and the original exception for the scheduler's sin
 External Channel canonical terminal state remains required; native provider leave/Tracker effects
 remain best-effort and may not be replayable after a crash.
 
+## Public Status and Read-only Admission
+
+Authorized Agent list/detail responses include required nullable `deletion_status`.
+Active Agents project null. Decommissioning Agents project `deleting` when their job
+has no unresolved failure evidence, and `deletion_error` when a failure boundary,
+retained diagnostic, or required-job absence is observed. List projection batches the
+visible Agent IDs; this field contains no job ID, participant key, provider data or
+raw exception text. An error indicator does not authorize edits or manual recovery.
+
+User-write operations serialize their final durable change with decommission admission
+on the canonical Agent row. The shared repository guard locks and checks lifecycle
+inside the owning transaction after existing scope/permission checks. Its safe public
+conflict is HTTP 409 with code `agent_decommissioning`; a disappeared authorized target
+is 404. Settings, administrators, avatars, saved memory, Project policy/catalog,
+environment selections, Toolkit attachment/configuration, OAuth publication, uploads,
+Runtime commands and Session user controls integrate this policy at their owning write
+boundary. Parent-before-child locking also protects new root Sessions and Routine
+definition changes. Native cleanup, provider reconciliation and safety Stop operations
+retain their own explicit authority.
+
+Workspace inspection stays separate from new Runtime-work admission. Admission closes
+its database transaction before external Runtime/provider/object-store I/O. Already
+admitted external work can overlap deletion; this is not a provider rollback guarantee.
+Upload and OAuth final publication revalidate lifecycle before attaching new state.
+Native Terminal/Browser authorities continue to reject decommissioning Agents and do
+not restore deleted Runtime resources merely to render an inspection view.
+Workspace-owned connections and personal Toolkit configuration remain independently
+manageable; adding Agent-scoped associations still requires an active Agent.
+
+Web cards, sidebar rows and desktop/mobile shared headers show a localized Deleting or
+Deletion error badge in preference to operational enabled/disabled labels. The stored
+enabled setting is unchanged. Mutation controls become unavailable while inspection,
+search, pagination, links and navigation remain usable. There are no new retry/cancel/
+force-delete controls. Visible deletion projections refetch at bounded five-second
+intervals and on focus; background polling is disabled. Final detail 404 returns to the
+Agent directory. A stale-write conflict preserves read-only cache evidence while
+invalidating Agent queries, rather than making the Agent editable on a failed refresh.
+
 ## Root and Non-FK Structures
 
 - `agents`: primary key `id`; Workspace membership and lifecycle status define the root authority.
@@ -73,6 +116,12 @@ remain best-effort and may not be replayable after a crash.
 - `agent_decommission_jobs`: primary key `id`, unique `agent_id`; its Agent and Workspace IDs are
   scalar tombstone identity rather than root-owning foreign keys. Status, attempt count, lease owner,
   lease expiry, retry time, bounded error fields and timestamps survive Agent removal.
+  Nullable `failure_boundary_key` records the first unresolved participant/phase obligation;
+  it is a scalar diagnostic attribution, not a foreign key or execution checkpoint. Claim/reclaim
+  and typed normal waits preserve it and the diagnostics. Only fenced successful replay of that
+  exact responsibility clears both; unattributed previous diagnostics remain until complete root
+  finalization. The scheduler owns writes; finalization clears error fields atomically with the
+  completed tombstone.
 - `runtime_recreation_operations` / `runtime_recreation_operation_items`: operation/item IDs and
   unique `(operation_id, runtime_id)` preserve historical outcomes and counters. Item `runtime_id`
   is scalar historical evidence after the emergency migration; it does not block Runtime deletion.

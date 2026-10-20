@@ -28,6 +28,9 @@ class AgentDecommissionJob(BaseModel):
         default=None,
         description="Scheduled retry time",
     )
+    failure_boundary_key: str | None = Field(
+        description="First unresolved cleanup responsibility; not a progress checkpoint"
+    )
     last_error_kind: str | None = Field(default=None, description="Last error kind")
     last_error_summary: str | None = Field(
         default=None,

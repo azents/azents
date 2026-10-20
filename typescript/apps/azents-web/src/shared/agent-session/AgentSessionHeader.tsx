@@ -25,6 +25,7 @@ import {
 import { useTranslations } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { AgentAvatar } from "./AgentAvatar";
+import { AgentDeletionBadge, AgentDeletionNotice } from "./AgentDeletionStatus";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShellMobileNav";
 import type {
   AgentResponse,
@@ -127,7 +128,7 @@ export function AgentSessionHeader({
             label={t("sessions.renameLabel")}
             value={editingTitle}
             maxLength={200}
-            disabled={renameBusy}
+            disabled={renameBusy || agent.deletion_status !== null}
             onChange={(event) => setEditingTitle(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && editingTitle.trim()) {
@@ -141,7 +142,9 @@ export function AgentSessionHeader({
               variant="subtle"
               color="red"
               leftSection={<IconTrash size={rem(16)} />}
-              disabled={renameBusy || !session.title}
+              disabled={
+                renameBusy || !session.title || agent.deletion_status !== null
+              }
               onClick={() => void handleClearTitle()}
             >
               {t("sessions.clearTitle")}
@@ -152,7 +155,9 @@ export function AgentSessionHeader({
               </Button>
               <Button
                 loading={renameBusy}
-                disabled={!editingTitle.trim()}
+                disabled={
+                  !editingTitle.trim() || agent.deletion_status !== null
+                }
                 onClick={() => void handleSubmitRename()}
               >
                 {t("sessions.save")}
@@ -181,10 +186,12 @@ export function AgentSessionHeader({
             <Text fw={600} size="md" truncate>
               {sessionTitle}
             </Text>
+            <AgentDeletionBadge status={agent.deletion_status} />
             <ActionIcon
               variant="subtle"
               size="sm"
               onClick={handleOpenRename}
+              disabled={agent.deletion_status !== null}
               aria-label={t("sessions.rename")}
               style={{ flexShrink: 0 }}
             >
@@ -228,10 +235,12 @@ export function AgentSessionHeader({
             <Text fw={600} size="sm" truncate style={{ minWidth: 0 }}>
               {sessionTitle}
             </Text>
+            <AgentDeletionBadge status={agent.deletion_status} />
             <ActionIcon
               variant="subtle"
               size="sm"
               onClick={handleOpenRename}
+              disabled={agent.deletion_status !== null}
               aria-label={t("sessions.rename")}
               style={{ flexShrink: 0 }}
             >
@@ -250,6 +259,7 @@ export function AgentSessionHeader({
             </ActionIcon>
           </Group>
         </Group>
+        <AgentDeletionNotice status={agent.deletion_status} />
       </Box>
     </>
   );

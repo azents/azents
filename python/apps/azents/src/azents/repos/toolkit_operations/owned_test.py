@@ -25,6 +25,7 @@ from azents.repos.toolkit_operations.owned import AgentToolkitOperationsReposito
 async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> None:
     """Lock Toolkit then Agent before updating and reallocating the namespace."""
     _raw_session = AsyncMock(spec=AsyncSession)
+    _raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     session = ReadWriteSession(_raw_session)
     active = False
     events: list[str] = []
@@ -123,6 +124,7 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
 async def test_owned_blank_slug_reset_uses_locked_current_name() -> None:
     """Derive an Agent-owned reset Slug from the locked Toolkit Name."""
     _raw_session = AsyncMock(spec=AsyncSession)
+    _raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     session = ReadWriteSession(_raw_session)
 
     @asynccontextmanager

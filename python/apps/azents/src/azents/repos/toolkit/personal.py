@@ -26,6 +26,7 @@ from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import (
     PersonalToolkitConfig,
@@ -301,6 +302,8 @@ class PersonalToolkitRepository(ToolkitRepository):
                     )
                 )
             if additions:
+                for agent_id in sorted(additions):
+                    await require_active_agent(session, agent_id=agent_id)
                 await session.write_session.execute(
                     insert(RDBPersonalToolkitAgent)
                     .values(

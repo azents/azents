@@ -16,6 +16,7 @@ from azents.core.agent import (
     SubagentSettings,
 )
 from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
+from azents.core.agent_deletion import AgentDeletionStatus
 from azents.core.enums import AgentRuntimeCapability, AgentType
 from azents.core.historical_memory_settings import (
     HistoricalMemorySettingsScope,
@@ -100,6 +101,7 @@ class AgentResponse(BaseModel):
     model_parameters: ModelParameters | None
     system_prompt: str | None
     enabled: bool
+    deletion_status: AgentDeletionStatus | None
     type: AgentType
     runtime_profile_id: str | None
     runtime_profile_selection_version: int
@@ -171,6 +173,7 @@ class AgentResponse(BaseModel):
             model_parameters=data.model_parameters,
             system_prompt=data.system_prompt,
             enabled=data.enabled,
+            deletion_status=data.deletion_status,
             type=data.type,
             runtime_profile_id=data.runtime_profile_id,
             runtime_profile_selection_version=(data.runtime_profile_selection_version),

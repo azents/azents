@@ -83,6 +83,9 @@ function managerHarness(
     "useAgentToolkitManagementContainer",
     {
       react: harness.react,
+      "@/shared/agent-session/useAgentLifecycle": {
+        useAgentLifecycle: () => ({ readOnly: false }),
+      },
       "@mantine/hooks": store.mantine,
       "next-intl": { useTranslations: translations },
       "@/shared/toolkits/google-resume": googleResume,

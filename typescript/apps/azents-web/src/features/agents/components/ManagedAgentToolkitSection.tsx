@@ -34,6 +34,7 @@ import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
 
 export interface ManagedToolkitCardProps {
+  readOnly: boolean;
   item: AgentToolkitManagementItemResponse;
   pending: boolean;
   canAuthorizeShared: boolean;
@@ -102,6 +103,7 @@ function ToolkitBadges({
 }
 
 function AuthorizationAction({
+  readOnly,
   item,
   pending,
   authorizationPending,
@@ -112,6 +114,7 @@ function AuthorizationAction({
 }: ManagedToolkitCardProps): React.ReactElement | null {
   const t = useTranslations("workspace.agents.toolkitManagement");
   if (
+    readOnly ||
     item.readiness !== "authorization_required" ||
     (item.ownership_scope === "workspace_shared" && !canAuthorizeShared)
   ) {
@@ -169,7 +172,9 @@ export function ManagedToolkitCard(
             color="red"
             size="xs"
             onClick={props.onDelete}
-            disabled={props.pending || props.authorizationPending}
+            disabled={
+              props.readOnly || props.pending || props.authorizationPending
+            }
           >
             {t(
               props.item.ownership_scope === "workspace_shared"
@@ -238,7 +243,9 @@ export function ToolkitConnectionDetails(
             <Button
               variant="subtle"
               color="red"
-              disabled={props.pending || props.authorizationPending}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
               onClick={props.onDelete}
             >
               {t("detach")}
@@ -248,14 +255,18 @@ export function ToolkitConnectionDetails(
           <>
             <Button
               variant="default"
-              disabled={props.pending || props.authorizationPending}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
               onClick={props.onEdit}
             >
               {t("edit")}
             </Button>
             <Button
               variant="default"
-              disabled={props.pending || props.authorizationPending}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
               onClick={props.onToggle}
             >
               {t(props.item.toolkit.enabled ? "disable" : "enable")}
@@ -263,7 +274,9 @@ export function ToolkitConnectionDetails(
             <Button
               variant="subtle"
               color="red"
-              disabled={props.pending || props.authorizationPending}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
               onClick={props.onDelete}
             >
               {t("delete")}
@@ -347,6 +360,7 @@ export function ManagedAgentToolkitSectionView(
   ): ManagedToolkitCardProps {
     return {
       item,
+      readOnly: props.readOnly,
       pending: props.pending || props.setupPending,
       canAuthorizeShared: props.canAuthorizeShared,
       authorizationPending: props.authorizationPendingId === item.toolkit.id,
@@ -357,6 +371,7 @@ export function ManagedAgentToolkitSectionView(
       onToggle: () => props.onToggle(item),
       onDelete: () => props.onRequestDelete(item),
       userConnectionView:
+        !props.readOnly &&
         item.toolkit.toolkit_type === "github" &&
         projectGitHubUserMode(item.toolkit.config) &&
         (item.ownership_scope === "agent_only" || props.canAuthorizeShared) &&
@@ -405,7 +420,7 @@ export function ManagedAgentToolkitSectionView(
         <Button
           size="xs"
           leftSection={<IconPlus size={14} />}
-          disabled={state.type !== "READY"}
+          disabled={props.readOnly || state.type !== "READY"}
           onClick={props.onStartAdd}
         >
           {t("toolkitManagement.addToolkit")}
@@ -640,7 +655,7 @@ export function ManagedAgentToolkitSectionView(
         </Stack>
       </Modal>
       <Modal
-        opened={props.deleteTarget != null}
+        opened={!props.readOnly && props.deleteTarget != null}
         onClose={props.onCancelDelete}
         title={t(
           props.deleteTarget?.ownership_scope === "workspace_shared"

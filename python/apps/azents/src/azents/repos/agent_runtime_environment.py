@@ -32,6 +32,7 @@ from azents.rdb.models.workspace_environment import (
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 
 
 @dataclasses.dataclass(frozen=True)
@@ -66,7 +67,7 @@ class AgentRuntimeEnvironmentRepository:
         role: WorkspaceUserRole,
         manage: bool,
     ) -> Result[bool, RuntimeEnvironmentAccessError]:
-        if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+        if agent is None:
             return Failure(RuntimeEnvironmentAccessError.NOT_FOUND)
         if agent.workspace_id != workspace_id:
             return Failure(RuntimeEnvironmentAccessError.NOT_FOUND)
@@ -147,6 +148,7 @@ class AgentRuntimeEnvironmentRepository:
             if isinstance(access, Failure):
                 return access
             assert agent is not None
+            await require_active_agent(session, agent_id=agent_id)
             desired = merge_runtime_environment(
                 self._decode(agent.encrypted_runtime_environment), edits
             )

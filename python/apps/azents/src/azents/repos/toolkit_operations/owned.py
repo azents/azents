@@ -7,7 +7,7 @@ from typing import Annotated, assert_never
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
-from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.enums import WorkspaceUserRole
 from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.github_user_oauth import GitHubUserRevocation
 from azents.core.toolkit_errors import NotFound
@@ -18,6 +18,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
@@ -189,6 +190,7 @@ class AgentToolkitOperationsRepository:
                 )
                 if error is not None:
                     return Failure(error)
+            await require_active_agent(session, agent_id=agent_id)
             toolkit = await self.toolkit_repo.create(session, create)
             await self.namespace_repo.ensure_active(
                 session,
@@ -241,6 +243,7 @@ class AgentToolkitOperationsRepository:
                 )
                 if error is not None:
                     return Failure(error)
+            await require_active_agent(session, agent_id=agent_id)
             await guard_user_registration_update(
                 session, toolkit, update, repository=self.toolkit_repo
             )
@@ -284,6 +287,8 @@ class AgentToolkitOperationsRepository:
                 workspace_user_id=workspace_user_id,
                 role=role,
             )
+            if isinstance(access, Success):
+                await require_active_agent(session, agent_id=agent_id)
         match access:
             case Success():
                 return Success(None)
@@ -319,6 +324,7 @@ class AgentToolkitOperationsRepository:
                     pass
                 case _:
                     assert_never(access)
+            await require_active_agent(session, agent_id=agent_id)
             await self.github_user_installation_repo.sync(
                 session,
                 user_id,
@@ -413,6 +419,7 @@ class AgentToolkitOperationsRepository:
                     pass
                 case _:
                     assert_never(access)
+            await require_active_agent(session, agent_id=agent_id)
             await self.mcp_oauth_connection_repo.upsert_connected(
                 session,
                 toolkit_id=toolkit_id,
@@ -475,6 +482,7 @@ class AgentToolkitOperationsRepository:
                     pass
                 case _:
                     assert_never(access)
+            await require_active_agent(session, agent_id=agent_id)
             await self.mcp_oauth_connection_repo.delete_by_toolkit_id(
                 session,
                 toolkit_id,
@@ -519,6 +527,7 @@ class AgentToolkitOperationsRepository:
                     pass
                 case _:
                     assert_never(access)
+            await require_active_agent(session, agent_id=agent_id)
             revocations = await capture_user_toolkit_delete(
                 session, toolkit, repository=self.toolkit_repo
             )
@@ -534,13 +543,9 @@ class AgentToolkitOperationsRepository:
         workspace_user_id: str,
         role: WorkspaceUserRole,
     ) -> Result[Agent, AgentWorkspaceMismatch | AgentManagementDenied]:
-        """Load an active Agent and verify Owner or explicit AgentAdmin authority."""
+        """Authorize inspection independently of the user's mutation lifecycle guard."""
         agent = await self.agent_repo.get_by_id(session, agent_id)
-        if (
-            agent is None
-            or agent.workspace_id != workspace_id
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-        ):
+        if agent is None or agent.workspace_id != workspace_id:
             return Failure(AgentWorkspaceMismatch(agent_id=agent_id))
         if role is WorkspaceUserRole.OWNER:
             return Success(agent)

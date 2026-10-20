@@ -10,6 +10,7 @@ import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "@/shared/agent-session/AgentFocusedShellMobileNav";
 import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
 import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
+import { AgentDeletionBadge, AgentDeletionNotice } from "./AgentDeletionStatus";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHeaderProps {
@@ -52,13 +53,17 @@ export function AgentSettingsHeader({
             <Text fw={600} size="md">
               {agent.name}
             </Text>
-            <Badge
-              size="sm"
-              variant="dot"
-              color={agent.enabled ? "green" : "gray"}
-            >
-              {agent.enabled ? t("status.enabled") : t("status.disabled")}
-            </Badge>
+            {agent.deletion_status !== null ? (
+              <AgentDeletionBadge status={agent.deletion_status} />
+            ) : (
+              <Badge
+                size="sm"
+                variant="dot"
+                color={agent.enabled ? "green" : "gray"}
+              >
+                {agent.enabled ? t("status.enabled") : t("status.disabled")}
+              </Badge>
+            )}
             <Badge
               size="sm"
               variant="light"
@@ -103,8 +108,10 @@ export function AgentSettingsHeader({
         <Text fw={600} size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
           {agent.name}
         </Text>
+        <AgentDeletionBadge status={agent.deletion_status} />
         {controls}
       </Group>
+      <AgentDeletionNotice status={agent.deletion_status} />
     </Box>
   );
 }

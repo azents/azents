@@ -8,6 +8,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { useFileUpload } from "@/shared/file-upload/useFileUpload";
 import { resolveComposerSubscriptionSelection } from "@/shared/subscription-usage/composerSubscriptionUsage";
@@ -279,7 +280,16 @@ function setupActionsFromWorkspaceItems(
 export function useAgentDraftChatContainer(
   props: AgentDraftChatContainerProps,
 ): AgentDraftChatContainerOutput {
-  const { handle, agent, sessionScope: initialSessionScope = "team" } = props;
+  const {
+    handle,
+    agent: initialAgent,
+    sessionScope: initialSessionScope = "team",
+  } = props;
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const pathname = usePathname();
   const router = useRouter();
   const [sessionScope, setSessionScope] =
@@ -529,11 +539,13 @@ export function useAgentDraftChatContainer(
     [workspaceItems],
   );
 
-  const canSendMessage = workspaceItems.every(
-    (item) =>
-      item.type === "existing_project" ||
-      (item.startingRef !== null && item.startingRef.trim() !== ""),
-  );
+  const canSendMessage =
+    agent.deletion_status === null &&
+    workspaceItems.every(
+      (item) =>
+        item.type === "existing_project" ||
+        (item.startingRef !== null && item.startingRef.trim() !== ""),
+    );
 
   const onSendMessage = useCallback(
     async (

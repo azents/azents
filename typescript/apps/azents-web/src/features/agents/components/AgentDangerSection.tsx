@@ -15,11 +15,13 @@ import { useCallback } from "react";
 import { trpc } from "@/trpc/client";
 
 interface AgentDangerSectionProps {
+  readOnly: boolean;
   handle: string;
   agentId: string;
 }
 
 export function AgentDangerSection({
+  readOnly,
   handle,
   agentId,
 }: AgentDangerSectionProps): React.ReactElement {
@@ -53,6 +55,7 @@ export function AgentDangerSection({
               color="red"
               leftSection={<IconTrash size={14} />}
               onClick={open}
+              disabled={readOnly}
               variant="filled"
             >
               {t("delete")}
@@ -71,6 +74,7 @@ export function AgentDangerSection({
             <Button
               color="red"
               onClick={handleDelete}
+              disabled={readOnly}
               loading={deleteMutation.isPending}
             >
               {t("delete")}

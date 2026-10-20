@@ -1034,10 +1034,14 @@ export const ChatInput = memo(function ChatInput({
                 goal={goal}
                 isMobile={isMobile}
                 todo={todo}
-                onClearGoal={onClearGoal}
-                onUpdateGoal={onUpdateGoal}
-                onPauseGoal={onPauseGoal}
-                onResumeGoal={onResumeGoal}
+                {...(inputDisabled
+                  ? {}
+                  : {
+                      onClearGoal,
+                      onUpdateGoal,
+                      onPauseGoal,
+                      onResumeGoal,
+                    })}
               />
             )}
             {selectedAction !== null && !editingMessageId && !inputDisabled && (

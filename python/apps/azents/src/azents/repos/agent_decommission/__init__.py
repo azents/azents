@@ -135,8 +135,6 @@ class AgentDecommissionRepository:
                 lease_owner=lease_owner,
                 lease_until=lease_until,
                 next_attempt_at=None,
-                last_error_kind=None,
-                last_error_summary=None,
                 updated_at=now,
             )
             .returning(RDBAgentDecommissionJob)
@@ -178,6 +176,7 @@ class AgentDecommissionRepository:
         lease_owner: str,
         expected_attempt: int,
         next_attempt_at: datetime.datetime,
+        failure_boundary_key: str,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
@@ -195,6 +194,17 @@ class AgentDecommissionRepository:
                 lease_owner=None,
                 lease_until=None,
                 next_attempt_at=next_attempt_at,
+                failure_boundary_key=sa.case(
+                    (
+                        sa.and_(
+                            RDBAgentDecommissionJob.failure_boundary_key.is_(None),
+                            RDBAgentDecommissionJob.last_error_kind.is_(None),
+                            RDBAgentDecommissionJob.last_error_summary.is_(None),
+                        ),
+                        failure_boundary_key,
+                    ),
+                    else_=RDBAgentDecommissionJob.failure_boundary_key,
+                ),
                 last_error_kind=error_kind[:120],
                 last_error_summary=error_summary[:500],
                 updated_at=now,
@@ -202,6 +212,62 @@ class AgentDecommissionRepository:
             .returning(RDBAgentDecommissionJob.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def schedule_wait(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        next_attempt_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> bool:
+        """Release an ordinary wait without creating or clearing error evidence."""
+        result = await session.write_session.execute(
+            sa.update(RDBAgentDecommissionJob)
+            .where(
+                RDBAgentDecommissionJob.id == job_id,
+                RDBAgentDecommissionJob.lease_owner == lease_owner,
+                RDBAgentDecommissionJob.attempt_count == expected_attempt,
+            )
+            .values(
+                status=AgentDecommissionStatus.RETRY_WAIT,
+                lease_owner=None,
+                lease_until=None,
+                next_attempt_at=next_attempt_at,
+                updated_at=now,
+            )
+            .returning(RDBAgentDecommissionJob.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def clear_failure_boundary(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        boundary_key: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Clear only the exact proven responsibility; unknown old errors stay."""
+        await session.write_session.execute(
+            sa.update(RDBAgentDecommissionJob)
+            .where(
+                RDBAgentDecommissionJob.id == job_id,
+                RDBAgentDecommissionJob.lease_owner == lease_owner,
+                RDBAgentDecommissionJob.attempt_count == expected_attempt,
+                RDBAgentDecommissionJob.failure_boundary_key == boundary_key,
+            )
+            .values(
+                failure_boundary_key=None,
+                last_error_kind=None,
+                last_error_summary=None,
+                updated_at=now,
+            )
+        )
 
     def _build(self, rdb: RDBAgentDecommissionJob) -> AgentDecommissionJob:
         """Convert a database row to a domain model."""
@@ -215,6 +281,7 @@ class AgentDecommissionRepository:
             lease_owner=rdb.lease_owner,
             lease_until=rdb.lease_until,
             next_attempt_at=rdb.next_attempt_at,
+            failure_boundary_key=rdb.failure_boundary_key,
             last_error_kind=rdb.last_error_kind,
             last_error_summary=rdb.last_error_summary,
             started_at=rdb.started_at,

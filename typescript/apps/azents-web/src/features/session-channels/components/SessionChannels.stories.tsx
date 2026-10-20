@@ -11,6 +11,7 @@ import type {
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "agent_01",
   name: "Incident Coordinator",
   description: "Coordinates incident response in approved Slack channels.",

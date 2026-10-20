@@ -63,7 +63,17 @@ export function AgentSidebarSection({
   const workspaceBase = `/w/${handle}`;
   const agentsBase = `${workspaceBase}/agents`;
 
-  const agentsQuery = trpc.agent.list.useQuery({ handle });
+  const agentsQuery = trpc.agent.list.useQuery(
+    { handle },
+    {
+      refetchInterval: (query) =>
+        query.state.data?.items.some((agent) => agent.deletion_status !== null)
+          ? 5000
+          : false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: true,
+    },
+  );
 
   const { agentId: activeAgentId } = useMemo(
     () => resolveActive(pathname, workspaceBase),
@@ -76,7 +86,7 @@ export function AgentSidebarSection({
     const items = agentsQuery.data?.items ?? [];
     const q = query.toLowerCase();
     const filtered = items
-      .filter((a) => a.enabled)
+      .filter((a) => a.enabled || a.deletion_status !== null)
       .filter(
         (a) =>
           !q ||

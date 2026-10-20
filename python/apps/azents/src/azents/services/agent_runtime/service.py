@@ -8,6 +8,7 @@ from typing import Annotated, assert_never
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.agent_mutation import AgentMutationReadOnly
 from azents.core.agent_runtime_removal import (
     AgentRuntimeRemovalConfirmationRequest,
     AgentRuntimeRemovalUnavailable,
@@ -948,7 +949,7 @@ class AgentRuntimeService:
     ):
         """Load one visible Agent and derive settings-management authority."""
         agent = await self.operations.get_agent(agent_id)
-        if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+        if agent is None:
             return AgentNotFound(agent_id=agent_id)
         if agent.workspace_id != workspace_id:
             return AgentNotBelongToWorkspace(agent_id=agent_id)
@@ -957,6 +958,8 @@ class AgentRuntimeService:
             can_manage = await self.operations.is_admin(agent_id, workspace_user_id)
         if agent.type is AgentType.PRIVATE and not can_manage:
             return AgentAccessDenied(agent_id=agent_id)
+        if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise AgentMutationReadOnly()
         return _AuthorizedAgent(agent=agent, can_manage=can_manage)
 
     async def _build_read_output(

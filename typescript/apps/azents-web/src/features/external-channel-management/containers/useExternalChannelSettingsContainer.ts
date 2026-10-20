@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import {
   DEFAULT_DISCORD_SUPPRESS_URL_PREVIEWS,
   DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
@@ -114,8 +115,13 @@ function validationMessage(
 
 export function useExternalChannelSettingsContainer({
   handle,
-  agent,
+  agent: initialAgent,
 }: ExternalChannelSettingsContainerProps): ExternalChannelSettingsContainerOutput {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const utils = trpc.useUtils();
   const [manifestTransport, setManifestTransport] =
     useState<ExternalChannelTransport>("http");
@@ -384,11 +390,12 @@ export function useExternalChannelSettingsContainer({
     agent,
     state,
     manifestState,
-    dialogState,
-    discordDialogState,
+    dialogState: agent.deletion_status === null ? dialogState : null,
+    discordDialogState:
+      agent.deletion_status === null ? discordDialogState : null,
     actionError,
     actionTarget,
-    actionsBusy: actionTarget !== null,
+    actionsBusy: actionTarget !== null || agent.deletion_status !== null,
     discordThreadDurationDrafts,
     discordThreadDurationSavedConnectionId,
     discordUrlPreviewDrafts,

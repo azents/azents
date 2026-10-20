@@ -13,6 +13,7 @@ from azents.core.agent_deletion import (
     AgentDeletionOwnershipLost,
     AgentDeletionParticipantFailure,
     AgentDeletionRegistry,
+    AgentDeletionWaitReason,
     avatar_object_keys,
 )
 from azents.core.config import Config, require_workspace_s3_bucket
@@ -49,7 +50,7 @@ class AgentDeletionExecution:
     job: AgentDecommissionJob
     lease_owner: str
     avatar_evidence: AgentAvatarDeletionEvidence | None
-    waiting_retention: bool
+    wait_reason: AgentDeletionWaitReason | None
     completed: bool
 
 
@@ -106,13 +107,14 @@ class SessionRetirementParticipant:
             retired = await self.retire_root(execution, root_session_id=root.id)
             waiting_for_active_run = waiting_for_active_run or not retired
         if waiting_for_active_run:
-            raise RuntimeError("Agent root tree still has active work")
+            execution.wait_reason = AgentDeletionWaitReason.ACTIVE_WORK
+            return
         await self.operations.advance_status(
             job=execution.job,
             lease_owner=execution.lease_owner,
             status=AgentDecommissionStatus.WAITING_RETENTION,
         )
-        execution.waiting_retention = True
+        execution.wait_reason = AgentDeletionWaitReason.RETENTION
 
 
 @dataclasses.dataclass
@@ -208,9 +210,12 @@ class DatabaseDeletionParticipant:
     async def run(self, execution: AgentDeletionExecution) -> None:
         if execution.avatar_evidence is None:
             raise RuntimeError("Agent deletion avatar evidence is missing")
-        await self.operations.require_runtime_acknowledged(
+        acknowledged = await self.operations.runtime_acknowledged(
             job=execution.job, lease_owner=execution.lease_owner
         )
+        if not acknowledged:
+            execution.wait_reason = AgentDeletionWaitReason.RUNTIME_ACKNOWLEDGEMENT
+            return
         execution.completed = await self.operations.finalize(
             job=execution.job,
             lease_owner=execution.lease_owner,
@@ -226,6 +231,7 @@ class DatabaseDeletionParticipant:
 class AgentDeletionPipeline:
     registry: AgentDeletionRegistry
     participants: tuple[AgentDeletionParticipant, ...]
+    operations: AgentDecommissionOperationsRepository
 
     async def advance(
         self, *, job: AgentDecommissionJob, lease_owner: str
@@ -235,7 +241,7 @@ class AgentDeletionPipeline:
             participant.key for participant in self.participants
         )
         handlers = {participant.key: participant for participant in self.participants}
-        execution = AgentDeletionExecution(job, lease_owner, None, False, False)
+        execution = AgentDeletionExecution(job, lease_owner, None, None, False)
         for definition in self.registry.participants:
             try:
                 await handlers[definition.key].run(execution)
@@ -247,6 +253,12 @@ class AgentDeletionPipeline:
                 raise AgentDeletionParticipantFailure(
                     participant_key=definition.key, phase="cleanup", error=error
                 ) from error
-            if execution.waiting_retention:
+            if execution.wait_reason is not None:
                 break
+            if not execution.completed:
+                await self.operations.clear_failure_boundary(
+                    job=job,
+                    lease_owner=lease_owner,
+                    boundary_key=f"{definition.key}/cleanup",
+                )
         return execution

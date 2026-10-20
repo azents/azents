@@ -8,7 +8,7 @@
  */
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   buildProviderIntegrationOptions,
   fallbackSelectableModelLabel,
@@ -90,8 +90,23 @@ export function useAgentFormContainer(
 
   const agentQuery = trpc.agent.get.useQuery(
     { handle, agentId: agentId ?? "" },
-    { enabled: isEditMode },
+    {
+      enabled: isEditMode,
+      refetchInterval: (query) =>
+        query.state.error?.data?.code === "NOT_FOUND"
+          ? false
+          : query.state.data?.deletion_status != null
+            ? 5000
+            : false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: true,
+    },
   );
+  useEffect(() => {
+    if (agentQuery.error?.data?.code === "NOT_FOUND") {
+      router.replace(`/w/${encodeURIComponent(handle)}/agents`);
+    }
+  }, [agentQuery.error, handle, router]);
   const integrationsQuery = trpc.llmProviderIntegration.list.useQuery({
     handle,
   });

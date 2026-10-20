@@ -109,6 +109,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_default.data import (
@@ -1044,6 +1045,7 @@ class ChatOperationsRepository:
                 return Failure(SubagentSessionReadOnly())
             if agent_session.primary_kind is AgentSessionPrimaryKind.TEAM_PRIMARY:
                 return Failure(PrimarySessionPinBlocked())
+            await require_active_agent(session, agent_id=agent_session.agent_id)
             updated = await self.agent_session_repository.set_pinned(
                 session,
                 session_id=session_id,
@@ -1100,10 +1102,7 @@ class ChatOperationsRepository:
             ):
                 return Failure(SessionNotFound())
             agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
+            if agent is None:
                 return Failure(SessionNotFound())
             authorized = await self._authorize_public_session(
                 session,
@@ -1113,6 +1112,7 @@ class ChatOperationsRepository:
             )
             if authorized is not None:
                 return Failure(authorized)
+            await require_active_agent(session, agent_id=agent_id)
             tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
                 root_session_id=session_id,
@@ -1234,6 +1234,7 @@ class ChatOperationsRepository:
                 return Failure(authorized)
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
+            await require_active_agent(session, agent_id=agent_session.agent_id)
             updated = await self.agent_session_repository.update_title(
                 session,
                 session_id=session_id,
@@ -1346,6 +1347,12 @@ class ChatOperationsRepository:
             **(metadata or {}),
         }
         async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session, session_id
+            )
+            if agent_session is None:
+                raise ValueError("AgentSession not found")
+            await require_active_agent(session, agent_id=agent_session.agent_id)
             event = await self.event_transcript_repository.append(
                 session,
                 EventCreate(
@@ -1706,6 +1713,7 @@ class ChatOperationsRepository:
                 )
                 if authorized is not None:
                     return Failure(authorized)
+                await require_active_agent(session, agent_id=agent_id)
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
             if agent_session.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:

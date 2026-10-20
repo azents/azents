@@ -16,7 +16,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.memory_scope import MemoryScope
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent.data import Agent
 from azents.repos.memory.data import Memory
 from azents.repos.memory.ui_operations import MemoryUIOperations
@@ -106,7 +106,9 @@ def _make_service() -> MemoryService:
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield AsyncMock(spec=AsyncSession)
+        raw = AsyncMock(spec=AsyncSession)
+        raw.scalar.return_value = AgentLifecycleStatus.ACTIVE
+        yield ReadWriteSession(raw)
 
     return MemoryService(
         operations=MemoryUIOperations(

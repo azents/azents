@@ -89,6 +89,7 @@ export interface BrowserInteractionHandlers {
 }
 
 export interface SessionBrowserPanelProps {
+  readOnly: boolean;
   focused: boolean;
   focusViewport: { top: number; height: number } | null;
   zoom: number;
@@ -165,16 +166,17 @@ function BrowserShell({
 }
 
 export function SessionBrowserPanel({
+  readOnly,
   focused,
   focusViewport,
   zoom,
   onToggleFocus,
   onZoomChange,
-  state,
+  state: observedState,
   closeError,
   createError,
   creating,
-  canCreate,
+  canCreate: creationAllowed,
   onCreatePage,
   onSelect,
   onClosePage,
@@ -200,6 +202,11 @@ export function SessionBrowserPanel({
   onAddressSubmit,
   onNavigate,
 }: SessionBrowserPanelProps): ReactElement {
+  const canCreate = creationAllowed && !readOnly;
+  const state =
+    observedState.type === "READY" && readOnly
+      ? { ...observedState, canInput: false, canClose: false }
+      : observedState;
   const t = useTranslations("chat.browser");
   const descriptionId = useId();
   if (state.type === "LOADING") {
@@ -235,7 +242,7 @@ export function SessionBrowserPanel({
                 : t("loadError")}
           </Text>
         </Alert>
-        <Button variant="default" onClick={onRetry}>
+        <Button variant="default" onClick={onRetry} disabled={readOnly}>
           {t("retry")}
         </Button>
       </Stack>
@@ -277,7 +284,7 @@ export function SessionBrowserPanel({
           >
             {t("newTab")}
           </Button>
-          <Button variant="subtle" onClick={onRetry}>
+          <Button variant="subtle" onClick={onRetry} disabled={readOnly}>
             {t("refresh")}
           </Button>
         </Stack>
@@ -623,6 +630,7 @@ export function SessionBrowserPanel({
               <Menu.Divider />
               <Menu.Item
                 onClick={onRetry}
+                disabled={readOnly}
                 leftSection={<IconRefresh size={14} aria-hidden />}
               >
                 {t("refreshConnection")}

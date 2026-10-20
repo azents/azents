@@ -616,7 +616,7 @@ async def test_decommission_provider_failure_keeps_committed_cleanup_phase(
     )
     with pytest.raises(RuntimeError, match="postcommit provider"):
         await ChannelDeletionParticipant(operations, _FailingCleanup(active)).run(
-            AgentDeletionExecution(job, "retirement-owner", None, False, False)
+            AgentDeletionExecution(job, "retirement-owner", None, None, False)
         )
     async with rdb_session_manager() as session:
         observed = await session.read_session.get(RDBAgentDecommissionJob, job.id)
@@ -669,6 +669,7 @@ async def test_same_lease_owner_stale_attempt_cannot_mutate_or_finalize(
         lease_owner="retirement-owner",
         next_attempt_at=now + datetime.timedelta(minutes=1),
         error_kind="StaleAttempt",
+        failure_boundary_key="agent.channels/cleanup",
         error_summary="Stale claim",
         now=now,
     )

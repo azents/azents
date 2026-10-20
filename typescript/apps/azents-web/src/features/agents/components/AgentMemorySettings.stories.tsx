@@ -12,6 +12,7 @@ import type {
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "agent_01",
   name: "Release Operator",
   description: "Coordinates release checklists and CI follow-up.",
@@ -165,6 +166,17 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+export const DeletingReadOnly = {
+  tags: ["ci-contract"],
+  args: { agent: { ...agent, deletion_status: "deleting" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("switch", { name: "Enable Memory" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
 
 export const SavedLoaded = {} satisfies Story;
 

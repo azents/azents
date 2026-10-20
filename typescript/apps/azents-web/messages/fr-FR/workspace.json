@@ -460,6 +460,12 @@
   },
   "agents": {
     "headline": "Agents",
+    "deletion": {
+      "deleting": "Suppression en cours",
+      "error": "Erreur de suppression",
+      "notice": "Cet agent est en cours de suppression. Vous pouvez le consulter, mais pas le modifier.",
+      "errorNotice": "Une erreur est survenue lors de la suppression de l’agent. Vous pouvez le consulter, mais les modifications restent indisponibles."
+    },
     "description": "Gérez les agents IA de votre espace de travail",
     "addAgent": "Ajouter un agent",
     "empty": "Aucun agent pour le moment",

@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from azcommon.result import Success
@@ -127,7 +127,10 @@ async def test_delay_updates_raise_tick_without_mutating_input(
 
         @asynccontextmanager
         async def manager() -> AsyncIterator[WriteSession]:
-            yield session
+            with patch.object(
+                raw, "scalar", new=AsyncMock(return_value=AgentLifecycleStatus.ACTIVE)
+            ):
+                yield session
 
         agents = AsyncMock(spec=AgentRepository)
         agents.get_by_id.return_value = agent
@@ -184,6 +187,7 @@ async def test_delay_updates_raise_tick_without_mutating_input(
 async def test_agent_atomic_operations_close_before_returning() -> None:
     """Create, update, and admin removal finish their shared transactions."""
     _raw_session = AsyncMock(spec=AsyncSession)
+    _raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     session = ReadWriteSession(_raw_session)
     transaction_active = False
 

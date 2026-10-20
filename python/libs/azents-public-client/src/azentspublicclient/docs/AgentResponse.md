@@ -17,6 +17,7 @@ Name | Type | Description | Notes
 **model_parameters** | [**ModelParameters**](ModelParameters.md) |  | 
 **system_prompt** | **str** |  | 
 **enabled** | **bool** |  | 
+**deletion_status** | [**AgentDeletionStatus**](AgentDeletionStatus.md) |  | 
 **type** | [**AgentType**](AgentType.md) |  | 
 **runtime_profile_id** | **str** |  | 
 **runtime_profile_selection_version** | **int** |  | 

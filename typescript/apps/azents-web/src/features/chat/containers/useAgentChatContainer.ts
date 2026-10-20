@@ -7,6 +7,7 @@
  * through the backend before mounting chat state.
  */
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type {
@@ -68,6 +69,7 @@ export function useAgentChatContainer(
   }, []);
 
   const { handle, agent, sessionId, session } = props;
+  const router = useRouter();
   const utils = trpc.useUtils();
   const agentQuery = trpc.agent.get.useQuery(
     { handle, agentId: agent.id },
@@ -76,8 +78,20 @@ export function useAgentChatContainer(
       staleTime: 0,
       refetchOnMount: false,
       refetchOnWindowFocus: true,
+      refetchInterval: (query) =>
+        query.state.error?.data?.code === "NOT_FOUND"
+          ? false
+          : query.state.data?.deletion_status != null
+            ? 5000
+            : false,
+      refetchIntervalInBackground: false,
     },
   );
+  useEffect(() => {
+    if (agentQuery.error?.data?.code === "NOT_FOUND") {
+      router.replace(`/w/${encodeURIComponent(handle)}/agents`);
+    }
+  }, [agentQuery.error, handle, router]);
   const [hydratedAgent, setHydratedAgent] = useState<{
     agent: AgentResponse;
     handle: string;
@@ -90,7 +104,11 @@ export function useAgentChatContainer(
       if (!current) {
         return;
       }
-      utils.agent.get.setData(input, agent);
+      utils.agent.get.setData(input, (current) =>
+        current?.deletion_status != null && agent.deletion_status === null
+          ? { ...agent, deletion_status: current.deletion_status }
+          : agent,
+      );
       setHydratedAgent({ agent, handle });
       void utils.agent.get.invalidate(input);
     });

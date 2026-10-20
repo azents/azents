@@ -5,6 +5,7 @@ import type { AgentResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "assistant",
   name: "Research assistant",
   description: "Research and writing for personal and Team Sessions.",
@@ -65,6 +66,18 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const AgentEntry: Story = {};
+export const Deleting: Story = {
+  tags: ["ci-contract"],
+  args: { agent: { ...agent, deletion_status: "deleting" } },
+};
+export const DeletionError: Story = {
+  tags: ["ci-contract"],
+  args: { agent: { ...agent, deletion_status: "deletion_error" } },
+};
+export const MobileDeleting: Story = {
+  ...Deleting,
+  globals: { viewport: { value: "mobile1", isRotated: false } },
+};
 export const ConversationReturn: Story = {
   args: { originSessionId: "conversation" },
   play: async ({ canvasElement }) => {

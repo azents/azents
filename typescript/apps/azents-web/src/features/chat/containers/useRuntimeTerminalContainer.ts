@@ -42,6 +42,7 @@ type ProtocolPhase =
   | "live";
 
 interface RuntimeTerminalContainerProps {
+  readOnly: boolean;
   handle: string;
   agentId: string;
   sessionId: string;
@@ -77,6 +78,7 @@ function closeSocket(socket: WebSocket): void {
 }
 
 export function useRuntimeTerminalContainer({
+  readOnly,
   handle,
   agentId,
   sessionId,
@@ -87,6 +89,8 @@ export function useRuntimeTerminalContainer({
     [agentId, handle, sessionId],
   );
   const resourceKey = `${handle}\u0000${agentId}\u0000${sessionId}`;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const projectionQuery = trpc.terminal.projection.useQuery(resource, {
     refetchInterval: 5_000,
     retry: false,
@@ -271,6 +275,9 @@ export function useRuntimeTerminalContainer({
 
   const sendPendingInput = useCallback(
     (socket: WebSocket): void => {
+      if (readOnlyRef.current) {
+        return;
+      }
       removePendingInputThrough(acceptedNextInputSequenceRef.current - 1);
       const reconciled = reconcilePendingTerminalInput(
         pendingInputRef.current,
@@ -337,7 +344,7 @@ export function useRuntimeTerminalContainer({
         failSocket(socket);
         return;
       }
-      inputEnabledRef.current = true;
+      inputEnabledRef.current = !readOnlyRef.current;
       setConnection({
         type: "connected",
         shellLabel: pendingShellLabelRef.current,
@@ -358,6 +365,7 @@ export function useRuntimeTerminalContainer({
 
   const scheduleReconnect = useCallback((): void => {
     if (
+      readOnlyRef.current ||
       !mountedRef.current ||
       !activatedRef.current ||
       !isTerminalProjectionReconnectable(projectionRef.current?.state ?? null)
@@ -374,7 +382,9 @@ export function useRuntimeTerminalContainer({
 
   const connect = useCallback(async (): Promise<void> => {
     const projection = projectionRef.current;
+    const canMutate = (): boolean => !readOnlyRef.current;
     if (
+      !canMutate() ||
       !mountedRef.current ||
       !activatedRef.current ||
       !isTerminalProjectionConnectable(projection?.state ?? null) ||
@@ -392,7 +402,7 @@ export function useRuntimeTerminalContainer({
     );
     try {
       const issued = await ticketMutation.mutateAsync(resource);
-      if (attempt !== connectAttemptRef.current) {
+      if (!canMutate() || attempt !== connectAttemptRef.current) {
         return;
       }
       if (issued.status !== "issued" || issued.ticket === null) {
@@ -412,6 +422,7 @@ export function useRuntimeTerminalContainer({
 
       socket.onopen = () => {
         if (
+          readOnlyRef.current ||
           socketGenerationRef.current !== generation ||
           socketRef.current !== socket
         ) {
@@ -683,6 +694,7 @@ export function useRuntimeTerminalContainer({
     (text: string): void => {
       const socket = socketRef.current;
       if (
+        readOnlyRef.current ||
         socket?.readyState !== WebSocket.OPEN ||
         protocolPhaseRef.current !== "live" ||
         !inputEnabledRef.current
@@ -733,6 +745,7 @@ export function useRuntimeTerminalContainer({
         disposeTerminal();
       }
       const terminal = new Terminal({
+        disableStdin: readOnlyRef.current,
         cursorBlink: true,
         convertEol: false,
         fontFamily:
@@ -794,6 +807,18 @@ export function useRuntimeTerminalContainer({
     clearResizeTimer,
     resourceKey,
   ]);
+
+  useEffect(() => {
+    if (readOnly) {
+      clearReconnectTimer();
+      inputEnabledRef.current = false;
+      pendingInputRef.current.clear();
+      pendingInputBytesRef.current = 0;
+      if (terminalRef.current) {
+        terminalRef.current.options.disableStdin = true;
+      }
+    }
+  }, [readOnly, clearReconnectTimer]);
 
   useEffect(() => {
     const state = projectionQuery.data?.state ?? null;
@@ -905,6 +930,7 @@ export function useRuntimeTerminalContainer({
   };
 
   return {
+    readOnly,
     projection: projectionQuery.data ?? null,
     projectionLoading: projectionQuery.isLoading,
     presentation,
@@ -935,11 +961,17 @@ export function useRuntimeTerminalContainer({
         requestTerminate(socket);
         return;
       }
+      if (readOnlyRef.current) {
+        return;
+      }
       activatedRef.current = true;
       setConnection({ type: "reconnecting" });
       void projectionQuery.refetch().then(() => connectRef.current());
     },
     onRetry: () => {
+      if (readOnlyRef.current) {
+        return;
+      }
       terminateRequestedRef.current = false;
       const socket = socketRef.current;
       socketRef.current = null;

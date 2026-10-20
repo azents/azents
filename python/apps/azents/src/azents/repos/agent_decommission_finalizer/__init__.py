@@ -123,6 +123,7 @@ class AgentDecommissionFinalizerRepository:
         job.lease_owner = None
         job.lease_until = None
         job.next_attempt_at = None
+        job.failure_boundary_key = None
         job.last_error_kind = None
         job.last_error_summary = None
         job.completed_at = now

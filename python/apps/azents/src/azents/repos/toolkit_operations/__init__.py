@@ -27,6 +27,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.github_user_oauth.guards import read_summary
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
@@ -383,6 +384,7 @@ class ToolkitOperationsRepository:
             )
             if toolkit_id not in {item.id for item in available}:
                 return Failure(ToolkitUnavailable(toolkit_id=toolkit_id))
+            await require_active_agent(session, agent_id=agent_id)
             create_result = await self.agent_toolkit_repository.create(
                 session,
                 AgentToolkitCreate(
@@ -421,6 +423,7 @@ class ToolkitOperationsRepository:
                 return Failure(AgentToolkitNotFound(agent_toolkit_id=agent_toolkit_id))
             if agent_toolkit.agent_id != agent_id:
                 return Failure(AgentToolkitMismatch(agent_toolkit_id=agent_toolkit_id))
+            await require_active_agent(session, agent_id=agent_id)
             await self.agent_toolkit_repository.delete_by_id(
                 session,
                 agent_toolkit_id,

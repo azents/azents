@@ -14,6 +14,7 @@ from azents.core.agent_deletion import (
     AgentDeletionOwnershipLost,
     AgentDeletionParticipantFailure,
     AgentDeletionRegistry,
+    AgentDeletionWaitReason,
 )
 from azents.core.agent_deletion_registry import get_agent_deletion_registry
 from azents.core.config import Config
@@ -58,7 +59,7 @@ class SystemDecommissionClock:
 @dataclasses.dataclass(frozen=True)
 class AgentDecommissionAdvanceResult:
     completed: bool
-    waiting_retention: bool
+    wait_reason: AgentDeletionWaitReason | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -126,6 +127,11 @@ class AgentDecommissionService:
                         lease_owner=lease_owner,
                         error_kind=type(error).__name__,
                         error_summary=str(error) or type(error).__name__,
+                        failure_boundary_key=(
+                            error.boundary_key
+                            if isinstance(error, AgentDeletionParticipantFailure)
+                            else "agent.coordinator/advance"
+                        ),
                     )
                 except AgentDeletionOwnershipLost:
                     logger.info(
@@ -153,7 +159,17 @@ class AgentDecommissionService:
                 )
                 continue
             completed_count += int(result.completed)
-            waiting_retention_count += int(result.waiting_retention)
+            if result.wait_reason is AgentDeletionWaitReason.RETENTION:
+                waiting_retention_count += 1
+            elif result.wait_reason is not None:
+                now = self.clock.now()
+                scheduled = await self.operation_repository.schedule_wait(
+                    job=job,
+                    lease_owner=lease_owner,
+                    next_attempt_at=now + self._retry_delay(job.attempt_count),
+                    now=now,
+                )
+                retry_scheduled_count += int(scheduled)
         return AgentDecommissionSummary(
             claimed_count,
             completed_count,
@@ -183,10 +199,16 @@ class AgentDecommissionService:
                 ),
                 DatabaseDeletionParticipant(operations),
             ),
+            operations,
         )
         result = await pipeline.advance(job=job, lease_owner=lease_owner)
-        return AgentDecommissionAdvanceResult(
-            result.completed, result.waiting_retention
+        return AgentDecommissionAdvanceResult(result.completed, result.wait_reason)
+
+    @staticmethod
+    def _retry_delay(attempt_count: int) -> datetime.timedelta:
+        return min(
+            datetime.timedelta(minutes=2 ** min(max(0, attempt_count - 1), 5)),
+            _MAX_RETRY_DELAY,
         )
 
     async def _retry(
@@ -196,16 +218,15 @@ class AgentDecommissionService:
         lease_owner: str,
         error_kind: str,
         error_summary: str,
+        failure_boundary_key: str,
     ) -> None:
         now = self.clock.now()
-        delay = min(
-            datetime.timedelta(minutes=2 ** min(max(0, job.attempt_count - 1), 5)),
-            _MAX_RETRY_DELAY,
-        )
+        delay = self._retry_delay(job.attempt_count)
         updated = await self.operation_repository.mark_retry(
             job=job,
             lease_owner=lease_owner,
             next_attempt_at=now + delay,
+            failure_boundary_key=failure_boundary_key,
             error_kind=error_kind,
             error_summary=error_summary,
             now=now,

@@ -59,6 +59,7 @@ function createModelSelection(
 function createAgent(input: AgentFixtureInput): EnrichedAgent {
   const modelSelection = createModelSelection(input);
   return {
+    deletion_status: null,
     id: input.id,
     name: input.name,
     description: input.description,
