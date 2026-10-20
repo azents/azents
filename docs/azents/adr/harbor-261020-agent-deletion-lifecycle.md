@@ -138,3 +138,71 @@ Unexpected cross-scope rows block finalization with attributable diagnostics; th
 not deleted or detached to make cleanup pass. Tests prove supported creator invariants
 and preservation of deliberately mismatched rows. No production-data invariant is
 claimed without inspecting production; invalid legacy/manual data is a residual risk.
+
+## ADR-D4. Deleting Visibility, Read-only Enforcement, and Failure Attribution
+
+The requester explicitly added REQ-8 and REQ-9 after endorsing the previous design
+direction. This decision extends that scope with deletion badges, authoritative
+read-only behavior, and one internal failure identifier. It supersedes the earlier
+no-public-change/no-job-schema-change boundary only for these requested outcomes.
+The no-participant-ledger, no-versioning, and unchanged retry-cadence decisions remain.
+
+**Decision:** Accept the following on 2026-10-20 under delegated technical authority.
+
+- Add a required nullable `deletion_status` projection to Agent list/detail responses:
+  null for active Agents, `deleting`, or `deletion_error`. Derive it from the canonical
+  lifecycle and job evidence in the authorized read boundary; batch job lookup for lists.
+- Both non-null states imply read-only presentation. The server enforces read-only
+  from lifecycle, not the cached response or `enabled`, using an active-Agent lock/CAS
+  in each user-originated Agent-scoped mutation transaction. Existing authorization
+  remains first; return a safe `agent_decommissioning` conflict for authorized writes.
+- Revalidate long-running upload/OAuth publication at its durable attachment commit.
+  Previously started external I/O may overlap deletion; it cannot attach new Agent
+  resources after deletion wins the commit race. Internal lifecycle/native cleanup
+  retains explicit authority; no public or generic bypass flag is added.
+- Preserve authorized idempotent DELETE. Do not add cancel/force-delete/manual-retry
+  controls or change other Agents' or shared-resource authority.
+- Add nullable `failure_boundary_key` to the existing decommission job. It names the
+  first unresolved participant/phase failure and is not a cleanup checkpoint. Keep
+  bounded error diagnostics internal. Claim/reclaim must not clear the failure merely
+  because another attempt starts.
+- Only current-owner/attempt successful proof of the exact failed responsibility clears
+  its key and associated diagnostics atomically. Earlier success, an unrelated wait,
+  cancellation, or stale ownership cannot clear it. A second earlier failure keeps the
+  first unresolved boundary; finalization clears it atomically with completion. Stable
+  boundary keys cover participant and final verification errors without policy versions.
+- Represent expected retention, active-work stopping, and Runtime-ack waits as typed
+  outcomes rather than exceptions. Use the existing scheduling/backoff behavior without
+  setting or clearing an unrelated failure. Existing non-gating channel provider effects
+  do not become new failure-label triggers.
+
+**Alternatives rejected:** UI-only disabled controls do not protect direct or stale API
+requests. Inferring state from `enabled` confuses independent concepts. Publishing raw
+job errors leaks operational details. Reusing exception names/summary text as encoded
+recovery authority cannot identify the failed responsibility. Generic participant
+checkpoints are unnecessary for one unresolved-failure identifier.
+
+**Compatibility:** Generate an additive nullable-column migration. Existing jobs retain
+phase, attempt, timing and diagnostic text, with no invented failure boundary. Legacy
+`RuntimeError` records may be ordinary waits, so do not regex-classify their cause.
+Null boundary plus retained diagnostic evidence is a typed internal unattributed
+previous-error condition and conservatively projects `deletion_error`. This reports
+recorded prior error evidence, not a newly classified failure of the current wait.
+Do not invent historical participant ownership. Unknown prior obligations clear only
+after complete successful required final verification/root completion; a later known
+failure cannot replace them with an easier recovery condition. Known-boundary recovery
+clears its diagnostics too, so it cannot be mistaken for unknown legacy evidence.
+Older expected waits may consequently retain a previous-error indicator until deletion
+completes; this historical ambiguity is an explicit compatibility limitation.
+A decommissioning Agent missing its required job is an invariant error and stays
+read-only with a safe error projection. No raw key, SQL, exception text, credential, or
+internal job identifier is returned through the new field.
+
+**UI and validation:** Use one localized status component on lists and desktop/mobile
+Agent headers. Keep inspection navigation enabled and modifying controls disabled or
+absent. Shared error copy is neutral: deletion encountered an error and changes remain
+unavailable. Do not promise automatic retry from this projection alone: a missing-job
+invariant error has no job to claim. Existing valid jobs retain native automatic retries.
+Refresh visible deleting Agents through existing query refetch/invalidation; server
+conflict refreshes stale pages. Unit/DB/component tests own the state, recovery,
+permission, and mutation-race matrix; representative E2E remains thin.

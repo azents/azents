@@ -9,9 +9,11 @@ snapshot_id: harbor-261020
 
 # Testable Agent Deletion Lifecycle Design
 
-- Requirements: `harbor-261020/REQ-1` through `REQ-7`, requester-confirmed.
-- Technical decisions: `harbor-261020/ADR-D1` through `ADR-D3`, delegated.
+- Requirements: `harbor-261020/REQ-1` through `REQ-9`, requester-confirmed.
+- Technical decisions: `harbor-261020/ADR-D1` through `ADR-D4`, delegated.
 - Implementation state: not implemented; final requester approval pending.
+- Revision 2 adds the requested deleting/error labels and read-only behavior to the
+  previously endorsed lifecycle design.
 
 ## Outcome and Boundaries
 
@@ -23,6 +25,8 @@ catalog and PostgreSQL contract tests detect undeclared references before deploy
 This replaces the Agent's manually distributed cleanup lists, not the Session lifecycle
 engine. Existing asynchronous DELETE, permission checks, finite retention, admission
 fences, job phases, retry schedule, and terminal Runtime acknowledgement remain.
+Public lifecycle presentation and user-mutation admission are extended by REQ-8/REQ-9:
+deleting Agents remain inspectable but read-only, with a distinct actual-error label.
 
 The emergency Runtime recreation-history FK fix is independent and delivered first.
 The lifecycle refactor follows it, then expanded pipeline tests, then a representative
@@ -47,6 +51,12 @@ E2E completion test. Schema-documentation conventions remain a separate backend 
 - Some Agent DB operations lack full job fencing: blob completion, external cleanup
   completion, and the stop-only active-run retirement branch. This refactor closes
   those gaps instead of claiming existing lease handling covers every write.
+- `AgentResponse` currently omits lifecycle status and deletion progress. Agent list
+  cards and desktop/mobile headers expose enabled/disabled, not deleting/error state.
+  User-facing mutation paths do not yet share a complete deleting-Agent read-only guard.
+- Job claim currently clears the latest error fields, and ordinary Runtime/active-work
+  waits can use `RuntimeError`. A reliable error badge cannot be derived from those
+  exception names or cleared merely because a retry begins.
 
 ## Architecture
 
@@ -144,8 +154,9 @@ Runtime cleanup may be requested before other effects finish, but Runtime/Agent 
 rows cannot disappear until every required final predicate is satisfied.
 
 A Session wait keeps the existing `waiting_retention` behavior. Active-run or Runtime
-acknowledgement delays keep their existing bounded retry behavior; this design adds no
-new public statuses or scheduling policy.
+acknowledgement delays become typed waits using their existing bounded scheduling
+behavior; they do not set a deletion-error latch. The new public summary does not add
+job phases or change retry cadence.
 
 ### Concrete ownership coverage
 
@@ -217,9 +228,10 @@ explicit domain predicates and the database's actual constraints.
 
 ## Replay, Failure and Compatibility
 
-- No generic participant checkpoint table, migration/backfill, registry snapshot, or
-  policy-version field is added. Existing unfinished jobs are evaluated by the current
-  registry using their native resource state.
+- No generic participant checkpoint table, checkpoint backfill, registry snapshot, or
+  policy-version field is added. One nullable job failure-boundary identifier supports
+  the explicitly requested error visibility (ADR-D4), not execution skipping. Existing
+  unfinished jobs are evaluated by the current registry using native resource state.
 - Crash after blob deletion but before metadata success replays the same idempotent
   object deletion. Rows are removed only after native deletion evidence is persisted.
 - Partial avatar deletion repeats the immutable key set. A different current avatar
@@ -240,6 +252,132 @@ provider delivery outcome. This design preserves that behavior and does not clai
 recoverable exactly-once or eventual provider delivery. Stronger guarantees would need
 a separate channel-owned durable-effect/credential-lifetime design, not merely a
 participant checkpoint boolean.
+
+## Deleting Visibility and Read-only Product Behavior
+
+### Public projection and screen states
+
+Add required nullable `deletion_status` to the existing authorized Agent list/detail
+output and generated clients. The projection is null for an active Agent and otherwise
+`deleting` or `deletion_error`. Canonical lifecycle determines read-only authority;
+`enabled` is not rewritten and a cached field cannot authorize a write.
+
+| Canonical condition | Visible state | Allowed user behavior |
+| --- | --- | --- |
+| Active Agent | Existing enabled/disabled presentation | Existing permission-controlled actions |
+| Decommissioning, no classified unresolved failure | Deleting | Inspect and navigate; no new mutations/work |
+| Decommissioning, unresolved actual or unattributed previous error | Deletion error | Same read-only behavior |
+| Decommissioning, required job missing | Safe deletion-error presentation | Read-only; internal invariant diagnostic |
+| Final root removed | Absent from list; detail not found | Return to Agent list |
+
+Use one localized badge component in Agent cards and common detail/settings headers,
+including the mobile header. The deletion label takes precedence over enabled/disabled
+as operational status. Keep the name, identity and permitted inspection readable; do
+not gray out or disable the entire page, including navigation.
+
+The normal state needs concise guidance that changes are unavailable during deletion.
+The error state says deletion encountered an error and changes remain unavailable; it
+does not imply the deletion was cancelled or promise automatic recovery. A missing-job
+invariant error has no job to retry, so shared copy cannot unconditionally claim retries
+continue. Valid jobs retain the existing automatic retry policy. Do not add a retry,
+cancel or force-delete
+button. The first DELETE remains unchanged, and repeated authorized DELETE still
+returns its idempotent job result even though the UI does not advertise it as recovery.
+
+Keep badges understandable without color and expose textual status to assistive
+technology. Desktop and mobile have the same status, not a desktop-only indicator.
+Existing layouts and settings information hierarchy otherwise stay unchanged.
+
+List reads batch-fetch deletion-job projections for visible Agent IDs. Do not introduce
+one query per Agent or bypass private-Agent visibility. Expose neither raw error text,
+SQL, credentials, provider identifiers, failure-boundary keys, nor job IDs in the new
+projection. Existing detailed error records remain internal.
+
+Use existing query invalidation on accepted DELETE and bounded refetch while a visible
+Agent has either deleting state. Revalidate on focus/re-entry; stop polling when hidden
+or the Agent disappears. If a stale write returns the conflict below, invalidate the
+Agent query and retain read-only state while refreshing. Failure to fetch does not
+turn a previously deleting Agent into editable state.
+
+### Authoritative mutation guard
+
+Retain existing authentication, Workspace membership, private-Agent visibility, and
+per-operation authorization. Then require active lifecycle in the same DB transaction
+as every user-originated Agent-scoped mutation. Lock/CAS on the canonical Agent row must
+serialize with `mark_decommissioning`; a service preflight alone is insufficient.
+
+Inventory and cover these mutation families:
+
+- General settings, enabled/visibility/model selection, administrators, avatars.
+- Agent-owned Toolkit/configuration/access attachments and credential/OAuth publication.
+- Saved-memory changes, project policy/catalog/defaults, and environment selections.
+- Runtime lifecycle/attachment, workspace file/project writes, shell/Terminal and
+  interactive Browser work admission, Runtime Web services.
+- New Session/input/action admission and any other Agent-owned public mutation that can
+  create work or attach state; preserve existing native fences where already correct.
+
+Read-only listing, navigation and permitted inspection continue. Mutating convenience
+reads or inspection that starts new Runtime work do not become a bypass. Pure reads
+may already be unavailable under native Runtime deletion; this design does not restore
+resources merely to render an inspection page.
+
+For an authorized mutation, return a stable 409 conflict with safe
+`agent_decommissioning` code. Preserve existing 403/404 confidentiality behavior for
+unauthorized or absent targets. The guard is shared policy integrated into each owning
+operation, not a new HTTP-only middleware check.
+
+Uploads and OAuth span external I/O: preflight may improve feedback, but final
+publication/credential attachment must recheck lifecycle atomically. If deletion wins,
+no new resource attaches to the Agent; temporary or abandoned targets use the original
+upload/OAuth cleanup authority. Already dispatched external I/O can overlap deletion,
+so this is not a claim of atomic provider rollback. A commit that wins before deletion
+is ordered before it and must be covered by the resulting cleanup scope.
+
+Internal deletion participants, native reconciliation/cleanup, and safety-stop behavior
+retain explicit owner operations. Shared Workspace/provider changes are not globally
+disabled because one Agent is deleting. Do not create a generic/public bypass flag.
+
+### Unresolved error lifecycle
+
+Add nullable internal `failure_boundary_key` to the existing decommission job. Stable
+keys name participant/phase responsibilities; they are not policy versions, persisted
+execution checkpoints, or public strings. Null means no attributed unresolved boundary,
+not necessarily no error: null plus retained diagnostics represents an unattributed
+previous error. Existing bounded diagnostics remain internal.
+
+- On an actual owned failure, latch its boundary if none is unresolved, and schedule
+  retry through the existing policy. Later failures may replace diagnostic text but
+  cannot replace the first unresolved recovery obligation.
+- Claim/reclaim preserves the latch and diagnostics. Earlier participant success and
+  ordinary waiting do not clear it.
+- Only successful replay or fresh proof of that exact responsibility clears the latch
+  and its diagnostic fields atomically under the current job/Agent/owner/attempt fence.
+  Serial dependency execution ensures
+  earlier responsibilities succeeded before the original later failure is reached.
+- For final-verification failures, the exact verification responsibility is the boundary,
+  not merely a broad generic finalization flag. Root completion clears the latch in the
+  final transaction; a crash before the clear conservatively retains the error.
+- Cancellation and ownership loss do not create false failure/recovery records.
+- Retention waits, stopping active work and pending Runtime acknowledgements return typed
+  wait outcomes with the same scheduling/backoff semantics. They neither create an error
+  nor clear an unrelated unresolved one.
+- Non-gating best-effort channel presentation failures stay outside this badge's success
+  boundary, preserving ADR-D2 rather than silently changing deletion semantics.
+
+The nullable-column migration does not guess historical failure ownership. Older job
+errors contain ambiguous `RuntimeError` values, including ordinary waits. Null boundary
+plus retained diagnostic evidence becomes an internal typed unattributed-previous-error
+case and projects the safe deletion-error badge. Never regex-parse old messages to infer
+cause or recovery, and never treat claim/reclaim as proof of success.
+
+An unattributed obligation clears only on complete fresh required final verification
+and root completion; a newly attributed failure cannot replace it with an easier
+recovery condition. Known-boundary recovery clears both its key and diagnostics, so
+recovered new errors are not reclassified as legacy failures. No placeholder participant,
+backfilled ownership, additional state table, or version is introduced. Legacy expected
+waits may retain a previous-error indicator until deletion completes; this conservative
+historical ambiguity is disclosed rather than hiding a recorded genuine error.
+No reset of phase, retention, attempt count or scheduled retry is required.
 
 ## Schema, Dependencies and Living Specs
 
@@ -271,13 +409,16 @@ Contract tests compare the registry to migrated PostgreSQL metadata:
 
 ## Security and Operational Boundaries
 
-Public permission and admission checks do not change. Participant contexts constrain
+Existing public permissions remain; lifecycle-based read-only admission is completed
+across Agent-owned user writes under REQ-9. Participant contexts constrain
 all cleanup to one Agent and Workspace. Shared connection/provider/toolkit resources
 remain outside Agent destructive authority. Runtime paths and provider deletion stay
 under native Runtime authority, not guessed filesystem paths.
 
 The emergency migration removes only the recreation-history restrictive FK. The
-abstraction itself introduces no new persistent state or public/generated API changes.
+abstraction introduces no participant ledger. The visibility extension adds one nullable
+internal job column, an additive required-nullable public deletion summary, and generated
+client updates. API capability presentation must agree with read-only lifecycle.
 Any schema alignment discovered during implementation must follow the declared
 ownership policy, preserve retained evidence, and be reviewed as an explicit migration;
 there is no generic permission to drop inconvenient constraints.
@@ -287,6 +428,13 @@ IDs and continue without resetting attempts or retention. Rolling back the compo
 does not need participant data conversion. Rolling back the emergency FK migration can
 fail after Runtime targets have been deleted; retained history must not be erased to
 force downgrade.
+The failure-boundary column must be deployed before new writers. Old binaries ignore it;
+mixed-version writers may still clear legacy diagnostics and do not enforce all new
+read-only guards, so do not claim the new UX/security admission contract is fully active
+until backend rollout is complete. Roll back application code before dropping the new
+column; dropping it discards only the new unresolved-failure attribution, not cleanup
+evidence, job ownership, or native deletion state. Frontend/backend rollout must preserve
+the currently generated client contract rather than introduce a permanent fallback.
 
 ## Test Strategy
 
@@ -304,6 +452,10 @@ own branch matrices; E2E is the primary cross-deployment user-path evidence only
 | Runtime participant | No binding, pending acknowledgement, stale generation, current acknowledgement, provider outage, no unauthorized fallback |
 | Finalizer / PostgreSQL | Actual FK constraints, full rollback, historical item preservation, other Agent isolation, late root mutation, stale same-owner attempt, repeat finalization |
 | Existing-job compatibility | Old phase values and partially completed native resource evidence resume without new checkpoint adoption |
+| Public lifecycle projection | Active/deleting/error/missing-job states, batched authorized lists, no internal-error leakage, no false recovery on claim |
+| Read-only mutations | Direct and stale-client denial for every mutation family, active-write/delete lock races, upload/OAuth final publication, unchanged permissions and idempotent DELETE |
+| Failure latch | First-boundary persistence, exact recovery, earlier failures, normal waits, cancellation and same-owner stale attempts |
+| Frontend components | Desktop/mobile badges, read-only controls without disabled navigation, error copy, refetch/conflict/404 behavior; no screenshot-only assertion |
 | Representative API E2E | Create target, request deletion, wait for actual GET 404/list absence; preserve another Agent. No SQL writes or exhaustive branch matrix |
 
 Tests use real dependencies only at their own boundary, deterministic fake responses or
@@ -322,16 +474,21 @@ scenario unless a browser-specific boundary is being tested.
 1. Emergency fix PR: Runtime recreation history ownership correction; already separate.
 2. Lifecycle PR: approved participant structure, fencing corrections, ownership catalog,
    directly necessary baseline contract checks, and current Living Spec dependency map.
-3. Coverage PR: thorough participant/coordinator/DB failure and replay matrices on the
+3. Visibility/read-only PR: public summary, failure latch, complete user-mutation guards,
+   localized desktop/mobile UI, generated clients and focused contract checks. Keep it
+   separately reviewable from the deletion composition.
+4. Coverage PR: thorough participant/coordinator/DB failure and replay matrices on the
    stable structure. Existing useful tests are migrated rather than blindly duplicated.
-4. E2E PR: one representative actual-deletion completion path, building on the structure.
+5. E2E PR: one representative actual-deletion completion path, building on the structure;
+   the public response and read-only rejection participate in that path while UI matrices
+   remain component tests.
 
 The backend convention PR remains independent. No merge or production changes are
 implied by a local implementation, green CI, or Design approval.
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `2`
 
 | ID | Material mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -344,6 +501,9 @@ implied by a local implementation, green CI, or Design approval.
 | M7 | Living Spec table/dependency ownership evidence maintained with schema changes | REQ-7 | required |
 | M8 | Existing best-effort provider presentation effects, without stronger delivery promise | REQ-1; ADR-D2; current effect code | existing |
 | M9 | Field-aware catalog facts, preserved scoped RESTRICT references and cross-scope rejection | REQ-2, REQ-5; ADR-D3 | decided |
+| M10 | Safe deletion projection and localized list/detail read-only status UI | REQ-8, REQ-9; ADR-D4 | required |
+| M11 | Atomic lifecycle guard for every user-originated Agent mutation and final attachment | REQ-9; ADR-D4 | decided |
+| M12 | One unresolved-failure boundary field, typed normal waits and exact fenced recovery | REQ-8; ADR-D4 | decided |
 
 ## Removal and Replacement
 
@@ -354,13 +514,16 @@ implied by a local implementation, green CI, or Design approval.
 | Agent-owned unfenced blob/stop/final-cleanup writes | REQ-1, REQ-4; ADR-D2 | Same-transaction execution-context fencing | Call-site and stale-attempt DB tests |
 | Fixed Agent constraint-name-only completeness assertion | REQ-2; ADR-D1 | Relevant installed-edge ownership contract tests | Preserve useful safety assertions, remove duplicate fixed-list authority |
 | Tests coupled only to replaced internal call lists | REQ-3, REQ-6 | Participant and coordinator behavior tests | No obsolete orchestration-only assumptions retained |
-| Session lifecycle engine, native evidence and job schema | No removal authority | Retained unchanged | Session regression checks and migration/API diff inspection |
+| Claim-time diagnostic clearing and expected-wait exceptions | REQ-8; ADR-D4 | Failure latch preservation and typed normal waits | Claim/recovery/wait regression tests |
+| Enabled-only Agent operational labels and unguarded edit controls | REQ-8, REQ-9; ADR-D4 | Shared deletion projection, read-only controls and server guards | Component and API mutation-family tests |
+| Session lifecycle engine and native evidence | No removal authority | Retained unchanged | Session regression checks; one additive job field only |
 
 ## Feasibility and Remaining Risks
 
 The existing coordinator, completed DB operations, domain-native cleanup services,
 PostgreSQL catalog reader, migrated-DB test fixture, and retained job state support the
-proposed boundaries. No new public contract or paid-model prerequisite is needed.
+proposed boundaries. The user-requested visibility addition needs public response/client
+changes and a nullable job column, but no paid-model prerequisite or participant ledger.
 
 Main risks are incomplete row-scope declarations, stale-worker writes, immutable-target
 capture drift, and incorrect classification of shared tables. The explicit catalog,
@@ -373,6 +536,12 @@ set M1–M9 on 2026-10-20 after checking Requirements, ADR decisions, and curren
 An independent read-only authority and feasibility review also found no blocking
 corrections for revision 1 / M1–M9 on 2026-10-20. Both checks are design-level evidence,
 not implementation verification or requester approval.
+Revision 2 adds explicit UI/admission/error-attribution mechanisms under requester-provided
+REQ-8/REQ-9 and delegated ADR-D4. The delegated technical interviewee and an independent
+read-only reviewer endorsed the complete revision 2 / M1–M12 on 2026-10-20 after resolving
+legacy-error normalization and truthful shared error copy. No blocking findings remain.
+These are design-level checks; implementation verification and final requester approval
+remain separate and have not been recorded as complete.
 
 ## Design Approval
 
@@ -381,5 +550,5 @@ not implementation verification or requester approval.
 - Final approver: requester.
 - Approved on: pending.
 - Approved Design revision: pending.
-- Approved authority IDs: pending (`M1` through `M9` proposed).
+- Approved authority IDs: pending (`M1` through `M12` proposed).
 - Approved scope: pending final requester confirmation of this complete Design.

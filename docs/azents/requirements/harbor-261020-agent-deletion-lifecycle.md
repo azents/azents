@@ -31,6 +31,8 @@ coordination between them.
 - Developers can identify the responsible cleanup boundary when deletion fails.
 - Historical references and shared resources do not accidentally block or disappear
   during terminal Agent deletion.
+- Users can distinguish an Agent awaiting deletion from an active Agent or one whose
+  deletion encountered an error, and can inspect it without making new changes.
 
 ## Goals
 
@@ -42,7 +44,8 @@ coordination between them.
 
 - Change public deletion permissions, retention policies, or asynchronous semantics.
 - Replace Session lifecycle ownership or bypass its retention/purge behavior.
-- Add user-facing controls, configuration modes, or a new versioning system.
+- Add deletion cancellation, forced purge, manual retry controls, configuration modes,
+  or a new versioning system.
 - Merge, deploy, or manually repair production data as part of design approval.
 
 ## Requirements
@@ -136,6 +139,42 @@ cleanup implementations can determine ownership and safe deletion order.
 - The initial work covers the Agent-deletion dependency boundary; maintaining the same
   documentation discipline applies to subsequent schema/dependency changes.
 
+### REQ-8. Visible deleting and error states
+
+An authorized viewer can recognize deletion progress and deletion errors wherever the
+Agent is listed or inspected.
+
+**Acceptance criteria**
+
+- After deletion is accepted, the Agent has a visible deleting label in Agent lists
+  and Agent detail/settings headers until its actual removal.
+- An actual deletion-processing error has a distinct error label, including while
+  automatic recovery is pending; normal retention or Runtime acknowledgement waits
+  are not represented as failures.
+- Claiming a retry alone must not misrepresent an unresolved error as recovered.
+- State remains correct across refresh, revisiting the page, and multiple clients.
+- Labels are localized and understandable without relying on color alone.
+- Public status does not expose raw exception text, SQL, credentials, or private
+  operational identifiers; existing viewing authorization remains unchanged.
+
+### REQ-9. Read-only deleting Agents
+
+Once deletion is accepted, the Agent stays inspectable under existing read permissions
+but is read-only for user-initiated changes, including when deletion has encountered
+an error.
+
+**Acceptance criteria**
+
+- Agent configuration and owned-resource edits, activation, new work, and interactive
+  Runtime operations are unavailable; read-only navigation remains usable.
+- The server enforces this boundary, including direct API requests and pages opened
+  before deletion began, rather than relying only on disabled controls.
+- Existing authorized cleanup, safety-stop behavior, and automatic recovery continue;
+  read-only presentation must not stop the deletion pipeline.
+- Repeating an already accepted DELETE retains the existing idempotent job response,
+  but the UI does not present it as a new retry/cancel operation.
+- No change to other Agents or shared Workspace/provider resources is implied.
+
 ## Fixed Constraints
 
 - The emergency Runtime-history deletion fix is delivered first and independently.
@@ -146,9 +185,14 @@ cleanup implementations can determine ownership and safe deletion order.
 ## Open Assumptions
 
 - Internal cleanup composition may change while existing public behavior stays fixed.
+- The explicit deleting/error presentation and read-only behavior in REQ-8 and REQ-9
+  extend the prior user-visible scope; unrelated product behavior remains unchanged.
 - Exact continuation storage and code reuse are technical decisions after confirmation.
 
 ## Confirmation
 
 The requester confirmed requirements REQ-1 through REQ-7 on 2026-10-20 (KST),
 before ADR decisions and implementation of the lifecycle abstraction began.
+The requester accepted the existing design direction and explicitly added REQ-8 and
+REQ-9 on 2026-10-20 (KST). The updated complete Design will be presented for final
+confirmation; no new product decision is inferred beyond those requested outcomes.
