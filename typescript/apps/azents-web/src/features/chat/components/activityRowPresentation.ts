@@ -106,6 +106,7 @@ export const activityRowBorder = `${rem(1)} solid var(--mantine-color-default-bo
 export const chatScrollOverscrollBehavior = "contain" as const;
 export const chatScrollViewportProps: ScrollViewportProps = {
   "data-chat-scroll-viewport": true,
+  style: { touchAction: "pan-y pinch-zoom" },
 };
 export const activityDetailScrollAreaProps = {
   overscrollBehavior: chatScrollOverscrollBehavior,

@@ -6,6 +6,12 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - typescript/apps/azents-web/src/shared/components/ScrollContainedViewport.tsx
+  - typescript/apps/azents-web/src/shared/components/ScrollContainedViewport.module.css
+  - typescript/apps/azents-web/src/shared/components/AppLayout.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
+  - typescript/apps/azents-web/src/features/chat/containers/useChatComposerOverlay.ts
+  - typescript/apps/azents-web/src/features/chat/components/ChatView.module.css
   - typescript/apps/azents-web/src/features/chat/components/ChatTimelineItem.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatDetailPanel.tsx
   - typescript/apps/azents-web/src/features/chat/components/ActivityRow.tsx
@@ -201,8 +207,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-19
-spec_version: 196
+last_verified_at: 2026-10-21
+spec_version: 197
 ---
 
 # Conversation & Events
@@ -539,6 +545,36 @@ context ring remains inspectable without exposing an inference-profile mutation 
 the Normal, Fast, or Ultrafast processing-speed intent for the represented completed model turn
 from that turn marker's applied inference profile. Missing provenance remains unavailable, and
 the displayed intent is not a verified provider-served tier or the current composer preference.
+
+Draft and concrete-session chat routes use a full-height, document-contained viewport.
+While this surface is mounted, CSS fixes the body to the viewport and makes the AppShell
+and Agent content inherit its height. Leaving the chat route removes that containment;
+settings and directory pages keep their ordinary document scrolling. Non-scrolling chat
+surfaces permit pinch zoom but do not initiate vertical touch panning. The native timeline
+and draft content scrollers explicitly permit vertical panning and pinch zoom. Native
+textarea editing, multiline scrolling and selection remain unchanged. This boundary uses
+CSS `touch-action`, not keyboard-height calculations, viewport-offset correction, forced
+focus/scroll, gesture event cancellation or a JavaScript document scroll lock.
+
+Concrete-session composers float over the conversation in a separate layer anchored to
+the chat column's lower edge. The surrounding layer is transparent and lets pointer
+gestures reach the timeline; the input card retains its own background and controls.
+The timeline reserves the measured composer height at its end so the final message can
+scroll above the input, including when multiline input or attachments change that height.
+The vertical timeline scrollbar ends at the input card's top edge without reducing
+the conversation's scroll viewport. Conversation items remain fully opaque above that
+edge and fade linearly to transparent at the card's bottom edge. This alpha mask affects
+only the timeline, not the composer or scrollbar. The track and mask boundaries follow
+the measured card height as multiline input, attachments or composer status change.
+The layout does not track `VisualViewport` or infer keyboard geometry. Draft screens
+retain their native bottom composer and independently scrollable setup content.
+
+Both chat routes request `interactive-widget=resizes-content` viewport behavior so
+supporting browsers resize the layout with the on-screen keyboard. Browsers that do not
+support this directive retain their native keyboard viewport behavior. This does not
+register an OS keyboard accessory. Safari and embedded WebKit may still pan the native
+viewport or expose a keyboard-related bottom gap despite document containment; this
+layout does not guarantee suppression of that browser behavior.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":

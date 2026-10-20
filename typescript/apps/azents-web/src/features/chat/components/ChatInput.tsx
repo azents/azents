@@ -1012,6 +1012,7 @@ export const ChatInput = memo(function ChatInput({
         )}
         <Paper
           withBorder
+          data-chat-composer-card
           radius={rem(12)}
           px="xs"
           py={rem(6)}

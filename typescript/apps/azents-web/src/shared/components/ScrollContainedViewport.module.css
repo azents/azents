@@ -1,0 +1,32 @@
+.viewport {
+  --agent-content-height: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  touch-action: pinch-zoom;
+}
+
+:global(html):has(.viewport) {
+  height: 100%;
+  overflow: hidden;
+  background: var(--mantine-color-body);
+  touch-action: pinch-zoom;
+  overscroll-behavior: none;
+}
+
+:global(body):has(.viewport) {
+  position: fixed;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: pinch-zoom;
+  overscroll-behavior: none;
+}
+
+:global(.mantine-AppShell-root):has(.viewport),
+:global(.mantine-AppShell-main):has(.viewport) {
+  height: 100%;
+  min-height: 0;
+}

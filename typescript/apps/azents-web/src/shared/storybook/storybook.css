@@ -18,3 +18,15 @@
   --font-geist-sans: "Geist Storybook";
   --font-geist-mono: "Geist Mono Storybook";
 }
+
+#storybook-root:has([data-scroll-contained-viewport]),
+body > div:has(.storybook-root [data-scroll-contained-viewport]),
+.storybook-root:has([data-scroll-contained-viewport]),
+.storybook-surface:has([data-scroll-contained-viewport]) {
+  height: 100%;
+  min-height: 0;
+}
+
+.storybook-surface {
+  min-height: 100dvh;
+}

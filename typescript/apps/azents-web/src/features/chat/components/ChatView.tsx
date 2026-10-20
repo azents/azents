@@ -27,6 +27,7 @@ import {
 } from "./activityRowPresentation";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
+import classes from "./ChatView.module.css";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
 import { MessageBubble } from "./MessageBubble";
@@ -79,6 +80,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
     scrollAreaRef,
     viewportRef,
     contentRef,
+    composerOverlay,
     hasTimelineItems,
     chatPresentationItems,
     activeActivitySource,
@@ -147,9 +149,10 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
       gap={0}
       align="stretch"
       wrap="nowrap"
-      style={{ overflow: "hidden" }}
+      style={{ overflow: "hidden", touchAction: "pinch-zoom" }}
     >
       <Stack
+        data-chat-gesture-column
         h="100%"
         mih={0}
         miw={0}
@@ -159,6 +162,9 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           backgroundColor: "var(--mantine-color-body)",
           position: "relative",
           overflow: "hidden",
+          touchAction: "pinch-zoom",
+          "--chat-composer-top-inset": rem(composerOverlay.cardTopInset),
+          "--chat-composer-bottom-inset": rem(composerOverlay.cardBottomInset),
         }}
       >
         {/* message area */}
@@ -169,16 +175,23 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           viewportRef={viewportRef}
           overscrollBehavior={chatScrollOverscrollBehavior}
           viewportProps={chatScrollViewportProps}
+          classNames={{
+            viewport: classes.timelineViewport,
+            scrollbar: classes.timelineScrollbar,
+          }}
           styles={{ root: { minWidth: 0 }, viewport: { minWidth: 0 } }}
         >
           <Box
             ref={contentRef}
+            data-chat-timeline-content
             px="md"
-            pb="md"
             maw={rem(920)}
             mx="auto"
             w="100%"
             pt="md"
+            style={{
+              paddingBottom: `calc(${rem(composerOverlay.endSpace)} + var(--mantine-spacing-md))`,
+            }}
           >
             {/* older messages loading indicator */}
             {isLoadingMore && (
@@ -443,8 +456,15 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
         </ScrollArea>
 
         <Box
-          bg="var(--mantine-color-body)"
-          style={{ position: "relative", flexShrink: 0 }}
+          ref={composerOverlay.composerRef}
+          data-chat-composer-overlay
+          style={{
+            position: "absolute",
+            insetInline: 0,
+            bottom: 0,
+            zIndex: 1,
+            pointerEvents: "none",
+          }}
         >
           {/* new message notice chip */}
           {(showNewMessageChip || hasDetachedNewer) && (
@@ -478,7 +498,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           )}
           {/* input area */}
           <Box px="md" py="sm">
-            <Box maw={rem(920)} mx="auto">
+            <Box maw={rem(920)} mx="auto" style={{ pointerEvents: "auto" }}>
               <ChatInputContainer
                 personalToolsHref={personalToolsHref}
                 agentId={activeAgent?.id ?? null}
