@@ -30,6 +30,57 @@ def test_registry_rejects_duplicate_resource_owners() -> None:
         AgentDeletionRegistry((*definitions, duplicate))
 
 
+@pytest.mark.parametrize("invalid", ["duplicate", "unknown", "cycle", "empty", "long"])
+def test_registry_rejects_invalid_dependency_composition(invalid: str) -> None:
+    definitions = list(get_agent_deletion_registry().participants)
+    if invalid == "duplicate":
+        definitions.append(definitions[0])
+    elif invalid == "unknown":
+        definitions[0] = dataclasses.replace(definitions[0], dependencies=("unknown",))
+    elif invalid == "cycle":
+        definitions[0] = dataclasses.replace(
+            definitions[0], dependencies=(definitions[-1].key,)
+        )
+    else:
+        definitions[0] = dataclasses.replace(
+            definitions[0], key="" if invalid == "empty" else "x" * 81
+        )
+    with pytest.raises(ValueError):
+        AgentDeletionRegistry(definitions)
+
+
+@pytest.mark.parametrize("resource_kind", ["external", "historical"])
+def test_registry_rejects_duplicate_non_fk_resources(resource_kind: str) -> None:
+    definitions = list(get_agent_deletion_registry().participants)
+    if resource_kind == "external":
+        definitions[0] = dataclasses.replace(
+            definitions[0], external_resources=("same-object", "same-object")
+        )
+    else:
+        definitions[0] = dataclasses.replace(
+            definitions[0], historical_resources=("same-history", "same-history")
+        )
+    with pytest.raises(ValueError, match="Duplicate Agent deletion resource"):
+        AgentDeletionRegistry(definitions)
+
+
+@pytest.mark.parametrize("columns", [(), ("agent_id", "workspace_id")])
+def test_registry_rejects_incomplete_composite_identity(
+    columns: tuple[str, ...],
+) -> None:
+    definitions = list(get_agent_deletion_registry().participants)
+    first = definitions[0]
+    definitions[0] = dataclasses.replace(
+        first,
+        relationships=(
+            dataclasses.replace(first.relationships[0], source_columns=columns),
+            *first.relationships[1:],
+        ),
+    )
+    with pytest.raises(ValueError, match="Invalid Agent deletion relationship"):
+        AgentDeletionRegistry(definitions)
+
+
 async def test_installed_agent_deletion_edges_match_scoped_ownership(
     rdb_engine: AsyncEngine, latest_db_schema: None
 ) -> None:

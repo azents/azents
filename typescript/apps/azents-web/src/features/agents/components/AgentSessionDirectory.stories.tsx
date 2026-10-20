@@ -1,5 +1,5 @@
 import { rem } from "@mantine/core";
-import { expect, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentSessionDirectory } from "./AgentSessionDirectory";
 import type {
@@ -148,6 +148,70 @@ export const DeletingReadOnly: Story = {
       canvas.getByRole("button", { name: "Session actions" }),
     ).toBeDisabled();
     await expect(canvas.getByRole("tab", { name: "Active" })).toBeEnabled();
+  },
+};
+
+export const DeletionErrorInspection: Story = {
+  tags: ["ci-contract"],
+  args: {
+    agent: { ...agent, deletion_status: "deletion_error" },
+    totalCount: 52,
+    onStatusChange: fn(),
+    onPageChange: fn(),
+    onCreateSession: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByText("Deletion error").length).toBeGreaterThan(
+      0,
+    );
+    await expect(
+      canvas.getByRole("button", { name: "New session" }),
+    ).toBeDisabled();
+    await expect(
+      canvas.getByRole("button", { name: "Session actions" }),
+    ).toBeDisabled();
+    await expect(
+      canvas.getByRole("link", { name: /Release checklist follow-up/ }),
+    ).toHaveAttribute(
+      "href",
+      "/w/engineering/agents/agent_01/sessions/sess_release",
+    );
+    await userEvent.click(canvas.getByRole("tab", { name: "Archived" }));
+    await expect(args.onStatusChange).toHaveBeenCalledWith("archived");
+    await userEvent.click(canvas.getByRole("button", { name: "2" }));
+    await expect(args.onPageChange).toHaveBeenCalledWith(2);
+    await expect(args.onCreateSession).not.toHaveBeenCalled();
+  },
+};
+
+export const MobileDeletionErrorInspection: Story = {
+  ...DeletionErrorInspection,
+  tags: ["ci-contract"],
+  globals: { viewport: { value: "mobile1", isRotated: false } },
+};
+
+export const DeletingArchivedInspection: Story = {
+  tags: ["ci-contract"],
+  args: {
+    agent: { ...agent, deletion_status: "deleting" },
+    status: "archived",
+    sessions: [archivedSession],
+    onRestoreSession: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: "Restore" }),
+    ).toBeDisabled();
+    await expect(
+      canvas.getByRole("link", { name: /Investigate flaky deployment/ }),
+    ).toHaveAttribute(
+      "href",
+      "/w/engineering/agents/agent_01/sessions/sess_archived",
+    );
+    await expect(canvas.getByRole("tab", { name: "Active" })).toBeEnabled();
+    await expect(args.onRestoreSession).not.toHaveBeenCalled();
   },
 };
 
