@@ -1977,6 +1977,7 @@ class TestResolveAgentTools:
                 operations=AsyncMock(),
                 completion=AsyncMock(),
                 notifications=AsyncMock(),
+                files=AsyncMock(),
             )
             if kind == "routine"
             else None

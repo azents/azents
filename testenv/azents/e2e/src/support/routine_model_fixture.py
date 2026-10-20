@@ -406,8 +406,9 @@ def plan(request: Request) -> Text | Call:
                 "command": (
                     HOLD_COMMAND
                     if HOLD in request.prior_text
-                    else f"printf '%s\\n' '{RUNTIME_PROOF}' > routine-e2e-proof.txt; "
-                    "cat routine-e2e-proof.txt"
+                    else f"printf '%s\\n' '{RUNTIME_PROOF}' "
+                    "> /tmp/routine-e2e-proof.txt; "
+                    "cat /tmp/routine-e2e-proof.txt"
                 ),
                 "yield_time_ms": 30000,
             },
@@ -421,15 +422,16 @@ def plan(request: Request) -> Text | Call:
             {
                 "slug": first.slug,
                 "execution_id": execution,
-                "work": {
-                    "objective_outcome": "failed" if notify else "finished",
-                    "result": f"ROUTINE_E2E_RESULT_{first.title.rsplit(' ', 1)[-1]}",
-                    "next_hint": (
-                        "The single local check is complete; do not repeat it."
-                    ),
-                    "notify": notify,
-                    "message": "ROUTINE_E2E_NOTIFICATION" if notify else None,
-                },
+                "objective_outcome": "failed" if notify else "finished",
+                "result": f"ROUTINE_E2E_RESULT_{first.title.rsplit(' ', 1)[-1]}",
+                "next_hint": "The single local check is complete; do not repeat it.",
+                "notify": notify,
+                "message": "ROUTINE_E2E_NOTIFICATION" if notify else None,
+                "files": (
+                    ["/tmp/routine-e2e-proof.txt"]
+                    if notify and CHANNEL_SETUP not in request.prior_text
+                    else None
+                ),
             },
         )
     return Text(f"resp_routine_e2e_settled_{execution}", "ROUTINE_E2E_TURN_SETTLED")

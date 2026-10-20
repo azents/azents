@@ -498,6 +498,7 @@ class RoutineNotificationPayload(BaseModel):
     slug: str = Field(min_length=1)
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)
+    attachments: list[Attachment] = Field(default_factory=list)
 
 
 class AssistantMessagePayload(BaseModel):

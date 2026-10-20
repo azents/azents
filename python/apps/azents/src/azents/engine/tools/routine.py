@@ -4,8 +4,9 @@ import datetime
 import json
 from dataclasses import asdict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
 from azents.core.routine import (
     RoutineChanges,
     RoutineContent,
@@ -46,6 +47,7 @@ from azents.engine.tools.runtime_instruction_context import (
 )
 from azents.repos.routine.completion import RoutineCompletionRepository
 from azents.repos.routine.operations import RoutineOperations
+from azents.services.routine.files import RoutineFileService
 from azents.services.routine.notification import RoutineNotificationService
 
 
@@ -86,10 +88,24 @@ class RoutineExecutionInput(RoutineIdentityInput):
     execution_id: str = Field(min_length=1)
 
 
-class RecordRoutineResultInput(RoutineExecutionInput):
+class RecordRoutineResultInput(RoutineExecutionInput, RoutineWorkResult):
     """Record objective outcome, continuity, and independently chosen notification."""
 
-    work: RoutineWorkResult
+    files: list[str] | None = Field(
+        min_length=1,
+        max_length=MAX_EXTERNAL_CHANNEL_FILES,
+        description=(
+            "Absolute Runtime paths or authorized exchange:// URIs to attach. "
+            "Null when no files. Requires notify=true."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_files(self) -> "RecordRoutineResultInput":
+        """Silent results cannot publish files."""
+        if self.files is not None and not self.notify:
+            raise ValueError("Silent Routine results cannot include files.")
+        return self
 
 
 class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
@@ -102,11 +118,13 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
         completion: RoutineCompletionRepository,
         notifications: RoutineNotificationService,
         scope: RoutineScope,
+        files: RoutineFileService,
     ) -> None:
         self.operations = operations
         self.completion = completion
         self.notifications = notifications
         self.scope = scope
+        self.files = files
         self.turn_context: TurnContext | None = None
         self.execution_owner: SessionExecutionOwner | None = None
         self.runtime_context_store: RuntimeInstructionContextStore | None = None
@@ -280,22 +298,49 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
 
         async def record_routine_result(args: RecordRoutineResultInput) -> str:
             authority = await self._authority()
-            try:
-                recording = await self.completion.complete(
-                    scope=self.scope,
-                    authority=authority,
-                    slug=args.slug,
-                    execution_id=args.execution_id,
-                    work=args.work,
-                    now=datetime.datetime.now(datetime.UTC),
-                )
-            except ValueError as exc:
-                raise FunctionToolError(str(exc)) from None
             runtime = (
                 None
                 if self.runtime_context_store is None
                 else self.runtime_context_store.get()
             )
+            try:
+                prepared_files = None
+                if args.files is not None:
+                    current = await self.completion.context(
+                        scope=self.scope,
+                        authority=authority,
+                        slug=args.slug,
+                        execution_id=args.execution_id,
+                    )
+                    if current.phase != "completed":
+                        binding_id = (
+                            await self.notifications.operations.current_primary(
+                                scope=self.scope, authority=authority
+                            )
+                        )
+                        prepared_files = await self.files.prepare(
+                            paths=args.files,
+                            binding_id=binding_id,
+                            execution_id=args.execution_id,
+                            authority=authority,
+                            runtime=runtime,
+                        )
+                recording = await self.completion.complete(
+                    scope=self.scope,
+                    authority=authority,
+                    slug=args.slug,
+                    execution_id=args.execution_id,
+                    work=RoutineWorkResult(
+                        objective_outcome=args.objective_outcome,
+                        result=args.result,
+                        next_hint=args.next_hint,
+                        notify=args.notify,
+                        message=args.message,
+                    ),
+                    now=datetime.datetime.now(datetime.UTC),
+                )
+            except ValueError as exc:
+                raise FunctionToolError(str(exc)) from None
             state = await self.notifications.deliver(
                 scope=self.scope,
                 authority=authority,
@@ -304,6 +349,7 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
                 publish_event=None
                 if self.turn_context is None
                 else self.turn_context.publish_event,
+                files=prepared_files,
             )
             return _json(
                 {
@@ -368,7 +414,9 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
                     "result and required future next_hint. Record honest failed "
                     "investigations too. Choose notify independently: true requires "
                     "message; false forbids message. Notify only when the user "
-                    "needs to know. Delivery uses current Session Primary or "
+                    "needs to know. Attach files with absolute Runtime paths or "
+                    "authorized exchange:// URIs; silent results forbid files. "
+                    "Delivery uses current Session Primary or "
                     "Session chat when absent, with no automatic resend. "
                     "Closes only this occurrence, never the Run, other Routines, "
                     "ordinary work or Channel Work."
@@ -393,10 +441,12 @@ class RoutineToolkitProvider(ToolkitProvider[RoutineToolkitConfig]):
         operations: RoutineOperations,
         completion: RoutineCompletionRepository,
         notifications: RoutineNotificationService,
+        files: RoutineFileService,
     ) -> None:
         self.operations = operations
         self.completion = completion
         self.notifications = notifications
+        self.files = files
 
     async def resolve(
         self, config: RoutineToolkitConfig, context: ResolveContext
@@ -407,6 +457,7 @@ class RoutineToolkitProvider(ToolkitProvider[RoutineToolkitConfig]):
             operations=self.operations,
             completion=self.completion,
             notifications=self.notifications,
+            files=self.files,
             scope=RoutineScope(
                 workspace_id=context.workspace_id,
                 agent_id=context.agent_id,

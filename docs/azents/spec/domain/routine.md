@@ -139,9 +139,12 @@ not added. This read-only snapshot does not rebind a host Run or grant context,
 completion or idle-continuation authority for another Run's work.
 
 `record_routine_result` requires the admitted, started, current-owner identity.
-Its `work` contains `objective_outcome` (`finished` or `failed`), nonblank `result`
-and `next_hint`, independent `notify`, and nullable `message`. A notifying result
-requires a nonblank message; a silent result requires null. Completion atomically
+Its input is flat: `slug`, `execution_id`, `objective_outcome` (`finished` or
+`failed`), nonblank `result` and `next_hint`, independent `notify`, nullable
+`message`, and nullable `files`. The tool does not accept a nested `work` object.
+A notifying result requires a nonblank message and may attach up to 20 files
+using absolute Runtime paths or authorized `exchange://` references. Silent
+results require both message and files to be null. Completion atomically
 closes only that item and retains its canonical record. Repeating completion
 returns the existing stored work without another notification. The newest 100
 records per definition are retained. Judgment continuity uses latest work only.
@@ -162,7 +165,14 @@ means delivery to the originating Session chat. An existing but unavailable,
 replaced or failed Primary does not fall back to another Session/channel. Delivery
 is a post-commit, one-attempt effect with separate observation; uncertain or failed
 publication is not an automatic retry queue. Objective outcome, record success
-and delivery status remain distinct. Backfill preserves all existing Bindings:
+and delivery status remain distinct. Files are prepared with existing Runtime
+transfer/Exchange authority before completion, outside database transactions.
+Preparation failure leaves work incomplete. File-bearing delivery is pinned to
+the observed Primary (including its absence) and rejects a destination change.
+Channel notifications use existing outbound file manifests; Session chat
+notifications retain Exchange attachments in their durable notification event.
+Repeated completion does not prepare or send files again.
+Backfill preserves all existing Bindings:
 zero eligible connections means no Primary, one unambiguous connection selects it,
 and multiple or inconsistent connections block migration for explicit resolution.
 

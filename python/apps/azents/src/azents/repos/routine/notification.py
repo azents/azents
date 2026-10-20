@@ -6,10 +6,11 @@ from typing import Annotated
 from fastapi import Depends
 
 from azents.core.enums import EventKind
+from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.routine import RoutineScope
 from azents.core.session_resource_authority import SessionResourceAuthority
-from azents.engine.events.types import Event, RoutineNotificationPayload
+from azents.engine.events.types import Attachment, Event, RoutineNotificationPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -18,7 +19,10 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.routine.authority import RoutineExecutionAuthorityRepository
 from azents.repos.routine.completion import RoutineResultRecording
-from azents.repos.session_primary_channel import SessionPrimaryChannelRepository
+from azents.repos.session_primary_channel import (
+    SessionPrimaryChannelRepository,
+    SessionPrimaryChannelUnavailable,
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,21 @@ class RoutineNotificationOperations:
     ]
     events: Annotated[EventTranscriptRepository, Depends()]
     execution_authority: Annotated[RoutineExecutionAuthorityRepository, Depends()]
+
+    async def current_primary(
+        self, *, scope: RoutineScope, authority: SessionResourceAuthority
+    ) -> str | None:
+        """Observe the authorized destination before file preparation."""
+        async with self.session_manager() as session:
+            await self.execution_authority.fence_execution_scope(
+                session, scope=scope, authority=authority
+            )
+            return await self.primary.get_current(
+                session,
+                workspace_id=scope.workspace_id,
+                agent_id=scope.agent_id,
+                session_id=scope.session_id,
+            )
 
     async def primary_matches(
         self,
@@ -70,6 +89,10 @@ class RoutineNotificationOperations:
         scope: RoutineScope,
         authority: SessionResourceAuthority,
         recording: RoutineResultRecording,
+        files: tuple[ExternalChannelOutboundFileManifest, ...],
+        attachments: tuple[Attachment, ...],
+        expected_primary: str | None,
+        pin_primary: bool,
     ) -> RoutineNotificationPreparation:
         """Capture only the current Primary; absence alone permits Session chat."""
         state = recording.state
@@ -94,6 +117,10 @@ class RoutineNotificationOperations:
                 agent_id=scope.agent_id,
                 session_id=scope.session_id,
             )
+            if pin_primary and binding_id != expected_primary:
+                raise SessionPrimaryChannelUnavailable(
+                    "Routine attachment destination changed."
+                )
             if binding_id is not None:
                 plans = await self.channels.prepare_binding_reply_effects(
                     session,
@@ -102,7 +129,7 @@ class RoutineNotificationOperations:
                     session_id=scope.session_id,
                     binding_id=binding_id,
                     text=work.message,
-                    files=(),
+                    files=files,
                     operation_seed=f"routine-result:{state.context.execution_id}",
                     slack_reply_broadcast=False,
                     discord_forward_to_parent=False,
@@ -115,6 +142,7 @@ class RoutineNotificationOperations:
                 slug=state.context.candidate.slug,
                 title=state.context.candidate.content.title,
                 content=work.message,
+                attachments=list(attachments),
             )
             event = await self.events.append(
                 session,

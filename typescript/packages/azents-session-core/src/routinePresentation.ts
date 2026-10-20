@@ -329,7 +329,13 @@ export function routineEventMessage(
     case "routine_notification": {
       const payload = event.payload;
       if (
-        !onlyKeys(payload, ["execution_id", "slug", "title", "content"]) ||
+        !onlyKeys(payload, [
+          "execution_id",
+          "slug",
+          "title",
+          "content",
+          "attachments",
+        ]) ||
         !text(payload.execution_id) ||
         !text(payload.slug) ||
         !text(payload.title) ||

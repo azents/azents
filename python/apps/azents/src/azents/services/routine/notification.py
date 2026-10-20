@@ -18,6 +18,7 @@ from azents.repos.routine.completion import (
 from azents.repos.routine.notification import RoutineNotificationOperations
 from azents.repos.session_primary_channel import SessionPrimaryChannelUnavailable
 from azents.services.external_channel.channel_action import ExternalChannelActionService
+from azents.services.routine.files import RoutineNotificationFiles
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class RoutineNotificationService:
         recording: RoutineResultRecording,
         runtime: RuntimeInstructionContext | None,
         publish_event: PublishEventFn | None,
+        files: RoutineNotificationFiles | None,
     ) -> RoutineExecutionState:
         """The canonical result is already committed before reaching any effect."""
         state = recording.state
@@ -49,6 +51,10 @@ class RoutineNotificationService:
                 scope=scope,
                 authority=authority,
                 recording=recording,
+                files=() if files is None else files.manifests,
+                attachments=() if files is None else files.attachments,
+                expected_primary=None if files is None else files.binding_id,
+                pin_primary=files is not None,
             )
         except SessionPrimaryChannelUnavailable:
             return await self.completion.observe_delivery(

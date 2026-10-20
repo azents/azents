@@ -64,8 +64,8 @@ Do not promise arbitrary per-Routine schedules or exact hourly execution.
    be achieved, record an honest failed objective and useful future hint. Do not
    claim success because a command was attempted or a prerequisite was missing.
 4. Call `record_routine_result` separately for each completed occurrence. Supply
-   `work.objective_outcome` (`finished` or `failed`), concise `result`, required
-   `next_hint`, and the independently chosen notification fields.
+   top-level `objective_outcome` (`finished` or `failed`), concise `result`,
+   required `next_hint`, `notify`, `message`, and `files`. Do not nest under `work`.
 5. Let ordinary incomplete-work continuation carry remaining occurrences. Do not
    create another persistent Session, timer, judgment loop, or duplicate Routine
    to keep an admitted occurrence running.
@@ -73,9 +73,13 @@ Do not promise arbitrary per-Routine schedules or exact hourly execution.
 ## Choose notification independently
 
 - Prefer `notify=false` when nothing requires the user's attention, and set
-  `message=null`. Routine execution does not imply a notification.
+  `message=null` and `files=null`. Routine execution does not imply a notification.
 - Use `notify=true` only when the user needs to know, with a nonblank `message`.
   Keep objective outcome, saved result, future hint, and notification distinct.
+- Attach files in the same result call using `files` with absolute Runtime paths
+  or authorized `exchange://` URIs; use null when there are no files. File
+  preparation failure leaves the occurrence incomplete. Files follow the same
+  current Primary or Session chat destination as the message.
 - Let the result tool use the current Session Primary at delivery time, or Session
   chat only when no Primary exists. Do not supply or reconstruct a destination.
 - Do not use `channel_action.finish` or a Scheduled Task terminal tool to complete

@@ -91,8 +91,15 @@ class _Turn(ExtensionObservation):
     usage: _Usage | None
 
 
+class _NotificationFile(ExtensionObservation):
+    uri: StrictStr
+    name: StrictStr
+    size: StrictInt
+
+
 class _Notification(ExtensionObservation):
     content: StrictStr
+    attachments: list[_NotificationFile]
 
 
 class _ModelEvidence(ExtensionObservation):
@@ -390,6 +397,17 @@ def run_routine_journey(
         channel.delivery_status if channel is not None else "delivered"
     )
     history = _history(**common).items
+    if channel is None:
+        notifications = [
+            _Notification.model_validate(item.payload)
+            for item in history
+            if item.kind == "routine_notification"
+        ]
+        assert len(notifications) == 1
+        assert len(notifications[0].attachments) == 1
+        attached = notifications[0].attachments[0]
+        assert attached.name == "routine-e2e-proof.txt"
+        assert attached.uri.startswith("exchange://") and attached.size > 0
     judgments = [
         _Judgment.model_validate(item.payload)
         for item in history
