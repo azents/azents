@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, create_autospec
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Result, Success
+from psycopg.errors import DeadlockDetected, SerializationFailure
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import (
@@ -1396,9 +1398,13 @@ class TestChatWriteService:
             assert session_after is not None
             assert session_after.run_state == AgentSessionRunState.RUNNING
 
+    @pytest.mark.parametrize(
+        "abort_type", [None, DeadlockDetected, SerializationFailure]
+    )
     async def test_failed_run_retry_reverts_latest_failed_error_and_marks_running(
         self,
         rdb_session_manager: SessionManager[WriteSession],
+        abort_type: type[DeadlockDetected | SerializationFailure] | None,
     ) -> None:
         """Manual failed-run retry soft-reverts terminal failure output."""
         async with rdb_session_manager() as session:
@@ -1472,7 +1478,24 @@ class TestChatWriteService:
                 terminal_result_message="temporary failure",
             )
 
-        result = await _service(rdb_session_manager).create_idempotent_failed_run_retry(
+        attempts = 0
+
+        @asynccontextmanager
+        async def retry_session_manager() -> AsyncGenerator[WriteSession, None]:
+            nonlocal attempts
+            attempts += 1
+            async with rdb_session_manager() as session:
+                yield session
+                if abort_type is not None and attempts == 1:
+                    # Abort after the whole database mutation, before commit.
+                    # The next invocation must observe rollback, not its writes.
+                    raise OperationalError(
+                        "COMMIT", None, abort_type("confirmed transaction abort")
+                    )
+
+        result = await _service(
+            retry_session_manager
+        ).create_idempotent_failed_run_retry(
             agent_id=agent_id,
             session_id=agent_session.id,
             user_id=user_id,
@@ -1483,6 +1506,7 @@ class TestChatWriteService:
 
         assert result.request.created is True
         assert result.failed_event_id == failed_event.id
+        assert attempts == (1 if abort_type is None else 2)
         async with rdb_session_manager() as session:
             rows = (
                 await session.write_session.execute(

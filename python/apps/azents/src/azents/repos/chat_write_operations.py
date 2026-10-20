@@ -372,6 +372,7 @@ class ChatWriteOperationsRepository:
             command_id=command_id,
         )
 
+    @retry_hierarchy_operation
     async def create_idempotent_failed_run_retry(
         self,
         *,

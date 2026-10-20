@@ -1581,7 +1581,13 @@ for that session. Failed-run retry writes target the latest visible failed-run `
 are rejected with `409 Conflict` if any newer visible durable event exists, if the session is running,
 or if pending mailbox item/command state exists. Accepted retry writes soft-revert the failed event and later
 visible events, mark the session running, send a normal wake-up, return accepted type
-`failed_run_retry`, and set `history_reload_required = true`. Signal delivery is not the persistence source of truth. REST write
+`failed_run_retry`, and set `history_reload_required = true`. Signal delivery is not the persistence source of truth.
+The complete database-only failed-run retry operation recovers PostgreSQL-confirmed
+deadlock or serialization aborts only after its session scope has closed and rolled
+back. Every attempt retains the original request identity and freshly reauthorizes
+the requester and target. Cancellation, stale authority, uncertain commit, and
+other errors propagate; post-commit wake-up delivery is outside this recovery boundary.
+REST write
 responses include `session_id`, `client_request_id`, an accepted target, an authoritative live
 snapshot, and `history_reload_required` for writes such as edit/command that require durable history
 reload.
