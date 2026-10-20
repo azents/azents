@@ -685,6 +685,12 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ### 2.6 Agent decommission
 
+Cleanup participants, attempt fencing, current completion evidence, and the
+column-scoped PostgreSQL dependency catalog are specified in
+[Agent deletion ownership](agent-deletion.md). That registry is the shared source for
+execution ordering and final verification; the finalizer has no independent manual
+model-deletion or lifecycle-root list.
+
 `DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}` is an asynchronous decommission
 request, not immediate row deletion. An Agent administrator or Workspace owner can request it only
 when the archived-session retention policy is finite. The operation atomically marks the Agent

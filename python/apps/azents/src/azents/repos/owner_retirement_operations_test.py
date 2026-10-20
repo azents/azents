@@ -13,6 +13,8 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.broker.types import SessionStopSignal
+from azents.core.agent_deletion import AgentAvatarDeletionEvidence
+from azents.core.agent_deletion_registry import get_agent_deletion_registry
 from azents.core.agent_session_data import AgentSession, AgentSessionCreate
 from azents.core.enums import (
     AgentDecommissionStatus,
@@ -50,6 +52,7 @@ from azents.repos.agent_decommission_finalizer import (
 from azents.repos.agent_decommission_operations import (
     AgentDecommissionOperationsRepository,
 )
+from azents.repos.agent_deletion_fence import deletion_context
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -71,7 +74,10 @@ from azents.repos.session_lifecycle_operations import (
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.services.agent_decommission import AgentDecommissionService
+from azents.services.agent_deletion import (
+    AgentDeletionExecution,
+    ChannelDeletionParticipant,
+)
 from azents.services.owner_lifecycle import OwnerLifecycleService
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -121,7 +127,9 @@ def _decommission(
         read_session_manager=read,
         agent_repository=AgentRepository(),
         decommission_repository=AgentDecommissionRepository(),
-        finalizer_repository=AgentDecommissionFinalizerRepository(),
+        finalizer_repository=AgentDecommissionFinalizerRepository(
+            get_agent_deletion_registry()
+        ),
         agent_session_repository=AgentSessionRepository(),
         agent_run_repository=AgentRunRepository(),
         retention_repository=ArchivedSessionRetentionRepository(),
@@ -220,6 +228,7 @@ async def _decommission_job(
 ) -> AgentDecommissionJob:
     now = datetime.datetime.now(datetime.UTC)
     async with manager() as session:
+        await AgentRepository().mark_decommissioning(session, subject.agent_id)
         created = await AgentDecommissionRepository().create_or_get(
             session,
             agent_id=subject.agent_id,
@@ -599,12 +608,15 @@ async def test_decommission_provider_failure_keeps_committed_cleanup_phase(
             finally:
                 active[0] = False
 
-    service = object.__new__(AgentDecommissionService)
-    service.operation_repository = _decommission(tracked, tracked)
-    service.external_channel_lifecycle_service = _FailingCleanup(active)
+    operations = _decommission(tracked, tracked)
+    await operations.advance_status(
+        job=job,
+        lease_owner="retirement-owner",
+        status=AgentDecommissionStatus.FINALIZING,
+    )
     with pytest.raises(RuntimeError, match="postcommit provider"):
-        await service._cleanup_agent_external_roots(
-            job=job, lease_owner="retirement-owner"
+        await ChannelDeletionParticipant(operations, _FailingCleanup(active)).run(
+            AgentDeletionExecution(job, "retirement-owner", None, False, False)
         )
     async with rdb_session_manager() as session:
         observed = await session.read_session.get(RDBAgentDecommissionJob, job.id)
@@ -632,21 +644,25 @@ async def test_same_lease_owner_stale_attempt_cannot_mutate_or_finalize(
                 status=AgentDecommissionStatus.FINALIZING,
             )
         )
-    assert not await operations.set_status(
-        job_id=job.id,
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        await operations.advance_status(
+            job=job,
+            lease_owner="retirement-owner",
+            status=AgentDecommissionStatus.RETIRING_SESSIONS,
+        )
+    assert not await operations.finalize(
+        job=job,
         lease_owner="retirement-owner",
-        expected_attempt=job.attempt_count,
-        status=AgentDecommissionStatus.RETIRING_SESSIONS,
+        avatar_evidence=AgentAvatarDeletionEvidence(
+            deletion_context(job, lease_owner="retirement-owner"), ()
+        ),
     )
-    assert not await operations.finalize(job=job, lease_owner="retirement-owner")
     with pytest.raises(RuntimeError, match="lease was lost"):
         await operations.retire_root_tree(
             job=job, lease_owner="retirement-owner", root_session_id=subject.session_id
         )
     with pytest.raises(RuntimeError, match="lease was lost"):
-        await operations.prepare_external_cleanup(
-            job=job, lease_owner="retirement-owner"
-        )
+        await operations.cleanup_channels(job=job, lease_owner="retirement-owner")
     now = datetime.datetime.now(datetime.UTC)
     assert not await operations.mark_retry(
         job=job,
