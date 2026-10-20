@@ -186,15 +186,14 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         self.runtime_context_store = store
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Expose management tools and the run-bound terminal action."""
+        """Expose all Scheduled tools, with terminal authority checked on use."""
         self.turn_context = context
         tools = [
             self._make_add_tool(),
             self._make_list_tool(),
             self._make_delete_tool(),
+            self._make_submit_result_tool(),
         ]
-        if await self._active_cycle(context.run_id) is not None:
-            tools.append(self._make_submit_result_tool())
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
     async def get_dynamic_prompt(self, context: TurnContext) -> str:

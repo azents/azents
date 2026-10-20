@@ -233,14 +233,6 @@ class AgentRemoveGitWorktreeAdmission:
     bridge_identity: str
 
 
-@dataclasses.dataclass(frozen=True)
-class AgentGitWorktreeToolAvailability:
-    """Retained descriptive eligibility for the two Agent worktree tools."""
-
-    create: bool
-    remove: bool
-
-
 @dataclasses.dataclass
 class SessionGitWorktreeService:
     """Orchestrate completed database operations and external Git work."""
@@ -278,41 +270,6 @@ class SessionGitWorktreeService:
         """Reject action admission after a durable ownership takeover."""
         await self.repository.assert_actor_current(
             execution=execution, actor_generation=actor_generation
-        )
-
-    async def project_agent_git_worktree_availability(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-    ) -> AgentGitWorktreeToolAvailability:
-        """Describe both worktree tools from one retained eligibility context."""
-        unavailable = AgentGitWorktreeToolAvailability(create=False, remove=False)
-        if self.runner_operations is None or self.skill_store is None:
-            return unavailable
-        target = await self.runtime_target_resolver.project_operation_target(agent_id)
-        if target is None:
-            return unavailable
-        binding_service = self.session_working_folder_binding_service
-        binding = await binding_service.project_bound_authority_for_target(
-            agent_id=agent_id,
-            session_id=session_id,
-            runtime_target=target,
-        )
-        if binding is None:
-            return unavailable
-        allocations = await self.repository.list_active_session_allocations(
-            agent_id=agent_id, session_id=session_id
-        )
-        if allocations is None:
-            return unavailable
-        return AgentGitWorktreeToolAvailability(
-            create=True,
-            remove=any(
-                allocation.status is SessionGitWorktreeStatus.READY
-                and allocation.session_workspace_project_id is not None
-                for allocation in allocations
-            ),
         )
 
     async def admit_agent_create_git_worktree(

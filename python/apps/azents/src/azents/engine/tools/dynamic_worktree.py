@@ -83,7 +83,7 @@ class RemoveGitWorktreeInput(BaseModel):
 
 
 class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
-    """Expose durable Agent-managed worktree operations when currently eligible."""
+    """Expose durable Agent-managed worktree operations with admission checks."""
 
     def __init__(
         self,
@@ -134,21 +134,15 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
         self.turn_action_bridge_boundary = turn_action_bridge_boundary
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Project only currently eligible Agent-managed worktree operations."""
+        """Expose both operations independently of current worktree eligibility."""
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
-        tools: list[FunctionTool] = []
-        availability = await self.service.project_agent_git_worktree_availability(
-            agent_id=self.agent_id,
-            session_id=self.session_id,
-        )
-        if availability.create:
-            tools.append(self._create_git_worktree_tool())
-        if availability.remove:
-            tools.append(self._remove_git_worktree_tool())
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
-            tools=tools,
+            tools=[
+                self._create_git_worktree_tool(),
+                self._remove_git_worktree_tool(),
+            ],
         )
 
     def _create_git_worktree_tool(self) -> FunctionTool:
