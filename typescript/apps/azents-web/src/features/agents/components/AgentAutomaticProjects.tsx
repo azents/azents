@@ -39,7 +39,7 @@ import type { ProjectDirectoryPickerEntry } from "@/shared/agent-workspace/types
 
 interface AgentAutomaticProjectsProps {
   handle: string;
-  agent: { id: string };
+  agent: { id: string; deletion_status: "deleting" | "deletion_error" | null };
   runtimeCapability: "none" | "managed" | "removing";
   state: AutomaticProjectsState;
   isProjectPickerOpen: boolean;
@@ -171,10 +171,14 @@ export function AgentAutomaticProjects({
   const message =
     state.type === "MISSING" ? t("missingDescription") : stateMessage(state);
   const saveEnabled =
-    runtimeCapability === "managed" && automaticProjectsSaveEnabled(state);
+    agent.deletion_status === null &&
+    runtimeCapability === "managed" &&
+    automaticProjectsSaveEnabled(state);
   const reloadVisible = isReloadVisible(state);
   const editingDisabled =
-    runtimeCapability !== "managed" || automaticProjectsEditingDisabled(state);
+    agent.deletion_status !== null ||
+    runtimeCapability !== "managed" ||
+    automaticProjectsEditingDisabled(state);
 
   if (state.type === "LOADING") {
     return (
@@ -423,7 +427,7 @@ export function AgentAutomaticProjects({
       </Stack>
 
       <AgentWorkspaceDirectoryPickerModal
-        opened={isProjectPickerOpen}
+        opened={isProjectPickerOpen && agent.deletion_status === null}
         state={pickerState}
         runtimeSettingsHref={`/w/${handle}/agents/${agent.id}/settings/runtime`}
         translationNamespace="agentWorkspacePicker"

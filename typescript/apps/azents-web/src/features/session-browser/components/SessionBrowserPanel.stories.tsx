@@ -811,6 +811,7 @@ const meta = {
   parameters: { layout: "fullscreen" },
   render: (props) => <BrowserFixture {...props} />,
   args: {
+    readOnly: false,
     focused: true,
     focusViewport: null,
     zoom: 1,
@@ -853,6 +854,17 @@ const meta = {
 } satisfies Meta<typeof SessionBrowserPanel>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const DeletingReadOnly: Story = {
+  tags: ["ci-contract"],
+  args: { readOnly: true, focused: false },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: "New tab" }),
+    ).toBeDisabled();
+  },
+};
 
 export const ManualKeyboardWithoutRecognizedInput = {
   render: (props) => <ManualKeyboardFixture {...props} />,

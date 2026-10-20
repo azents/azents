@@ -6,6 +6,7 @@ import {
 } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import {
   creationReturnPath,
   deserializeGitHubUserCreation,
@@ -49,6 +50,7 @@ export interface AgentToolkitManagementContainerProps {
 }
 
 export interface AgentToolkitManagementContainerOutput extends AgentToolkitManagementContainerProps {
+  readOnly: boolean;
   state: AgentToolkitManagementState;
   editor: AgentToolkitEditorState;
   mutationState: AgentToolkitMutationState;
@@ -86,6 +88,7 @@ export function useAgentToolkitManagementContainer({
   handle,
   agentId,
 }: AgentToolkitManagementContainerProps): AgentToolkitManagementContainerOutput {
+  const { readOnly } = useAgentLifecycle({ handle, agentId });
   const t = useTranslations("workspace.agents.toolkitManagement");
   const utils = trpc.useUtils();
   const [editor, setEditor] = useState<AgentToolkitEditorState>({
@@ -419,8 +422,9 @@ export function useAgentToolkitManagementContainer({
   return {
     handle,
     agentId,
+    readOnly,
     state,
-    editor,
+    editor: readOnly && editor.type !== "DETAIL" ? { type: "CLOSED" } : editor,
     mutationState,
     deleteTarget,
     pending:
@@ -440,6 +444,9 @@ export function useAgentToolkitManagementContainer({
     onGithubUserPopupAccepted,
     onAuthorize,
     onStartAdd: () => {
+      if (readOnly) {
+        return;
+      }
       setMutationState({ type: "IDLE" });
       setEditor({ type: "CATALOG", tab: "new" });
     },

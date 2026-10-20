@@ -32,6 +32,7 @@ const subscriptionModel: AgentModelSelection = {
 };
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "agent_release",
   name: "Release Operator",
   description: "Coordinates release checklists and CI follow-up.",

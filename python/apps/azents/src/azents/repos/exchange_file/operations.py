@@ -24,6 +24,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
@@ -411,6 +412,7 @@ class ExchangeFileOperationRepository:
         )
         if membership is None:
             return Failure(ExchangeUploadError.ACCESS_DENIED)
+        await require_active_agent(session, agent_id=agent_id)
         return Success(agent.workspace_id)
 
     async def _authorize_upload_row(

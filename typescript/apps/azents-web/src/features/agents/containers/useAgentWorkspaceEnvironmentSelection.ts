@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import type { AgentWorkspaceEnvironmentSelectionProps } from "../components/AgentWorkspaceEnvironmentSelection";
 
@@ -11,6 +12,7 @@ export function useAgentWorkspaceEnvironmentSelection({
   handle: string;
   agentId: string;
 }): AgentWorkspaceEnvironmentSelectionProps {
+  const { readOnly } = useAgentLifecycle({ handle, agentId });
   const utils = trpc.useUtils();
   const input = { handle, agentId };
   const query = trpc.workspace.getAgentEnvironmentSelection.useQuery(input);
@@ -37,7 +39,10 @@ export function useAgentWorkspaceEnvironmentSelection({
         ? { type: "LOADING" }
         : {
             type: "READY",
-            settings: query.data,
+            settings: {
+              ...query.data,
+              can_manage: query.data.can_manage && !readOnly,
+            },
             selectedIds: selected,
             dirty,
             saving: mutation.isPending,
@@ -52,7 +57,7 @@ export function useAgentWorkspaceEnvironmentSelection({
       mutation.reset();
     },
     onSave: () => {
-      if (query.data?.can_manage && !mutation.isPending && dirty) {
+      if (!readOnly && query.data?.can_manage && !mutation.isPending && dirty) {
         mutation.mutate({ ...input, selectedIds: selected });
       }
     },

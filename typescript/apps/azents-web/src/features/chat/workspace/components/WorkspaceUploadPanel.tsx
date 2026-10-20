@@ -27,6 +27,7 @@ import type { WorkspaceUploadRow } from "../workspaceUploadTypes";
 import type { WorkspaceUploadFailure } from "@azents/public-client";
 
 export interface WorkspaceUploadPanelProps {
+  readOnly: boolean;
   rows: WorkspaceUploadRow[];
   t: WorkspacePanelTranslator;
   onCancel: (id: string) => void;
@@ -139,6 +140,7 @@ function isActive(phase: WorkspaceUploadRow["phase"]): boolean {
 }
 
 export function WorkspaceUploadPanel({
+  readOnly,
   rows,
   t,
   onCancel,
@@ -289,6 +291,7 @@ export function WorkspaceUploadPanel({
                         variant="light"
                         leftSection={<IconRefresh size="0.875rem" />}
                         onClick={() => onRetry(row.id, false)}
+                        disabled={readOnly}
                       >
                         {t("upload.retry")}
                       </Button>
@@ -299,6 +302,7 @@ export function WorkspaceUploadPanel({
                         color="orange"
                         variant="light"
                         onClick={() => onRetry(row.id, true)}
+                        disabled={readOnly}
                       >
                         {t("upload.overwriteAndRetry")}
                       </Button>

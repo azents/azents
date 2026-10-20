@@ -61,7 +61,11 @@ export function ChatSessionView(
   props: ChatSessionViewContainerOutput,
 ): React.ReactElement {
   return (
-    <BrowserAvailabilityProvider enabled={props.agent.browser_enabled}>
+    <BrowserAvailabilityProvider
+      enabled={
+        props.agent.browser_enabled && props.agent.deletion_status === null
+      }
+    >
       <ChatSessionContent {...props} />
     </BrowserAvailabilityProvider>
   );
@@ -86,6 +90,7 @@ function ChatSessionContent({
 }: ChatSessionViewContainerOutput): React.ReactElement {
   const t = useTranslations("chat");
   const tAgentDetail = useTranslations("workspace.agents.detail");
+  const tDeletion = useTranslations("workspace.agents.deletion");
   const tRoutines = useTranslations("routines");
   const panelItems: SessionPanelItem[] = [
     {
@@ -386,9 +391,11 @@ function ChatSessionContent({
             todo={chatSession.todo}
             currentWorkspaceProfile={currentWorkspaceProfile}
             readOnlyNotice={
-              subagentNavigation === null
-                ? null
-                : tAgentDetail("subagents.inputDisabledPlaceholder")
+              agent.deletion_status !== null
+                ? tDeletion("notice")
+                : subagentNavigation === null
+                  ? null
+                  : tAgentDetail("subagents.inputDisabledPlaceholder")
             }
           />
         </Box>

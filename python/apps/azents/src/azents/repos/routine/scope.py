@@ -2,12 +2,13 @@
 
 import sqlalchemy as sa
 
-from azents.core.enums import AgentLifecycleStatus, AgentSessionStatus
+from azents.core.enums import AgentSessionStatus
 from azents.core.routine import RoutineScope, RoutineUnavailable
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
@@ -22,7 +23,6 @@ async def require_routine_scope(session: ReadSession, *, scope: RoutineScope) ->
             RDBAgentSession.workspace_id == scope.workspace_id,
             RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             RDBAgent.workspace_id == scope.workspace_id,
-            RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
         )
     )
     if found is None:
@@ -43,12 +43,12 @@ async def fence_routine_scope(
         .where(
             RDBAgent.id == scope.agent_id,
             RDBAgent.workspace_id == scope.workspace_id,
-            RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
         )
-        .with_for_update(read=True, key_share=True)
+        .with_for_update(key_share=True)
     )
     if agent is None:
         raise RoutineUnavailable("Routine Agent is not active or authorized.")
+    await require_active_agent(session, agent_id=scope.agent_id)
     target = await session.write_session.scalar(
         sa.select(RDBAgentSession.id)
         .where(

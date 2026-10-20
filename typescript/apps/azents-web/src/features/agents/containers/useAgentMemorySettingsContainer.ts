@@ -4,6 +4,7 @@
 
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import type {
   ConsolidatedMemoryState,
@@ -133,8 +134,13 @@ export function useMemoryScrollPagination({
 
 export function useAgentMemorySettingsContainer({
   handle,
-  agent,
+  agent: initialAgent,
 }: AgentMemorySettingsContainerProps): AgentMemorySettingsContainerOutput {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const t = useTranslations("workspace.agents.memorySettings");
   const utils = trpc.useUtils();
   const [kind, setKind] = useState<MemoryKindValue>("saved");

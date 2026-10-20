@@ -55,6 +55,7 @@ const meta = {
     mutationState: { type: "IDLE" },
     deleteTarget: null,
     pending: false,
+    readOnly: false,
     attachPending: false,
     attachPendingId: null,
     setupPending: false,

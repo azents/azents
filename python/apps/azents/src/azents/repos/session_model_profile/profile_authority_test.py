@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_mutation import AgentMutationReadOnly
 from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -46,8 +47,10 @@ async def test_writable_root_retains_blocking_locks_and_authority(
         ),
         workspace_id="workspace",
     )
+    agents.get_by_id.return_value = agents.lock_by_id.return_value
     sessions = AsyncMock(spec=AgentSessionRepository)
     sessions.lock_by_id.return_value = current
+    sessions.get_by_id.return_value = current
     sessions.get_root_session_agent_by_session_id.return_value = (
         SessionAgent.model_construct(agent_session_id="session")
     )
@@ -62,7 +65,8 @@ async def test_writable_root_retains_blocking_locks_and_authority(
     repository = SessionModelProfileRepository(
         agents, sessions, memberships, AsyncMock(), AsyncMock(), AsyncMock()
     )
-    async with AsyncSession() as raw:
+    async with AsyncMock(spec=AsyncSession) as raw:
+        raw.scalar.return_value = agents.lock_by_id.return_value.lifecycle_status
         scope = ReadWriteSession(raw)
         if denied is None:
             assert (
@@ -71,19 +75,24 @@ async def test_writable_root_retains_blocking_locks_and_authority(
                 )
                 is current
             )
+        elif denied == "agent":
+            with pytest.raises(AgentMutationReadOnly):
+                await repository.lock_writable_root(
+                    scope, agent_id="agent", session_id="session", user_id="user"
+                )
         else:
             expected = {
                 "subagent": "Subagent sessions are read-only",
                 "private": "Requester does not have session access",
-                "agent": "AgentSession is not active",
                 "membership": "Requester does not have session access",
             }
             with pytest.raises(ValueError, match=expected[denied]):
                 await repository.lock_writable_root(
                     scope, agent_id="agent", session_id="session", user_id="user"
                 )
-        sessions.lock_by_id.assert_awaited_once_with(scope, "session")
-        if denied in {"subagent", "private"}:
+        if denied is not None:
+            sessions.lock_by_id.assert_not_awaited()
             agents.lock_by_id.assert_not_awaited()
         else:
+            sessions.lock_by_id.assert_awaited_once_with(scope, "session")
             agents.lock_by_id.assert_awaited_once_with(scope, "agent")

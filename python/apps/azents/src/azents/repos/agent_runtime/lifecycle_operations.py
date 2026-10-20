@@ -18,6 +18,7 @@ from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeLifecycleCommand
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
@@ -125,6 +126,10 @@ class AgentRuntimeLifecycleOperationsRepository:
         """Preserve configuration and lifecycle CAS in one completed mutation."""
         runtime_repository = self.runtime_repository
         async with self.session_manager() as session:
+            runtime = await runtime_repository.get_by_id(session, runtime_id)
+            if runtime is None:
+                return None
+            await require_active_agent(session, agent_id=runtime.agent_id)
             return await runtime_repository.set_desired_state_if_configuration_current(
                 session,
                 runtime_id,
@@ -166,6 +171,12 @@ class AgentRuntimeLifecycleOperationsRepository:
                     session, runtime_id, command_type, desired_state
                 )
             else:
+                runtime = await runtime_repository.get_by_id(session, runtime_id)
+                if runtime is None:
+                    return RuntimeLifecycleCommandResult(
+                        command=None, provider_disconnected=False
+                    )
+                await require_active_agent(session, agent_id=runtime.agent_id)
                 assert provider_id is not None
                 assert expected_digest is not None
                 provider_connected = (

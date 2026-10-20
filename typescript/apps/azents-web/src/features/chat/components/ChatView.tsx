@@ -319,6 +319,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
                   const failedRunRetryAction = msg.failedRunFailure
                     ? {
                         canRetry:
+                          readOnlyNotice === null &&
                           chatTimelineState.type === "LATEST_FOLLOWING" &&
                           msg.id === latestVisibleId &&
                           !isResponsePending &&

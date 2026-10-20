@@ -77,7 +77,7 @@ const readyPickerState: ProjectDirectoryPickerState = {
 
 const commonArgs = {
   handle: "engineering",
-  agent: { id: "agent_01" },
+  agent: { id: "agent_01", deletion_status: null },
   runtimeCapability: "managed",
   isProjectPickerOpen: false,
   pickerState: closedPickerState,

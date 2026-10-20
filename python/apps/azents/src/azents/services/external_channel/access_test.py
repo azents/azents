@@ -96,6 +96,7 @@ class _Session(AsyncSession):
     def __init__(self) -> None:
         super().__init__()
         self.commit_mock = AsyncMock()
+        self.scalar = AsyncMock(return_value=AgentLifecycleStatus.ACTIVE)
 
     async def commit(self) -> None:
         await self.commit_mock()
@@ -300,6 +301,7 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
     route = SimpleNamespace(
         id="route-1",
         connection_id="connection-1",
+        agent_id="agent-1",
         require_active_agent_id=lambda: "agent-1",
     )
     connection = SimpleNamespace(id="connection-1")
@@ -398,6 +400,7 @@ async def test_allow_preparation_failure_creates_no_session_or_decision() -> Non
     route = SimpleNamespace(
         id="route-1",
         connection_id="connection-1",
+        agent_id="agent-1",
         require_active_agent_id=lambda: "agent-1",
     )
     connection = SimpleNamespace(id="connection-1")
@@ -486,6 +489,7 @@ async def test_allow_rejects_existing_binding_with_stopping_session() -> None:
     route = SimpleNamespace(
         id="route-1",
         connection_id="connection-1",
+        agent_id="agent-1",
         require_active_agent_id=lambda: "agent-1",
     )
     connection = SimpleNamespace(id="connection-1")

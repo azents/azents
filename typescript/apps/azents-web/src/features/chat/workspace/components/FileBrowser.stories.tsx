@@ -69,6 +69,7 @@ function DirectoryBrowser({
   return (
     <Box h="30rem" w="28rem">
       <FileBrowserContainer
+        readOnly={false}
         root={root}
         cwd={root}
         path={root}

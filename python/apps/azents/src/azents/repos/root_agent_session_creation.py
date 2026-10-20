@@ -18,6 +18,7 @@ from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 
@@ -63,6 +64,7 @@ class RootAgentSessionCreationRepository:
         agent = await self.agent_repository.get_by_id(session, create.agent_id)
         if agent is None:
             raise ValueError("Agent is unavailable")
+        await require_active_agent(session, agent_id=create.agent_id)
         self._require_runtime_capability(
             agent.runtime_capability,
             runtime_dependent=False,
@@ -116,6 +118,7 @@ class RootAgentSessionCreationRepository:
                 initial_project_paths=tuple(project.path for project in projects),
                 policy_revision=None,
             )
+        await require_active_agent(session, agent_id=agent_id)
         policy = await self._require_automatic_project_policy(
             session,
             agent_id=agent_id,

@@ -13,7 +13,7 @@ from azents.core.auth.permissions import Permissions, has_permission
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.enums import WorkspaceUserRole
 from azents.core.github_user_oauth import (
     GitHubPersonalRequester,
     GitHubToolkitRequester,
@@ -42,6 +42,7 @@ from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.account_access import evaluate_active_subject
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.github_user_oauth.guards import (
     capture_and_clear_user_tokens,
     capture_registration,
@@ -134,7 +135,7 @@ class GitHubUserOAuthOperationRepository:
 
     async def authorize_scope_in_session(
         self,
-        session: ReadSession,
+        session: WriteSession,
         *,
         user_id: str,
         session_id: str,
@@ -169,11 +170,7 @@ class GitHubUserOAuthOperationRepository:
                 )
         else:
             agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.workspace_id != workspace_id
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
+            if agent is None or agent.workspace_id != workspace_id:
                 raise GitHubUserOAuthError(
                     GitHubUserErrorCode.NOT_FOUND, "Agent not found."
                 )
@@ -187,6 +184,7 @@ class GitHubUserOAuthOperationRepository:
                     GitHubUserErrorCode.AUTHORITY,
                     "Agent management permission required.",
                 )
+            await require_active_agent(session, agent_id=agent_id)
 
     async def authorize_scope(
         self, *, user_id: str, session_id: str, workspace_id: str, agent_id: str | None

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import type {
   RuntimeWebDurationSeconds,
@@ -30,6 +31,7 @@ export interface RuntimeWebUpdateInput {
 }
 
 export interface RuntimeWebServicesContainerOutput {
+  readOnly: boolean;
   state: RuntimeWebServicesState;
   action: RuntimeWebMutationAction;
   mutationError: string | null;
@@ -62,6 +64,7 @@ export function useRuntimeWebServicesContainer({
   autoRefreshVisible,
   runtimeAvailable,
 }: RuntimeWebServicesContainerProps): RuntimeWebServicesContainerOutput {
+  const { readOnly } = useAgentLifecycle({ handle, agentId });
   const utils = trpc.useUtils();
   const input = useMemo(() => ({ handle, agentId }), [agentId, handle]);
   const query = trpc.runtimeWeb.list.useQuery(input, {
@@ -206,6 +209,7 @@ export function useRuntimeWebServicesContainer({
   );
 
   return {
+    readOnly,
     state,
     action,
     mutationError: mutationError === null ? null : errorMessage(mutationError),

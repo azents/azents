@@ -24741,6 +24741,15 @@
         "title": "AgentDecommissionResponse",
         "description": "Accepted Agent decommission response."
       },
+      "AgentDeletionStatus": {
+        "type": "string",
+        "enum": [
+          "deleting",
+          "deletion_error"
+        ],
+        "title": "AgentDeletionStatus",
+        "description": "Safe public presentation without operational identifiers or diagnostics."
+      },
       "AgentListResponse": {
         "properties": {
           "items": {
@@ -25092,6 +25101,16 @@
             "type": "boolean",
             "title": "Enabled"
           },
+          "deletion_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentDeletionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "type": {
             "$ref": "#/components/schemas/AgentType"
           },
@@ -25281,6 +25300,7 @@
           "model_parameters",
           "system_prompt",
           "enabled",
+          "deletion_status",
           "type",
           "runtime_profile_id",
           "runtime_profile_selection_version",

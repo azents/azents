@@ -22,6 +22,7 @@ export interface BrowserConnectionInfo {
   websocketUrl: string;
 }
 export interface BrowserConnectionOptions {
+  readOnly: boolean;
   resourceKey: string;
   target: BrowserTarget | null;
   connect: () => Promise<BrowserConnectionInfo>;
@@ -106,6 +107,9 @@ export function useBrowserConnection(
       }
     };
     const retryObservation = (code: number): void => {
+      if (latest.current.readOnly) {
+        return;
+      }
       const delay = browserReconnectDelay(code, retryState.current.failures);
       if (delay === null) {
         return;
@@ -114,6 +118,7 @@ export function useBrowserConnection(
       reconnectDeadline = window.setTimeout(() => {
         if (
           active &&
+          !latest.current.readOnly &&
           epoch.current === generation &&
           currentKey.current === key
         ) {
@@ -214,9 +219,13 @@ export function useBrowserConnection(
       native?.close(4408, "Browser attachment deadline reached.");
     }, 20000);
     const open = async (): Promise<void> => {
+      const canMutate = (): boolean => !latest.current.readOnly;
+      if (!canMutate()) {
+        return;
+      }
       try {
         const info = await latest.current.connect();
-        if (!current()) {
+        if (!canMutate() || !current()) {
           return;
         }
         native = new WebSocket(info.websocketUrl, ["azents.browser.v1"]);
@@ -225,7 +234,11 @@ export function useBrowserConnection(
         native.addEventListener(
           "open",
           () => {
-            if (!current() || native?.readyState !== WebSocket.OPEN) {
+            if (
+              latest.current.readOnly ||
+              !current() ||
+              native?.readyState !== WebSocket.OPEN
+            ) {
               return;
             }
             if (native.protocol !== "azents.browser.v1") {
@@ -300,22 +313,25 @@ export function useBrowserConnection(
 
   const coordinate = useCallback(
     (frame: BrowserFrame, action: BrowserCoordinateAction): boolean =>
-      client.current?.coordinate(frame, action) ?? false,
+      !latest.current.readOnly &&
+      (client.current?.coordinate(frame, action) ?? false),
     [],
   );
   const openField = useCallback(
     (frame: BrowserFrame, editableId: string): boolean =>
-      client.current?.openField(frame, editableId) ?? false,
+      !latest.current.readOnly &&
+      (client.current?.openField(frame, editableId) ?? false),
     [],
   );
   const finishField = useCallback(
     (text: string | null): boolean =>
-      client.current?.finishField(text) ?? false,
+      !latest.current.readOnly && (client.current?.finishField(text) ?? false),
     [],
   );
   const dialog = useCallback(
     (accept: boolean, text: string | null): boolean =>
-      client.current?.dialog(accept, text) ?? false,
+      !latest.current.readOnly &&
+      (client.current?.dialog(accept, text) ?? false),
     [],
   );
   const displayed = useCallback((image: BrowserImage): void => {
@@ -341,6 +357,9 @@ export function useBrowserConnection(
     socket.current?.close(4400, "Browser image could not be decoded.");
   }, []);
   const reconnect = useCallback((): void => {
+    if (latest.current.readOnly) {
+      return;
+    }
     retryState.current.failures = 0;
     setAttempt((value) => value + 1);
   }, []);

@@ -68,6 +68,7 @@ def _job(*, job_id: str, attempt_count: int = 1) -> AgentDecommissionJob:
         lease_owner=None,
         lease_until=None,
         next_attempt_at=None,
+        failure_boundary_key=None,
         last_error_kind=None,
         last_error_summary=None,
         started_at=None,
@@ -77,7 +78,33 @@ def _job(*, job_id: str, attempt_count: int = 1) -> AgentDecommissionJob:
     )
 
 
-class _DecommissionRepositoryDouble:
+class _RecoveryRepositoryDouble:
+    async def schedule_wait(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        next_attempt_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> bool:
+        raise AssertionError("Unexpected ordinary wait in this focused test")
+
+    async def clear_failure_boundary(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        boundary_key: str,
+        now: datetime.datetime,
+    ) -> None:
+        raise AssertionError("Unexpected recovery in this focused test")
+
+
+class _DecommissionRepositoryDouble(_RecoveryRepositoryDouble):
     """Claim and retry recorder for coordinator tests."""
 
     def __init__(self, jobs: list[AgentDecommissionJob]) -> None:
@@ -118,6 +145,7 @@ class _DecommissionRepositoryDouble:
         lease_owner: str,
         expected_attempt: int,
         next_attempt_at: datetime.datetime,
+        failure_boundary_key: str,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
@@ -143,7 +171,7 @@ class _FailureIsolatingCoordinator(AgentDecommissionService):
             raise RuntimeError("provider unavailable")
         return AgentDecommissionAdvanceResult(
             completed=True,
-            waiting_retention=False,
+            wait_reason=None,
         )
 
 
@@ -377,7 +405,7 @@ class _ExternalChannelLifecycleDouble:
         return 0
 
 
-class _DecommissionStatusRepositoryDouble:
+class _DecommissionStatusRepositoryDouble(_RecoveryRepositoryDouble):
     """Always retain the scheduler-owned job lease."""
 
     async def claim_due(
@@ -414,6 +442,7 @@ class _DecommissionStatusRepositoryDouble:
         lease_owner: str,
         expected_attempt: int,
         next_attempt_at: datetime.datetime,
+        failure_boundary_key: str,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
@@ -479,7 +508,7 @@ async def test_retire_tree_terminates_external_channel_before_archive() -> None:
         operations, service.broker, external_channel_lifecycle
     ).retire_root(
         AgentDeletionExecution(
-            _job(job_id="decommission"), "scheduler-1", None, False, False
+            _job(job_id="decommission"), "scheduler-1", None, None, False
         ),
         root_session_id="root-session-1",
     )
@@ -538,7 +567,7 @@ async def test_retire_tree_preserves_started_scheduled_run_without_stop() -> Non
         operations, broker, external_channel_lifecycle
     ).retire_root(
         AgentDeletionExecution(
-            _job(job_id="decommission-scheduled"), "scheduler-1", None, False, False
+            _job(job_id="decommission-scheduled"), "scheduler-1", None, None, False
         ),
         root_session_id="root-session-1",
     )
@@ -775,7 +804,7 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
     operations.decommission_repository = _DecommissionStatusRepositoryDouble()
 
     execution = AgentDeletionExecution(
-        _job(job_id="decommission"), "scheduler-1", None, False, False
+        _job(job_id="decommission"), "scheduler-1", None, None, False
     )
     await ChannelDeletionParticipant(operations, cleanup_lifecycle).run(execution)
     await FileDeletionParticipant(
@@ -813,7 +842,7 @@ async def test_decommission_targets_terminal_delete_from_resource_binding() -> N
 
     await RuntimeDeletionParticipant(operations, runtime_service).run(
         AgentDeletionExecution(
-            _job(job_id="decommission"), "scheduler-1", None, False, False
+            _job(job_id="decommission"), "scheduler-1", None, None, False
         )
     )
 

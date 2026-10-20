@@ -27,6 +27,7 @@ from azents.rdb.models.workspace_environment import (
     RDBWorkspaceEnvironmentVariable,
 )
 from azents.rdb.session_capabilities import ReadSession
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_runtime_environment import AgentRuntimeEnvironmentRepository
 
 
@@ -234,6 +235,7 @@ class WorkspaceEnvironmentRepository:
             if isinstance(access, Failure):
                 return access
             assert agent is not None
+            await require_active_agent(session, agent_id=agent_id)
             available = {row.id for row in await self._rows(session, workspace_id)}
             if (
                 len(selected_ids) != len(set(selected_ids))

@@ -32,6 +32,7 @@ import type { WorkspaceEntry, WorkspacePathStat } from "../types";
 import type { SupportedLocale } from "@/shared/lib/locale";
 
 interface FileInfoProps {
+  readOnly: boolean;
   entry: WorkspaceEntry | null;
   stat: WorkspacePathStat | null;
   isLoading: boolean;
@@ -119,6 +120,7 @@ function MetadataRow({
 }
 
 export function FileInfo({
+  readOnly,
   entry,
   stat,
   isLoading,
@@ -182,6 +184,7 @@ export function FileInfo({
               <Menu.Item
                 leftSection={<IconFolderPlus size="0.875rem" />}
                 onClick={onCreateDirectory}
+                disabled={readOnly}
               >
                 {t("newFolder")}
               </Menu.Item>
@@ -198,6 +201,7 @@ export function FileInfo({
                 <Menu.Item
                   leftSection={<IconEdit size="0.875rem" />}
                   onClick={() => onRename(entry)}
+                  disabled={readOnly}
                 >
                   {t("rename")}
                 </Menu.Item>
@@ -206,6 +210,7 @@ export function FileInfo({
                 <Menu.Item
                   leftSection={<IconArrowRight size="0.875rem" />}
                   onClick={() => onMove(entry)}
+                  disabled={readOnly}
                 >
                   {t("move")}
                 </Menu.Item>
@@ -216,6 +221,7 @@ export function FileInfo({
                   color="red"
                   leftSection={<IconTrash size="0.875rem" />}
                   onClick={() => onDelete(entry)}
+                  disabled={readOnly}
                 >
                   {t("delete")}
                 </Menu.Item>

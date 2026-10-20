@@ -161,12 +161,35 @@ class AgentDecommissionRepositoryProtocol(Protocol):
         lease_owner: str,
         expected_attempt: int,
         next_attempt_at: datetime.datetime,
+        failure_boundary_key: str,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
     ) -> bool:
         """Persist bounded retry state for an owned job."""
         ...
+
+    async def schedule_wait(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        next_attempt_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> bool: ...
+
+    async def clear_failure_boundary(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        boundary_key: str,
+        now: datetime.datetime,
+    ) -> None: ...
 
 
 class AgentDecommissionAgentSessionRepositoryProtocol(Protocol):
@@ -586,9 +609,9 @@ class AgentDecommissionOperationsRepository:
                 session, agent_id=job.agent_id
             )
 
-    async def require_runtime_acknowledged(
+    async def runtime_acknowledged(
         self, *, job: AgentDecommissionJob, lease_owner: str
-    ) -> None:
+    ) -> bool:
         """Recheck native acknowledgement before finalization, outside external I/O."""
         async with self.session_manager() as session:
             await require_deletion_ownership(
@@ -604,9 +627,8 @@ class AgentDecommissionOperationsRepository:
                     )
                 )
                 if acknowledged is None:
-                    raise RuntimeError(
-                        "AgentRuntime terminal deletion acknowledgement is pending"
-                    )
+                    return False
+            return True
 
     async def require_owned(
         self, *, job: AgentDecommissionJob, lease_owner: str
@@ -646,6 +668,7 @@ class AgentDecommissionOperationsRepository:
         job: AgentDecommissionJob,
         lease_owner: str,
         next_attempt_at: datetime.datetime,
+        failure_boundary_key: str,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
@@ -658,9 +681,44 @@ class AgentDecommissionOperationsRepository:
                 lease_owner=lease_owner,
                 expected_attempt=job.attempt_count,
                 next_attempt_at=next_attempt_at,
+                failure_boundary_key=failure_boundary_key,
                 error_kind=error_kind,
                 error_summary=error_summary,
                 now=now,
+            )
+
+    async def schedule_wait(
+        self,
+        *,
+        job: AgentDecommissionJob,
+        lease_owner: str,
+        next_attempt_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> bool:
+        async with self.session_manager() as session:
+            return await self.decommission_repository.schedule_wait(
+                session,
+                job_id=job.id,
+                lease_owner=lease_owner,
+                expected_attempt=job.attempt_count,
+                next_attempt_at=next_attempt_at,
+                now=now,
+            )
+
+    async def clear_failure_boundary(
+        self, *, job: AgentDecommissionJob, lease_owner: str, boundary_key: str
+    ) -> None:
+        async with self.session_manager() as session:
+            await require_deletion_ownership(
+                session, context=deletion_context(job, lease_owner=lease_owner)
+            )
+            await self.decommission_repository.clear_failure_boundary(
+                session,
+                job_id=job.id,
+                lease_owner=lease_owner,
+                expected_attempt=job.attempt_count,
+                boundary_key=boundary_key,
+                now=datetime.datetime.now(datetime.UTC),
             )
 
     @retry_hierarchy_operation

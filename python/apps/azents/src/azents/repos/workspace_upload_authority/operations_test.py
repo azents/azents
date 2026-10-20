@@ -3,11 +3,13 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import NamedTuple
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_mutation import AgentMutationReadOnly
 from azents.core.enums import AgentLifecycleStatus, AgentType, WorkspaceUserRole
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
@@ -31,9 +33,14 @@ _USER_ID = "user-1"
 class _SessionManager:
     """Provide one session-shaped value for repository doubles."""
 
+    def __init__(self, lifecycle: AgentLifecycleStatus | None) -> None:
+        self.lifecycle = lifecycle
+
     @asynccontextmanager
     async def __call__(self) -> AsyncGenerator[WriteSession]:
-        yield ReadWriteSession(AsyncSession())
+        raw = AsyncMock(spec=AsyncSession)
+        raw.scalar.return_value = self.lifecycle
+        yield ReadWriteSession(raw)
 
 
 class _AgentRepository(AgentRepository):
@@ -141,7 +148,7 @@ def _repository(
             agent_repository=_AgentRepository(agent),
             agent_admin_repository=admin_repository,
             workspace_user_repository=_WorkspaceUserRepository(membership),
-            session_manager=_SessionManager(),
+            session_manager=_SessionManager(agent.lifecycle_status if agent else None),
         ),
         admin_repository=admin_repository,
     )
@@ -160,10 +167,13 @@ async def test_authorize_rejects_unavailable_agent() -> None:
             admin=False,
         )
 
-        result = await repository.authorize(agent_id=_AGENT_ID, user_id=_USER_ID)
-
-        assert isinstance(result, Failure)
-        assert isinstance(result.error, WorkspaceUploadRequesterAgentUnavailable)
+        if agent is None:
+            result = await repository.authorize(agent_id=_AGENT_ID, user_id=_USER_ID)
+            assert isinstance(result, Failure)
+            assert isinstance(result.error, WorkspaceUploadRequesterAgentUnavailable)
+        else:
+            with pytest.raises(AgentMutationReadOnly):
+                await repository.authorize(agent_id=_AGENT_ID, user_id=_USER_ID)
 
 
 @pytest.mark.asyncio

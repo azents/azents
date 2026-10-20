@@ -18,6 +18,7 @@ from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 
@@ -105,6 +106,7 @@ class AgentAutomaticProjectOperationsRepository:
             )
             if admin.scalar_one_or_none() is None:
                 return Failure(AutomaticProjectDenial.ADMIN_REQUIRED)
+            await require_active_agent(session, agent_id=agent_id)
             policy = await self.policy_repository.lock_policy(
                 session, agent_id=agent_id
             )

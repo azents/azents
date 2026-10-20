@@ -46,6 +46,7 @@ const subscriptionModel: AgentModelSelection = {
 };
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "agent_release",
   name: "Release Operator",
   description: "Coordinates release checklists and CI follow-up.",
@@ -139,7 +140,9 @@ const workspacePanel: WorkspacePanelContainerOutput = {
   state: workspacePanelStoryFixture.state,
   metricsState: { type: "LOADING" },
   workspaceUploads: workspacePanelStoryFixture.workspaceUploads,
+  readOnly: false,
   runtimeWebServices: {
+    readOnly: false,
     state: {
       type: "READY",
       services: [],
@@ -291,6 +294,7 @@ const subagentNavigation: SubagentNavigationLinks = {
 };
 
 const terminal: RuntimeTerminalContainerOutput = {
+  readOnly: false,
   projection: {
     state: "ready",
     reason_code: null,

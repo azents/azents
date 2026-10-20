@@ -54,6 +54,7 @@ import type {
 import type { WorkspaceUploadRow } from "../workspaceUploadTypes";
 
 export interface FileBrowserProps {
+  readOnly: boolean;
   root: string;
   cwd: string;
   path: string;
@@ -262,6 +263,7 @@ function getStatusColor(status: WorkspaceEntry["status"]): string {
 }
 
 interface TreeNodeProps {
+  readOnly: boolean;
   compact: boolean;
   node: FileTreeNode;
   depth: number;
@@ -287,6 +289,7 @@ interface TreeNodeProps {
 }
 
 function TreeNode({
+  readOnly,
   compact,
   node,
   depth,
@@ -318,7 +321,7 @@ function TreeNode({
   const displayName = getEntryDisplayName(node, depth);
   const displayPath = getEntryDisplayPath(node, depth);
   const isDirectory = node.kind === "directory";
-  const selectable = canSelect(node);
+  const selectable = !readOnly && canSelect(node);
   const canRemoveProject = node.capabilities?.removeProject === true;
   const canDeleteWorktree = node.capabilities?.deleteWorktree === true;
   const rowStyle = compact
@@ -523,12 +526,14 @@ function TreeNode({
                 <Menu.Item
                   leftSection={<IconUpload size="0.875rem" />}
                   onClick={() => onOpenUploadPicker(node.path)}
+                  disabled={readOnly}
                 >
                   {t("upload.openPicker")}
                 </Menu.Item>
                 <Menu.Item
                   leftSection={<IconFolderPlus size="0.875rem" />}
                   onClick={() => onCreateDirectory(node.path)}
+                  disabled={readOnly}
                 >
                   {t("newFolder")}
                 </Menu.Item>
@@ -538,6 +543,7 @@ function TreeNode({
               <Menu.Item
                 leftSection={<IconEdit size="0.875rem" />}
                 onClick={() => onRenamePath(node)}
+                disabled={readOnly}
               >
                 {t("rename")}
               </Menu.Item>
@@ -546,6 +552,7 @@ function TreeNode({
               <Menu.Item
                 leftSection={<IconArrowRight size="0.875rem" />}
                 onClick={() => onMovePath(node)}
+                disabled={readOnly}
               >
                 {t("move")}
               </Menu.Item>
@@ -558,6 +565,7 @@ function TreeNode({
                 color="red"
                 leftSection={<IconTrash size="0.875rem" />}
                 onClick={() => onRemoveProject(node)}
+                disabled={readOnly}
               >
                 {t("removeProject")}
               </Menu.Item>
@@ -567,6 +575,7 @@ function TreeNode({
                 color="red"
                 leftSection={<IconTrash size="0.875rem" />}
                 onClick={() => onDeleteWorktreeProject(node)}
+                disabled={readOnly}
               >
                 {t("deleteWorktree")}
               </Menu.Item>
@@ -576,6 +585,7 @@ function TreeNode({
                 color="red"
                 leftSection={<IconTrash size="0.875rem" />}
                 onClick={() => onDeletePath(node)}
+                disabled={readOnly}
               >
                 {t("delete")}
               </Menu.Item>
@@ -588,6 +598,7 @@ function TreeNode({
           node.children.map((child) => (
             <TreeNode
               key={child.nodeId}
+              readOnly={readOnly}
               compact={compact}
               node={child}
               depth={depth + 1}
@@ -648,6 +659,7 @@ function TreeNode({
 }
 
 export function FileBrowser({
+  readOnly,
   compact,
   root,
   cwd,
@@ -789,7 +801,7 @@ export function FileBrowser({
             </Menu.Label>
             <Menu.Item
               leftSection={<IconArrowRight size="0.875rem" />}
-              disabled={selectedPaths.length === 0}
+              disabled={readOnly || selectedPaths.length === 0}
               onClick={onBulkMove}
             >
               {t("move")}
@@ -797,7 +809,7 @@ export function FileBrowser({
             <Menu.Item
               color="red"
               leftSection={<IconTrash size="0.875rem" />}
-              disabled={selectedPaths.length === 0}
+              disabled={readOnly || selectedPaths.length === 0}
               onClick={onBulkDelete}
             >
               {t("delete")}
@@ -859,6 +871,7 @@ export function FileBrowser({
       ) : null}
 
       <WorkspaceUploadPanel
+        readOnly={readOnly}
         rows={uploadRows}
         t={t}
         onCancel={onCancelUpload}
@@ -893,6 +906,7 @@ export function FileBrowser({
                     variant="light"
                     leftSection={<IconFolderPlus size="0.875rem" />}
                     onClick={onAddProject}
+                    disabled={readOnly}
                   >
                     {t("addProject")}
                   </Button>
@@ -911,6 +925,7 @@ export function FileBrowser({
                       variant="subtle"
                       leftSection={<IconFolderPlus size="0.875rem" />}
                       onClick={onAddProject}
+                      disabled={readOnly}
                     >
                       {t("addProject")}
                     </Button>
@@ -919,6 +934,7 @@ export function FileBrowser({
               ) : null}
               {displayTree.map((node) => (
                 <TreeNode
+                  readOnly={readOnly}
                   key={node.nodeId}
                   compact={compact}
                   node={node}

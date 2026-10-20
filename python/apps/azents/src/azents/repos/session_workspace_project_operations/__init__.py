@@ -18,6 +18,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
@@ -219,6 +220,7 @@ class SessionWorkspaceProjectOperationsRepository:
             )
             if locked is None:
                 return Failure(ProjectContextUnavailable())
+            await require_active_agent(session, agent_id=context.agent_id)
             try:
                 authority = (
                     await self.binding_repository.project_bound_authority_in_session(
@@ -339,6 +341,7 @@ class SessionWorkspaceProjectOperationsRepository:
             )
             if locked is None:
                 return Failure(ProjectContextUnavailable())
+            await require_active_agent(session, agent_id=context.agent_id)
             try:
                 authority = (
                     await self.binding_repository.project_bound_authority_in_session(

@@ -67,7 +67,17 @@ export function useWorkspaceHomeContainer(
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const agentListQuery = trpc.agent.list.useQuery({ handle });
+  const agentListQuery = trpc.agent.list.useQuery(
+    { handle },
+    {
+      refetchInterval: (query) =>
+        query.state.data?.items.some((agent) => agent.deletion_status !== null)
+          ? 5000
+          : false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: true,
+    },
+  );
   const membersQuery = trpc.workspaceMember.list.useQuery({ handle });
 
   const state: WorkspaceHomeState = useMemo(() => {

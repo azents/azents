@@ -636,6 +636,7 @@ export function ScheduledTasks({
                 size="compact-sm"
                 leftSection={<IconPlus size={rem(16)} />}
                 onClick={onOpenCreate}
+                disabled={mutationBusy}
               >
                 {t("newTask")}
               </Button>

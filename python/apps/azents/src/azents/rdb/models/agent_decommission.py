@@ -84,6 +84,9 @@ class RDBAgentDecommissionJob(RDBModel):
         nullable=True,
         default=None,
     )
+    failure_boundary_key: Mapped[str | None] = mapped_column(
+        sa.String(512), init=False, nullable=True, default=None
+    )
     last_error_kind: Mapped[str | None] = mapped_column(
         sa.String(120),
         init=False,

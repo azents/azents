@@ -10,6 +10,7 @@ import { Box, Drawer, Group, rem } from "@mantine/core";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentFocusedShellMobileNavProvider } from "@/shared/agent-session/AgentFocusedShellMobileNav";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import {
   AgentFocusedSidebar,
@@ -48,9 +49,14 @@ function parseSessionListScope(
 
 export function AgentFocusedShell({
   handle,
-  agent,
+  agent: initialAgent,
   children,
 }: AgentFocusedShellProps): React.ReactElement {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

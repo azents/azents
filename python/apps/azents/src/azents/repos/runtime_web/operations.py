@@ -20,6 +20,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.runtime_web.data import (
     RuntimeWebConfiguration,
     RuntimeWebMutationResult,
@@ -101,6 +102,7 @@ class RuntimeWebOperationsRepository:
             configuration = await self._configuration(session)
             if isinstance(configuration, RuntimeWebOperationError):
                 return Failure(configuration)
+            await require_active_agent(session, agent_id=agent_id)
             try:
                 result = await self.repository.create_service(
                     session,
@@ -335,6 +337,7 @@ class RuntimeWebOperationsRepository:
             configuration = await self._configuration(session)
             if isinstance(configuration, RuntimeWebOperationError):
                 return Failure(configuration)
+            await require_active_agent(session, agent_id=agent_id)
             try:
                 deleted = await self.repository.delete_service(
                     session,
@@ -643,6 +646,7 @@ class RuntimeWebOperationsRepository:
         configuration = await self._configuration(session)
         if isinstance(configuration, RuntimeWebOperationError):
             return Failure(configuration)
+        await require_active_agent(session, agent_id=agent_id)
         try:
             result = await mutate(session)
         except RuntimeWebRepositoryQuotaExceeded as error:
@@ -677,11 +681,7 @@ class RuntimeWebOperationsRepository:
                 RuntimeWebOperationCode.ACCESS_DENIED, scope=None
             )
         agent = await self.agent_repository.get_by_id(session, agent_id)
-        if (
-            agent is None
-            or agent.workspace_id != workspace_id
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-        ):
+        if agent is None or agent.workspace_id != workspace_id:
             return RuntimeWebOperationError(
                 RuntimeWebOperationCode.NOT_FOUND, scope=None
             )

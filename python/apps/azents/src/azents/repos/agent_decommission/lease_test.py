@@ -95,6 +95,7 @@ async def test_same_worker_reclaim_cannot_finalize_or_retry_old_decommission(
         expected_attempt=first.attempt_count,
         next_attempt_at=later,
         error_kind="obsolete",
+        failure_boundary_key="agent.avatar/cleanup",
         error_summary="Obsolete attempt.",
         now=later,
     )

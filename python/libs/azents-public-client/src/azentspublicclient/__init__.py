@@ -79,6 +79,7 @@ __all__ = [
     "AgentCreateGitWorktreeAction",
     "AgentCreateRequest",
     "AgentDecommissionResponse",
+    "AgentDeletionStatus",
     "AgentListResponse",
     "AgentModelSelection",
     "AgentModelSelectionInput",
@@ -767,6 +768,7 @@ from azentspublicclient.models.agent_admin_response import AgentAdminResponse as
 from azentspublicclient.models.agent_create_git_worktree_action import AgentCreateGitWorktreeAction as AgentCreateGitWorktreeAction
 from azentspublicclient.models.agent_create_request import AgentCreateRequest as AgentCreateRequest
 from azentspublicclient.models.agent_decommission_response import AgentDecommissionResponse as AgentDecommissionResponse
+from azentspublicclient.models.agent_deletion_status import AgentDeletionStatus as AgentDeletionStatus
 from azentspublicclient.models.agent_list_response import AgentListResponse as AgentListResponse
 from azentspublicclient.models.agent_model_selection import AgentModelSelection as AgentModelSelection
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput as AgentModelSelectionInput

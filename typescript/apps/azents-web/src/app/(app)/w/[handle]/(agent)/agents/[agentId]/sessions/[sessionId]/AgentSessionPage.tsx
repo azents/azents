@@ -23,6 +23,7 @@ function supportingContent({
     case "browser":
       return agent.browser_enabled && panel.opened ? (
         <SessionBrowserPage
+          readOnly={agent.deletion_status !== null}
           handle={handle}
           agentId={agent.id}
           sessionId={sessionId}

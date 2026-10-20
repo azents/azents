@@ -17,6 +17,21 @@ class AgentDeletionPolicy(enum.StrEnum):
     VERIFY_RUNTIME = "verify_runtime"
 
 
+class AgentDeletionWaitReason(enum.StrEnum):
+    """Normal asynchronous progress that must not create a new error latch."""
+
+    RETENTION = "retention"
+    ACTIVE_WORK = "active_work"
+    RUNTIME_ACKNOWLEDGEMENT = "runtime_acknowledgement"
+
+
+class AgentDeletionStatus(enum.StrEnum):
+    """Safe public presentation without operational identifiers or diagnostics."""
+
+    DELETING = "deleting"
+    ERROR = "deletion_error"
+
+
 @dataclasses.dataclass(frozen=True)
 class AgentDeletionContext:
     """Exact current job ownership; never reusable across claimed attempts."""
@@ -97,6 +112,10 @@ class AgentDeletionParticipantFailure(RuntimeError):
         self.phase = phase
         self.error = error
         super().__init__(f"Agent deletion {participant_key}/{phase} failed: {error}")
+
+    @property
+    def boundary_key(self) -> str:
+        return f"{self.participant_key}/{self.phase}"
 
 
 @dataclasses.dataclass(frozen=True, init=False)

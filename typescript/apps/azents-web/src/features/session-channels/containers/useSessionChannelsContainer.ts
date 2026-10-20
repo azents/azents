@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import { sessionChannelDisconnectInvalidationPlan } from "../invalidation";
 import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
@@ -45,10 +46,15 @@ function normalizeError(error: unknown): string {
 
 export function useSessionChannelsContainer({
   handle,
-  agent,
+  agent: initialAgent,
   sessionId,
   session,
 }: SessionChannelsContainerProps): SessionChannelsContainerOutput {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const utils = trpc.useUtils();
   const onUpdateTitle = useAgentSessionTitleUpdater(agent.id, sessionId);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -158,7 +164,7 @@ export function useSessionChannelsContainer({
     updatingResponseModeId,
     responseModeError,
     onDisconnect: (binding) => {
-      if (disconnectLock.current) {
+      if (agent.deletion_status !== null || disconnectLock.current) {
         return;
       }
       disconnectLock.current = true;
@@ -180,6 +186,7 @@ export function useSessionChannelsContainer({
       const responseMode =
         responseModeDrafts[binding.id] ?? binding.response_mode;
       if (
+        agent.deletion_status !== null ||
         responseMode === binding.response_mode ||
         updatingResponseModeId !== null ||
         binding.disconnected_at !== null

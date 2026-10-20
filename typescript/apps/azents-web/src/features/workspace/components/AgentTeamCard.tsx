@@ -7,6 +7,7 @@ import { IconClock } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
+import { AgentDeletionBadge } from "@/shared/agent-session/AgentDeletionStatus";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import styles from "./WorkspaceHome.module.css";
@@ -62,7 +63,7 @@ export function AgentTeamCard({
       radius="md"
       className={styles.teamCard}
       style={{
-        opacity: agent.enabled ? 1 : 0.55,
+        opacity: agent.enabled || agent.deletion_status !== null ? 1 : 0.55,
         display: "flex",
         flexDirection: "column",
         gap: "var(--mantine-spacing-sm)",
@@ -84,13 +85,17 @@ export function AgentTeamCard({
             {agent.name}
           </Text>
           <Group gap={6} wrap="nowrap">
-            <Badge
-              size="xs"
-              variant="dot"
-              color={agent.enabled ? "green" : "gray"}
-            >
-              {agent.enabled ? tHome("enabled") : tHome("disabled")}
-            </Badge>
+            {agent.deletion_status !== null ? (
+              <AgentDeletionBadge status={agent.deletion_status} />
+            ) : (
+              <Badge
+                size="xs"
+                variant="dot"
+                color={agent.enabled ? "green" : "gray"}
+              >
+                {agent.enabled ? tHome("enabled") : tHome("disabled")}
+              </Badge>
+            )}
             <Text size="xs" c="dimmed" truncate>
               {agent.modelSummary}
             </Text>

@@ -43,6 +43,7 @@ const meta = {
   args: {
     item: shared,
     pending: false,
+    readOnly: false,
     canAuthorizeShared: true,
     authorizationPending: false,
     workspaceEditHref: "/w/acme/toolkits/toolkit-1/edit",
@@ -56,6 +57,18 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const DeletingReadOnly = {
+  tags: ["ci-contract"],
+  args: { readOnly: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Detach" })).toBeDisabled();
+    await expect(
+      canvas.getByRole("button", { name: "View details" }),
+    ).toBeEnabled();
+  },
+} satisfies Story;
 
 export const WorkspaceShared = {} satisfies Story;
 

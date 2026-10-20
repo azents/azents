@@ -21,10 +21,12 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
+from azents.core.agent_deletion import AgentDeletionStatus
 from azents.core.agent_errors import InvalidRoutineCadence, NotFound
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
@@ -460,11 +462,19 @@ class AgentService:
             )
         agents = await self._project_active_agents(workspace_id, result.items)
         source_snapshot = await self._capture_context_source(agents)
+        deletion_errors = await self.repository.deletion_errors_by_agent(
+            [
+                agent.id
+                for agent in agents
+                if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ]
+        )
         items = [
             await self._build_output(
                 agent,
                 can_manage=agent.id in managed_agent_ids,
                 source_snapshot=source_snapshot,
+                deletion_status=self._deletion_status(agent, deletion_errors),
             )
             for agent in agents
         ]
@@ -1093,11 +1103,27 @@ class AgentService:
     ) -> AgentOutput:
         """Resolve current capabilities at the detached product read boundary."""
         projected = (await self._project_active_agents(agent.workspace_id, [agent]))[0]
+        deletion_errors = await self.repository.deletion_errors_by_agent(
+            [agent.id]
+            if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            else []
+        )
         return await self._build_output(
             projected,
             can_manage=can_manage,
             source_snapshot=await self._capture_context_source([projected]),
+            deletion_status=self._deletion_status(agent, deletion_errors),
         )
+
+    @staticmethod
+    def _deletion_status(
+        agent: Agent, errors: dict[str, bool]
+    ) -> AgentDeletionStatus | None:
+        if agent.lifecycle_status is AgentLifecycleStatus.ACTIVE:
+            return None
+        if errors.get(agent.id, True):
+            return AgentDeletionStatus.ERROR
+        return AgentDeletionStatus.DELETING
 
     async def _capture_context_source(
         self, agents: list[Agent]
@@ -1119,6 +1145,7 @@ class AgentService:
         *,
         can_manage: bool,
         source_snapshot: CapturedContextSource | None,
+        deletion_status: AgentDeletionStatus | None,
     ) -> AgentOutput:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
@@ -1172,6 +1199,7 @@ class AgentService:
             effective_terminal_enabled=terminal_denied_scope is None,
             terminal_denied_scope=terminal_denied_scope,
             can_manage=can_manage,
+            deletion_status=deletion_status,
         )
 
     @staticmethod

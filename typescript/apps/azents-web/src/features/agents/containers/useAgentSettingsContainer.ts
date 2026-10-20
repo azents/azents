@@ -39,7 +39,8 @@ export function useAgentSettingsContainer(
   return {
     ...formOutput,
     handle,
-    agent,
+    agent:
+      formOutput.formState.type === "EDIT" ? formOutput.formState.agent : agent,
     section,
   };
 }

@@ -9,6 +9,7 @@ from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
 
+from azents.core.agent_mutation import AgentMutationReadOnly, AgentMutationTargetMissing
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
@@ -280,19 +281,28 @@ class DiscordConnectionActivationService:
                     failure_stage=failure_stage,
                 )
         capabilities = _discord_capabilities()
-        activated = await self.operations.activate(
-            connection_id=connection_id,
-            expected_encrypted_credentials=encrypted_credentials,
-            expected_configuration_generation=configuration_generation,
-            provider_app_id=metadata.application_id,
-            provider_tenant_id=target_guild_id,
-            provider_bot_user_id=bot_user_id,
-            interaction_public_key=metadata.verify_key,
-            command_set=command_set.model_dump(mode="json"),
-            capabilities=capabilities.model_dump(mode="json"),
-            callback_selector_hash=selector_hash,
-            checked_at=datetime.datetime.now(datetime.UTC),
-        )
+        try:
+            activated = await self.operations.activate(
+                connection_id=connection_id,
+                expected_encrypted_credentials=encrypted_credentials,
+                expected_configuration_generation=configuration_generation,
+                provider_app_id=metadata.application_id,
+                provider_tenant_id=target_guild_id,
+                provider_bot_user_id=bot_user_id,
+                interaction_public_key=metadata.verify_key,
+                command_set=command_set.model_dump(mode="json"),
+                capabilities=capabilities.model_dump(mode="json"),
+                callback_selector_hash=selector_hash,
+                checked_at=datetime.datetime.now(datetime.UTC),
+            )
+        except AgentMutationReadOnly, AgentMutationTargetMissing:
+            await self._clear_prepared_callback(
+                connection_id=connection_id,
+                expected_encrypted_credentials=encrypted_credentials,
+                expected_configuration_generation=configuration_generation,
+                callback_selector_hash=selector_hash,
+            )
+            raise
         if activated is None:
             error = DiscordActivationConfigurationError("discord_authority_changed")
             cleared = await self._clear_prepared_callback(

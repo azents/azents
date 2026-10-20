@@ -171,6 +171,7 @@ export function useChatSessionViewContainer(
         panel.activeView === "metrics"),
   });
   const terminal = useRuntimeTerminalContainer({
+    readOnly: agent.deletion_status !== null,
     handle,
     agentId: agent.id,
     sessionId,

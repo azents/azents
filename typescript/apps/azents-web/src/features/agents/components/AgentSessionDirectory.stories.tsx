@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentSessionDirectory } from "./AgentSessionDirectory";
 import type {
@@ -8,6 +9,7 @@ import type {
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "agent_01",
   name: "Release Operator",
   description:
@@ -133,6 +135,21 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+export const DeletingReadOnly: Story = {
+  tags: ["ci-contract"],
+  args: { agent: { ...agent, deletion_status: "deleting" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: "New session" }),
+    ).toBeDisabled();
+    await expect(
+      canvas.getByRole("button", { name: "Session actions" }),
+    ).toBeDisabled();
+    await expect(canvas.getByRole("tab", { name: "Active" })).toBeEnabled();
+  },
+};
 
 export const Active = {} satisfies Story;
 
