@@ -11,7 +11,7 @@ snapshot_id: harbor-261020
 
 - Requirements: `harbor-261020/REQ-1` through `REQ-9`, requester-confirmed.
 - Technical decisions: `harbor-261020/ADR-D1` through `ADR-D4`, delegated.
-- Implementation state: not implemented; final requester approval pending.
+- Implementation state: approved for implementation; implementation is not yet verified.
 - Revision 2 adds the requested deleting/error labels and read-only behavior to the
   previously endorsed lifecycle design.
 
@@ -540,15 +540,17 @@ Revision 2 adds explicit UI/admission/error-attribution mechanisms under request
 REQ-8/REQ-9 and delegated ADR-D4. The delegated technical interviewee and an independent
 read-only reviewer endorsed the complete revision 2 / M1–M12 on 2026-10-20 after resolving
 legacy-error normalization and truthful shared error copy. No blocking findings remain.
-These are design-level checks; implementation verification and final requester approval
-remain separate and have not been recorded as complete.
+These are design-level checks, not implementation verification. The requester approved
+revision 2 and requested implementation on 2026-10-20.
 
 ## Design Approval
 
 - Mode: Autonomous technical decisions; requester final approval.
 - Decision owner: delegated technical interviewee and primary agent for ADR choices.
 - Final approver: requester.
-- Approved on: pending.
-- Approved Design revision: pending.
-- Approved authority IDs: pending (`M1` through `M12` proposed).
-- Approved scope: pending final requester confirmation of this complete Design.
+- Approved on: `2026-10-20`.
+- Approved Design revision: `2`.
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12`.
+- Approved scope: the complete revision-2 lifecycle composition, ownership validation,
+  mutation fencing, deleting/error presentation, read-only behavior, failure attribution,
+  Living Spec maintenance, and layered verification, delivered in separate PR phases.
