@@ -15,53 +15,30 @@ import {
   Title,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
 import { FormPageLayout } from "@/shared/components/FormPageLayout";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { usePasswordLoginFormController } from "../containers/usePasswordLoginFormController";
+import type { PasswordLoginFormOutput } from "../containers/usePasswordLoginFormController";
 import type { PasswordLoginStepContainerProps } from "../containers/usePasswordLoginStep";
 
-/** Password input form (pure UI) */
-function PasswordLoginForm({
+const PasswordLoginForm = createReactContainer(
+  "PasswordLoginForm",
+  usePasswordLoginFormController,
+  PasswordLoginFormView,
+);
+
+/** Password input form with explicit state and native form callbacks. */
+export function PasswordLoginFormView({
   email,
   error,
   isPending,
-  onSubmit,
   onUseOtherMethod,
-}: {
-  email: string;
-  error: string | null;
-  isPending: boolean;
-  onSubmit: (password: string) => void;
-  onUseOtherMethod: () => void;
-}): React.ReactElement {
+  formRef,
+  password,
+  syncPasswordState,
+  handleSubmit,
+}: PasswordLoginFormOutput): React.ReactElement {
   const t = useTranslations("auth");
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const [password, setPassword] = useState("");
-
-  function syncPasswordState(): void {
-    const input = formRef.current?.elements.namedItem("password");
-    if (!(input instanceof HTMLInputElement)) {
-      return;
-    }
-    setPassword(input.value);
-  }
-
-  useEffect(() => {
-    syncPasswordState();
-    const intervalId = window.setInterval(syncPasswordState, 250);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, []);
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const password = formData.get("password");
-    if (typeof password === "string" && password) {
-      onSubmit(password);
-    }
-  }
 
   return (
     <form ref={formRef} onSubmit={handleSubmit}>

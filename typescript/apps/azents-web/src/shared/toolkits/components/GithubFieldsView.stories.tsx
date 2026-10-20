@@ -1,10 +1,12 @@
 import { rem } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { projectGithubFormFields } from "../provider-form-fields";
 import { GithubFieldsView } from "./GithubFieldsView";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const meta = {
   component: GithubFieldsView,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(680)}>
@@ -13,12 +15,14 @@ const meta = {
     ),
   ],
   args: {
-    config: {
-      github_auth_type: "pat",
-      toolsets: ["repos"],
-      inject_runtime_environment: false,
-    },
-    credentials: { type: "pat" },
+    fields: projectGithubFormFields(
+      {
+        github_auth_type: "pat",
+        toolsets: ["repos"],
+        inject_runtime_environment: false,
+      },
+      { type: "pat" },
+    ),
     hasCredentials: false,
     savedUserRegistration: false,
     authorizationState: null,
@@ -39,8 +43,11 @@ const meta = {
     runtimeAcknowledged: false,
     canTest: true,
     onRetryAvailability: fn(),
-    onConfigChange: fn(),
-    onCredentialsChange: fn(),
+    onAuthChange: fn(),
+    onCredentialFieldChange: fn(),
+    onToolsetsChange: fn(),
+    onInjectRuntimeEnvironmentChange: fn(),
+    onTargetsChange: fn(),
     onConnectInstallations: fn(),
     onInstallApp: fn(),
     onTest: fn(),
@@ -128,8 +135,10 @@ export const AvailabilityErrorNotAbsence = {
 } satisfies Story;
 export const SavedMissingPlatform = {
   args: {
-    config: { github_auth_type: "github_app_platform_user" },
-    credentials: { type: "github_app_platform_user" },
+    fields: projectGithubFormFields(
+      { github_auth_type: "github_app_platform_user" },
+      null,
+    ),
     hasCredentials: true,
     canTest: false,
     availability: {
@@ -144,8 +153,10 @@ export const SavedMissingPlatform = {
 } satisfies Story;
 export const NewByoaUser = {
   args: {
-    config: { github_auth_type: "github_app_user" },
-    credentials: { type: "github_app_user" },
+    fields: projectGithubFormFields(
+      { github_auth_type: "github_app_user" },
+      null,
+    ),
     canTest: false,
   },
   play: async ({ canvasElement }) => {
@@ -179,13 +190,12 @@ export const RedactedByoaEdit = {
       canvas.getByLabelText("OAuth Client Secret", { exact: false }),
       "replacement",
     );
-    await expect(args.onCredentialsChange).toHaveBeenCalled();
+    await expect(args.onCredentialFieldChange).toHaveBeenCalled();
   },
 } satisfies Story;
 export const ByoaInstallationUnchanged = {
   args: {
-    config: { github_auth_type: "github_app" },
-    credentials: { type: "github_app" },
+    fields: projectGithubFormFields({ github_auth_type: "github_app" }, null),
     canTest: true,
   },
   play: async ({ canvasElement }) => {
@@ -200,7 +210,10 @@ export const ByoaInstallationUnchanged = {
 } satisfies Story;
 export const PlatformInstallations = {
   args: {
-    config: { github_auth_type: "github_app_platform" },
+    fields: projectGithubFormFields(
+      { github_auth_type: "github_app_platform" },
+      null,
+    ),
     installationState: {
       type: "READY",
       installations: [

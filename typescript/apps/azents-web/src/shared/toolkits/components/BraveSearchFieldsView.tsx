@@ -14,13 +14,14 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 
+import type {
+  BraveFieldCallbacks,
+  BraveFormFields,
+} from "../provider-form-fields";
 import type { BraveSearchTestState } from "../types";
 
-export interface BraveSearchFieldsViewProps {
-  config: Record<string, unknown>;
-  onConfigChange: (config: Record<string, unknown>) => void;
-  credentials: Record<string, unknown> | null;
-  onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
+export interface BraveSearchFieldsViewProps extends BraveFieldCallbacks {
+  fields: BraveFormFields;
   hasCredentials: boolean;
   replacingKey: boolean;
   onReplaceKey: () => void;
@@ -29,10 +30,12 @@ export interface BraveSearchFieldsViewProps {
 }
 
 export function BraveSearchFieldsView({
-  config,
-  onConfigChange,
-  credentials,
-  onCredentialsChange,
+  fields,
+  onApiKeyChange,
+  onCountryChange,
+  onLanguageChange,
+  onSafesearchChange,
+  onTimeoutChange,
   hasCredentials,
   replacingKey,
   onReplaceKey,
@@ -40,14 +43,7 @@ export function BraveSearchFieldsView({
   testState,
 }: BraveSearchFieldsViewProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits.braveSearch");
-  const key =
-    typeof credentials?.api_key === "string" ? credentials.api_key : "";
-  const country = typeof config.country === "string" ? config.country : "US";
-  const language =
-    typeof config.search_lang === "string" ? config.search_lang : "en";
-  const safesearch =
-    typeof config.safesearch === "string" ? config.safesearch : "strict";
-  const timeout = typeof config.timeout === "number" ? config.timeout : 10;
+  const { apiKey: key, country, language, safesearch, timeout } = fields;
   const testFeedback = (() => {
     switch (testState.type) {
       case "IDLE":
@@ -81,10 +77,7 @@ export function BraveSearchFieldsView({
           autoComplete="new-password"
           required={!hasCredentials}
           value={key}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            onCredentialsChange(value ? { api_key: value } : null);
-          }}
+          onChange={(event) => onApiKeyChange(event.currentTarget.value)}
         />
       )}
 
@@ -93,24 +86,14 @@ export function BraveSearchFieldsView({
         description={t("countryHint")}
         value={country}
         maxLength={3}
-        onChange={(event) =>
-          onConfigChange({
-            ...config,
-            country: event.currentTarget.value.toUpperCase(),
-          })
-        }
+        onChange={(event) => onCountryChange(event.currentTarget.value)}
       />
       <TextInput
         label={t("language")}
         description={t("languageHint")}
         value={language}
         maxLength={5}
-        onChange={(event) =>
-          onConfigChange({
-            ...config,
-            search_lang: event.currentTarget.value.toLowerCase(),
-          })
-        }
+        onChange={(event) => onLanguageChange(event.currentTarget.value)}
       />
       <Select
         label={t("safeSearch")}
@@ -121,16 +104,14 @@ export function BraveSearchFieldsView({
           { value: "moderate", label: t("moderate") },
           { value: "off", label: t("off") },
         ]}
-        onChange={(value) =>
-          onConfigChange({ ...config, safesearch: value ?? "strict" })
-        }
+        onChange={onSafesearchChange}
       />
       <NumberInput
         label={t("timeout")}
         min={1}
         max={30}
         value={timeout}
-        onChange={(value) => onConfigChange({ ...config, timeout: value })}
+        onChange={onTimeoutChange}
       />
 
       <Stack gap="xs">

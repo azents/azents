@@ -4,15 +4,17 @@ import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { BraveSearchFieldsView } from "./BraveSearchFieldsView";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-const config = {
+const fields = {
+  apiKey: "",
   country: "US",
-  search_lang: "en",
+  language: "en",
   safesearch: "strict",
   timeout: 10,
 };
 
 const meta = {
   component: BraveSearchFieldsView,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(540)}>
@@ -21,10 +23,12 @@ const meta = {
     ),
   ],
   args: {
-    config,
-    onConfigChange: fn(),
-    credentials: null,
-    onCredentialsChange: fn(),
+    fields,
+    onApiKeyChange: fn(),
+    onCountryChange: fn(),
+    onLanguageChange: fn(),
+    onSafesearchChange: fn(),
+    onTimeoutChange: fn(),
     hasCredentials: false,
     replacingKey: false,
     onReplaceKey: fn(),
@@ -43,10 +47,8 @@ export const NewKey = {
     await expect(
       canvas.getByRole("button", { name: "Test connection" }),
     ).toBeDisabled();
-    await userEvent.type(canvas.getByLabelText("Brave Search API key"), "k");
-    await expect(args.onCredentialsChange).toHaveBeenLastCalledWith({
-      api_key: "k",
-    });
+    await userEvent.type(canvas.getByLabelText(/Brave Search API key/), "k");
+    await expect(args.onApiKeyChange).toHaveBeenLastCalledWith("k");
   },
 } satisfies Story;
 

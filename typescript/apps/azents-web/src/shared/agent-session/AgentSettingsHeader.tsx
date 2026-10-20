@@ -48,7 +48,7 @@ export function AgentSettingsHeader({
           avatar={agent.avatar ?? null}
           size={40}
         />
-        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+        <Stack gap={rem(2)} style={{ flex: 1, minWidth: 0 }}>
           <Group gap="xs" wrap="wrap">
             <Text fw={600} size="md">
               {agent.name}

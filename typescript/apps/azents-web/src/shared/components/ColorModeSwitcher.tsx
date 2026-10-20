@@ -5,8 +5,7 @@
  *
  * Icon button for selecting light / dark / system modes from menu.
  */
-import { ActionIcon, Menu } from "@mantine/core";
-import { useMantineColorScheme } from "@mantine/core";
+import { ActionIcon, Menu, rem } from "@mantine/core";
 import {
   IconBrightnessAuto,
   IconCheck,
@@ -14,32 +13,36 @@ import {
   IconSun,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useColorMode } from "@/shared/providers/color-mode";
-import type { ColorModePreference } from "@/shared/lib/color-mode";
+import { useColorModeSwitcherController } from "../containers/useColorModeSwitcherController";
+import { createReactContainer } from "../lib/createReactContainer";
+import type { ColorModeSwitcherOutput } from "../containers/useColorModeSwitcherController";
 
-export function ColorModeSwitcher(): React.ReactElement {
-  const { mode, preference, setColorMode } = useColorMode();
-  const { setColorScheme } = useMantineColorScheme();
+export const ColorModeSwitcher = createReactContainer(
+  "ColorModeSwitcher",
+  useColorModeSwitcherController,
+  ColorModeSwitcherView,
+);
+
+export function ColorModeSwitcherView({
+  mode,
+  preference,
+  handleSelect,
+}: ColorModeSwitcherOutput): React.ReactElement {
   const t = useTranslations("common");
-
-  function handleSelect(newPreference: ColorModePreference): void {
-    setColorMode(newPreference);
-    if (newPreference === "system") {
-      setColorScheme("auto");
-    } else {
-      setColorScheme(newPreference);
-    }
-  }
 
   function getCurrentIcon(): React.ReactElement {
     if (preference === "system") {
-      return <IconBrightnessAuto size={20} />;
+      return <IconBrightnessAuto size={rem(20)} />;
     }
-    return mode === "dark" ? <IconMoon size={20} /> : <IconSun size={20} />;
+    return mode === "dark" ? (
+      <IconMoon size={rem(20)} />
+    ) : (
+      <IconSun size={rem(20)} />
+    );
   }
 
   return (
-    <Menu shadow="md" width={160}>
+    <Menu shadow="md" width={rem(160)}>
       <Menu.Target>
         <ActionIcon variant="subtle" size="lg">
           {getCurrentIcon()}
@@ -47,23 +50,27 @@ export function ColorModeSwitcher(): React.ReactElement {
       </Menu.Target>
       <Menu.Dropdown>
         <Menu.Item
-          leftSection={<IconSun size={16} />}
-          rightSection={preference === "light" ? <IconCheck size={16} /> : null}
+          leftSection={<IconSun size={rem(16)} />}
+          rightSection={
+            preference === "light" ? <IconCheck size={rem(16)} /> : null
+          }
           onClick={() => handleSelect("light")}
         >
           {t("light")}
         </Menu.Item>
         <Menu.Item
-          leftSection={<IconMoon size={16} />}
-          rightSection={preference === "dark" ? <IconCheck size={16} /> : null}
+          leftSection={<IconMoon size={rem(16)} />}
+          rightSection={
+            preference === "dark" ? <IconCheck size={rem(16)} /> : null
+          }
           onClick={() => handleSelect("dark")}
         >
           {t("dark")}
         </Menu.Item>
         <Menu.Item
-          leftSection={<IconBrightnessAuto size={16} />}
+          leftSection={<IconBrightnessAuto size={rem(16)} />}
           rightSection={
-            preference === "system" ? <IconCheck size={16} /> : null
+            preference === "system" ? <IconCheck size={rem(16)} /> : null
           }
           onClick={() => handleSelect("system")}
         >

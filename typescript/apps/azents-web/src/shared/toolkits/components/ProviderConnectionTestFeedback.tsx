@@ -1,4 +1,4 @@
-import { Alert, Text } from "@mantine/core";
+import { Alert, rem, Text } from "@mantine/core";
 import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
 import type { ProviderConnectionTestState } from "../types";
 import type { ReactElement } from "react";
@@ -20,7 +20,7 @@ export function ProviderConnectionTestFeedback({
         <Alert
           variant="light"
           color="red"
-          icon={<IconAlertTriangle size={16} />}
+          icon={<IconAlertTriangle size={rem(16)} />}
         >
           {preWrap ? (
             <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
@@ -38,9 +38,9 @@ export function ProviderConnectionTestFeedback({
           color={state.result.success ? "green" : "red"}
           icon={
             state.result.success ? (
-              <IconCheck size={16} />
+              <IconCheck size={rem(16)} />
             ) : (
-              <IconAlertTriangle size={16} />
+              <IconAlertTriangle size={rem(16)} />
             )
           }
         >

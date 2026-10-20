@@ -5,6 +5,10 @@
 import { useState } from "react";
 import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import { trpc } from "@/trpc/client";
+import {
+  braveFieldCallbacks,
+  projectBraveFormFields,
+} from "../provider-form-fields";
 import { pickToolkitOwnerScope } from "../toolkit-owner-scope";
 
 import type { BraveSearchFieldsViewProps } from "../components/BraveSearchFieldsView";
@@ -37,16 +41,18 @@ export function useBraveSearchConfigFieldsContainer(
           : { type: "IDLE" };
 
   return {
-    config,
-    onConfigChange: (nextConfig) => {
-      testConnection.reset();
-      onConfigChange(nextConfig);
-    },
-    credentials,
-    onCredentialsChange: (nextCredentials) => {
-      testConnection.reset();
-      onCredentialsChange(nextCredentials);
-    },
+    fields: projectBraveFormFields(config, credentials),
+    ...braveFieldCallbacks(
+      config,
+      (nextConfig) => {
+        testConnection.reset();
+        onConfigChange(nextConfig);
+      },
+      (nextCredentials) => {
+        testConnection.reset();
+        onCredentialsChange(nextCredentials);
+      },
+    ),
     hasCredentials,
     replacingKey,
     onReplaceKey: () => setReplacingKey(true),

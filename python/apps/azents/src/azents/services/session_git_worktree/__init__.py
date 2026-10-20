@@ -2464,6 +2464,8 @@ class SessionGitWorktreeService:
             )
         except CanonicalExecutionOwnerGenerationStaleError:
             raise
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
             await self._fail_agent_create_git_worktree(
                 execution=execution,
@@ -3117,6 +3119,8 @@ class SessionGitWorktreeService:
             )
         except CanonicalExecutionOwnerGenerationStaleError:
             raise
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             await self._mark_action_execution_failed(
                 execution=execution,
@@ -3175,6 +3179,8 @@ class SessionGitWorktreeService:
             return project
         except CanonicalExecutionOwnerGenerationStaleError:
             raise
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
             await self._fail_agent_create_git_worktree(
                 execution=execution,
@@ -3229,6 +3235,8 @@ class SessionGitWorktreeService:
                 worktree_path=worktree_path,
             )
         except CanonicalExecutionOwnerGenerationStaleError:
+            raise
+        except asyncio.CancelledError:
             raise
         except Exception as exc:
             await self._mark_action_execution_failed(
@@ -3287,6 +3295,8 @@ class SessionGitWorktreeService:
             )
         except CanonicalExecutionOwnerGenerationStaleError:
             raise
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
             await self._fail_agent_create_git_worktree(
                 execution=execution,
@@ -3324,6 +3334,8 @@ class SessionGitWorktreeService:
                 path=path,
             )
         except CanonicalExecutionOwnerGenerationStaleError:
+            raise
+        except asyncio.CancelledError:
             raise
         except Exception as exc:
             await self._append_action_execution_event(

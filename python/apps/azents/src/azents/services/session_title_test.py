@@ -1129,12 +1129,8 @@ class TestSessionTitleHelpers:
         @asynccontextmanager
         async def session_manager() -> AsyncIterator[WriteSession]:
             session = RecordingSession()
-            try:
-                yield ReadWriteSession(session)
-            except Exception:
-                raise
-            else:
-                await session.commit()
+            yield ReadWriteSession(session)
+            await session.commit()
 
         class RecordingThreadTitleService(_ThreadTitleService):
             async def project_generated_title(
