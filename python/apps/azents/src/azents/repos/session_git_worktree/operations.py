@@ -128,27 +128,6 @@ class SessionGitWorktreeOperationsRepository:
                 ),
             )
 
-    async def list_active_session_allocations(
-        self, *, agent_id: str, session_id: str
-    ) -> list[SessionGitWorktree] | None:
-        """Complete the list active session allocations database operation."""
-        async with self.read_session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if (
-                agent_session is None
-                or agent_session.agent_id != agent_id
-                or agent_session.status is not AgentSessionStatus.ACTIVE
-            ):
-                return None
-            allocations = await self.session_git_worktree_repository.list_by_session_id(
-                session,
-                session_id=session_id,
-            )
-            return allocations
-
     async def admit_create(
         self,
         *,

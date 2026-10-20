@@ -332,6 +332,64 @@ def _service(
     )
 
 
+async def test_submit_rejects_unbound_run_before_any_terminal_mutation() -> None:
+    """Always-visible terminal tools still require a Run-bound cycle on use."""
+    order: list[str] = []
+    service, run_repository, event_repository, cycle_repository, task_repository = (
+        _service(order=order, task=_task())
+    )
+    run_repository.run.scheduled_task_cycle_id = None
+
+    with pytest.raises(ValueError, match="not an active Scheduled Task cycle"):
+        await service.submit(
+            workspace_id="w" * 32,
+            agent_id="a" * 32,
+            session_id="s" * 32,
+            run_id=_RUN_ID,
+            status="finished",
+            result="Completed.",
+        )
+
+    assert order == ["lock_run"]
+    assert run_repository.patches == []
+    assert event_repository.creates == []
+    assert cycle_repository.deleted == []
+    assert task_repository.deleted is False
+    assert task_repository.released is False
+
+
+async def test_submit_rejects_cycle_owned_by_another_run_without_mutation() -> None:
+    """Visible terminal tools cannot settle a cycle bound to another Run."""
+    order: list[str] = []
+    service, run_repository, event_repository, cycle_repository, task_repository = (
+        _service(order=order, task=_task())
+    )
+    cycle_repository.record = cycle_repository.record.model_copy(
+        update={
+            "state": cycle_repository.record.state.model_copy(
+                update={"current_run_id": "o" * 32}
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="no matching started Scheduled Task cycle"):
+        await service.submit(
+            workspace_id="w" * 32,
+            agent_id="a" * 32,
+            session_id="s" * 32,
+            run_id=_RUN_ID,
+            status="finished",
+            result="Completed.",
+        )
+
+    assert order == ["lock_run", "get_event", "lock_cycle"]
+    assert run_repository.patches == []
+    assert event_repository.creates == []
+    assert cycle_repository.deleted == []
+    assert task_repository.deleted is False
+    assert task_repository.released is False
+
+
 async def test_submit_commits_event_cycle_and_once_task_before_run_completion() -> None:
     """One-time terminalization removes active state and stores recovery fields."""
     order: list[str] = []

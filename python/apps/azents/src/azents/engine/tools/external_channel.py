@@ -353,28 +353,16 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         self.runtime_context_store = store
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Expose Channel Action only while an active binding exists."""
+        """Expose channel tools independently of current binding or file state."""
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
         self.run_id = context.run_id
-        enabled = await self.service.has_active_binding(
-            session_id=self.session_id,
-            agent_id=self.agent_id,
-        )
         return ToolkitState(
-            status=ToolkitStatus.ENABLED if enabled else ToolkitStatus.DISABLED,
-            tools=(
-                [
-                    self._make_channel_action_tool(),
-                    *(
-                        [self._make_download_external_file_tool()]
-                        if self.runtime_context_store is not None
-                        else []
-                    ),
-                ]
-                if enabled
-                else []
-            ),
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                self._make_channel_action_tool(),
+                self._make_download_external_file_tool(),
+            ],
         )
 
     async def get_static_prompt(self, context: TurnContext) -> str:

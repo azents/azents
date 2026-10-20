@@ -637,6 +637,11 @@ while Memory explicitly does not support transfer or import.
 
 ### Managed Skill VFS
 
+`load_skill` remains available when the current filesystem and managed Skill
+inventories are empty. Prompt inventory and invocation still enforce the current
+Runtime capability and exact active filesystem or Run VFS projection; exposing
+the loader does not grant access to an unprojected Skill.
+
 The global `azents` source includes the `browser` Skill and its focused
 open/observe, actions/human-help and captures/files references. The three fixed
 `browser_open`, `browser_observe` and `browser_act` tools bind trusted current
@@ -1763,16 +1768,18 @@ state remains separate and never becomes the Channel Work source of truth.
 ## Scheduled Toolkit
 
 Scheduled Toolkit is a root-only, automatically connected Toolkit with no
-Workspace ToolkitConfig. Its management tools are always available in eligible
+Workspace ToolkitConfig. All four tools are always available in eligible
 root Runs:
 
 - `add_scheduled_task`
 - `list_scheduled_tasks`
 - `delete_scheduled_task`
+- `submit_scheduled_task_result`
 
-`submit_scheduled_task_result` is added only when the current AgentRun has an
-exact valid started Scheduled Task cycle. The terminal tool commits the canonical
-Session result and returns a terminal Tool result so execution ends without
+`submit_scheduled_task_result` validates the current Run's cycle and execution
+authority when invoked, independently of its unconditional visibility. Dynamic
+cycle guidance still requires an exact valid started cycle. The terminal tool
+commits the canonical Session result and returns a terminal Tool result so execution ends without
 another model turn.
 
 Scheduled occurrence state uses Session-scoped Toolkit State with namespace

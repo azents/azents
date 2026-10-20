@@ -543,6 +543,33 @@ class TestManagedSkillProjection:
 class TestSkillToolkit:
     """Skill Toolkit managed VFS authorization behavior."""
 
+    @pytest.mark.asyncio
+    async def test_empty_inventory_keeps_loader_without_granting_skill_access(
+        self,
+    ) -> None:
+        """The loader remains discoverable when neither source has a Skill."""
+        toolkit = SkillToolkit(
+            store=_SkillStore(SkillProjectionState()),
+            projection_service=None,
+            vfs_projection_service=None,
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        state = await toolkit.update_context(
+            TurnContext(
+                workspace_id="workspace-1",
+                model="test-model",
+                run_id="run-1",
+                publish_event=_noop_publish_event,
+            )
+        )
+        [load_skill] = state.tools
+        assert load_skill.spec.name == "load_skill"
+        with pytest.raises(FunctionToolError, match="Managed Skill resolution"):
+            await load_skill.handler(
+                json.dumps({"skill_path": "azents://skills/azents/missing/SKILL.md"})
+            )
+
     def test_execution_authority_binds_store_and_projection_service(self) -> None:
         """A resolved Toolkit uses execution-local state collaborators."""
         store = _SkillStore(SkillProjectionState())
@@ -641,14 +668,7 @@ class TestSkillToolkit:
 
         state = await toolkit.update_context(context)
 
-        assert service.load_calls == [
-            {
-                "run_id": "run-1",
-                "agent_id": "agent-1",
-                "session_id": "session-1",
-                "workspace_id": "workspace-current",
-            }
-        ]
+        assert service.load_calls == []
         [load_skill] = state.tools
         await load_skill.handler(
             json.dumps({"skill_path": "azents://skills/azents/review/SKILL.md"})
@@ -697,7 +717,7 @@ class TestSkillToolkit:
     async def test_prompt_and_catalog_recheck_filesystem_skill_authority(
         self,
     ) -> None:
-        """Each projection surface hides filesystem Skills after a downgrade."""
+        """Skill guidance and invocation recheck downgraded filesystem authority."""
         provider_calls = 0
         current = RuntimeCapabilityResolver.from_agent(
             state=AgentRuntimeCapability.REMOVING,
@@ -738,7 +758,12 @@ class TestSkillToolkit:
         state = await toolkit.update_context(context)
 
         assert prompt == ""
-        assert state.tools == []
+        [load_skill] = state.tools
+        assert load_skill.spec.name == "load_skill"
+        with pytest.raises(FunctionToolError):
+            await load_skill.handler(
+                json.dumps({"skill_path": _skill_item().skill_path})
+            )
         assert provider_calls == 2
 
 
