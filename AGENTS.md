@@ -36,6 +36,7 @@ Detailed coding rules live under `.claude/conventions/` and are indexed by `.cla
 
 - Always start with `.claude/rules/conventions.md`.
 - For Python work, also read `.claude/rules/python-conventions.md` when relevant.
+- For Azents backend work, also read `.claude/rules/backend-conventions.md`.
 - For TypeScript work, also read `.claude/rules/typescript-conventions.md` when relevant.
 - For Swift work, also read `.claude/rules/swift-conventions.md` when relevant.
 - For test substrate work, read `.claude/rules/testenv-conventions.md`.

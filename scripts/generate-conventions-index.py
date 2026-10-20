@@ -41,6 +41,7 @@ END_MARKER = "<!-- END_TABLE -->"
 # and under .claude/rules/<index>.
 SCOPE_CONFIG: dict[str, dict[str, str]] = {
     "global": {"index": "conventions.md"},
+    "backend": {"index": "backend-conventions.md"},
     "python": {"index": "python-conventions.md"},
     "typescript": {"index": "typescript-conventions.md"},
     "swift": {"index": "swift-conventions.md"},
