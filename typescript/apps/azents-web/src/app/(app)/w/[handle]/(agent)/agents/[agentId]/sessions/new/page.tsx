@@ -3,6 +3,11 @@ import { notFound } from "next/navigation";
 import { AgentDraftChatPage } from "@/features/chat/AgentDraftChatPage";
 import { trpc } from "@/trpc/server";
 import type { AgentDraftSessionScope } from "@/features/chat/containers/useAgentDraftChatContainer";
+import type { Viewport } from "next";
+
+export const viewport: Viewport = {
+  interactiveWidget: "resizes-content",
+};
 
 function parseSessionScope(value?: string | string[]): AgentDraftSessionScope {
   const raw = Array.isArray(value) ? value[0] : value;

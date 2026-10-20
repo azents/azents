@@ -179,6 +179,7 @@ const args: AgentDraftChatContainerOutput = {
 
 const meta = {
   component: AgentDraftChat,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <Box h="100dvh" maw={rem(1120)} mx="auto" style={{ display: "flex" }}>

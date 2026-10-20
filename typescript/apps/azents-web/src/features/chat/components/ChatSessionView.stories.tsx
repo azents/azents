@@ -1,6 +1,6 @@
-import { Box } from "@mantine/core";
 import { useRef, useState } from "react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
+import { ScrollContainedViewport } from "@/shared/components/ScrollContainedViewport";
 import { createChatMessage } from "../story-fixtures";
 import { workspacePanelStoryFixture } from "../workspace-story-fixture";
 import { ChatSessionView } from "./ChatSessionView";
@@ -404,9 +404,9 @@ const meta = {
   render: (props) => <InteractiveSession {...props} />,
   decorators: [
     (Story) => (
-      <Box h="100dvh" miw={0} style={{ overflow: "hidden" }}>
+      <ScrollContainedViewport>
         <Story />
-      </Box>
+      </ScrollContainedViewport>
     ),
   ],
   args,
@@ -522,6 +522,165 @@ export const MobileChat = {
     );
     await expect(composer).toBeVisible();
     await expect(composer).toHaveValue(draft);
+  },
+} satisfies Story;
+
+export const MobileKeyboardDemo = {
+  args: {
+    headerSession: { ...session, title: "Composer overlay" },
+    terminalMobile: true,
+    panel: { ...args.panel, opened: false },
+    subscriptionUsage: null,
+    chatSession: {
+      ...chatSession,
+      sessionId: "mobile-keyboard-css-demo",
+      messages: Array.from({ length: 16 }, (_, index) =>
+        createChatMessage({
+          id: `keyboard-css-demo-${index}`,
+          role: index % 2 === 0 ? "user" : "assistant",
+          content:
+            index % 2 === 0
+              ? "Can I scroll the conversation while keeping the input stable?"
+              : "The input floats above the conversation. Space at the end follows the input height so the final message can be read above it.",
+        }),
+      ),
+    },
+  },
+} satisfies Story;
+
+export const OverlayWithoutVisualViewport = {
+  ...MobileKeyboardDemo,
+  args: {
+    ...MobileKeyboardDemo.args,
+    headerSession: { ...session, title: "Composer overlay · no viewport API" },
+  },
+  beforeEach: () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      window,
+      "visualViewport",
+    );
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: null,
+    });
+    return () => {
+      if (descriptor) {
+        Object.defineProperty(window, "visualViewport", descriptor);
+      } else {
+        Reflect.deleteProperty(window, "visualViewport");
+      }
+    };
+  },
+  play: async ({ canvasElement }) => {
+    await expect(window.visualViewport).toBeNull();
+    const overlay = canvasElement.querySelector("[data-chat-composer-overlay]");
+    const column = canvasElement.querySelector("[data-chat-gesture-column]");
+    if (!(overlay instanceof HTMLElement) || !(column instanceof HTMLElement)) {
+      throw new Error(
+        "Expected the floating input and chat column without the optional API.",
+      );
+    }
+    await expect(getComputedStyle(overlay).position).toBe("absolute");
+    await expect(overlay.getBoundingClientRect().bottom).toBe(
+      column.getBoundingClientRect().bottom,
+    );
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("textbox", { name: "Chat message" }),
+    ).toBeEnabled();
+  },
+} satisfies Story;
+
+export const ChatPanOwnership = {
+  ...MobileKeyboardDemo,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const viewport = canvasElement.querySelector("[data-chat-scroll-viewport]");
+    const frame = canvasElement.querySelector(
+      "[data-scroll-contained-viewport]",
+    );
+    const composer = canvasElement.querySelector(
+      'textarea[name="chat-message"]',
+    );
+    if (
+      !(viewport instanceof HTMLElement) ||
+      !(frame instanceof HTMLElement) ||
+      !(composer instanceof HTMLTextAreaElement)
+    ) {
+      throw new Error(
+        "Expected the workspace, timeline viewport and native input.",
+      );
+    }
+    await expect(getComputedStyle(document.body).position).toBe("fixed");
+    await expect(getComputedStyle(document.body).touchAction).toBe(
+      "pinch-zoom",
+    );
+    await expect(getComputedStyle(document.documentElement).touchAction).toBe(
+      "pinch-zoom",
+    );
+    await expect(getComputedStyle(frame).touchAction).toBe("pinch-zoom");
+    await expect(getComputedStyle(viewport).touchAction).toBe(
+      "pan-y pinch-zoom",
+    );
+    const chatColumn = viewport.closest("[data-chat-gesture-column]");
+    if (!(chatColumn instanceof HTMLElement)) {
+      throw new Error("Expected the non-scrolling conversation column.");
+    }
+    await expect(getComputedStyle(chatColumn).touchAction).toBe("pinch-zoom");
+    const overlay = canvasElement.querySelector("[data-chat-composer-overlay]");
+    const content = canvasElement.querySelector("[data-chat-timeline-content]");
+    if (
+      !(overlay instanceof HTMLElement) ||
+      !(content instanceof HTMLElement)
+    ) {
+      throw new Error("Expected the transparent overlay and timeline content.");
+    }
+    await expect(getComputedStyle(overlay).position).toBe("absolute");
+    await expect(getComputedStyle(overlay).backgroundColor).toBe(
+      "rgba(0, 0, 0, 0)",
+    );
+    await expect(getComputedStyle(overlay).overflow).toBe("visible");
+    await expect(getComputedStyle(overlay).pointerEvents).toBe("none");
+    await expect(
+      getComputedStyle(document.documentElement).backgroundColor,
+    ).toBe(getComputedStyle(chatColumn).backgroundColor);
+    await waitFor(() =>
+      expect(
+        Number.parseFloat(getComputedStyle(content).paddingBottom),
+      ).toBeGreaterThanOrEqual(overlay.getBoundingClientRect().height),
+    );
+    viewport.scrollTop = viewport.scrollHeight;
+    const anchors = content.querySelectorAll("[data-chat-scroll-anchor]");
+    const last = anchors.item(anchors.length - 1);
+    if (!(last instanceof HTMLElement)) {
+      throw new Error("Expected a final conversation message.");
+    }
+    await waitFor(() =>
+      expect(last.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        overlay.getBoundingClientRect().top,
+      ),
+    );
+    await expect(viewport.scrollHeight).toBeGreaterThan(viewport.clientHeight);
+    viewport.scrollTop = 100;
+    await expect(viewport.scrollTop).toBe(100);
+    await userEvent.clear(composer);
+    await userEvent.type(composer, "Keep this draft");
+    composer.setSelectionRange(5, 9);
+    await expect(composer.selectionStart).toBe(5);
+    await expect(getComputedStyle(composer).touchAction).toBe("auto");
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Toggle session panel" }),
+    );
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Close session panel" }),
+    );
+    await expect(composer).toHaveValue("Keep this draft");
+    await expect(
+      document.querySelectorAll('meta[name="viewport"]'),
+    ).toHaveLength(1);
+    await expect(
+      document.querySelector('meta[name="viewport"]')?.getAttribute("content"),
+    ).toContain("interactive-widget=resizes-content");
   },
 } satisfies Story;
 

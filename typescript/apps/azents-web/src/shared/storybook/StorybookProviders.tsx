@@ -67,8 +67,8 @@ export function StorybookProviders({
               initialResolvedMode={resolvedColorScheme}
             >
               <div
+                className="storybook-surface"
                 style={{
-                  minHeight: "100vh",
                   background: "var(--mantine-color-body)",
                   color: "var(--mantine-color-text)",
                 }}

@@ -8,6 +8,7 @@
 import { AppShell } from "@mantine/core";
 import { usePathname } from "next/navigation";
 import { AppBar } from "@/shared/components/AppBar";
+import { ScrollContainedViewport } from "@/shared/components/ScrollContainedViewport";
 import { AccountLocaleSync } from "@/shared/providers/account-locale-sync";
 import { SidebarProvider } from "@/shared/providers/sidebar";
 import type { ReactNode } from "react";
@@ -26,6 +27,9 @@ export function AppLayout({
     pathname,
   );
   const headerHeight = isAgentDetailRoute ? 0 : 60;
+  const isChatRoute = /^\/w\/[^/]+\/agents\/[^/]+\/sessions\/[^/]+\/?$/.test(
+    pathname,
+  );
 
   // Show header bottom border on sidebar pages (workspace, account settings)
   const withBorder =
@@ -41,7 +45,13 @@ export function AppLayout({
             <AppBar authStatus={authStatus} />
           </AppShell.Header>
         )}
-        <AppShell.Main>{children}</AppShell.Main>
+        <AppShell.Main>
+          {isChatRoute ? (
+            <ScrollContainedViewport>{children}</ScrollContainedViewport>
+          ) : (
+            children
+          )}
+        </AppShell.Main>
       </AppShell>
     </SidebarProvider>
   );
