@@ -69,7 +69,8 @@ void test("all seven Routine actions use semantic input/output and title or slug
       {
         slug: "traffic",
         execution_id: "occurrence-a",
-        work: routineWorkFixture,
+        ...routineWorkFixture,
+        files: null,
       },
       "completed",
       { created: true, execution: routineCompletionFixture },
@@ -205,7 +206,7 @@ void test("completion separates objective failure, result, hint, notification an
   const projected = detail(
     routineCallFixture(
       "record_routine_result",
-      { slug: "traffic", execution_id: "occurrence-a", work },
+      { slug: "traffic", execution_id: "occurrence-a", ...work, files: null },
       "completed",
       { created: true, execution },
     ),
@@ -231,10 +232,9 @@ void test("duplicate completion preserves canonical work instead of displaying t
   const input = {
     slug: "traffic",
     execution_id: "occurrence-a",
-    work: {
-      ...routineWorkFixture,
-      result: "A changed request that must not replace saved work.",
-    },
+    ...routineWorkFixture,
+    result: "A changed request that must not replace saved work.",
+    files: null,
   };
   const projected = detail(
     routineCallFixture("record_routine_result", input, "completed", {
@@ -303,10 +303,9 @@ void test("untrusted source collisions and invalid cross-field outputs remain di
         {
           slug: "traffic",
           execution_id: "occurrence-a",
-          work: {
-            ...routineWorkFixture,
-            message: "Silent work cannot contain this",
-          },
+          ...routineWorkFixture,
+          message: "Silent work cannot contain this",
+          files: null,
         },
         "running",
         null,
@@ -321,7 +320,8 @@ void test("untrusted source collisions and invalid cross-field outputs remain di
         {
           slug: "traffic",
           execution_id: "occurrence-a",
-          work: routineWorkFixture,
+          ...routineWorkFixture,
+          files: null,
         },
         "completed",
         {

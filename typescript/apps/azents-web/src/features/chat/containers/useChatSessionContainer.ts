@@ -997,7 +997,12 @@ function mapEvents(
         const routine = routineEventMessage(event);
         return routine === null
           ? messages
-          : upsertMessageByMergeKey(messages, routine);
+          : upsertMessageByMergeKey(
+              messages,
+              event.kind === "routine_notification"
+                ? { ...routine, attachments: eventAttachments(payload) }
+                : routine,
+            );
       }
       case "user_message": {
         const content = contentText(payload.content);

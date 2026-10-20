@@ -190,7 +190,8 @@ export const RoutineObjectiveAndDeliveryFailure: Story = {
       {
         slug: "traffic",
         execution_id: "occurrence-a",
-        work: failedRoutineWork,
+        ...failedRoutineWork,
+        files: null,
       },
       "completed",
       {
@@ -222,10 +223,9 @@ export const RoutineExistingCompletion: Story = {
       {
         slug: "traffic",
         execution_id: "occurrence-a",
-        work: {
-          ...routineWorkFixture,
-          result: "A changed request, not the saved result.",
-        },
+        ...routineWorkFixture,
+        result: "A changed request, not the saved result.",
+        files: null,
       },
       "completed",
       { created: false, execution: routineCompletionFixture },

@@ -9,6 +9,7 @@ import pytest
 import sqlalchemy as sa
 
 from azents.core.enums import AgentRunStatus
+from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.external_channel_provider_effect import (
     ProviderEffectPlan,
     ProviderMutationOutcome,
@@ -32,6 +33,7 @@ from azents.repos.routine.notification import RoutineNotificationOperations
 from azents.repos.routine.persistence_test import _legacy_binding
 from azents.repos.session_primary_channel import SessionPrimaryChannelRepository
 from azents.services.external_channel.channel_action import ExternalChannelActionService
+from azents.services.routine.files import RoutineNotificationFiles
 from azents.services.routine.notification import RoutineNotificationService
 
 
@@ -79,6 +81,15 @@ async def test_current_primary_delivery_is_post_commit_and_never_replayed(
         operations=operations, completion=f.repository, channels=channels
     )
     item = f.states[0]
+    manifest = ExternalChannelOutboundFileManifest(
+        path="/tmp/report.txt",
+        filename="report.txt",
+        media_type="text/plain",
+        expected_size=5,
+    )
+    files = RoutineNotificationFiles(
+        binding_id=binding_id, manifests=(manifest,), attachments=()
+    )
     recording = await f.repository.complete(
         scope=f.scope,
         authority=f.authority,
@@ -92,6 +103,9 @@ async def test_current_primary_delivery_is_post_commit_and_never_replayed(
         plan: ProviderEffectPlan, **kwargs: object
     ) -> ProviderMutationOutcome:
         assert plan.target.binding_id == binding_id
+        assert plan.target.request_payload["files"] == [
+            manifest.model_dump(mode="json")
+        ]
         assert kwargs["authority"] == f.authority
         # A separate real transaction sees completion before the provider call.
         state = await f.repository.context(
@@ -124,6 +138,7 @@ async def test_current_primary_delivery_is_post_commit_and_never_replayed(
                 recording=recording,
                 runtime=None,
                 publish_event=publish,
+                files=files,
             )
     else:
         await service.deliver(
@@ -132,6 +147,7 @@ async def test_current_primary_delivery_is_post_commit_and_never_replayed(
             recording=recording,
             runtime=None,
             publish_event=publish,
+            files=files,
         )
     state = await f.repository.context(
         scope=f.scope,
@@ -162,6 +178,7 @@ async def test_current_primary_delivery_is_post_commit_and_never_replayed(
         recording=repeat,
         runtime=None,
         publish_event=publish,
+        files=None,
     )
     assert channels.execute_binding_effect.call_count == 1
     publish.assert_not_called()
@@ -215,6 +232,7 @@ async def test_invalid_existing_primary_fails_without_session_chat_fallback(
         recording=recording,
         runtime=None,
         publish_event=publish,
+        files=None,
     )
     assert state.delivery_status is RoutineDeliveryStatus.FAILED
     channels.execute_binding_effect.assert_not_called()
@@ -262,7 +280,13 @@ async def test_primary_replacement_suppresses_captured_effect(
         now=NOW,
     )
     prepared = await operations.prepare(
-        scope=f.scope, authority=f.authority, recording=recording
+        scope=f.scope,
+        authority=f.authority,
+        recording=recording,
+        files=(),
+        attachments=(),
+        expected_primary=None,
+        pin_primary=False,
     )
     assert prepared.binding_id == first_id and prepared.plans
     async with rdb_session_manager() as session:
