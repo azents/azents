@@ -27,6 +27,7 @@ import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, useState } from "react";
+import { AgentDeletionBadge } from "@/shared/agent-session/AgentDeletionStatus";
 import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
 import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
 import type { AgentListContainerOutput } from "../containers/useAgentListContainer";
@@ -151,7 +152,8 @@ function AgentCard({
             <Text fw={500} truncate>
               {agent.name}
             </Text>
-            {!agent.enabled && (
+            <AgentDeletionBadge status={agent.deletion_status} />
+            {agent.deletion_status === null && !agent.enabled && (
               <Badge color="gray" variant="outline" size="sm">
                 {t("disabled")}
               </Badge>
@@ -176,6 +178,7 @@ function AgentCard({
           {canManage && (
             <Switch
               checked={agent.enabled}
+              disabled={agent.deletion_status !== null}
               onChange={(e) => onToggleEnabled(agent, e.currentTarget.checked)}
               size="sm"
             />
@@ -192,6 +195,7 @@ function AgentCard({
             <ActionIcon
               variant="subtle"
               color="red"
+              disabled={agent.deletion_status !== null}
               onClick={() => onDelete(agent.id)}
             >
               <IconTrash size={16} />

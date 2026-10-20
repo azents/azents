@@ -200,7 +200,11 @@ export function RuntimeTerminalPanel({
             <Stack gap="sm">
               <Text size="sm">{t("stoppedDescription")}</Text>
               {projection.can_start_runtime ? (
-                <Button size="xs" onClick={onStartRuntime}>
+                <Button
+                  size="xs"
+                  onClick={onStartRuntime}
+                  disabled={terminal.readOnly}
+                >
                   {t("startRuntime")}
                 </Button>
               ) : null}
@@ -236,6 +240,7 @@ export function RuntimeTerminalPanel({
                 variant="subtle"
                 leftSection={<IconRefresh size={rem(14)} />}
                 onClick={terminal.onRetry}
+                disabled={terminal.readOnly}
               >
                 {t("retry")}
               </Button>
@@ -293,6 +298,7 @@ export function RuntimeTerminalPanel({
                 size="compact-xs"
                 variant={terminal.ctrlActive ? "filled" : "default"}
                 onClick={terminal.onToggleCtrl}
+                disabled={terminal.readOnly}
               >
                 Ctrl
               </Button>
@@ -300,6 +306,7 @@ export function RuntimeTerminalPanel({
                 size="compact-xs"
                 variant={terminal.altActive ? "filled" : "default"}
                 onClick={terminal.onToggleAlt}
+                disabled={terminal.readOnly}
               >
                 Alt
               </Button>
@@ -309,6 +316,7 @@ export function RuntimeTerminalPanel({
                   size="compact-xs"
                   variant="default"
                   onClick={() => terminal.onSoftwareKey(key)}
+                  disabled={terminal.readOnly}
                 >
                   {label}
                 </Button>
@@ -317,6 +325,7 @@ export function RuntimeTerminalPanel({
                 aria-label={t("focusKeyboard")}
                 variant="default"
                 onClick={terminal.onFocusKeyboard}
+                disabled={terminal.readOnly}
               >
                 <IconKeyboard size={rem(16)} />
               </ActionIcon>

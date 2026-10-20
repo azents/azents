@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import type {
   RuntimeEnvironmentVariableDraft,
@@ -19,6 +20,7 @@ export function useAgentRuntimeEnvironmentVariablesContainer({
   handle,
   agentId,
 }: AgentRuntimeEnvironmentVariablesContainerProps): RuntimeEnvironmentVariablesProps {
+  const { readOnly } = useAgentLifecycle({ handle, agentId });
   const t = useTranslations(
     "workspace.agents.runtimeSettings.environmentVariables",
   );
@@ -90,7 +92,7 @@ export function useAgentRuntimeEnvironmentVariablesContainer({
       : {
           type: "READY",
           entries,
-          canManage: query.data.can_manage,
+          canManage: query.data.can_manage && !readOnly,
           status: mutation.isPending
             ? { type: "SAVING" }
             : mutation.isError

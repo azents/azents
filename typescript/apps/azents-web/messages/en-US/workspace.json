@@ -460,6 +460,12 @@
   },
   "agents": {
     "headline": "Agents",
+    "deletion": {
+      "deleting": "Deleting",
+      "error": "Deletion error",
+      "notice": "This agent is being deleted. You can inspect it, but changes are unavailable.",
+      "errorNotice": "Agent deletion encountered an error. You can inspect it, but changes remain unavailable."
+    },
     "description": "Manage AI agents for your workspace",
     "addAgent": "Add Agent",
     "empty": "No agents yet",

@@ -3,6 +3,7 @@
 /** Capability-aware Agent Runtime settings container. */
 
 import { useCallback, useMemo, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { shouldPollRuntimeLifecycle } from "@/shared/lib/runtimeLifecycle";
 import { useRuntimeSystemMetricsContainer } from "@/shared/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
 import { trpc } from "@/trpc/client";
@@ -74,13 +75,14 @@ function errorMessage(error: unknown): string {
 
 export function useAgentRuntimeSettingsContainer({
   handle,
-  agent,
+  agent: initialAgent,
 }: AgentRuntimeSettingsContainerProps): AgentRuntimeSettingsContainerOutput {
   const utils = trpc.useUtils();
-  const agentQuery = trpc.agent.get.useQuery(
-    { handle, agentId: agent.id },
-    { initialData: agent },
-  );
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
     agent.runtime_profile_id,
   );
@@ -270,7 +272,7 @@ export function useAgentRuntimeSettingsContainer({
 
   return {
     handle,
-    agent: agentQuery.data,
+    agent,
     state,
     metricsState: metrics.state,
     selectedProfileId,

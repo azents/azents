@@ -51,6 +51,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
+import { AgentDeletionBadge } from "@/shared/agent-session/AgentDeletionStatus";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { isAutoArchiveDueSoon } from "../auto-archive-urgency";
@@ -276,9 +277,10 @@ export function AgentFocusedSidebarView({
     const archiving = archivingSessionId === session.id;
     const pinning = pinningSessionId === session.id;
     const showActions =
-      onRenameSession != null ||
-      (!isPrimary && onSetSessionPinned != null) ||
-      (!running && !isPrimary && onArchiveSession != null);
+      agent.deletion_status === null &&
+      (onRenameSession != null ||
+        (!isPrimary && onSetSessionPinned != null) ||
+        (!running && !isPrimary && onArchiveSession != null));
 
     return (
       <NavLink
@@ -424,7 +426,7 @@ export function AgentFocusedSidebarView({
   return (
     <>
       <Modal
-        opened={editingSession !== null}
+        opened={editingSession !== null && agent.deletion_status === null}
         onClose={handleCloseRename}
         title={t("sessions.renameTitle")}
         centered
@@ -470,7 +472,7 @@ export function AgentFocusedSidebarView({
       </Modal>
 
       <Modal
-        opened={archiveTarget !== null}
+        opened={archiveTarget !== null && agent.deletion_status === null}
         onClose={() => setArchiveTarget(null)}
         title={t("sessions.archiveConfirmTitle")}
         centered
@@ -571,13 +573,17 @@ export function AgentFocusedSidebarView({
             </Text>
           )}
           <Group mt={{ base: "sm", lg: 0 }} gap="xs">
-            <Badge
-              size="xs"
-              variant="dot"
-              color={agent.enabled ? "green" : "gray"}
-            >
-              {agent.enabled ? t("status.enabled") : t("status.disabled")}
-            </Badge>
+            {agent.deletion_status !== null ? (
+              <AgentDeletionBadge status={agent.deletion_status} />
+            ) : (
+              <Badge
+                size="xs"
+                variant="dot"
+                color={agent.enabled ? "green" : "gray"}
+              >
+                {agent.enabled ? t("status.enabled") : t("status.disabled")}
+              </Badge>
+            )}
             <Badge
               size="xs"
               variant="light"
@@ -622,6 +628,7 @@ export function AgentFocusedSidebarView({
                       : t("sessions.new")
                   }
                   loading={creatingSession}
+                  disabled={agent.deletion_status !== null}
                   onClick={onCreateSession}
                 >
                   <IconPlus size={rem(16)} />

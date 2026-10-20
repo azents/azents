@@ -38,6 +38,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.conversation_provisioning import (
     ExternalChannelConversationProvisioningRepository,
@@ -127,6 +128,7 @@ class ExternalChannelAccessOperations:
             )
             if request_snapshot is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
+            await self._fence_request_agent(session, request_snapshot)
             if request_snapshot.setup_claim_id is not None:
                 allowed = await self._allow_setup_request(
                     session,
@@ -692,6 +694,7 @@ class ExternalChannelAccessOperations:
             )
             if request_snapshot is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
+            await self._fence_request_agent(session, request_snapshot)
             expected_status = (
                 ExternalChannelAccessRequestStatus.BLOCKED
                 if action == "block"
@@ -934,6 +937,17 @@ class ExternalChannelAccessOperations:
             request=decided,
             control_delete_plan=delete_plan,
         )
+
+    async def _fence_request_agent(
+        self, session: WriteSession, request: ExternalChannelAccessRequest
+    ) -> None:
+        """Acquire the parent lifecycle fence before provider-routing child locks."""
+        route = await self.repository.get_agent_route(
+            session, route_id=request.route_id
+        )
+        if route is None or route.agent_id is None:
+            raise ExternalChannelAccessDecisionError("The Agent route is unavailable.")
+        await require_active_agent(session, agent_id=route.agent_id)
 
     async def _locked_request(
         self,

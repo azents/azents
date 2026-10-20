@@ -10,6 +10,7 @@ from azents.core.enums import ExternalChannelConnectionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
+from azents.repos.external_channel.agent_mutation import require_active_single_app_agent
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
@@ -53,9 +54,10 @@ class ExternalChannelConnectionRepository:
                 session,
                 connection_id=connection_id,
             )
-        if configuration is None or configuration.workspace_id != workspace_id:
-            return None
-        return configuration
+            if configuration is None or configuration.workspace_id != workspace_id:
+                return None
+            await require_active_single_app_agent(session, connection_id=connection_id)
+            return configuration
 
     async def update_connection_health(
         self,
@@ -71,6 +73,7 @@ class ExternalChannelConnectionRepository:
     ) -> ExternalChannelConnectionHealthUpdate:
         """Persist one fenced health result and distinguish missing from stale state."""
         async with self.session_manager() as session:
+            await require_active_single_app_agent(session, connection_id=connection_id)
             connection = await self.repository.update_connection_health(
                 session,
                 connection_id=connection_id,

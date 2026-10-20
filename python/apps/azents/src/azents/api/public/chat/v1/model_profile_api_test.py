@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from unittest.mock import Mock, create_autospec
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import httpx
 import pytest
@@ -71,8 +71,9 @@ _NOW = datetime.datetime(2026, 10, 14, tzinfo=datetime.UTC)
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[WriteSession]:
     """Supply real session capabilities without a database or listener."""
-    async with AsyncSession() as session:
-        yield ReadWriteSession(session)
+    session = AsyncMock(spec=AsyncSession)
+    session.scalar.return_value = AgentLifecycleStatus.ACTIVE
+    yield ReadWriteSession(session)
 
 
 @dataclass(frozen=True)
@@ -127,8 +128,10 @@ async def profile_http() -> AsyncIterator[_ProfileHTTPFixture]:
     )
     agents = create_autospec(AgentRepository, instance=True)
     agents.lock_by_id.return_value = agent
+    agents.get_by_id.return_value = agent
     sessions = create_autospec(AgentSessionRepository, instance=True)
     sessions.lock_by_id.side_effect = lambda *_: current
+    sessions.get_by_id.side_effect = lambda *_: current
     sessions.get_root_session_agent_by_session_id.return_value = (
         SessionAgent.model_construct(agent_session_id=current.id)
     )

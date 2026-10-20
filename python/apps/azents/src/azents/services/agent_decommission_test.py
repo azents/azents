@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.infra.s3.service import S3Service
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionStopSignal
+from azents.core.config import Config
 from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
@@ -36,6 +38,14 @@ from azents.repos.external_channel.data import (
 from azents.services.agent_decommission import (
     AgentDecommissionAdvanceResult,
     AgentDecommissionService,
+    SystemDecommissionClock,
+)
+from azents.services.agent_deletion import (
+    AgentDeletionExecution,
+    ChannelDeletionParticipant,
+    FileDeletionParticipant,
+    RuntimeDeletionParticipant,
+    SessionRetirementParticipant,
 )
 
 
@@ -58,6 +68,7 @@ def _job(*, job_id: str, attempt_count: int = 1) -> AgentDecommissionJob:
         lease_owner=None,
         lease_until=None,
         next_attempt_at=None,
+        failure_boundary_key=None,
         last_error_kind=None,
         last_error_summary=None,
         started_at=None,
@@ -67,7 +78,33 @@ def _job(*, job_id: str, attempt_count: int = 1) -> AgentDecommissionJob:
     )
 
 
-class _DecommissionRepositoryDouble:
+class _RecoveryRepositoryDouble:
+    async def schedule_wait(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        next_attempt_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> bool:
+        raise AssertionError("Unexpected ordinary wait in this focused test")
+
+    async def clear_failure_boundary(
+        self,
+        session: WriteSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        boundary_key: str,
+        now: datetime.datetime,
+    ) -> None:
+        raise AssertionError("Unexpected recovery in this focused test")
+
+
+class _DecommissionRepositoryDouble(_RecoveryRepositoryDouble):
     """Claim and retry recorder for coordinator tests."""
 
     def __init__(self, jobs: list[AgentDecommissionJob]) -> None:
@@ -108,6 +145,7 @@ class _DecommissionRepositoryDouble:
         lease_owner: str,
         expected_attempt: int,
         next_attempt_at: datetime.datetime,
+        failure_boundary_key: str,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
@@ -133,7 +171,7 @@ class _FailureIsolatingCoordinator(AgentDecommissionService):
             raise RuntimeError("provider unavailable")
         return AgentDecommissionAdvanceResult(
             completed=True,
-            waiting_retention=False,
+            wait_reason=None,
         )
 
 
@@ -144,6 +182,7 @@ async def test_decommission_continues_after_one_job_retries() -> None:
         [_job(job_id="failed"), _job(job_id="ok")]
     )
     service = object.__new__(_FailureIsolatingCoordinator)
+    service.clock = SystemDecommissionClock()
     operations = object.__new__(AgentDecommissionOperationsRepository)
     service.operation_repository = operations
     operations.session_manager = _session_manager
@@ -166,6 +205,7 @@ class _TransactionDouble(AsyncSession):
     def __init__(self) -> None:
         super().__init__()
         self.committed = False
+        self.scalar = AsyncMock(return_value="owned-row")
 
     async def commit(self) -> None:
         """Record the root archive transaction commit."""
@@ -365,7 +405,7 @@ class _ExternalChannelLifecycleDouble:
         return 0
 
 
-class _DecommissionStatusRepositoryDouble:
+class _DecommissionStatusRepositoryDouble(_RecoveryRepositoryDouble):
     """Always retain the scheduler-owned job lease."""
 
     async def claim_due(
@@ -402,6 +442,7 @@ class _DecommissionStatusRepositoryDouble:
         lease_owner: str,
         expected_attempt: int,
         next_attempt_at: datetime.datetime,
+        failure_boundary_key: str,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
@@ -463,12 +504,13 @@ async def test_retire_tree_terminates_external_channel_before_archive() -> None:
     operations.decommission_repository = _DecommissionStatusRepositoryDouble()
     service.broker = _BrokerDouble()
 
-    retired = (
-        await service._retire_root_tree(  # Pin transaction-bound participant dispatch.
-            job=_job(job_id="decommission"),
-            lease_owner="scheduler-1",
-            root_session_id="root-session-1",
-        )
+    retired = await SessionRetirementParticipant(
+        operations, service.broker, external_channel_lifecycle
+    ).retire_root(
+        AgentDeletionExecution(
+            _job(job_id="decommission"), "scheduler-1", None, None, False
+        ),
+        root_session_id="root-session-1",
     )
 
     assert retired is True
@@ -521,9 +563,12 @@ async def test_retire_tree_preserves_started_scheduled_run_without_stop() -> Non
     operations.decommission_repository = _DecommissionStatusRepositoryDouble()
     service.broker = broker
 
-    retired = await service._retire_root_tree(
-        job=_job(job_id="decommission-scheduled"),
-        lease_owner="scheduler-1",
+    retired = await SessionRetirementParticipant(
+        operations, broker, external_channel_lifecycle
+    ).retire_root(
+        AgentDeletionExecution(
+            _job(job_id="decommission-scheduled"), "scheduler-1", None, None, False
+        ),
         root_session_id="root-session-1",
     )
 
@@ -758,16 +803,19 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
     operations.runtime_repository = _RuntimeRepositoryDouble()
     operations.decommission_repository = _DecommissionStatusRepositoryDouble()
 
-    await service._cleanup_agent_external_roots(  # Pin finalizer precondition cleanup.
-        job=_job(job_id="decommission"),
-        lease_owner="scheduler-1",
+    execution = AgentDeletionExecution(
+        _job(job_id="decommission"), "scheduler-1", None, None, False
     )
+    await ChannelDeletionParticipant(operations, cleanup_lifecycle).run(execution)
+    await FileDeletionParticipant(
+        operations, AsyncMock(spec=S3Service), AsyncMock(spec=Config)
+    ).run(execution)
 
     assert events == [
         "external-channel-cleanup",
         "purge-provider-state",
-        "expire-unbound-files",
         "consume-cleanup",
+        "expire-unbound-files",
     ]
 
 
@@ -792,9 +840,10 @@ async def test_decommission_targets_terminal_delete_from_resource_binding() -> N
     service.agent_runtime_service = runtime_service
     operations.decommission_repository = _DecommissionStatusRepositoryDouble()
 
-    await service._cleanup_agent_external_roots(  # Pin terminal deletion fencing.
-        job=_job(job_id="decommission"),
-        lease_owner="scheduler-1",
+    await RuntimeDeletionParticipant(operations, runtime_service).run(
+        AgentDeletionExecution(
+            _job(job_id="decommission"), "scheduler-1", None, None, False
+        )
     )
 
     assert runtime_service.calls == [{"agent_id": "agent-decommission"}]

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
@@ -240,6 +241,7 @@ async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> N
     selected = _channel_default()
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -323,6 +325,7 @@ async def test_replace_same_multi_default_preserves_connection_generation() -> N
     )
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     repository = AsyncMock()
@@ -364,6 +367,7 @@ async def test_default_response_mode_read_projects_agent_value() -> None:
     """Visible Agent management state includes the concrete creation default."""
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     agent_repository = AsyncMock()
@@ -395,6 +399,7 @@ async def test_default_response_mode_update_requires_agent_admin() -> None:
     """A non-admin cannot mutate the Agent-scoped creation default."""
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     agent_repository = AsyncMock()
@@ -428,6 +433,7 @@ async def test_default_response_mode_update_does_not_rewrite_bindings() -> None:
     """Replacing the Agent default calls only the Agent repository mutation."""
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     agent_repository = AsyncMock()
@@ -475,6 +481,7 @@ async def test_binding_response_mode_update_uses_full_ownership_scope() -> None:
     """The service supplies Workspace, Agent, Session, and binding ownership."""
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     repository = AsyncMock()
@@ -528,6 +535,7 @@ async def test_parent_binding_response_mode_update_uses_participation_locks() ->
     events: list[str] = []
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -609,6 +617,7 @@ async def test_setup_discord_commits_route_before_callback_activation(
     events: list[str] = []
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -723,6 +732,7 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
     events: list[str] = []
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -825,6 +835,7 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
     events: list[str] = []
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -916,6 +927,7 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
     """Activation failure retains configuring state instead of restoring authority."""
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -1014,6 +1026,7 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
     )
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     repository = ExternalChannelManagementRepository()
@@ -1225,6 +1238,7 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
     """Repeated catalog addition is idempotent under the connection lock."""
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -1293,6 +1307,7 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
     route = SimpleNamespace(id="route-1")
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     scalars = Mock()
@@ -1335,6 +1350,7 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge(
     events: list[str] = []
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     commits = 0
@@ -1461,6 +1477,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
     events: list[str] = []
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 
@@ -1555,6 +1572,7 @@ async def test_validate_connection_finishes_db_reads_before_provider_io(
     events: list[str] = []
     commit_mock = AsyncMock()
     raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
 

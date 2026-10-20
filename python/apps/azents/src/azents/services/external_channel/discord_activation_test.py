@@ -4,12 +4,14 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_mutation import AgentMutationReadOnly, AgentMutationTargetMissing
 from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
@@ -298,7 +300,14 @@ def _service(
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield ReadWriteSession(AsyncMock(spec=AsyncSession, wraps=session))
+        raw = AsyncMock(spec=AsyncSession, wraps=session)
+        result = MagicMock()
+        # These unit scenarios exercise provider sequencing for a shared App.
+        result.one_or_none.return_value = SimpleNamespace(
+            app_mode=ExternalChannelAppMode.MULTI, agent_id=None
+        )
+        raw.execute = AsyncMock(return_value=result)
+        yield ReadWriteSession(raw)
 
     return DiscordConnectionActivationService(
         config=Config.model_construct(
@@ -635,3 +644,52 @@ async def test_lost_activation_fence_is_reported_without_commit(
     ]
     assert repository.failure_kwargs is not None
     assert repository.failure_kwargs["failure_code"] == "discord_authority_changed"
+
+
+@pytest.mark.parametrize(
+    "error_type", [AgentMutationReadOnly, AgentMutationTargetMissing]
+)
+async def test_deletion_during_provider_work_clears_prepared_callback(
+    codec: ExternalChannelCredentialsCodec,
+    error_type: type[Exception],
+) -> None:
+    """Reject final publication but retain exact native callback cleanup authority."""
+    configuration = _configuration(codec)
+    events: list[str] = []
+    repository = _RepositoryDouble(
+        configuration=configuration,
+        events=events,
+        activate_result=None,
+    )
+    service = _service(
+        callback_url="https://callbacks.example",
+        repository=repository,
+        codec=codec,
+        client=_DiscordClientDouble(events),
+        events=events,
+    )
+    denial = error_type()
+    service.operations.activate = AsyncMock(side_effect=denial)
+    with pytest.raises(error_type) as caught:
+        await service.activate(connection_id=configuration.id)
+    assert caught.value is denial
+    assert events == [
+        "load",
+        "metadata",
+        "bot",
+        "prepare",
+        "commit",
+        "endpoint",
+        "command",
+        "clear",
+        "commit",
+    ]
+    assert repository.failure_kwargs is None
+    assert repository.prepare_kwargs is not None and repository.clear_kwargs is not None
+    for key in (
+        "connection_id",
+        "expected_encrypted_credentials",
+        "expected_configuration_generation",
+        "callback_selector_hash",
+    ):
+        assert repository.clear_kwargs[key] == repository.prepare_kwargs[key]

@@ -13,6 +13,7 @@ import type {
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "agent_01",
   name: "Release Operator",
   description: "Coordinates release checklists and CI follow-up.",

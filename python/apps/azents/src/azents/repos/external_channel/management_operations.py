@@ -43,6 +43,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
     ExternalChannelMultiConnectionDisconnect,
@@ -109,6 +110,7 @@ class ExternalChannelManagementOperationRepository:
                 or agent.workspace_id != workspace_id
             ):
                 raise ExternalChannelManagementNotFound(connection_id)
+            await require_active_agent(session, agent_id=agent_id)
             existing = await self.repository.get_multi_route_by_agent(
                 session,
                 workspace_id=workspace_id,
@@ -157,6 +159,7 @@ class ExternalChannelManagementOperationRepository:
     ) -> None:
         """Commit a dedicated route before provider validation or activation."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             await self.domain_repository.create_agent_route(
                 session,
                 ExternalChannelAgentRouteCreate(
@@ -202,6 +205,7 @@ class ExternalChannelManagementOperationRepository:
     ) -> tuple[ProviderEffectPlan, ...]:
         """Commit the disconnection before returning terminal-control plans."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             cleanup_plans = await self.repository.disconnect_binding(
                 session,
                 workspace_id=workspace_id,
@@ -953,6 +957,7 @@ class ExternalChannelManagementOperationRepository:
     ) -> None:
         """Commit the exact connected binding mutation without lease I/O."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             updated = await self.repository.update_binding_response_mode(
                 session,
                 workspace_id=workspace_id,
@@ -1024,6 +1029,7 @@ class ExternalChannelManagementOperationRepository:
     ) -> None:
         """Commit prepared configuration before provider validation or activation."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             connection = await self.repository.replace_slack_configuration(
                 session,
                 workspace_id=workspace_id,
@@ -1049,6 +1055,7 @@ class ExternalChannelManagementOperationRepository:
     ) -> None:
         """Commit prepared configuration before provider validation or activation."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             connection = await self.repository.replace_discord_configuration(
                 session,
                 workspace_id=workspace_id,
@@ -1078,6 +1085,7 @@ class ExternalChannelManagementOperationRepository:
             admin=True,
         )
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             update_default = (
                 self.agent_repository.update_external_channel_default_response_mode
             )
@@ -1108,6 +1116,7 @@ class ExternalChannelManagementOperationRepository:
             connection_id=connection_id,
         )
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             connection = (
                 await self.repository.update_discord_thread_auto_archive_duration(
                     session,
@@ -1139,6 +1148,7 @@ class ExternalChannelManagementOperationRepository:
             connection_id=connection_id,
         )
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             connection = await self.repository.update_discord_url_preview_suppression(
                 session,
                 workspace_id=workspace_id,
@@ -1168,6 +1178,7 @@ class ExternalChannelManagementOperationRepository:
             connection_id=connection_id,
         )
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             connection = await self.repository.update_connection_access_policy(
                 session,
                 workspace_id=workspace_id,

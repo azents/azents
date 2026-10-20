@@ -52,7 +52,11 @@ interface AgentSettingsProps {
 }
 
 export function AgentSettings(props: AgentSettingsProps): React.ReactElement {
-  const { handle, agent, section, ...formProps } = props;
+  const { handle, agent: initialAgent, section, ...formProps } = props;
+  const agent =
+    formProps.formState.type === "EDIT"
+      ? formProps.formState.agent
+      : initialAgent;
   const settingsHref = `/w/${handle}/agents/${agent.id}/settings`;
 
   if (section === "danger") {
@@ -60,7 +64,11 @@ export function AgentSettings(props: AgentSettingsProps): React.ReactElement {
       <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
         <Stack gap="xl" p="md" maw={rem(860)} mx="auto" w="100%">
           <div style={{ padding: "0 var(--mantine-spacing-lg)" }}>
-            <AgentDangerSection handle={handle} agentId={agent.id} />
+            <AgentDangerSection
+              handle={handle}
+              agentId={agent.id}
+              readOnly={agent.deletion_status !== null}
+            />
           </div>
         </Stack>
       </div>

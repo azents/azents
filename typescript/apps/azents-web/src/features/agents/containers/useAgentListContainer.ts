@@ -26,7 +26,17 @@ export function useAgentListContainer(
   const utils = trpc.useUtils();
   const meQuery = trpc.workspaceMember.me.useQuery({ handle });
   const canManage = meQuery.data?.role === "owner";
-  const listQuery = trpc.agent.list.useQuery({ handle });
+  const listQuery = trpc.agent.list.useQuery(
+    { handle },
+    {
+      refetchInterval: (query) =>
+        query.state.data?.items.some((agent) => agent.deletion_status !== null)
+          ? 5000
+          : false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: true,
+    },
+  );
   const agents = useMemo(() => listQuery.data?.items ?? [], [listQuery.data]);
 
   const listState: AgentListState = useMemo(() => {
@@ -46,6 +56,9 @@ export function useAgentListContainer(
   });
 
   const updateMutation = trpc.agent.update.useMutation({
+    onError: () => {
+      void utils.agent.list.invalidate({ handle });
+    },
     onSuccess: () => {
       void utils.agent.list.invalidate({ handle });
     },
@@ -60,6 +73,9 @@ export function useAgentListContainer(
 
   const onToggleEnabled = useCallback(
     (agent: AgentResponse, enabled: boolean): void => {
+      if (agent.deletion_status !== null) {
+        return;
+      }
       updateMutation.mutate({ handle, agentId: agent.id, enabled });
     },
     [handle, updateMutation],

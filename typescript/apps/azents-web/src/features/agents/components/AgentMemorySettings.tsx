@@ -107,11 +107,13 @@ function toHistoricalMemoryScopeValue(
 function MemoryCard({
   memory,
   deleting,
+  readOnly,
   onEdit,
   onDelete,
 }: {
   memory: MemoryResponse;
   deleting: boolean;
+  readOnly: boolean;
   onEdit: (memory: MemoryResponse) => void;
   onDelete: (memory: MemoryResponse) => void;
 }): React.ReactElement {
@@ -137,6 +139,7 @@ function MemoryCard({
             <ActionIcon
               variant="subtle"
               aria-label={t("edit")}
+              disabled={readOnly}
               onClick={() => onEdit(memory)}
             >
               <IconEdit size={rem(16)} />
@@ -147,6 +150,7 @@ function MemoryCard({
               aria-label={t("delete")}
               loading={deleting}
               onClick={() => onDelete(memory)}
+              disabled={readOnly}
             >
               <IconTrash size={rem(16)} />
             </ActionIcon>
@@ -165,11 +169,13 @@ function MemoryCard({
 function SavedMemoryList({
   state,
   deletingId,
+  readOnly,
   onEdit,
   onDelete,
 }: {
   state: SavedMemoryListState;
   deletingId: string | null;
+  readOnly: boolean;
   onEdit: (memory: MemoryResponse) => void;
   onDelete: (memory: MemoryResponse) => void;
 }): React.ReactElement {
@@ -203,6 +209,7 @@ function SavedMemoryList({
               key={memory.id}
               memory={memory}
               deleting={deletingId === memory.id}
+              readOnly={readOnly}
               onEdit={onEdit}
               onDelete={onDelete}
             />
@@ -488,6 +495,7 @@ function MemoryDraftModal({
 }
 
 export function AgentMemorySettings({
+  agent,
   memoryEnabled,
   kind,
   savedScope,
@@ -522,6 +530,7 @@ export function AgentMemorySettings({
   onDeleteMemory,
 }: AgentMemorySettingsProps): React.ReactElement {
   const t = useTranslations("workspace.agents.memorySettings");
+  const readOnly = agent.deletion_status !== null;
 
   return (
     <Box
@@ -538,7 +547,7 @@ export function AgentMemorySettings({
               </Text>
               <Switch
                 checked={memoryEnabled}
-                disabled={togglingMemory}
+                disabled={togglingMemory || readOnly}
                 label={t("enabledLabel")}
                 onChange={(event) =>
                   onMemoryEnabledChange(event.currentTarget.checked)
@@ -587,6 +596,7 @@ export function AgentMemorySettings({
               <Button
                 leftSection={<IconPlus size={rem(16)} />}
                 onClick={onStartCreate}
+                disabled={readOnly}
               >
                 {t("create")}
               </Button>
@@ -595,6 +605,7 @@ export function AgentMemorySettings({
             {actionError && <Alert color="red">{actionError}</Alert>}
 
             <SavedMemoryList
+              readOnly={readOnly}
               state={savedListState}
               deletingId={deletingId}
               onEdit={onStartEdit}
@@ -670,7 +681,7 @@ export function AgentMemorySettings({
         )}
       </Stack>
       <MemoryDraftModal
-        draftState={draftState}
+        draftState={readOnly ? null : draftState}
         saving={saving}
         onCancel={onCancelDraft}
         onDraftChange={onDraftChange}

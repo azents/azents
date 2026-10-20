@@ -5,6 +5,7 @@ import datetime
 
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
+from azents.repos.external_channel.agent_mutation import require_active_single_app_agent
 from azents.repos.external_channel.data import (
     DiscordGatewayTypingTarget,
     ExternalChannelConnection,
@@ -27,6 +28,7 @@ class DiscordConnectionOperationRepository:
     ) -> ExternalChannelConnectionConfiguration | None:
         """Return one completed connection configuration snapshot."""
         async with self.session_manager() as session:
+            await require_active_single_app_agent(session, connection_id=connection_id)
             return await self.external_channel_repository.get_connection_configuration(
                 session,
                 connection_id=connection_id,
@@ -44,6 +46,7 @@ class DiscordConnectionOperationRepository:
     ) -> bool:
         """Persist one provisional callback configuration."""
         async with self.session_manager() as session:
+            await require_active_single_app_agent(session, connection_id=connection_id)
             prepared = await self.external_channel_repository.prepare_discord_callback(
                 session,
                 connection_id=connection_id,
@@ -74,6 +77,7 @@ class DiscordConnectionOperationRepository:
     ) -> ExternalChannelConnection | None:
         """Commit one fenced Discord activation."""
         async with self.session_manager() as session:
+            await require_active_single_app_agent(session, connection_id=connection_id)
             repository = self.external_channel_repository
             activated = await repository.activate_discord_connection(
                 session,
@@ -104,6 +108,7 @@ class DiscordConnectionOperationRepository:
     ) -> ExternalChannelConnection | None:
         """Persist one fenced safe Discord activation failure."""
         async with self.session_manager() as session:
+            await require_active_single_app_agent(session, connection_id=connection_id)
             failed = await (
                 self.external_channel_repository.record_discord_activation_failure(
                     session,

@@ -39,6 +39,8 @@ class PostgreSQLForeignKey:
     constraint_name: str
     source_table: str
     target_table: str
+    source_columns: tuple[str, ...]
+    target_columns: tuple[str, ...]
     delete_action: PostgreSQLForeignKeyDeleteAction
     triggers: tuple[PostgreSQLReferentialTrigger, ...]
 

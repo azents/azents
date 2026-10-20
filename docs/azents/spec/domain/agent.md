@@ -1,7 +1,7 @@
 ---
 title: "Agent Domain Spec"
 created: 2026-04-20
-updated: 2026-10-19
+updated: 2026-10-20
 tags: [backend, engine]
 spec_type: domain
 domain: agent
@@ -192,7 +192,7 @@ and unchanged discovery, judgment and notification semantics.
 | Field | Meaning |
 |---|---|
 | `workspace_id` | owning Workspace. restrictive parent FK prevents Workspace deletion from bypassing Agent lifecycle |
-| `lifecycle_status` | `active` or `decommissioning`; decommissioning fences new session and runtime activity |
+| `lifecycle_status` | `active` or `decommissioning`; decommissioning fences user-originated Agent-owned mutations and new work while preserving authorized inspection and native cleanup |
 | `name`, `description` | display name and description |
 | `selectable_model_options` | ordered JSONB array of selectable semantic labels. Each option has a unique label, label-scoped subagent policy, and one to five ordered physical candidates; each candidate owns a resolved `AgentModelSelection` snapshot and model-scoped runtime settings |
 | `main_model_label` | selected label from `selectable_model_options` for normal model turns |
@@ -685,12 +685,35 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ### 2.6 Agent decommission
 
+Cleanup participants, attempt fencing, current completion evidence, and the
+column-scoped PostgreSQL dependency catalog are specified in
+[Agent deletion ownership](agent-deletion.md). That registry is the shared source for
+execution ordering and final verification; the finalizer has no independent manual
+model-deletion or lifecycle-root list.
+
 `DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}` is an asynchronous decommission
 request, not immediate row deletion. An Agent administrator or Workspace owner can request it only
 when the archived-session retention policy is finite. The operation atomically marks the Agent
 `decommissioning`, creates or returns one content-free durable job, and returns `202 Accepted` with
 `{ job_id, status, created_at }`. Unlimited (`null`) retention returns `409 Conflict` before any
 state mutation.
+
+Authorized Agent list/detail responses expose required nullable `deletion_status`:
+null for active Agents, `deleting` for normal progress, and `deletion_error` for
+unresolved failure evidence or a missing required job. Job diagnostics and internal
+identifiers stay private. Claims and ordinary waits preserve an unresolved error;
+only exact fenced recovery or verified root completion clears it.
+
+Both deletion states present read-only controls across Agent settings and owned
+resources, Session controls, uploads, Terminal and Browser, with localized badges in
+lists and desktop/mobile headers. Navigation and permitted inspection remain usable.
+The owning write transaction rechecks the canonical Agent row after authorization and
+returns safe HTTP 409 `agent_decommissioning` if deletion won; UI state is not authority.
+Final upload/OAuth attachment rechecks this boundary after external I/O. Native cleanup,
+safety Stop and shared Workspace/provider authorities remain independent. Repeated
+authorized DELETE returns the same job; no manual retry/cancel/force-delete control is
+introduced. Foreground refresh preserves known deletion evidence until actual removal,
+after which list results omit the Agent and detail returns 404.
 
 Decommissioning fences new session creation/recovery, input/action admission, archived-session
 restore, runtime actions, and stuck-run recovery. The coordinator retires eligible roots through the

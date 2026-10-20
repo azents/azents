@@ -8,12 +8,27 @@ import {
 import {
   deferred,
   HookHarness,
+  invoke,
   object,
 } from "../../../shared/testing/hook-test-harness.ts";
 
 interface AgentFixture {
   id: string;
   browser_enabled: boolean;
+  deletion_status?: "deleting" | "deletion_error" | null;
+}
+
+function agentFixture(value: unknown): AgentFixture {
+  const data = object(value);
+  return {
+    id: String(data.id),
+    browser_enabled: data.browser_enabled === true,
+    ...(data.deletion_status === "deleting" ||
+    data.deletion_status === "deletion_error" ||
+    data.deletion_status === null
+      ? { deletion_status: data.deletion_status }
+      : {}),
+  };
 }
 function fixture(cached: AgentFixture): {
   hook: HookHarness;
@@ -48,11 +63,11 @@ function fixture(cached: AgentFixture): {
       get: {
         cancel: (): Promise<void> => client.cancelQueries({ queryKey: key }),
         setData: (_input: unknown, value: unknown): void => {
-          const data = object(value);
-          const agent = {
-            id: String(data.id),
-            browser_enabled: data.browser_enabled === true,
-          };
+          const agent = agentFixture(
+            typeof value === "function"
+              ? invoke(value, client.getQueryData(key))
+              : value,
+          );
           client.setQueryData(key, agent);
           writes.push(agent);
           seeded.resolve(agent);
@@ -67,6 +82,7 @@ function fixture(cached: AgentFixture): {
     "useAgentChatContainer",
     {
       react: hook.react,
+      "next/navigation": { useRouter: () => ({ replace: () => {} }) },
       "@/trpc/client": {
         trpc: {
           useUtils: () => utils,
@@ -78,10 +94,7 @@ function fixture(cached: AgentFixture): {
                 const initial = object(opts.initialData);
                 return new QueryObserver<AgentFixture>(client, {
                   queryKey: key,
-                  initialData: {
-                    id: String(initial.id),
-                    browser_enabled: initial.browser_enabled === true,
-                  },
+                  initialData: agentFixture(initial),
                   queryFn: () => Promise.resolve(cached),
                 }).getCurrentResult();
               },
@@ -120,6 +133,27 @@ function props(agent: AgentFixture): Record<string, unknown> {
     renderSupportingContent: () => null,
   };
 }
+
+void test("stale server hydration preserves a known deletion error", async () => {
+  const cached: AgentFixture = {
+    id: "deleting-agent",
+    browser_enabled: true,
+    deletion_status: "deletion_error",
+  };
+  const { hook, client, key, seeded } = fixture(cached);
+  hook.render(
+    props({ ...cached, browser_enabled: false, deletion_status: null }),
+  );
+  hook.flushEffects();
+  await seeded;
+  assert.equal(
+    object(client.getQueryData(key)).deletion_status,
+    "deletion_error",
+  );
+  assert.equal(object(hook.render().agent).deletion_status, "deletion_error");
+  hook.unmount();
+  client.clear();
+});
 
 void test("chat container owns and restores the document scroll lifecycle", () => {
   const agent = { id: "scroll-agent", browser_enabled: false };

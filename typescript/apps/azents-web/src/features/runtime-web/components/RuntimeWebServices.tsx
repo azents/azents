@@ -57,6 +57,7 @@ function formatTime(value: string, locale: string): string {
 }
 
 export function RuntimeWebServices({
+  readOnly,
   state,
   action,
   mutationError,
@@ -120,7 +121,7 @@ export function RuntimeWebServices({
   }
 
   const validPort = typeof port === "number" && port >= 1 && port <= 65_535;
-  const mutating = action !== null;
+  const mutating = action !== null || readOnly;
   const durationOptions = [
     { value: "3600", label: t("duration.oneHour") },
     { value: "21600", label: t("duration.sixHours") },
@@ -140,6 +141,7 @@ export function RuntimeWebServices({
           <Button
             leftSection={<IconWorld size={rem(16)} />}
             onClick={() => setCreateOpened(true)}
+            disabled={readOnly}
           >
             {t("panel.create")}
           </Button>

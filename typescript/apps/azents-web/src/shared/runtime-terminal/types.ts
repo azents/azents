@@ -13,6 +13,7 @@ export type RuntimeTerminalConnectionState =
   | { type: "error" };
 
 export interface RuntimeTerminalViewState {
+  readOnly: boolean;
   projection: RuntimeTerminalProjectionResponse | null;
   projectionLoading: boolean;
   presentation: RuntimeTerminalPresentation;

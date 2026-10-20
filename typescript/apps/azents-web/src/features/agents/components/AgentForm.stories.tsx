@@ -105,6 +105,7 @@ const modelOptions: ModelSelectionOption[] = [
 ];
 
 const baseAgent: AgentResponse = {
+  deletion_status: null,
   id: "agent-1",
   name: "Snapshot Agent",
   description: "Exercises model selection snapshot settings.",
@@ -372,6 +373,25 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DefaultPreselected = {} satisfies Story;
+
+export const DeletingReadOnly = {
+  tags: ["ci-contract"],
+  args: {
+    section: "profile",
+    formState: {
+      type: "EDIT",
+      agent: { ...baseAgent, deletion_status: "deleting" },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(canvas.getByRole("link", { name: "Cancel" })).toBeVisible();
+    await expect(
+      canvas.getByLabelText("Routine tick (minutes)"),
+    ).toBeDisabled();
+  },
+} satisfies Story;
 
 export const RoutineCadenceDefaults = {
   args: { section: "profile" },

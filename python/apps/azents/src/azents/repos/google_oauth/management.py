@@ -14,7 +14,7 @@ from azents.core.auth.permissions import Permissions, has_permission
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.enums import WorkspaceUserRole
 from azents.core.google_oauth import (
     GoogleAttempt,
     GoogleAttemptStatus,
@@ -58,6 +58,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.account_access import evaluate_active_subject
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.session import SessionRepository
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import ToolkitRepository
@@ -195,7 +196,6 @@ class GoogleOAuthRepository:
             if (
                 agent is None
                 or agent.workspace_id != subject.workspace_id
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
                 or (
                     member.role is not WorkspaceUserRole.OWNER
                     and not await self.agent_admins.is_admin(
@@ -204,6 +204,7 @@ class GoogleOAuthRepository:
                 )
             ):
                 raise GoogleOAuthError("not_found", "Google setup context not found.")
+            await require_active_agent(session, agent_id=subject.agent_id)
 
     async def authorize(self, subject: GoogleManager) -> None:
         """Completed current-manager admission before any provider work."""

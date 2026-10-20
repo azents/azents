@@ -51,7 +51,7 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
         ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
         configuration_generation=1,
         status=ExternalChannelConnectionStatus.CONFIGURING,
-        app_mode=ExternalChannelAppMode.SINGLE,
+        app_mode=ExternalChannelAppMode.MULTI,
         provider_app_id="app-operation-test",
         provider_tenant_id=None,
         provider_bot_user_id=None,

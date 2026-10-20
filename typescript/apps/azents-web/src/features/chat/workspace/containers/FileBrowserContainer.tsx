@@ -41,6 +41,7 @@ export function FileBrowserContainer(
       <input
         ref={uploadInputRef}
         type="file"
+        disabled={props.readOnly}
         multiple
         hidden
         data-testid="workspace-upload-input"

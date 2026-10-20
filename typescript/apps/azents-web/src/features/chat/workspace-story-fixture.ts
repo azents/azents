@@ -148,10 +148,12 @@ const readyWorkspaceState: WorkspacePanelState = {
 };
 
 export const workspacePanelStoryFixture: WorkspacePanelContainerOutput = {
+  readOnly: false,
   state: readyWorkspaceState,
   metricsState: { type: "LOADING" },
   workspaceUploads: emptyWorkspaceUploads,
   runtimeWebServices: {
+    readOnly: false,
     state: {
       type: "READY",
       services: [],

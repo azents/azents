@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from starlette.types import Lifespan
 
 from azents.api import admin, internal, public, testenv
+from azents.api.agent_mutation_errors import register_agent_mutation_errors
 from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
 from azents.core.deps import AppContextBinding, get_appctx
@@ -50,6 +51,7 @@ def create_dummy_public_app() -> FastAPI:
         description="Public read-only API server for Azents",
         generate_unique_id_function=generate_short_operation_id,
     )
+    register_agent_mutation_errors(app)
     public.mount(as_route_mounter(app))
     return app
 
@@ -235,6 +237,7 @@ def _create_fastapi_instance(
         generate_unique_id_function=generate_short_operation_id,
     )
     app.state.appctx_binding = AppContextBinding(appctx)
+    register_agent_mutation_errors(app)
     app.state.di_container = container
     production_publishers = {
         get_runtime_terminal_invalidation_publisher: (

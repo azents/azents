@@ -36,6 +36,7 @@ const onService: RuntimeWebServiceResponse = {
 };
 
 const baseArgs: RuntimeWebServicesContainerOutput = {
+  readOnly: false,
   state: {
     type: "READY",
     services: [onService, offService],
@@ -66,6 +67,20 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+export const DeletingReadOnly = {
+  tags: ["ci-contract"],
+  args: { readOnly: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: "Add service" }),
+    ).toBeDisabled();
+    await expect(
+      canvas.getByRole("button", { name: "Turn On" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
 
 export const Populated = {
   play: async ({ canvasElement }) => {

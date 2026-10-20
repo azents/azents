@@ -1,8 +1,10 @@
 """Completed database operations for the Agent service."""
 
 import dataclasses
+from collections.abc import Sequence
 from typing import Annotated
 
+import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
@@ -15,6 +17,7 @@ from azents.core.github_user_oauth import GitHubUserRevocation
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.rdb.deps import get_session_manager
+from azents.rdb.models.agent_decommission import RDBAgentDecommissionJob
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
@@ -34,6 +37,7 @@ from azents.repos.agent_admin.data import (
 )
 from azents.repos.agent_decommission import AgentDecommissionRepository
 from azents.repos.agent_decommission.data import AgentDecommissionJob
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.github_user_oauth.guards import capture_and_clear_agent_user_tokens
@@ -250,6 +254,25 @@ class AgentOperationsRepository:
                 workspace_id,
                 workspace_user_id,
             )
+
+    async def deletion_errors_by_agent(
+        self, agent_ids: Sequence[str]
+    ) -> dict[str, bool]:
+        """Batch only safe error presence for already-authorized visible Agents."""
+        if not agent_ids:
+            return {}
+        async with self.session_manager() as session:
+            rows = await session.read_session.execute(
+                sa.select(
+                    RDBAgentDecommissionJob.agent_id,
+                    sa.or_(
+                        RDBAgentDecommissionJob.failure_boundary_key.is_not(None),
+                        RDBAgentDecommissionJob.last_error_kind.is_not(None),
+                        RDBAgentDecommissionJob.last_error_summary.is_not(None),
+                    ),
+                ).where(RDBAgentDecommissionJob.agent_id.in_(agent_ids))
+            )
+            return {agent_id: bool(has_error) for agent_id, has_error in rows}
 
     async def list_admin_agent_ids(
         self,
@@ -497,6 +520,7 @@ class AgentOperationsRepository:
     ) -> Result[AgentAdmin, DuplicateAdmin]:
         """Create one Agent admin in a completed transaction."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             return await self.admin_repository.create(
                 session,
                 AgentAdminCreate(
@@ -513,6 +537,7 @@ class AgentOperationsRepository:
     ) -> Result[None, AgentOperationLastAdmin | AgentOperationAdminNotFound]:
         """Protect the last admin and remove the target atomically."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             count = await self.admin_repository.count_by_agent(session, agent_id)
             if count <= 1:
                 return Failure(
@@ -593,6 +618,7 @@ class AgentOperationsRepository:
         if workspace_user is None or workspace_user.workspace_id != workspace_id:
             return Failure(AgentOperationNotAdmin(agent_id=agent_id))
         if workspace_user.role is WorkspaceUserRole.OWNER:
+            await require_active_agent(session, agent_id=agent_id)
             return Success(agent)
         admin = await self.admin_repository.is_admin(
             session,
@@ -601,6 +627,7 @@ class AgentOperationsRepository:
         )
         if not admin:
             return Failure(AgentOperationNotAdmin(agent_id=agent_id))
+        await require_active_agent(session, agent_id=agent_id)
         return Success(agent)
 
 

@@ -189,12 +189,13 @@ export function AgentDraftChat(
             isStopPending={false}
             onStopRequest={onStopRequest}
             inputActions={[]}
+            inputDisabled={agent.deletion_status !== null}
             editSendDisabled={isWritePending || !canSendMessage}
           />
         </Box>
       </Box>
       <WorkspaceDirectoryPickerModal
-        opened={isProjectPickerOpen}
+        opened={isProjectPickerOpen && agent.deletion_status === null}
         state={projectPickerState}
         runtimeSettingsHref={`/w/${handle}/agents/${agent.id}/settings/runtime`}
         onClose={onCloseProjectPicker}

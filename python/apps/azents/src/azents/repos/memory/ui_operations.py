@@ -11,6 +11,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import Memory, MemoryCreate, MemoryUpdate
 from azents.repos.memory.ui_paging import MemoryUIPage, list_memory_page
@@ -58,6 +59,7 @@ class MemoryUIOperations:
     ) -> Memory | None:
         """Keep the existing name check and create in one database operation."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             duplicate = await self.repository.get_by_name(
                 session, agent_id=agent_id, user_id=user_id, name=create.name
             )
@@ -77,10 +79,18 @@ class MemoryUIOperations:
 
     async def update_by_id(self, memory_id: str, update: MemoryUpdate) -> Memory | None:
         async with self.session_manager() as session:
+            existing = await self.repository.get_by_id(session, memory_id)
+            if existing is None:
+                return None
+            await require_active_agent(session, agent_id=existing.agent_id)
             return await self.repository.update_by_id(session, memory_id, update)
 
     async def delete_by_id(self, memory_id: str) -> bool:
         async with self.session_manager() as session:
+            existing = await self.repository.get_by_id(session, memory_id)
+            if existing is None:
+                return False
+            await require_active_agent(session, agent_id=existing.agent_id)
             return await self.repository.delete_by_id(session, memory_id)
 
     async def get_agent(self, agent_id: str) -> Agent | None:

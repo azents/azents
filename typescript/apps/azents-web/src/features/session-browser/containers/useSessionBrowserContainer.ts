@@ -2,7 +2,7 @@
 import { useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   browserPanelHref,
   parseBrowserTarget,
@@ -38,6 +38,7 @@ import type {
 import type { BrowserProjectionResponse } from "@azents/public-client";
 
 export interface SessionBrowserContainerProps {
+  readOnly: boolean;
   handle: string;
   agentId: string;
   sessionId: string;
@@ -60,14 +61,18 @@ function pages(projection: BrowserProjectionResponse): BrowserPageChoice[] {
 
 /** Select current tabs by preference, then independently admit every exact live attachment. */
 export function useSessionBrowserContainer(
-  resource: SessionBrowserContainerProps,
+  props: SessionBrowserContainerProps,
 ): SessionBrowserPanelProps {
   const t = useTranslations("chat.browser");
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
   const utils = trpc.useUtils();
-  const { handle, agentId, sessionId } = resource;
+  const { handle, agentId, sessionId, readOnly } = props;
+  const resource = useMemo(
+    () => ({ handle, agentId, sessionId }),
+    [handle, agentId, sessionId],
+  );
   const resourceKey = JSON.stringify([handle, agentId, sessionId]);
   const [deniedResource, setDeniedResource] = useState<string | null>(null);
   const denied = deniedResource === resourceKey;
@@ -195,7 +200,7 @@ export function useSessionBrowserContainer(
         : browserProjectionState(
             candidates,
             linked,
-            query.data.allow_input,
+            !readOnly && query.data.allow_input,
             recentBrowserTargets([
               ...(history.data?.history.items ?? []),
               ...(history.data?.live.partial_history.items ?? []),
@@ -224,6 +229,7 @@ export function useSessionBrowserContainer(
   const fieldResult = useRef<(result: BrowserFieldResult) => void>(() => {});
   const cancelField = useRef<(() => void) | null>(null);
   const live = useBrowserConnection({
+    readOnly,
     resourceKey: `${resourceKey}\u0000${query.data?.allow_input === true ? "direct" : "observe"}`,
     target: selectedTarget,
     connect,
@@ -330,6 +336,7 @@ export function useSessionBrowserContainer(
       source?.height,
     ]),
     enabled:
+      !readOnly &&
       focused &&
       state.type === "READY" &&
       !mutationPending &&
@@ -364,6 +371,7 @@ export function useSessionBrowserContainer(
         ? () => navigator.clipboard.readText()
         : null,
     enabled:
+      !readOnly &&
       focused &&
       fieldEditor.controls.draft === null &&
       state.type === "READY" &&
@@ -494,11 +502,13 @@ export function useSessionBrowserContainer(
     }
   };
   const canCreate =
+    !readOnly &&
     !denied &&
     query.data?.available === true &&
     query.data.allow_input &&
     !mutationPending;
   return {
+    readOnly,
     state,
     focused,
     focusViewport,
@@ -579,6 +589,9 @@ export function useSessionBrowserContainer(
       });
     },
     onRetry: () => {
+      if (readOnly) {
+        return;
+      }
       interaction.cancel();
       if (!close.isPending) {
         close.reset();

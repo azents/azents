@@ -79,6 +79,8 @@ def _service(
     """Build a ToolkitService with isolated repository doubles."""
     session_manager = MagicMock()
     session_manager.return_value = AsyncMock()
+    transaction = session_manager.return_value.__aenter__.return_value
+    transaction.write_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     return _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
@@ -116,6 +118,8 @@ def _agent_management_service(
     """Build a ToolkitService for Agent-owned management tests."""
     session_manager = MagicMock()
     session_manager.return_value = AsyncMock()
+    transaction = session_manager.return_value.__aenter__.return_value
+    transaction.write_session.scalar.return_value = AgentLifecycleStatus.ACTIVE
     return _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),

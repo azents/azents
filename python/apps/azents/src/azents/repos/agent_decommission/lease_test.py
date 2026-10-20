@@ -8,6 +8,8 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from azents.core.agent_deletion import AgentAvatarDeletionEvidence
+from azents.core.agent_deletion_registry import get_agent_deletion_registry
 from azents.core.enums import (
     AgentDecommissionStatus,
     AgentLifecycleStatus,
@@ -26,6 +28,7 @@ from azents.repos.agent_decommission import AgentDecommissionRepository
 from azents.repos.agent_decommission_finalizer import (
     AgentDecommissionFinalizerRepository,
 )
+from azents.repos.agent_deletion_fence import deletion_context
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime_removal.repository_test import _create_agent
 from azents.repos.runtime_profile.repository_test import _create_provider
@@ -92,6 +95,7 @@ async def test_same_worker_reclaim_cannot_finalize_or_retry_old_decommission(
         expected_attempt=first.attempt_count,
         next_attempt_at=later,
         error_kind="obsolete",
+        failure_boundary_key="agent.avatar/cleanup",
         error_summary="Obsolete attempt.",
         now=later,
     )
@@ -103,12 +107,17 @@ async def test_same_worker_reclaim_cannot_finalize_or_retry_old_decommission(
         status=AgentDecommissionStatus.FINALIZING,
         now=later,
     )
-    assert not await AgentDecommissionFinalizerRepository().finalize(
+    assert not await AgentDecommissionFinalizerRepository(
+        get_agent_deletion_registry()
+    ).finalize(
         rdb_session,
         job_id=job_id,
         agent_id=agent_id,
         lease_owner="scheduler",
         expected_attempt=first.attempt_count,
+        avatar_evidence=AgentAvatarDeletionEvidence(
+            deletion_context(first, lease_owner="scheduler"), ()
+        ),
         now=later,
     )
     assert await rdb_session.read_session.get(RDBAgent, agent_id) is not None
@@ -165,24 +174,34 @@ async def test_decommission_requires_current_terminal_delete_ack(
                 RuntimeError, match="terminal deletion is not acknowledged"
             ):
                 async with writes() as session:
-                    await AgentDecommissionFinalizerRepository().finalize(
+                    await AgentDecommissionFinalizerRepository(
+                        get_agent_deletion_registry()
+                    ).finalize(
                         session,
                         job_id=job_id,
                         agent_id=agent_id,
                         lease_owner="scheduler",
                         expected_attempt=claimed.attempt_count,
+                        avatar_evidence=AgentAvatarDeletionEvidence(
+                            deletion_context(claimed, lease_owner="scheduler"), ()
+                        ),
                         now=now,
                     )
             async with writes() as session:
                 assert await session.read_session.get(RDBAgent, agent_id) is not None
         else:
             async with writes() as session:
-                assert await AgentDecommissionFinalizerRepository().finalize(
+                assert await AgentDecommissionFinalizerRepository(
+                    get_agent_deletion_registry()
+                ).finalize(
                     session,
                     job_id=job_id,
                     agent_id=agent_id,
                     lease_owner="scheduler",
                     expected_attempt=claimed.attempt_count,
+                    avatar_evidence=AgentAvatarDeletionEvidence(
+                        deletion_context(claimed, lease_owner="scheduler"), ()
+                    ),
                     now=now,
                 )
             async with writes() as session:

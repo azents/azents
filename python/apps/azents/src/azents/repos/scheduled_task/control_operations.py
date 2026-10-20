@@ -24,6 +24,7 @@ from azents.core.scheduled_task_control import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
@@ -99,6 +100,7 @@ class ScheduledTaskProviderControlRepository:
                 origin_interaction_id=origin_interaction_id,
             )
             del interaction
+            await require_active_agent(session, agent_id=candidate.agent_id)
             target = await definitions.lock_provider_mutation_target(
                 session,
                 task_id=locator.task_id,

@@ -212,6 +212,9 @@ void test("actual Agent authorization keeps exact GitHub user modes and shared o
                   key,
             },
             "@/shared/toolkits/github-user-creation-state": githubCreation,
+            "@/shared/agent-session/useAgentLifecycle": {
+              useAgentLifecycle: () => ({ readOnly: false }),
+            },
             "@/shared/toolkits/github-user-oauth-state": githubOAuth,
             "@/shared/toolkits/google-resume": googleResume,
             "@/shared/toolkits/provider-config-views": providerConfigViews,

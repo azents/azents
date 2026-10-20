@@ -27,6 +27,7 @@ from azents.repos.active_profile_admission import (
     CapturedProfileAdmission,
 )
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
@@ -174,6 +175,10 @@ class SessionModelProfileRepository:
         user_id: str,
     ) -> AgentSession:
         """Lock and validate the exact web-writable root Session authority."""
+        await self.get_readable_root(
+            session, agent_id=agent_id, session_id=session_id, user_id=user_id
+        )
+        await require_active_agent(session, agent_id=agent_id)
         locked = await self.agent_session_repository.lock_by_id(
             session,
             session_id,
@@ -228,10 +233,9 @@ class SessionModelProfileRepository:
             raise ValueError("AgentSession not found")
         if readable.agent_id != agent_id:
             raise ValueError("AgentSession does not belong to the agent")
-        if (
-            readable.session_kind is not AgentSessionKind.ROOT
-            or readable.status is not AgentSessionStatus.ACTIVE
-        ):
+        if readable.session_kind is not AgentSessionKind.ROOT:
+            raise ValueError("Subagent sessions are read-only")
+        if readable.status is not AgentSessionStatus.ACTIVE:
             raise ValueError("AgentSession is not an active root")
         if (
             readable.product_mode is AgentSessionProductMode.USER
@@ -239,11 +243,7 @@ class SessionModelProfileRepository:
         ):
             raise ValueError("Requester does not have session access")
         agent = await self.agent_repository.get_by_id(session, agent_id)
-        if (
-            agent is None
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            or agent.workspace_id != readable.workspace_id
-        ):
+        if agent is None or agent.workspace_id != readable.workspace_id:
             raise ValueError("AgentSession is not active")
         root = await self.agent_session_repository.get_root_session_agent_by_session_id(
             session,

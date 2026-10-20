@@ -2,14 +2,15 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from azcommon.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
-from azents.core.enums import AgentSessionStatus
+from azents.core.enums import AgentSessionStatus, ExternalChannelAppMode
 from azents.core.session_execution_data import SessionExecutionRecord
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
@@ -74,6 +75,7 @@ async def test_residual_reads_close_their_sessions_before_returning() -> None:
 
     workspace_result = await AgentWorkspaceAccessRepository(
         session_manager=session_manager,
+        write_session_manager=session_manager,
         agent_repository=agent_repository,
         workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
     ).get_agent_for_user(
@@ -111,6 +113,11 @@ async def test_residual_mutation_and_idle_read_finish_before_returning(
         finally:
             transaction_active = False
 
+    result = MagicMock()
+    result.one_or_none.return_value = SimpleNamespace(
+        app_mode=ExternalChannelAppMode.MULTI, agent_id=None
+    )
+    _raw_session.execute.return_value = result
     external_channel_repository = AsyncMock(spec=ExternalChannelRepository)
     external_channel_repository.prepare_discord_callback.return_value = True
     prepared = await DiscordConnectionOperationRepository(

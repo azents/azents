@@ -50,6 +50,7 @@ from support.utils import (
     single_candidate_model_options,
     unique,
 )
+from tests.required.public.test_archived_session_retention import _run_scheduler_task
 
 
 class _WorkspaceIntegrationFixture(NamedTuple):
@@ -384,12 +385,13 @@ class TestAgentCrud:
         assert updated.name == "Updated"
         assert updated.description == "t description"
 
-    def test_delete_agent_creates_decommission_job(
+    def test_delete_agent_completes_and_preserves_other_agent(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
+        azents_admin_server_url: str,
     ) -> None:
-        """Agent DELETE creates a durable decommission job under finite retention."""
+        """Native scheduling removes only the read-only deletion target."""
         system_api = SystemV1Api(admin_api_client)
         settings = system_api.system_v1_get_file_lifecycle_settings()
         prior_retention = settings.archived_session_retention_days
@@ -408,6 +410,14 @@ class TestAgentCrud:
                 integration_id=integration_id,
                 model_selection=model_selection,
             )
+            retained_id = _create_agent(
+                public_api_client,
+                token=owner_token,
+                handle=handle,
+                integration_id=integration_id,
+                model_selection=model_selection,
+                name="Retained Agent",
+            )
 
             decommission = agent_api.agent_v1_delete_agent(
                 agent_id=agent_id,
@@ -418,6 +428,41 @@ class TestAgentCrud:
             assert decommission.job_id
             assert decommission.status == "pending"
             assert decommission.created_at is not None
+            deleting = agent_api.agent_v1_get_agent(
+                agent_id=agent_id, handle=handle, _headers=headers
+            )
+            assert deleting.deletion_status == "deleting"
+            repeated = agent_api.agent_v1_delete_agent(
+                agent_id=agent_id, handle=handle, _headers=headers
+            )
+            assert repeated.job_id == decommission.job_id
+            with pytest.raises(ApiException) as denied:
+                agent_api.agent_v1_update_agent(
+                    agent_id=agent_id,
+                    handle=handle,
+                    agent_update_request=AgentUpdateRequest(name="Blocked change"),
+                    _headers=headers,
+                )
+            assert denied.value.status == 409
+            assert "agent_decommissioning" in (denied.value.body or "")
+
+            # Run the deployed native coordinator, not an in-process cleanup helper.
+            _run_scheduler_task(azents_admin_server_url, task_key="agent_decommission")
+            with pytest.raises(ApiException) as removed:
+                agent_api.agent_v1_get_agent(
+                    agent_id=agent_id, handle=handle, _headers=headers
+                )
+            assert removed.value.status == 404
+            listed = agent_api.agent_v1_list_agents(handle=handle, _headers=headers)
+            assert {item.id for item in listed.items} == {retained_id}
+            retained = agent_api.agent_v1_update_agent(
+                agent_id=retained_id,
+                handle=handle,
+                agent_update_request=AgentUpdateRequest(name="Still editable"),
+                _headers=headers,
+            )
+            assert retained.name == "Still editable"
+            assert retained.deletion_status is None
         finally:
             _set_retention(system_api, prior_retention)
 

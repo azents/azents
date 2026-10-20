@@ -73,6 +73,7 @@ export function AgentAvatarSection({
             <Button
               leftSection={<IconUpload size={14} />}
               onClick={handlePickFile}
+              disabled={agent.deletion_status !== null}
               loading={busy}
               variant="default"
             >
@@ -82,6 +83,7 @@ export function AgentAvatarSection({
               <Button
                 leftSection={<IconTrash size={14} />}
                 onClick={() => void removeAvatar()}
+                disabled={agent.deletion_status !== null}
                 loading={state.type === "removing"}
                 color="red"
                 variant="subtle"
@@ -100,6 +102,7 @@ export function AgentAvatarSection({
       <input
         ref={inputRef}
         type="file"
+        disabled={agent.deletion_status !== null}
         accept="image/jpeg,image/png,image/webp"
         style={{ display: "none" }}
         onChange={handleFileChange}

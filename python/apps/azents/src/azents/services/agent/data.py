@@ -14,6 +14,7 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SubagentSettings,
 )
+from azents.core.agent_deletion import AgentDeletionStatus
 from azents.core.enums import AgentRuntimeCapability, AgentType
 from azents.core.upload_images import UploadedImage
 from azents.repos.agent.data import Agent
@@ -37,6 +38,7 @@ class AgentOutput(BaseModel):
     model_parameters: ModelParameters | None
     system_prompt: str | None
     enabled: bool
+    deletion_status: AgentDeletionStatus | None
     type: AgentType
     runtime_profile_id: str | None
     runtime_profile_selection_version: int
@@ -99,6 +101,7 @@ class AgentOutput(BaseModel):
         ]
         | None,
         can_manage: bool,
+        deletion_status: AgentDeletionStatus | None,
     ) -> Self:
         """Create output by combining domain `Agent` and resolved `avatar`."""
         return cls(
@@ -118,6 +121,7 @@ class AgentOutput(BaseModel):
             model_parameters=data.model_parameters,
             system_prompt=data.system_prompt,
             enabled=data.enabled,
+            deletion_status=deletion_status,
             type=data.type,
             runtime_profile_id=data.runtime_profile_id,
             runtime_profile_selection_version=(data.runtime_profile_selection_version),
@@ -135,10 +139,14 @@ class AgentOutput(BaseModel):
                 )
             ),
             runtime_add_available=(
-                can_manage and data.runtime_capability is AgentRuntimeCapability.NONE
+                can_manage
+                and deletion_status is None
+                and data.runtime_capability is AgentRuntimeCapability.NONE
             ),
             runtime_remove_available=(
-                can_manage and data.runtime_capability is AgentRuntimeCapability.MANAGED
+                can_manage
+                and deletion_status is None
+                and data.runtime_capability is AgentRuntimeCapability.MANAGED
             ),
             toolkit_management_available=can_manage,
             terminal_enabled=data.terminal_enabled,

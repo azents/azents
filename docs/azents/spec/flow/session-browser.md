@@ -62,7 +62,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-17
+last_verified_at: 2026-10-20
 spec_version: 1
 ---
 
@@ -94,6 +94,13 @@ Availability reports `runtime_unavailable`, `browser_unavailable`, or `working_f
 The service sends typed status/open/close commands and revalidates current account, Session and Runtime authority before returning the result. Creation requires the returned page to be present in the current task list. Close requires SDK dispatch and the selected target's absence from that list. Unknown/failed operations raise rather than masquerading as successful creation/closure or an unavailable read, and are never replayed.
 
 The Session supporting panel has a Browser destination using source-generated REST clients through tRPC. Task/page/incarnation links are separate from scheduled-task identifiers. A valid explicit live tab wins. Missing, malformed or closed links select the most recently worked live Agent tab known from a bounded authorized snapshot of the latest 100 history events and current partial live history; when unknown, the first live tab is selected. Event results supply preference only and must match the current projection exactly. Target rejection excludes that exact identity from the local candidates and refreshes the projection. A replacement tab always receives a fresh independently admitted attachment, never replayed input. No tabs shows an empty state with a New tab action, disabled for read-only viewers. Each tab has its own close button and the strip has a New tab button. Successful creation selects the returned exact new page; closing the active tab reuses the default selection rule. Panel dismissal or another destination unmounts the Browser Page without closing browser resources. REST tab permissions are independent of live-preview availability, and errors suppress cached unauthorized content.
+
+When the Agent is deleting or has a deletion error, the Browser UI explicitly enters
+the [Agent read-only state](../domain/agent-deletion.md#public-status-and-read-only-admission).
+It suppresses new tickets, reconnect/attachment (including after an awaited ticket or
+WebSocket open), navigation/input and pending-input replay. Existing output and local
+panel navigation remain inspectable where native Runtime authority permits them.
+Read-only presentation never starts or recreates a Runtime merely for inspection.
 
 ## Browser Automation Markers
 
