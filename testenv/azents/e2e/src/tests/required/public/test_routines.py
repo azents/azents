@@ -26,7 +26,6 @@ from azentspublicclient.models.routine_detail_response import RoutineDetailRespo
 from azentspublicclient.models.routine_list_response import RoutineListResponse
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.session_context_response import SessionContextResponse
-from docker.models.containers import Container
 from pydantic import StrictBool, StrictInt, StrictStr, TypeAdapter
 
 from support import routine_model_fixture as model
@@ -702,11 +701,11 @@ def test_joint_tick_uses_canonical_context_and_independent_work_results(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_admin_server_url: str,
-    azents_engine_worker_container: Container,
+    ordinary_model_stream_worker: object,
     openai_proxy_url: str,
 ) -> None:
     """Tool-created work crosses Scheduler, inbox, Worker and real Runtime paths."""
-    del azents_engine_worker_container
+    del ordinary_model_stream_worker
     run_routine_journey(
         public_api_client,
         admin_api_client,

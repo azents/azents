@@ -72,7 +72,7 @@ def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_admin_server_url: str,
-    azents_engine_worker_container: Container,
+    ordinary_model_stream_worker: object,
     azents_external_channel_gateway_factory: Callable[
         [], AbstractContextManager[Container]
     ],
@@ -81,7 +81,7 @@ def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
     delivery: Literal["delivered", "failed"],
 ) -> None:
     """Channel-created Session keeps Primary delivery separate from work outcome."""
-    del azents_engine_worker_container
+    del ordinary_model_stream_worker
     gateway = azents_external_channel_gateway_factory()
     gateway.__enter__()
     request.addfinalizer(lambda: gateway.__exit__(None, None, None))

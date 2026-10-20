@@ -5,7 +5,6 @@ from pathlib import Path
 
 import azentsadminclient
 import azentspublicclient
-from docker.models.containers import Container
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -22,13 +21,13 @@ def test_routine_panel_and_collapsed_judgment_survive_reload(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_admin_server_url: str,
-    azents_engine_worker_container: Container,
+    ordinary_model_stream_worker: object,
     openai_proxy_url: str,
     azents_main_web_url: str,
     browser_driver: WebDriver,
 ) -> None:
     """Inspect tool-created data without a fixture-only presentation shortcut."""
-    del azents_engine_worker_container
+    del ordinary_model_stream_worker
     driver = browser_driver
     wait = WebDriverWait(driver, 30, poll_frequency=0.1)
 
