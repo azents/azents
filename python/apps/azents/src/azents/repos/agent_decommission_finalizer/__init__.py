@@ -1,34 +1,27 @@
-"""Agent decommission finalization repository."""
+"""Fenced Agent root deletion after registry-owned completion verification."""
 
+import dataclasses
 import datetime
+from typing import Annotated
 
 import sqlalchemy as sa
+from fastapi import Depends
 
-from azents.core.enums import AgentDecommissionStatus, AgentLifecycleStatus
-from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.agent_admin import RDBAgentAdmin
-from azents.rdb.models.agent_decommission import RDBAgentDecommissionJob
-from azents.rdb.models.agent_project_catalog import RDBAgentProjectCatalogEntry
-from azents.rdb.models.agent_project_default import RDBAgentProjectDefault
-from azents.rdb.models.agent_project_preset import RDBAgentProjectPreset
-from azents.rdb.models.agent_runtime import RDBAgentRuntime
-from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.artifact import RDBArtifact
-from azents.rdb.models.exchange_file import RDBExchangeFile
-from azents.rdb.models.external_channel import (
-    RDBExternalChannelAccessGrant,
-    RDBExternalChannelAccessRequest,
-    RDBExternalChannelAgentRoute,
-    RDBExternalChannelBinding,
-    RDBExternalChannelBlock,
+from azents.core.agent_deletion import (
+    AgentAvatarDeletionEvidence,
+    AgentDeletionContext,
+    AgentDeletionParticipantFailure,
+    AgentDeletionRegistry,
+    avatar_object_keys,
 )
-from azents.rdb.models.memory import RDBAgentMemory
-from azents.rdb.models.model_file import RDBModelFile
-from azents.rdb.models.scheduled_task import RDBScheduledTask
-from azents.rdb.models.session_agent_context import RDBSessionAgentContext
-from azents.rdb.models.toolkit import RDBAgentToolkit
-from azents.rdb.models.toolkit_state import RDBToolkitState
-from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.core.agent_deletion_registry import get_agent_deletion_registry
+from azents.core.enums import AgentDecommissionStatus, AgentLifecycleStatus
+from azents.core.upload_images import StoredImage
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_decommission import RDBAgentDecommissionJob
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_deletion_verification import AgentDeletionVerification
 
 
 def _terminal_delete_pending(runtime: RDBAgentRuntime) -> bool:
@@ -40,8 +33,11 @@ def _terminal_delete_pending(runtime: RDBAgentRuntime) -> bool:
     )
 
 
+@dataclasses.dataclass
 class AgentDecommissionFinalizerRepository:
-    """Finalize Agent resources only after lifecycle roots are absent."""
+    """Use one registry for completion obligations; retain native root authority."""
+
+    registry: Annotated[AgentDeletionRegistry, Depends(get_agent_deletion_registry)]
 
     async def finalize(
         self,
@@ -51,9 +47,10 @@ class AgentDecommissionFinalizerRepository:
         agent_id: str,
         lease_owner: str,
         expected_attempt: int,
+        avatar_evidence: AgentAvatarDeletionEvidence,
         now: datetime.datetime,
     ) -> bool:
-        """Delete verified Agent-owned rows and complete its job tombstone."""
+        """Commit verified root removal and its tombstone together."""
         job = await session.write_session.scalar(
             sa.select(RDBAgentDecommissionJob)
             .where(
@@ -67,20 +64,42 @@ class AgentDecommissionFinalizerRepository:
         )
         if job is None:
             return False
-
         agent = await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(
                 RDBAgent.id == agent_id,
+                RDBAgent.workspace_id == job.workspace_id,
                 RDBAgent.lifecycle_status == AgentLifecycleStatus.DECOMMISSIONING,
             )
             .with_for_update()
         )
         if agent is None:
             raise RuntimeError("Decommissioning Agent is missing")
+        context = AgentDeletionContext(
+            job_id=job_id,
+            agent_id=agent_id,
+            workspace_id=agent.workspace_id,
+            lease_owner=lease_owner,
+            expected_attempt=expected_attempt,
+        )
+        current_avatar = (
+            StoredImage.model_validate(agent.avatar) if agent.avatar else None
+        )
+        if (
+            avatar_evidence.context != context
+            or avatar_evidence.keys != avatar_object_keys(current_avatar)
+        ):
+            raise AgentDeletionParticipantFailure(
+                participant_key="agent.avatar",
+                phase="verify",
+                error=RuntimeError(
+                    "Current avatar does not match this attempt's deletion evidence"
+                ),
+            )
 
-        await self._require_absent_lifecycle_roots(session, agent_id=agent_id)
-
+        await AgentDeletionVerification(self.registry).require_complete(
+            session, context=context
+        )
         runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.agent_id == agent_id)
@@ -88,21 +107,17 @@ class AgentDecommissionFinalizerRepository:
         )
         if runtime is not None:
             if _terminal_delete_pending(runtime):
-                raise RuntimeError("AgentRuntime terminal deletion is not acknowledged")
+                raise AgentDeletionParticipantFailure(
+                    participant_key="agent.runtime",
+                    phase="verify",
+                    error=RuntimeError(
+                        "AgentRuntime terminal deletion is not acknowledged"
+                    ),
+                )
             await session.write_session.delete(runtime)
+            await session.write_session.flush()
 
-        for model in (
-            RDBAgentAdmin,
-            RDBAgentProjectCatalogEntry,
-            RDBAgentProjectDefault,
-            RDBAgentProjectPreset,
-            RDBAgentToolkit,
-            RDBAgentMemory,
-        ):
-            await session.write_session.execute(
-                sa.delete(model).where(model.agent_id == agent_id)
-            )
-
+        # Only declared database children cascade; required roots were checked above.
         await session.write_session.delete(agent)
         job.status = AgentDecommissionStatus.COMPLETED
         job.lease_owner = None
@@ -114,58 +129,3 @@ class AgentDecommissionFinalizerRepository:
         job.updated_at = now
         await session.write_session.flush()
         return True
-
-    async def _require_absent_lifecycle_roots(
-        self,
-        session: ReadSession,
-        *,
-        agent_id: str,
-    ) -> None:
-        """Reject finalization while lifecycle-owned resources still remain."""
-        remaining = (
-            (RDBAgentSession, "AgentSession"),
-            (RDBArtifact, "Artifact"),
-            (RDBExchangeFile, "ExchangeFile"),
-            (RDBModelFile, "ModelFile"),
-            (RDBSessionAgentContext, "SessionAgentContext"),
-            (RDBScheduledTask, "ScheduledTask"),
-            (RDBToolkitState, "ToolkitState"),
-            (RDBExternalChannelAgentRoute, "ExternalChannelAgentRoute"),
-            (RDBExternalChannelAccessGrant, "ExternalChannelAccessGrant"),
-            (RDBExternalChannelBlock, "ExternalChannelBlock"),
-        )
-        for model, label in remaining:
-            exists = await session.read_session.scalar(
-                sa.select(sa.exists().where(model.agent_id == agent_id))
-            )
-            if exists:
-                raise RuntimeError(f"{label} lifecycle root remains")
-
-        route_owned_roots = (
-            (
-                RDBExternalChannelAccessRequest,
-                "ExternalChannelAccessRequest",
-                sa.select(
-                    sa.exists().where(
-                        RDBExternalChannelAccessRequest.route_id
-                        == RDBExternalChannelAgentRoute.id,
-                        RDBExternalChannelAgentRoute.agent_id == agent_id,
-                    )
-                ),
-            ),
-            (
-                RDBExternalChannelBinding,
-                "ExternalChannelBinding",
-                sa.select(
-                    sa.exists().where(
-                        RDBExternalChannelBinding.route_id
-                        == RDBExternalChannelAgentRoute.id,
-                        RDBExternalChannelAgentRoute.agent_id == agent_id,
-                    )
-                ),
-            ),
-        )
-        for _, label, exists_query in route_owned_roots:
-            exists = await session.read_session.scalar(exists_query)
-            if exists:
-                raise RuntimeError(f"{label} lifecycle root remains")

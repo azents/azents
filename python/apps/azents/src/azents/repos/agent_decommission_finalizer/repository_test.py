@@ -5,19 +5,21 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_deletion import AgentDeletionContext
+from azents.core.agent_deletion_registry import get_agent_deletion_registry
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.agent_decommission_finalizer import (
-    AgentDecommissionFinalizerRepository,
     _terminal_delete_pending,
 )
+from azents.repos.agent_deletion_verification import AgentDeletionVerification
 
 
 class _ExistsSessionDouble:
     """Capture lifecycle-root checks without requiring an RDB fixture."""
 
-    def __init__(self, results: list[bool]) -> None:
-        self.results = results
+    def __init__(self, existing_reference: str | None) -> None:
+        self.existing_reference = existing_reference
         self.statements: list[str] = []
         mock = AsyncMock(spec=AsyncSession)
         mock.scalar.side_effect = self.scalar
@@ -25,37 +27,40 @@ class _ExistsSessionDouble:
         self.session = mock
 
     async def scalar(self, statement: object) -> bool:
-        """Return deterministic existence results in repository check order."""
+        """Return existence by declared reference rather than incidental query order."""
         self.statements.append(str(statement))
-        return self.results.pop(0)
+        return (
+            self.existing_reference is not None
+            and f"{self.existing_reference} IN" in str(statement)
+        )
 
 
 @pytest.mark.asyncio
 async def test_finalizer_rejects_remaining_external_channel_route() -> None:
     """An Agent route remains a hard finalization fence after Session purge."""
-    session = _ExistsSessionDouble([False] * 7 + [True]).session
+    session = _ExistsSessionDouble("external_channel_agent_routes.agent_id").session
 
     with pytest.raises(
         RuntimeError,
-        match="ExternalChannelAgentRoute lifecycle root remains",
+        match="Lifecycle root remains: external_channel_agent_routes",
     ):
-        repository = AgentDecommissionFinalizerRepository()
-        await repository._require_absent_lifecycle_roots(
+        repository = AgentDeletionVerification(get_agent_deletion_registry())
+        await repository.require_complete(
             ReadWriteSession(session),
-            agent_id="agent-1",
+            context=AgentDeletionContext("job-1", "agent-1", "workspace", "worker", 1),
         )
 
 
 @pytest.mark.asyncio
 async def test_finalizer_does_not_treat_workspace_connection_as_agent_root() -> None:
     """Workspace-owned External Channel connections remain outside Agent cleanup."""
-    session_double = _ExistsSessionDouble([False] * 15)
+    session_double = _ExistsSessionDouble(None)
     session = session_double.session
 
-    repository = AgentDecommissionFinalizerRepository()
-    await repository._require_absent_lifecycle_roots(
+    repository = AgentDeletionVerification(get_agent_deletion_registry())
+    await repository.require_complete(
         ReadWriteSession(session),
-        agent_id="agent-1",
+        context=AgentDeletionContext("job-1", "agent-1", "workspace", "worker", 1),
     )
 
     checked_sql = "\n".join(session_double.statements)
