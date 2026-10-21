@@ -10,6 +10,7 @@ from azcommon.result import Success
 
 import azents.worker.run.executor as executor_module
 from azents.core.action_execution_data import ActionExecution
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import AgentRunStatus, MailboxItemKind, MailboxSchedulingMode
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
@@ -17,6 +18,7 @@ from azents.core.inference_profile import (
 )
 from azents.core.mailbox_data import MailboxItem
 from azents.core.routine import RoutineScope
+from azents.core.routine_judgment_test import JUDGMENT_TIME, candidate
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import TurnContext
 from azents.engine.events.action_messages import RoutineJudgmentAction
@@ -26,11 +28,13 @@ from azents.engine.routine_judgment_context import (
     PrepareRoutineJudgmentContext,
     RoutineJudgmentContext,
     RoutineJudgmentHost,
+    prepare_canonical_routine_judgment,
 )
-from azents.engine.routine_judgment_context_test import request
+from azents.engine.routine_judgment_context_test import UnusedFileDownloader, request
+from azents.engine.routine_judgment_test import history
 from azents.engine.run.model_transport import InMemoryModelTransportState
-from azents.engine.run.resolve import ResolvedInvokeInputProfile
 from azents.repos.routine.judgment_inbox import RoutineJudgmentSettlement
+from azents.repos.routine.judgment_model_test import model_fixture, option_for
 from azents.services.mailbox import (
     OperationActionInput,
     PendingInputInferenceProfile,
@@ -40,7 +44,6 @@ from azents.services.mailbox import (
 from azents.services.routine.judgment import RoutineJudgmentService
 from azents.testing.model_selection import (
     make_test_model_selection,
-    make_test_model_settings,
 )
 from azents.worker.run.executor_test import (
     _action_execution,
@@ -82,13 +85,21 @@ def _judgment_buffer(
 
 
 @pytest.mark.parametrize(
-    "capture_context,resumed", [(False, False), (True, False), (True, True)]
+    "capture_context,resumed,fallback",
+    [
+        (False, False, False),
+        (True, False, False),
+        (True, True, False),
+        (True, False, True),
+        (True, True, True),
+    ],
 )
 async def test_no_action_judgment_completes_host_without_foreground_preparation(
     monkeypatch: pytest.MonkeyPatch,
     *,
     capture_context: bool,
     resumed: bool,
+    fallback: bool,
 ) -> None:
     selection = make_test_model_selection(
         model_identifier="frozen-ordinary-candidate" if resumed else "gpt-test"
@@ -106,6 +117,9 @@ async def test_no_action_judgment_completes_host_without_foreground_preparation(
     lifecycle = _SessionLifecycle(recoverable_run=recoverable)
     executor = _executor(session_lifecycle=lifecycle)
     broadcast = Mock(spec=executor_module.BaseWebSocketBroadcast)
+    current_option = option_for("grok-4.5", "grok-4.6")
+    models = model_fixture(monkeypatch, current_option)
+    executor.judgment_models = models.repository
     executor.broadcast = broadcast
     original_inference = executor.test_session_state.inference_state
     observation = _observation().model_copy(update={"session_id": "session-001"})
@@ -148,27 +162,20 @@ async def test_no_action_judgment_completes_host_without_foreground_preparation(
             suppress_parent_result=False,
         )
 
-    resolved_request = dataclasses.replace(
-        request(selection),
-        session_id="session-001",
-        agent_id="agent-001",
-        workspace_id="workspace-001",
-        toolkits=[],
-    )
-    pure_resolution = AsyncMock(
-        return_value=Success(
-            ResolvedInvokeInputProfile(
-                run_request=resolved_request,
-                model_selection=selection,
-                model_settings=make_test_model_settings(),
-                reasoning_effort=None,
+    async def resolve_current(*args: object, **kwargs: object) -> Success:
+        current_selection = kwargs["resolved_model_selection"]
+        assert isinstance(current_selection, AgentModelSelection)
+        return Success(
+            dataclasses.replace(
+                request(current_selection),
+                session_id="session-001",
+                agent_id="agent-001",
+                workspace_id="workspace-001",
+                toolkits=[],
             )
         )
-    )
-    monkeypatch.setattr(
-        executor_module, "resolve_invoke_input_with_profile", pure_resolution
-    )
-    resolved_resolution = AsyncMock(return_value=Success(resolved_request))
+
+    resolved_resolution = AsyncMock(side_effect=resolve_current)
     monkeypatch.setattr(
         executor_module,
         "resolve_invoke_input_with_resolved_profile",
@@ -193,7 +200,35 @@ async def test_no_action_judgment_completes_host_without_foreground_preparation(
             context = await prepare_context()
             await context.admit_dispatch()
             assert context.request.inference_state is None
-            assert context.model_selection == selection
+            assert context.model_selection.model_identifier == "grok-4.5"
+            assert context.model_selection.normalized_capabilities.structured_response
+            assert not current_option.candidates[
+                0
+            ].model_selection.normalized_capabilities.structured_response
+            await prepare_canonical_routine_judgment(
+                run_request=context.request,
+                model_selection=context.model_selection,
+                transcript=history(),
+                candidates=(candidate(),),
+                current_time=JUDGMENT_TIME,
+                context=context.turn,
+                model_file_service=UnusedFileDownloader(),
+            )
+            if fallback:
+                advanced = await context.advance_after_quota()
+                assert advanced is not None
+                context = advanced
+                assert context.model_selection.model_identifier == "grok-4.6"
+                assert context.request.model == "grok-4.6"
+                await prepare_canonical_routine_judgment(
+                    run_request=context.request,
+                    model_selection=context.model_selection,
+                    transcript=history(),
+                    candidates=(candidate(),),
+                    current_time=JUDGMENT_TIME,
+                    context=context.turn,
+                    model_file_service=UnusedFileDownloader(),
+                )
             captured.append(context)
             if resumed:
                 raise _ContextCaptured(
@@ -235,9 +270,11 @@ async def test_no_action_judgment_completes_host_without_foreground_preparation(
     if resumed:
         with pytest.raises(_ContextCaptured):
             await call
-        pure_resolution.assert_not_awaited()
-        resolved_resolution.assert_awaited_once()
-        assert captured[0].model_selection == selection
+        assert resolved_resolution.await_count == (2 if fallback else 1)
+        assert captured[0].model_selection.model_identifier == (
+            "grok-4.6" if fallback else "grok-4.5"
+        )
+        assert captured[0].model_selection != selection
         assert executor.test_session_state.inference_state is original_inference
         assert lifecycle.cancelled_pending_run_ids == []
         assert recoverable is not None and recoverable.status is AgentRunStatus.RUNNING
@@ -268,10 +305,10 @@ async def test_no_action_judgment_completes_host_without_foreground_preparation(
     )
     assert len(lifecycle.cancelled_pending_run_ids) == 1
     if capture_context:
-        pure_resolution.assert_awaited_once()
+        assert resolved_resolution.await_count == (2 if fallback else 1)
         assert lifecycle.cancelled_pending_run_ids == [captured[0].turn.run_id]
     else:
-        pure_resolution.assert_not_awaited()
+        resolved_resolution.assert_not_awaited()
     assert not available
 
 
@@ -349,6 +386,7 @@ async def test_later_poll_runs_judgment_in_the_existing_host_boundary(
                 publish_event=AsyncMock(),
             ),
             admit_dispatch=AsyncMock(),
+            advance_after_quota=AsyncMock(return_value=None),
         )
 
     async def execute_judgment(

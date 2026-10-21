@@ -8,6 +8,7 @@ import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Literal
+from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
@@ -38,6 +39,7 @@ from azents.engine.routine_judgment_context import RoutineJudgmentContext
 from azents.engine.routine_judgment_context_test import UnusedFileDownloader, request
 from azents.engine.routine_judgment_test import history
 from azents.engine.run.emit import PublishedEvent
+from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -227,6 +229,7 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
             model_selection=selection,
             model_target_label="default",
             admit_dispatch=admit_dispatch,
+            advance_after_quota=AsyncMock(return_value=None),
             turn=TurnContext(
                 workspace_id=scope.workspace_id,
                 model="fixture",
@@ -252,6 +255,7 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
         ),
         watchdog=make_test_model_stream_watchdog(),
         model_file_service=UnusedFileDownloader(),
+        retry_policy=FailedRunRetryPolicy(0, 0, 1, 0),
     )
     request_started_at = datetime.datetime.now(datetime.UTC)
     call = service.execute(

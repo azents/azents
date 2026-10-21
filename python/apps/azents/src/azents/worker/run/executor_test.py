@@ -179,6 +179,7 @@ from azents.repos.external_channel.data import ExternalChannelMailboxProjectionI
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.model_candidate_selection import ModelCandidateSelection
 from azents.repos.model_metadata_source_data import ContextModelRequest
+from azents.repos.routine.judgment_model import RoutineJudgmentModelRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -2100,6 +2101,7 @@ def _executor(
     )
     return _TestRunExecutor(
         broker=Mock(spec=run_executor_module.SessionBroker),
+        judgment_models=Mock(spec=RoutineJudgmentModelRepository),
         read_repository=read_repository,
         model_operation_repository=model_repository,
         resolve_repositories=EngineResolveRepositories(

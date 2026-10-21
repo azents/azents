@@ -9,9 +9,13 @@ from typing import Annotated
 from fastapi import Depends
 
 from azents.core.action_execution_data import ActionExecution
+from azents.core.active_model_capabilities import ActiveModelCapabilitiesUnavailable
 from azents.core.model_pricing import capture_model_pricing
 from azents.core.routine import RoutineScope, RoutineUnavailable
-from azents.core.routine_judgment import RoutineJudgmentConsidered
+from azents.core.routine_judgment import (
+    RoutineJudgmentCandidate,
+    RoutineJudgmentConsidered,
+)
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.worker_model_profile import ProfileResolutionRuntimeError
 from azents.engine.events.action_messages import RoutineJudgmentAction
@@ -32,10 +36,19 @@ from azents.engine.providers.observation_state import InternalModelExecutionErro
 from azents.engine.routine_judgment import call_routine_judgment
 from azents.engine.routine_judgment_context import (
     PrepareRoutineJudgmentContext,
+    RoutineJudgmentContext,
     prepare_canonical_routine_judgment,
 )
 from azents.engine.run.errors import ModelCallError
-from azents.engine.run.provider_failure import UnclassifiedModelProviderError
+from azents.engine.run.provider_failure import (
+    ModelProviderFailure,
+    ModelProviderFailureCategory,
+    UnclassifiedModelProviderError,
+)
+from azents.engine.run.retry_policy import (
+    FailedRunRetryPolicy,
+    get_failed_run_retry_policy,
+)
 from azents.repos.routine.judgment_inbox import (
     RoutineJudgmentInboxRepository,
     RoutineJudgmentSettlement,
@@ -47,12 +60,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RoutineJudgmentService:
-    """One call and one database settlement; no independent owner or retry loop."""
+    """Use shared model-call policy inside one ordinary owner and settlement."""
 
     repository: Annotated[RoutineJudgmentInboxRepository, Depends()]
     sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
     watchdog: Annotated[ModelStreamWatchdog, Depends(get_model_stream_watchdog)]
     model_file_service: Annotated[ModelFileDownloader, Depends(ModelFileService)]
+    retry_policy: Annotated[FailedRunRetryPolicy, Depends(get_failed_run_retry_policy)]
 
     async def cancel(
         self, *, execution: ActionExecution, owner: SessionExecutionOwner
@@ -92,72 +106,32 @@ class RoutineJudgmentService:
         model: str | None = None
         try:
             context = await prepare_context()
-            request = context.request
-            if (
-                request.session_id != scope.session_id
-                or request.agent_id != scope.agent_id
-                or request.workspace_id != scope.workspace_id
-                or context.turn.resource_authority is None
-                or context.turn.resource_authority.execution_owner != owner
-                or context.turn.resource_authority.workspace_id != scope.workspace_id
-                or context.turn.resource_authority.agent_id != scope.agent_id
-                or context.turn.resource_authority.run_id != context.turn.run_id
-            ):
-                raise RoutineUnavailable(
-                    "Routine judgment context does not match its owner."
-                )
-            provider = request.provider.value
-            model = request.model
-            transcript = await self.repository.capture_transcript(
-                scope=scope, owner=owner
-            )
-            prepared = await prepare_canonical_routine_judgment(
-                run_request=request,
-                model_selection=context.model_selection,
-                transcript=transcript,
-                candidates=captured.candidates,
-                current_time=datetime.datetime.now(datetime.UTC),
-                context=context.turn,
-                model_file_service=self.model_file_service,
-            )
-            # Preparation can perform file/Toolkit I/O. Recheck the ordinary owner
-            # immediately before spending this call, without a judgment lease.
-            await self.repository.assert_current_owner(owner=owner)
-            await context.admit_dispatch()
-            if context.turn.check_stop is not None and await context.turn.check_stop():
-                raise asyncio.CancelledError(
-                    "Routine judgment stopped before dispatch."
-                )
-            outcome = await call_routine_judgment(
-                judgment_id=action.judgment_id,
-                candidates=captured.candidates,
-                selection=prepared.selection,
-                request=prepared.request,
-                sdk_factories=self.sdk_factories,
-                credential_kwargs=request.credential_kwargs,
-                pricing=capture_model_pricing(
-                    provider=request.provider,
-                    model_identifier=context.model_selection.model_identifier,
-                    definition=context.model_selection.pricing,
-                    request_timestamp=datetime.datetime.now(datetime.UTC),
-                ),
-                watchdog=self.watchdog,
-                timeout_policy=self.watchdog.resolve_policy(
-                    provider=request.provider.value,
-                    model=request.model,
-                    inference_profile=context.model_target_label,
-                ),
-                call_context=ModelStreamCallContext(
-                    call_kind="routine_judgment",
-                    provider=request.provider.value,
-                    provider_integration_id=context.model_selection.llm_provider_integration_id,
-                    model=request.model,
-                    session_id=scope.session_id,
-                    run_id=None,
-                    attempt_number=1,
-                    check_stop=context.turn.check_stop,
-                ),
-            )
+            attempt = 1
+            while True:
+                provider = context.request.provider.value
+                model = context.request.model
+                try:
+                    outcome = await self._call_once(
+                        scope=scope,
+                        owner=owner,
+                        judgment_id=action.judgment_id,
+                        candidates=captured.candidates,
+                        context=context,
+                        attempt=attempt,
+                    )
+                    break
+                except ModelProviderFailure as exc:
+                    if exc.category is ModelProviderFailureCategory.QUOTA_OR_BILLING:
+                        advanced = await context.advance_after_quota()
+                        if advanced is None:
+                            raise
+                        context = advanced
+                        attempt = 1
+                        continue
+                    if not self.retry_policy.retry_available(attempt):
+                        raise
+                    await asyncio.sleep(self.retry_policy.backoff_seconds(attempt))
+                    attempt += 1
         except asyncio.CancelledError:
             raise
         except (
@@ -167,6 +141,7 @@ class RoutineJudgmentService:
             EffectiveRequestNormalizationError,
             ModelRequestFeatureError,
             ProfileResolutionRuntimeError,
+            ActiveModelCapabilitiesUnavailable,
         ):
             logger.exception(
                 "Routine judgment model operation failed",
@@ -199,4 +174,73 @@ class RoutineJudgmentService:
             provider=provider,
             model=model,
             now=datetime.datetime.now(datetime.UTC),
+        )
+
+    async def _call_once(
+        self,
+        *,
+        scope: RoutineScope,
+        owner: SessionExecutionOwner,
+        judgment_id: str,
+        candidates: tuple[RoutineJudgmentCandidate, ...],
+        context: RoutineJudgmentContext,
+        attempt: int,
+    ) -> RoutineJudgmentPayload:
+        request = context.request
+        if (
+            request.session_id != scope.session_id
+            or request.agent_id != scope.agent_id
+            or request.workspace_id != scope.workspace_id
+            or context.turn.resource_authority is None
+            or context.turn.resource_authority.execution_owner != owner
+            or context.turn.resource_authority.workspace_id != scope.workspace_id
+            or context.turn.resource_authority.agent_id != scope.agent_id
+            or context.turn.resource_authority.run_id != context.turn.run_id
+        ):
+            raise RoutineUnavailable(
+                "Routine judgment context does not match its owner."
+            )
+        transcript = await self.repository.capture_transcript(scope=scope, owner=owner)
+        prepared = await prepare_canonical_routine_judgment(
+            run_request=request,
+            model_selection=context.model_selection,
+            transcript=transcript,
+            candidates=candidates,
+            current_time=datetime.datetime.now(datetime.UTC),
+            context=context.turn,
+            model_file_service=self.model_file_service,
+        )
+        await self.repository.assert_current_owner(owner=owner)
+        await context.admit_dispatch()
+        if context.turn.check_stop is not None and await context.turn.check_stop():
+            raise asyncio.CancelledError("Routine judgment stopped before dispatch.")
+        return await call_routine_judgment(
+            judgment_id=judgment_id,
+            candidates=candidates,
+            selection=prepared.selection,
+            request=prepared.request,
+            sdk_factories=self.sdk_factories,
+            credential_kwargs=request.credential_kwargs,
+            pricing=capture_model_pricing(
+                provider=request.provider,
+                model_identifier=context.model_selection.model_identifier,
+                definition=context.model_selection.pricing,
+                request_timestamp=datetime.datetime.now(datetime.UTC),
+            ),
+            watchdog=self.watchdog,
+            timeout_policy=self.watchdog.resolve_policy(
+                provider=request.provider.value,
+                model=request.model,
+                inference_profile=context.model_target_label,
+            ),
+            call_context=ModelStreamCallContext(
+                call_kind="routine_judgment",
+                provider=request.provider.value,
+                provider_integration_id=context.model_selection.llm_provider_integration_id,
+                model=request.model,
+                session_id=scope.session_id,
+                run_id=None,
+                attempt_number=attempt,
+                check_stop=context.turn.check_stop,
+            ),
         )

@@ -6,6 +6,7 @@ spec_type: domain
 domain: routine
 code_paths:
   - python/apps/azents/src/azents/core/routine*.py
+  - python/apps/azents/src/azents/core/model_operation.py
   - python/apps/azents/src/azents/rdb/models/routine*.py
   - python/apps/azents/src/azents/repos/routine/**
   - python/apps/azents/src/azents/repos/session_primary_channel.py
@@ -14,6 +15,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/routine_judgment*.py
   - python/apps/azents/src/azents/engine/tools/routine*.py
   - python/apps/azents/src/azents/worker/run/routine_judgment*.py
+  - python/apps/azents/src/azents/worker/run/executor.py
   - python/apps/azents/src/azents/api/public/chat/v1/routine_api_test.py
   - typescript/apps/azents-web/src/features/session-routines/**
   - typescript/apps/azents-web/src/features/chat/routineTool*
@@ -25,7 +27,7 @@ code_paths:
 api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug}
-last_verified_at: 2026-10-20
+last_verified_at: 2026-10-21
 spec_version: 3
 ---
 
@@ -68,7 +70,7 @@ records. It does not revoke the immutable context of already admitted work.
 
 The existing Scheduler runs a source-only dispatcher. It coalesces source evidence
 and enqueues one internal `routine_judgment` inbox action per eligible Session.
-There is no judgment worker, independent Run owner, domain lease or retry loop.
+There is no judgment worker, independent Run owner, domain lease or retry timer.
 The ordinary Session owner and FIFO/Run boundary execute the action; earlier
 ordinary work finishes its current boundary before judgment. Recovery and Stop
 use the existing execution-generation fences.
@@ -105,6 +107,24 @@ otherwise valid decision; later source evidence is retained separately.
 
 Judgment uses canonical Session history, the selected model/profile and supported
 Structured response output, with no executable tools.
+The Session-selected semantic label is resolved against current Agent options
+and current local capability evidence for every new judgment, including judgments
+hosted by an existing Run. A previously resolved foreground model snapshot is not
+the Judge's model authority. No separate Judge model snapshot or configuration is
+persisted. Current metadata changes and same-label model replacements therefore
+apply without reselecting or resaving a model.
+
+Within one judgment, a call-local candidate chain uses the shared model-operation
+selector and background health policy. Active cooldown and recovery/probe-pending
+candidates are skipped without claiming a foreground probe. Quota/billing failure
+updates shared health and advances through that chain; other classified provider
+failures use the shared bounded retry budget and backoff on the same candidate.
+Malformed output, capability/preparation failures and chain exhaustion settle as
+failed judgment rather than inventing another fallback category. Cancellation
+propagates without settlement. No foreground or compaction operation slot, Session
+inference snapshot or ordinary Run retry state is replaced by Judge progression.
+Owner fencing is rechecked before physical dispatch and candidate-health updates.
+
 Judge input includes an explicit timezone-aware current time normalized to UTC,
 alongside each candidate's objective, source evidence, last recorded execution
 start time, latest result and next-check hint. The instruction first evaluates

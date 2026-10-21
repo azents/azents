@@ -343,6 +343,7 @@ async def test_judgment_dispatch_stays_neutral_and_uses_its_domain_owner(
                 publish_event=AsyncMock(),
             ),
             admit_dispatch=AsyncMock(),
+            advance_after_quota=AsyncMock(return_value=None),
         )
 
     async def execute(

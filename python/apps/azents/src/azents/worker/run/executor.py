@@ -11,6 +11,7 @@ from typing import Annotated, Any, assert_never
 from azcommon.datetime import tznow
 from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
+from azcommon.uuid import uuid7
 from fastapi import Depends
 
 from azents.broker.broadcast import (
@@ -154,7 +155,6 @@ from azents.engine.run.provider_failure import (
 )
 from azents.engine.run.resolve import (
     resolve_agent_tools,
-    resolve_invoke_input_with_profile,
     resolve_invoke_input_with_resolved_profile,
     resolve_model_candidate_runtime,
 )
@@ -204,6 +204,10 @@ from azents.repos.model_metadata_source_data import (
 )
 from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
+)
+from azents.repos.routine.judgment_model import (
+    RoutineJudgmentModelRepository,
+    RoutineJudgmentModelState,
 )
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -402,6 +406,9 @@ class RunExecutor:
     ]
     resolve_repositories: Annotated[
         EngineResolveRepositories, Depends(get_engine_resolve_repositories)
+    ]
+    judgment_models: Annotated[
+        RoutineJudgmentModelRepository, Depends(RoutineJudgmentModelRepository)
     ]
     model_read_repository: Annotated[
         EngineModelReadRepository, Depends(get_engine_model_read_repository)
@@ -1022,56 +1029,57 @@ class RunExecutor:
         async def prepare_judgment_context(
             profile: RequestedInferenceProfile,
         ) -> RoutineJudgmentContext:
-            """Resolve ordinary context without admitting a foreground operation."""
+            """Resolve the current label independently of foreground snapshots."""
+            current = await self.judgment_models.prepare(
+                scope=RoutineScope(
+                    workspace_id=snapshot.workspace_id,
+                    agent_id=snapshot.agent_id,
+                    session_id=snapshot.session_id,
+                ),
+                owner=SessionExecutionOwner(
+                    session_id=snapshot.session_id, owner_generation=owner_generation
+                ),
+                profile=profile,
+                operation_id=uuid7().hex,
+            )
+            if current is None:
+                raise ProfileResolutionRuntimeError(_profile_resolution_failure(None))
+            return await prepare_judgment_candidate(profile, current)
+
+        async def prepare_judgment_candidate(
+            profile: RequestedInferenceProfile,
+            current: RoutineJudgmentModelState,
+        ) -> RoutineJudgmentContext:
+            """Materialize one candidate without changing the ordinary Run."""
             invoke = InvokeInput(
                 agent_id=snapshot.agent_id, session_id=snapshot.session_id, messages=[]
             )
-            existing = turn_inference_state
-            if (
-                existing is not None
-                and existing.model_target_label == profile.model_target_label
-                and existing.reasoning_effort == profile.reasoning_effort
-                and existing.enabled_execution_options
-                == profile.enabled_execution_options
-            ):
-                resolved = await resolve_invoke_input_with_resolved_profile(
-                    invoke,
-                    context_source=None,
-                    resolved_model_selection=existing.model_selection,
-                    resolved_model_settings=existing.model_settings,
-                    resolved_reasoning_effort=existing.reasoning_effort,
-                    resolved_enabled_execution_options=existing.enabled_execution_options,
-                    repositories=self.resolve_repositories,
-                    model_metadata_service=self.model_metadata_service,
-                    oauth_clients=self.oauth_clients,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                    image_generation_catalog_service=self.image_generation_catalog_service,
+            candidate = current.operation.current_candidate
+            judgment_selection = candidate.model_selection
+            applied_profile = adapt_inference_profile_to_model(
+                profile, judgment_selection
+            )
+            resolved = await resolve_invoke_input_with_resolved_profile(
+                invoke,
+                context_source=None,
+                resolved_model_selection=judgment_selection,
+                resolved_model_settings=candidate.settings,
+                resolved_reasoning_effort=applied_profile.reasoning_effort,
+                resolved_enabled_execution_options=(
+                    applied_profile.enabled_execution_options
+                ),
+                repositories=self.resolve_repositories,
+                model_metadata_service=self.model_metadata_service,
+                oauth_clients=self.oauth_clients,
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
+                image_generation_catalog_service=self.image_generation_catalog_service,
+            )
+            if resolved.failure:
+                raise ProfileResolutionRuntimeError(
+                    _profile_resolution_failure(resolved.error)
                 )
-                if resolved.failure:
-                    raise ProfileResolutionRuntimeError(
-                        _profile_resolution_failure(resolved.error)
-                    )
-                judgment_request = resolved.value
-                judgment_selection = existing.model_selection
-            else:
-                fresh = await resolve_invoke_input_with_profile(
-                    invoke,
-                    requested_profile=profile,
-                    context_source=None,
-                    repositories=self.resolve_repositories,
-                    model_metadata_service=self.model_metadata_service,
-                    oauth_clients=self.oauth_clients,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                    image_generation_catalog_service=self.image_generation_catalog_service,
-                )
-                if fresh.failure:
-                    raise ProfileResolutionRuntimeError(
-                        _profile_resolution_failure(fresh.error)
-                    )
-                judgment_request = fresh.value.run_request
-                judgment_selection = fresh.value.model_selection
+            judgment_request = resolved.value
 
             async def prepare_bindings(
                 bindings: Sequence[ToolkitBinding],
@@ -1101,6 +1109,25 @@ class RunExecutor:
                 if not await tool_admission_barrier.run_if_open(assert_owner):
                     raise asyncio.CancelledError(SHUTDOWN_CANCEL_MESSAGE)
 
+            async def advance_after_quota() -> RoutineJudgmentContext | None:
+                advanced = await self.judgment_models.advance_after_quota(
+                    scope=RoutineScope(
+                        workspace_id=snapshot.workspace_id,
+                        agent_id=snapshot.agent_id,
+                        session_id=snapshot.session_id,
+                    ),
+                    owner=SessionExecutionOwner(
+                        session_id=snapshot.session_id,
+                        owner_generation=owner_generation,
+                    ),
+                    current=current,
+                )
+                return (
+                    await prepare_judgment_candidate(profile, advanced)
+                    if advanced is not None
+                    else None
+                )
+
             return RoutineJudgmentContext(
                 request=dataclasses.replace(judgment_request, toolkits=bindings),
                 model_selection=judgment_selection,
@@ -1126,6 +1153,7 @@ class RunExecutor:
                     mailbox_activity_observer=mailbox_activity_observer,
                 ),
                 admit_dispatch=admit_judgment_dispatch,
+                advance_after_quota=advance_after_quota,
             )
 
         routine_host = RoutineJudgmentHost(
