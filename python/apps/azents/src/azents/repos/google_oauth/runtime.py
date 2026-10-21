@@ -127,7 +127,7 @@ class GoogleRuntimeRepository:
         registration: GoogleApplicationRegistration,
     ) -> GoogleExecutionState:
         toolkit = await self._delegated_toolkit(session, owner, toolkit_id)
-        if toolkit.toolkit_type != "google":
+        if toolkit.toolkit_type != "google" or not toolkit.enabled:
             raise GoogleOAuthError(
                 "authorization_unavailable", "Google connection is unavailable."
             )
@@ -166,13 +166,11 @@ class GoogleRuntimeRepository:
                 "Google application changed. Reconnect this connection.",
             )
         config = GoogleToolkitConfig.model_validate(toolkit.config)
-        if not config.security_risk_acknowledged:
-            raise GoogleOAuthError(
-                "risk_acknowledgement_required",
-                "Google connection requires content-risk review.",
-            )
         return GoogleExecutionState(
-            config, _connection(row, self.cipher), effective_registration
+            config,
+            _connection(row, self.cipher),
+            effective_registration,
+            toolkit.revision,
         )
 
     async def load(
@@ -246,7 +244,10 @@ class GoogleRuntimeRepository:
                 }:
                     raise
                 return False
-            if current.config != snapshot.config:
+            if (
+                current.config != snapshot.config
+                or current.revision != snapshot.revision
+            ):
                 return False
             if rejected:
                 row.status = GoogleConnectionStatus.RECONNECT_REQUIRED

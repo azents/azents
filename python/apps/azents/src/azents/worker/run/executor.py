@@ -175,7 +175,6 @@ from azents.engine.tools.deps import (
     get_runtime_web_toolkit_provider,
     get_scheduled_toolkit_provider,
     get_todo_toolkit_provider,
-    get_toolkit_registry,
     get_vfs_projection_service,
 )
 from azents.engine.tools.dynamic_worktree import (
@@ -259,6 +258,7 @@ from azents.worker.deps import (
     get_worker_broker,
     get_worker_config,
     get_worker_external_channel_toolkit_provider,
+    get_worker_toolkit_registry,
 )
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.finalizer import (
@@ -425,7 +425,7 @@ class RunExecutor:
         ModelMetadataService, Depends(ModelMetadataService)
     ]
     toolkit_registry: Annotated[
-        dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
+        dict[str, ToolkitProvider[Any]], Depends(get_worker_toolkit_registry)
     ]
     vfs_projection_service: Annotated[
         VfsProjectionService, Depends(get_vfs_projection_service)

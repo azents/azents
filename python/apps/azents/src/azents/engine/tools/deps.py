@@ -67,6 +67,10 @@ from azents.services.github_platform_system_setting.runtime import (
 )
 from azents.services.github_user_oauth.runtime import GitHubUserRuntimeService
 from azents.services.google_oauth.runtime import GoogleRuntimeService
+from azents.services.google_workspace.transport import (
+    GoogleWorkspaceSdk,
+    create_google_http_client,
+)
 from azents.services.memory_vfs import MemoryVfsReadBackend
 from azents.services.routine.files import RoutineFileService
 from azents.services.routine.notification import RoutineNotificationService
@@ -146,8 +150,11 @@ def get_toolkit_registry(
         "google_analytics": GoogleAnalyticsToolkitProvider(),
         "google": GoogleToolkitProvider(
             runtime=google_runtime,
-            snapshots=repositories.snapshots,
-            artifacts=artifact_service,
+            sdk=GoogleWorkspaceSdk(
+                capacity=8,
+                client_factory=create_google_http_client,
+            ),
+            files=None,
         ),
         "brave_search": BraveSearchToolkitProvider(
             transport=make_brave_testenv_transport()

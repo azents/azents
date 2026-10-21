@@ -152,6 +152,8 @@ class GoogleWorkspaceOperation(enum.StrEnum):
     GMAIL_DELETE_DRAFT = "gmail_delete_draft"
     GMAIL_SEND_DRAFT = "gmail_send_draft"
     GMAIL_SEND_MESSAGE = "gmail_send_message"
+    # Internal sender prerequisite, not a model-facing alias administration tool.
+    GMAIL_GET_SEND_AS = "gmail_get_send_as"
     GMAIL_REPLY_MESSAGE = "gmail_reply_message"
     GMAIL_FORWARD_MESSAGE = "gmail_forward_message"
     GMAIL_MODIFY_MESSAGE = "gmail_modify_message"
@@ -167,6 +169,7 @@ class GoogleWorkspaceOperation(enum.StrEnum):
     GMAIL_DELETE_FILTER = "gmail_delete_filter"
     GMAIL_REPLACE_FILTER = "gmail_replace_filter"
     GMAIL_APPLY_FILTER = "gmail_apply_filter"
+    GMAIL_PREVIEW_FILTER = "gmail_preview_filter"
     CALENDAR_LIST_CALENDARS = "calendar_list_calendars"
     CALENDAR_LIST_EVENTS = "calendar_list_events"
     CALENDAR_GET_EVENT = "calendar_get_event"
@@ -275,17 +278,27 @@ _POLICIES = (
     *_policies(
         _G, _method("gmail.users.messages.list", *_GMAIL_READ), _O.GMAIL_SEARCH_MESSAGES
     ),
-    *_policies(
-        _G,
-        _method("gmail.users.messages.get", *_GMAIL_READ),
-        _O.GMAIL_GET_MESSAGE,
-        _O.GMAIL_BATCH_GET_MESSAGES,
+    *(
+        GoogleOperationPolicy(
+            operation,
+            _G,
+            (
+                _method("gmail.users.messages.get", *_GMAIL_READ),
+                _method("gmail.users.messages.attachments.get", *_GMAIL_READ),
+            ),
+        )
+        for operation in (_O.GMAIL_GET_MESSAGE, _O.GMAIL_BATCH_GET_MESSAGES)
     ),
     *_policies(
         _G, _method("gmail.users.threads.list", *_GMAIL_READ), _O.GMAIL_SEARCH_THREADS
     ),
-    *_policies(
-        _G, _method("gmail.users.threads.get", *_GMAIL_READ), _O.GMAIL_GET_THREAD
+    GoogleOperationPolicy(
+        _O.GMAIL_GET_THREAD,
+        _G,
+        (
+            _method("gmail.users.threads.get", *_GMAIL_READ),
+            _method("gmail.users.messages.attachments.get", *_GMAIL_READ),
+        ),
     ),
     GoogleOperationPolicy(
         _O.GMAIL_DOWNLOAD_ATTACHMENT,
@@ -344,6 +357,11 @@ _POLICIES = (
         _G,
         _method("gmail.users.messages.send", *_GMAIL_DRAFT_WRITE, "gmail.send"),
         _O.GMAIL_SEND_MESSAGE,
+    ),
+    *_policies(
+        _G,
+        _method("gmail.users.settings.sendAs.get", *_GMAIL_SETTINGS_READ),
+        _O.GMAIL_GET_SEND_AS,
     ),
     *(
         GoogleOperationPolicy(
@@ -426,6 +444,14 @@ _POLICIES = (
             _method("gmail.users.messages.batchModify", *_GMAIL_MODIFY),
         ),
     ),
+    GoogleOperationPolicy(
+        _O.GMAIL_PREVIEW_FILTER,
+        _G,
+        (
+            _method("gmail.users.settings.filters.get", *_GMAIL_SETTINGS_READ),
+            _method("gmail.users.messages.list", *_GMAIL_READ),
+        ),
+    ),
     *_policies(
         _C,
         _method(
@@ -475,13 +501,27 @@ _POLICIES = (
         _C,
         _method("calendar.events.patch", *_CALENDAR_EVENTS_WRITE),
         _O.CALENDAR_UPDATE_EVENT,
-        _O.CALENDAR_UPDATE_STATUS_EVENT,
     ),
     *_policies(
         _C,
         _method("calendar.events.delete", *_CALENDAR_EVENTS_WRITE),
         _O.CALENDAR_DELETE_EVENT,
+    ),
+    GoogleOperationPolicy(
+        _O.CALENDAR_UPDATE_STATUS_EVENT,
+        _C,
+        (
+            _method("calendar.events.get", *_CALENDAR_EVENTS_READ),
+            _method("calendar.events.patch", *_CALENDAR_EVENTS_WRITE),
+        ),
+    ),
+    GoogleOperationPolicy(
         _O.CALENDAR_DELETE_STATUS_EVENT,
+        _C,
+        (
+            _method("calendar.events.get", *_CALENDAR_EVENTS_READ),
+            _method("calendar.events.delete", *_CALENDAR_EVENTS_WRITE),
+        ),
     ),
     GoogleOperationPolicy(
         _O.CALENDAR_RESPOND_EVENT,
@@ -573,8 +613,27 @@ _POLICIES = (
         _O.DRIVE_DELETE_PERMISSION,
     ),
 )
+
+
+def _include_metadata_prerequisite(
+    policy: GoogleOperationPolicy,
+) -> GoogleOperationPolicy:
+    if policy.operation in {
+        _O.DRIVE_READ_CONTENT,
+        _O.DRIVE_DOWNLOAD_FILE,
+        _O.DRIVE_EXPORT_FILE,
+        _O.DRIVE_COPY_FILE,
+        _O.DRIVE_UPDATE_CONTENT,
+    }:
+        return dataclasses.replace(
+            policy,
+            methods=(_method("drive.files.get", *_DRIVE_METADATA), *policy.methods),
+        )
+    return policy
+
+
 GOOGLE_WORKSPACE_OPERATIONS = MappingProxyType(
-    {policy.operation: policy for policy in _POLICIES}
+    {policy.operation: _include_metadata_prerequisite(policy) for policy in _POLICIES}
 )
 
 

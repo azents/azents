@@ -1,6 +1,7 @@
 """Worker transfer dependency composition tests."""
 
 from types import SimpleNamespace
+from unittest.mock import create_autospec
 
 import pytest
 from azcommon.infra.s3.service import S3Service
@@ -9,13 +10,25 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 )
 
 from azents.core.config import Config
+from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.engine.tools.builtin import BuiltinToolkitProvider
+from azents.engine.tools.google import GoogleToolkitProvider
+from azents.engine.tools.runtime_io import RuntimeRunnerOperationClient
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferService
+from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.artifact import ArtifactService
 from azents.services.chat.workspace import get_runtime_workspace_download_service
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.google_oauth.runtime import GoogleRuntimeService
+from azents.services.google_workspace.transport import (
+    GoogleWorkspaceSdk,
+    create_google_http_client,
+)
 from azents.services.model_file import ModelFileService
 from azents.worker.deps import (
     create_worker_external_channel_inbound_staging_configuration,
     create_worker_transfer_services,
+    get_worker_toolkit_registry,
 )
 
 
@@ -94,6 +107,44 @@ def test_worker_transfer_services_share_only_the_injected_coordinator() -> None:
     assert services.import_staging is not None
     assert services.import_staging.transfer_object_prefix == "v1/runtime-transfer"
     assert services.import_staging.maximum_size == 128 * 1024 * 1024
+
+
+def test_worker_google_registry_binds_exact_lazy_file_authority() -> None:
+    builtin = create_autospec(BuiltinToolkitProvider, instance=True)
+    builtin.vfs_projection_service = None
+    builtin.exchange_file_service = _ExchangeFileService()
+    builtin.model_file_service = _ModelFileService()
+    builtin.artifact_service = create_autospec(ArtifactService, instance=True)
+    builtin.agent_runtime_service = create_autospec(AgentRuntimeService, instance=True)
+    builtin.runner_operations = create_autospec(
+        RuntimeRunnerOperationClient, instance=True
+    )
+    provider = GoogleToolkitProvider(
+        runtime=create_autospec(GoogleRuntimeService, instance=True),
+        sdk=GoogleWorkspaceSdk(capacity=1, client_factory=create_google_http_client),
+        files=None,
+    )
+    registry = {"google": provider}
+    result = get_worker_toolkit_registry(
+        registry=registry,
+        builtin=builtin,
+        config=_config(),
+        s3=_S3Service(),
+        coordinator=_Coordinator(),
+    )
+    bound = result["google"]
+    assert isinstance(bound, GoogleToolkitProvider)
+    assert bound.sdk is provider.sdk and bound.files is not None
+    authority = SessionResourceAuthority(
+        "workspace", "agent", "session", "session", "run", 1, 7
+    )
+    bridge = bound.files(authority)
+    assert bridge.authority == authority and bridge.runtime is not None
+    assert bridge.runtime.authority == authority
+    assert bridge.runtime.transfers.coordinator is not None
+    assert bridge.maximum_bytes == _config().general_file_maximum_bytes
+    assert registry["google"] is provider
+    builtin.agent_runtime_service.resolve_operation_target.assert_not_awaited()
 
 
 @pytest.mark.parametrize("maximum_bytes", [16, 1024 * 1024])
