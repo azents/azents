@@ -339,17 +339,25 @@ def test_admin_system_settings_page_renders_redacted_platform_fields(
             )
         )
     )
-    private_key_input = browser_driver.find_element(
-        By.XPATH,
-        "//section[@aria-label='GitHub']"
-        "//label[contains(normalize-space(), 'Private key replacement')]"
-        "/following::input[1]",
+    private_key_input = _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.XPATH,
+                "//section[@aria-label='GitHub']"
+                "//label[contains(normalize-space(), 'Private key replacement')]"
+                "/following::input[1]",
+            )
+        )
     )
-    client_secret_input = browser_driver.find_element(
-        By.XPATH,
-        "//section[@aria-label='GitHub']"
-        "//label[contains(normalize-space(), 'Client secret replacement')]"
-        "/following::input[1]",
+    client_secret_input = _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.XPATH,
+                "//section[@aria-label='GitHub']"
+                "//label[contains(normalize-space(), 'Client secret replacement')]"
+                "/following::input[1]",
+            )
+        )
     )
     assert private_key_input.get_attribute("value") == ""
     assert client_secret_input.get_attribute("value") == ""
