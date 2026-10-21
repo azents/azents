@@ -19,8 +19,10 @@ import {
   IconFolderOpen,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useProjectPanelController } from "../containers/useProjectPanelController";
 import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
+import type { ProjectPanelViewProps } from "../containers/useProjectPanelController";
 import type {
   ProjectRegistrationMode,
   WorkspaceProjectPanelState,
@@ -30,7 +32,7 @@ import type {
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
 
-interface ProjectPanelProps {
+export interface ProjectPanelProps {
   projectState: WorkspaceProjectPanelState;
   projectPickerState: ProjectDirectoryPickerState;
   isProjectPickerOpen: boolean;
@@ -48,7 +50,13 @@ interface ProjectPanelProps {
   onDeleteProject: (projectId: string) => void;
 }
 
-export function ProjectPanel({
+export const ProjectPanel = createReactContainer(
+  "ProjectPanel",
+  useProjectPanelController,
+  ProjectPanelView,
+);
+
+export function ProjectPanelView({
   projectState,
   projectPickerState,
   isProjectPickerOpen,
@@ -63,18 +71,11 @@ export function ProjectPanel({
   onSetProjectRegistrationMode,
   onSetProjectRegistrationStartingRef,
   onSubmitProjectRegistration,
-  onDeleteProject,
-}: ProjectPanelProps): React.ReactElement {
+  deleteProjectId,
+  setDeleteProjectId,
+  handleConfirmDeleteProject,
+}: ProjectPanelViewProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
-  const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
-
-  const handleConfirmDeleteProject = (): void => {
-    if (!deleteProjectId) {
-      return;
-    }
-    onDeleteProject(deleteProjectId);
-    setDeleteProjectId(null);
-  };
 
   if (projectState.type === "LOADING") {
     return (

@@ -1,11 +1,12 @@
 import { rem } from "@mantine/core";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { SetupGuide } from "./SetupGuide";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
   component: SetupGuide,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(640)}>
@@ -27,11 +28,13 @@ export const GenericApiKey = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Setup guide" }));
-    await expect(
-      canvas.getByText(
-        "Go to the provider's dashboard, create an API key, and paste it above.",
-      ),
-    ).toBeVisible();
+    await waitFor(() =>
+      expect(
+        canvas.getByText(
+          "Go to the provider's dashboard, create an API key, and paste it above.",
+        ),
+      ).toBeVisible(),
+    );
   },
 } satisfies Story;
 
@@ -42,7 +45,9 @@ export const OpenRouterApiKey = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Setup guide" }));
-    await expect(canvas.getByText("OpenRouter setup")).toBeVisible();
+    await waitFor(() =>
+      expect(canvas.getByText("OpenRouter setup")).toBeVisible(),
+    );
     await expect(
       canvas.getByText(/account and API-key settings/i),
     ).toBeVisible();
@@ -60,7 +65,11 @@ export const XaiApiKey = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Setup guide" }));
-    await expect(canvas.getByText(/developer API billing/i)).toBeVisible();
+    await waitFor(() =>
+      expect(
+        canvas.getByText(/developer API usage is billed separately/i),
+      ).toBeVisible(),
+    );
     await expect(canvas.getByText(/SuperGrok.*X Premium/i)).toBeVisible();
   },
 } satisfies Story;

@@ -55,7 +55,7 @@ export function AgentRuntimeEnvironmentVariables({
     >
       <Stack gap="md">
         <Group justify="space-between" align="flex-start" gap="sm">
-          <Stack gap={4}>
+          <Stack gap={rem(4)}>
             <Text fw={700}>
               {t(scope === "workspace" ? "workspaceTitle" : "title")}
             </Text>
@@ -96,7 +96,7 @@ export function AgentRuntimeEnvironmentVariables({
         {ready ? (
           <>
             {ready.entries.length === 0 ? (
-              <Stack gap={4} py="sm">
+              <Stack gap={rem(4)} py="sm">
                 <Text size="sm" fw={500}>
                   {t("emptyTitle")}
                 </Text>

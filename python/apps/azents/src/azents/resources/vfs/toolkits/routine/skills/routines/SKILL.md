@@ -21,9 +21,15 @@ Choose by the output obligation, not merely a requested time or interval:
   into a mandatory-output Scheduled Task.
 - A one-off investigation does not automatically create a Routine.
 
-Explain the supported timing limits: source checking uses fixed 30-minute ticks,
-and the Session-wide 30-minute minimum action interval determines eligibility,
-not an exact execution time. Ordinary Session work can delay judgment at its FIFO boundary.
+Explain the supported timing limits: the Agent's Routine tick defaults to 180
+minutes and its separate minimum action delay defaults to 30 minutes. Both are
+configurable whole-minute settings satisfying `30 <= minimum delay <= tick <= 1440`.
+Supplying a minimum delay raises the tick when needed; lowering the delay does not
+lower the tick. Tick-only updates below the stored delay are rejected.
+Checking eligibility uses the last-check checkpoint and the separate last-action
+reference. Regular discovery is capped at 30 minutes, not an exact execution time.
+Ordinary Session work can delay judgment at its FIFO boundary. Neither setting
+guarantees investigations or notifications at that frequency.
 Do not promise arbitrary per-Routine schedules or exact hourly execution.
 
 ## Manage definitions

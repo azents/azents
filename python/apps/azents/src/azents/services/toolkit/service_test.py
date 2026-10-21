@@ -590,6 +590,8 @@ def _engine_session_manager(
             session = ReadWriteSession(raw_session)
             try:
                 yield session
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 await session.write_session.rollback()
                 raise

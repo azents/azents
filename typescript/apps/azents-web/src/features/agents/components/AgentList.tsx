@@ -22,40 +22,35 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, useState } from "react";
 import { AgentDeletionBadge } from "@/shared/agent-session/AgentDeletionStatus";
 import { agentPrimaryModelSelection } from "@/shared/agent-session/modelSelection";
 import { formatModelSelectionSummary } from "@/shared/agent-session/modelSelectionSummary";
-import type { AgentListContainerOutput } from "../containers/useAgentListContainer";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useAgentListController } from "../containers/useAgentListController";
+import type { AgentListViewProps } from "../containers/useAgentListController";
 import type { AgentResponse } from "@azents/public-client";
 
-export function AgentList(props: AgentListContainerOutput): React.ReactElement {
-  const { handle, listState, canManage, onDelete, onToggleEnabled } = props;
+export const AgentList = createReactContainer(
+  "AgentList",
+  useAgentListController,
+  AgentListView,
+);
+
+export function AgentListView(props: AgentListViewProps): React.ReactElement {
+  const {
+    handle,
+    listState,
+    canManage,
+    onToggleEnabled,
+    deleteOpened,
+    closeDelete,
+    handleDeleteClick,
+    handleDeleteConfirm,
+  } = props;
   const t = useTranslations("workspace.agents");
-
-  const [deleteOpened, { open: openDelete, close: closeDelete }] =
-    useDisclosure(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-
-  const handleDeleteClick = useCallback(
-    (agentId: string): void => {
-      setDeleteTarget(agentId);
-      openDelete();
-    },
-    [openDelete],
-  );
-
-  const handleDeleteConfirm = useCallback((): void => {
-    if (deleteTarget) {
-      onDelete(deleteTarget);
-      setDeleteTarget(null);
-      closeDelete();
-    }
-  }, [deleteTarget, onDelete, closeDelete]);
 
   const basePath = `/w/${handle}/agents`;
 

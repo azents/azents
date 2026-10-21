@@ -182,7 +182,7 @@ export function AgentSessionHeader({
           pb="xs"
           wrap="nowrap"
         >
-          <Group gap={4} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={rem(4)} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
             <Text fw={600} size="md" truncate>
               {sessionTitle}
             </Text>
@@ -231,7 +231,7 @@ export function AgentSessionHeader({
             avatar={agent.avatar ?? null}
             size={24}
           />
-          <Group gap={4} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={rem(4)} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
             <Text fw={600} size="sm" truncate style={{ minWidth: 0 }}>
               {sessionTitle}
             </Text>

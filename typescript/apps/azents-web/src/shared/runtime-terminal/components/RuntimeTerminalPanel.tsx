@@ -95,7 +95,7 @@ export function RuntimeTerminalPanel({
         <Group
           justify="space-between"
           px="sm"
-          py={6}
+          py={rem(6)}
           wrap="nowrap"
           style={{ minHeight: rem(40) }}
         >
@@ -114,7 +114,7 @@ export function RuntimeTerminalPanel({
                 terminal.connection.type === "reconnecting" ||
                 terminal.connection.type === "terminating"
               }
-              size={8}
+              size={rem(8)}
             >
               <IconTerminal2 size={rem(18)} />
             </Indicator>
@@ -127,7 +127,7 @@ export function RuntimeTerminalPanel({
               </Text>
             ) : null}
           </Group>
-          <Group gap={4} wrap="nowrap">
+          <Group gap={rem(4)} wrap="nowrap">
             {collapsed ? (
               <Button
                 size="compact-sm"
@@ -279,13 +279,13 @@ export function RuntimeTerminalPanel({
             background: "var(--mantine-color-dark-9)",
           }}
         >
-          <Box ref={terminal.hostRef} h="100%" p={6} />
+          <Box ref={terminal.hostRef} h="100%" p={rem(6)} />
         </Box>
 
         {mobile && focused ? (
           <ScrollArea type="never" offsetScrollbars={false}>
             <Group
-              gap={4}
+              gap={rem(4)}
               px="xs"
               pt="xs"
               wrap="nowrap"

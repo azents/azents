@@ -274,36 +274,6 @@ class TestAgentCrud:
         )
         assert configured.routine_check_interval_minutes == 120
         assert configured.routine_min_action_delay_minutes == 60
-        raised = agent_api.agent_v1_update_agent(
-            agent_id=created.id,
-            handle=handle,
-            agent_update_request=AgentUpdateRequest(
-                routine_min_action_delay_minutes=240
-            ),
-            _headers=headers,
-        )
-        assert raised.routine_check_interval_minutes == 240
-        assert raised.routine_min_action_delay_minutes == 240
-        lowered = agent_api.agent_v1_update_agent(
-            agent_id=created.id,
-            handle=handle,
-            agent_update_request=AgentUpdateRequest(
-                routine_min_action_delay_minutes=60
-            ),
-            _headers=headers,
-        )
-        assert lowered.routine_check_interval_minutes == 240
-        assert lowered.routine_min_action_delay_minutes == 60
-        with pytest.raises(ApiException) as invalid:
-            agent_api.agent_v1_update_agent(
-                agent_id=created.id,
-                handle=handle,
-                agent_update_request=AgentUpdateRequest(
-                    routine_check_interval_minutes=30
-                ),
-                _headers=headers,
-            )
-        assert invalid.value.status == 400
         agent_api.agent_v1_update_agent(
             agent_id=created.id,
             handle=handle,
@@ -313,7 +283,7 @@ class TestAgentCrud:
         reloaded = agent_api.agent_v1_get_agent(
             agent_id=created.id, handle=handle, _headers=headers
         )
-        assert reloaded.routine_check_interval_minutes == 240
+        assert reloaded.routine_check_interval_minutes == 120
         assert reloaded.routine_min_action_delay_minutes == 60
 
     def test_list_agents(

@@ -7,22 +7,28 @@
  */
 
 import { Button, Code, Collapse, rem, Stack, Text } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import { IconHelp } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useSetupGuideController } from "../containers/useSetupGuideController";
+import type { SetupGuideOutput } from "../containers/useSetupGuideController";
 
 export type CredentialType =
   "api_key" | "aws_credentials" | "gcp_service_account";
 
-export function SetupGuide({
+export const SetupGuide = createReactContainer(
+  "SetupGuide",
+  useSetupGuideController,
+  SetupGuideView,
+);
+
+export function SetupGuideView({
   credType,
   provider,
-}: {
-  credType: CredentialType;
-  provider: string;
-}): React.ReactElement {
+  opened,
+  toggle,
+}: SetupGuideOutput): React.ReactElement {
   const t = useTranslations("workspace.llmSettings");
-  const [opened, { toggle }] = useDisclosure(false);
 
   return (
     <Stack gap="xs">

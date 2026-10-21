@@ -2,6 +2,7 @@
 
 import datetime
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -70,6 +71,18 @@ from azents.repos.toolkit_operations import get_encrypted_toolkit_repository
 from azents.repos.user import UserRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
+
+
+@dataclass(frozen=True)
+class _RegistrationMode:
+    """Consumed provider mode; unknown or malformed fields remain stale."""
+
+    auth_type: str | None
+
+
+def _decode_registration_mode(config: Mapping[str, object]) -> _RegistrationMode:
+    value = config.get("github_auth_type")
+    return _RegistrationMode(auth_type=value if isinstance(value, str) else None)
 
 
 @dataclass(frozen=True)
@@ -272,9 +285,8 @@ class GitHubUserOAuthOperationRepository:
             if registration.source == "platform_user"
             else "github_app_user"
         )
-        if (
-            toolkit.revision != registration.toolkit_revision
-            or toolkit.config.get("github_auth_type") != auth_type
+        if toolkit.revision != registration.toolkit_revision or (
+            _decode_registration_mode(toolkit.config).auth_type != auth_type
         ):
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.STALE,

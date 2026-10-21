@@ -7,6 +7,10 @@ import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 import { decodeGitHubPopupMessage } from "../popup-messages";
 import { projectGitHubAuthEvidence } from "../provider-config-views";
+import {
+  githubFieldCallbacks,
+  projectGithubFormFields,
+} from "../provider-form-fields";
 import { pickToolkitOwnerScope } from "../toolkit-owner-scope";
 import type { GithubFieldsViewProps } from "../components/GithubFieldsView";
 import type { ToolkitOwnerScope } from "../toolkit-owner-scope";
@@ -154,6 +158,15 @@ export function useGithubConfigFieldsContainer(
   });
   return {
     ...props,
+    fields: projectGithubFormFields(props.config, props.credentials),
+    ...githubFieldCallbacks(
+      props.config,
+      props.credentials,
+      props.onConfigChange,
+      props.onCredentialsChange,
+    ),
+    onTargetsChange: (installations) =>
+      props.onCredentialsChange({ ...props.credentials, installations }),
     savedUserRegistration:
       props.hasCredentials && props.savedAuthType === "github_app_user",
     availability: availability.isError

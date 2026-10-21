@@ -6,7 +6,7 @@
  * NavLink list for moving between account settings pages.
  * Rendered as fixed sidebar on desktop and inside Drawer on mobile.
  */
-import { Divider, NavLink, Stack } from "@mantine/core";
+import { Divider, NavLink, rem, Stack } from "@mantine/core";
 import {
   IconLayoutGrid,
   IconPlugConnected,
@@ -15,18 +15,21 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useAccountSidebarController } from "../containers/useAccountSidebarController";
+import { createReactContainer } from "../lib/createReactContainer";
+import type { AccountSidebarOutput } from "../containers/useAccountSidebarController";
 
-interface AccountSidebarProps {
-  /** Called on NavLink click (for closing mobile Drawer) */
-  onNavigate?: () => void;
-}
+export const AccountSidebar = createReactContainer(
+  "AccountSidebar",
+  useAccountSidebarController,
+  AccountSidebarView,
+);
 
-export function AccountSidebar({
+export function AccountSidebarView({
   onNavigate,
-}: AccountSidebarProps): React.ReactElement {
+  pathname,
+}: AccountSidebarOutput): React.ReactElement {
   const t = useTranslations("account.sidebar");
-  const pathname = usePathname();
 
   const isAccount = pathname === "/account";
   const isExternalAccounts = pathname === "/account/external-accounts";
@@ -41,7 +44,7 @@ export function AccountSidebar({
             component={Link}
             href="/workspaces"
             label={t("workspaces")}
-            leftSection={<IconLayoutGrid size={18} />}
+            leftSection={<IconLayoutGrid size={rem(18)} />}
             onClick={onNavigate}
           />
           <Divider my="xs" />
@@ -51,7 +54,7 @@ export function AccountSidebar({
         component={Link}
         href="/account"
         label={t("general")}
-        leftSection={<IconUser size={18} />}
+        leftSection={<IconUser size={rem(18)} />}
         active={isAccount}
         onClick={onNavigate}
       />
@@ -59,7 +62,7 @@ export function AccountSidebar({
         component={Link}
         href="/account/external-accounts"
         label={t("externalAccounts")}
-        leftSection={<IconPlugConnected size={18} />}
+        leftSection={<IconPlugConnected size={rem(18)} />}
         active={isExternalAccounts}
         onClick={onNavigate}
       />
@@ -67,7 +70,7 @@ export function AccountSidebar({
         component={Link}
         href="/account/security"
         label={t("security")}
-        leftSection={<IconShield size={18} />}
+        leftSection={<IconShield size={rem(18)} />}
         active={isSecurity}
         onClick={onNavigate}
       />

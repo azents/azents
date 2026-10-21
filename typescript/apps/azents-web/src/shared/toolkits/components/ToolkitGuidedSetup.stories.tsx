@@ -13,6 +13,10 @@ import {
   projectNotionFields,
   projectSentryFields,
 } from "../provider-config-views";
+import {
+  braveFieldCallbacks,
+  projectBraveFormFields,
+} from "../provider-form-fields";
 import { projectToolkitConfig } from "../toolkit-config-projection";
 import { AwsConfigFields } from "./AwsConfigFields";
 import { BraveSearchFieldsView } from "./BraveSearchFieldsView";
@@ -134,6 +138,12 @@ function Fields({
       return (
         <BraveSearchFieldsView
           {...input}
+          fields={projectBraveFormFields(input.config, input.credentials)}
+          {...braveFieldCallbacks(
+            input.config,
+            input.onConfigChange,
+            input.onCredentialsChange,
+          )}
           testState={{ type: "IDLE" }}
           onTestConnection={noOp}
           replacingKey
