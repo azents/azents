@@ -1,0 +1,264 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { test } from "node:test";
+import { Script } from "node:vm";
+import * as mantine from "@mantine/core";
+import { MantineProvider } from "@mantine/core";
+import { createElement, isValidElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
+import { googleApplicationDraft } from "./google-application-state.ts";
+import {
+  SETTINGS_SECTIONS,
+  settingsSectionFromHash,
+} from "./settings-navigation.ts";
+import type { GoogleApplicationDetail } from "@azents/admin-client";
+import type { ReactElement } from "react";
+
+const require = createRequire(import.meta.url);
+
+function loadComponent(
+  file: string,
+  name: string,
+  boundaries: Record<string, unknown> = {},
+): (props: unknown) => ReactElement {
+  const exports: Record<string, unknown> = {};
+  const source = ts.transpileModule(
+    readFileSync(new URL(file, import.meta.url), "utf8"),
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        jsx: ts.JsxEmit.ReactJSX,
+      },
+    },
+  ).outputText;
+  new Script(source).runInNewContext({
+    exports,
+    require: (id: string): unknown =>
+      id === "@mantine/core" ? mantine : (boundaries[id] ?? require(id)),
+  });
+  const component = exports[name];
+  assert.ok(typeof component === "function");
+  return (props): ReactElement => {
+    const element: unknown = Reflect.apply(component, null, [props]);
+    assert.ok(isValidElement(element));
+    return element;
+  };
+}
+
+function render(
+  component: (props: unknown) => ReactElement,
+  props: unknown,
+): string {
+  return renderToStaticMarkup(
+    createElement(MantineProvider, {}, component(props)),
+  );
+}
+
+const Guide = loadComponent(
+  "./components/GoogleApplicationSetupGuide.tsx",
+  "GoogleApplicationSetupGuide",
+);
+const Card = loadComponent(
+  "./components/GoogleApplicationCard.tsx",
+  "GoogleApplicationCard",
+  {
+    "./GoogleApplicationSetupGuide": { GoogleApplicationSetupGuide: Guide },
+  },
+);
+const Layout = loadComponent(
+  "./components/SystemSettingsLayout.tsx",
+  "SystemSettingsLayout",
+  {
+    "../settings-navigation": { SETTINGS_SECTIONS },
+  },
+);
+
+const detail: GoogleApplicationDetail = {
+  status: "not_configured",
+  client_id: null,
+  callback_url: "https://azents.example.invalid/oauth/google/callback",
+  preview_verified: false,
+  service_access_verified: false,
+  section: "google_oauth",
+  schema_version: 1,
+  admin_version: 1,
+  client_id_source: "unset",
+  client_secret_source: "unset",
+  client_secret_configured: false,
+};
+function cardProps(overrides: Partial<GoogleApplicationDetail> = {}): unknown {
+  const current = { ...detail, ...overrides };
+  return {
+    state: {
+      type: "LOADED",
+      detail: current,
+      draft: googleApplicationDraft(current),
+      dirty: false,
+      saving: false,
+      reloadRequired: false,
+      error: null,
+      onDraftChange: (): void => {},
+      onSave: (): void => {},
+      onReload: (): void => {},
+    },
+  };
+}
+
+void test("Google guide renders the complete operator setup flow with official links", () => {
+  const html = render(Guide, {});
+  for (const step of [
+    "Get Preview access",
+    "Enable the Google services",
+    "Configure the OAuth consent screen",
+    "Create a Web application client",
+    "Save the credentials here",
+  ]) {
+    assert.ok(html.includes(step), step);
+  }
+  for (const host of [
+    "calendarmcp.googleapis.com",
+    "drivemcp.googleapis.com",
+    "gmailmcp.googleapis.com",
+  ]) {
+    assert.ok(html.includes(host));
+  }
+  for (const path of [
+    "preview",
+    "guides/configure-mcp-servers",
+    "guides/configure-oauth-consent",
+  ]) {
+    assert.ok(
+      html.includes(`href="https://developers.google.com/workspace/${path}"`),
+    );
+  }
+  assert.match(html, /Authorized redirect URIs/);
+  assert.match(html, /Test users/);
+  for (const scope of [
+    "calendar.calendarlist.readonly",
+    "calendar.events.readonly",
+    "calendar.events.freebusy",
+    "calendar.events",
+    "drive.readonly",
+    "drive.file",
+    "gmail.readonly",
+    "gmail.compose",
+    "gmail.modify",
+  ]) {
+    assert.ok(html.includes(`https://www.googleapis.com/auth/${scope}`));
+  }
+  assert.match(html, /AZ_GOOGLE_OAUTH_CLIENT_SECRET/);
+  assert.match(
+    html,
+    /does not test Preview eligibility or live service access/,
+  );
+  assert.match(html, /do not expose Gmail sending/);
+  assert.match(html, /does not enable whole-Drive search/);
+});
+
+void test("Google card opens help for setup and preserves the server callback and write-only secret", () => {
+  const html = render(Card, cardProps());
+  assert.match(html, /aria-expanded="true"/);
+  assert.ok(html.includes(detail.callback_url ?? "missing callback"));
+  assert.match(html, /Save application settings/);
+  const configured = render(
+    Card,
+    cardProps({
+      status: "configured_unverified",
+      client_id_source: "environment",
+      client_secret_source: "environment",
+      client_secret_configured: true,
+    }),
+  );
+  assert.match(configured, /aria-expanded="false"/);
+  assert.match(configured, /read-only here/);
+  assert.match(
+    configured,
+    /Existing secret plaintext is never returned|Owned by process environment/,
+  );
+  assert.match(
+    render(Card, cardProps({ callback_url: null })),
+    /Unavailable until the public Web URL is configured/,
+  );
+  assert.match(
+    render(Card, { state: { type: "ERROR", onReload: (): void => {} } }),
+    /Unable to load Google application settings/,
+  );
+});
+
+void test("settings navigation accepts known fragments and safely defaults unknown ones", () => {
+  for (const section of SETTINGS_SECTIONS) {
+    assert.equal(settingsSectionFromHash(`#${section.value}`), section.value);
+  }
+  assert.equal(settingsSectionFromHash(""), "google");
+  assert.equal(settingsSectionFromHash("#unknown"), "google");
+});
+
+void test("settings layout exposes one section while retaining every draft subtree", () => {
+  const sections = Object.fromEntries(
+    SETTINGS_SECTIONS.map(({ value }) => [
+      value,
+      createElement("input", {
+        name: `${value}-draft`,
+        defaultValue: `draft-${value}`,
+      }),
+    ]),
+  );
+  for (const section of SETTINGS_SECTIONS) {
+    const html = render(Layout, {
+      sections,
+      activeSection: section.value,
+      onSectionChange: (): void => {},
+    });
+    assert.match(html, /Settings section/);
+    assert.ok(html.includes(`aria-current="page"`));
+    const hidden = html.match(/<section[^>]*style="display:none"/g) ?? [];
+    assert.equal(hidden.length, SETTINGS_SECTIONS.length - 1);
+    for (const { value } of SETTINGS_SECTIONS) {
+      assert.ok(html.includes(`value="draft-${value}"`));
+    }
+  }
+});
+
+void test("GitHub failure stays within its section and does not replace the settings workspace", () => {
+  const Page = loadComponent(
+    "./components/SystemSettingsPageContent.tsx",
+    "SystemSettingsPageContent",
+    {
+      "../GoogleApplicationCardContainer": {
+        GoogleApplicationCardContainer: (): ReactElement =>
+          createElement("p", {}, "Google settings available"),
+      },
+      "../SystemSettingsLayoutContainer": {
+        SystemSettingsLayoutContainer: (props: {
+          sections: unknown;
+        }): ReactElement =>
+          Layout({
+            ...props,
+            activeSection: "google",
+            onSectionChange: (): void => {},
+          }),
+      },
+      "./ExternalAccountOAuthCards": {
+        ExternalAccountOAuthCards: (): ReactElement =>
+          createElement("p", {}, "Account linking available"),
+      },
+      "./HistoricalMemoryExecutionCard": {
+        HistoricalMemoryExecutionCard: (): ReactElement =>
+          createElement("p", {}, "Memory settings available"),
+      },
+    },
+  );
+  const html = render(Page, {
+    state: { type: "ERROR", message: "GitHub unavailable" },
+    auditState: { type: "LOADED", events: [], total: 0 },
+    externalFilesState: { type: "LOADING" },
+    externalFilesDraft: { outboundMaxFileMiB: "", outboundMaxActionMiB: "" },
+  });
+  assert.match(html, /Google settings available/);
+  assert.match(html, /Account linking available/);
+  assert.match(html, /Memory settings available/);
+  assert.match(html, /Unable to load GitHub settings/);
+  assert.match(html, /No System Settings audit events yet/);
+});

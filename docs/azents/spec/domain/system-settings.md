@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-15
+updated: 2026-10-21
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -63,7 +63,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle/compacted-event-retention
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-15
+last_verified_at: 2026-10-21
 spec_version: 10
 ---
 
@@ -111,6 +111,10 @@ state, environment-owned read-only fields, explicit secret replacement/clear
 actions and the deployment callback. A conflict or uncertain save requires
 reloading current settings before retry; reload discards the draft. Local
 configuration is not presented as verified Preview eligibility or service access.
+An expandable setup guide opens by default for incomplete or missing configuration.
+It explains Preview access, Cloud project and service enablement, consent setup,
+Web application client creation, exact callback registration, credential entry,
+and the separate Toolkit account-connection flow, with official Google links.
 See [Google Connection](google-connection.md) for the exact management, execution
 and candidate/publication contracts.
 
@@ -265,10 +269,22 @@ identity bindings.
 detail, patch, candidate validation/confirmation/cancellation, current-effective health check, and
 metadata-only audit list are exposed beneath `/system-setting/v1`.
 
-Admin Web exposes System Settings in authenticated Admin navigation. It renders inventory and Platform
-GitHub App detail, field source and fallback state, explicit secret actions, candidate validation and
-health state, aggregate binding impact, and confirmation choices. It never renders secret plaintext,
-effective generations, or resource identifiers from impact analysis.
+Admin Web exposes System Settings in authenticated Admin navigation. The workspace
+shows one purpose-based section at a time: Google, GitHub, Account linking (Slack
+and Discord), File transfers, Memory, or Audit log. Desktop uses a section menu;
+mobile uses a labeled section selector. URL fragments preserve the selected
+section across reload and browser history; missing or unknown fragments select
+Google. Section subtrees remain mounted while navigating, preserving in-progress
+drafts without saving them. Each section retains its independent save controls.
+
+Platform GitHub App detail, field source and fallback state, explicit secret
+actions, candidate validation and health, aggregate binding impact, and
+confirmation choices appear only in the GitHub section. GitHub loading and
+failure states do not replace the other settings sections. Its effective status
+is explicitly labeled as GitHub App status, not instance-wide settings health.
+The Audit log section renders the existing metadata-only settings events. The
+workspace never renders stored secret plaintext, effective generations, or
+resource identifiers from impact analysis.
 
 ### Helm and process delivery
 
