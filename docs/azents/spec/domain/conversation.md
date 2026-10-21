@@ -210,7 +210,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-21
+last_verified_at: 2026-10-22
 spec_version: 197
 ---
 
@@ -476,6 +476,14 @@ For managed authority, creation acquires the Runtime row's FK-compatible `KEY SH
 lock before writing any Agent foreign key. A concurrent lifecycle or capability
 transition rejects and rolls back the entire root tree, while Runtime-first
 reconciliation can complete without a cross-row lock cycle.
+Both canonical root creation and Team-primary ensure use this shared Runtime-first
+boundary: the wrapper observes lifecycle, and the lower repository's conditional
+Agent update owns the write fence. After Project persistence, the wrapper also
+revalidates the original capability and version used to validate its Project intent,
+including active lifecycle. A capability transition between the wrapper's observation
+and lower Runtime acquisition therefore rolls back the entire new root tree and
+Projects, even when the Agent returns to managed capability at a newer version.
+Existing-primary reuse and insert-race losers retain their read-only reuse behavior.
 The creation result may report the source policy revision for transaction-local
 provenance; the durable authority is the context Project snapshot.
 

@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -28,8 +29,21 @@ from azents.rdb.models.agent_automatic_project_item import (
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import (
+    RDBSessionAgentContext,
+    RDBSessionAgentContextProject,
+)
+from azents.rdb.session_capabilities import (
+    ReadSession,
+    ReadWriteSession,
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -626,6 +640,308 @@ class TestRootAgentSessionCreationRepository:
             "/workspace/agent/policy-a",
             "/workspace/agent/policy-b",
         )
+
+    @pytest.mark.parametrize("team_primary", [False, True])
+    @pytest.mark.parametrize("reenable_runtime", [False, True])
+    async def test_stale_project_authority_rolls_back_entire_root_tree(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+        team_primary: bool,
+        reenable_runtime: bool,
+    ) -> None:
+        """Project validation cannot outlive the exact managed authority it read."""
+        del latest_db_schema
+        manager = create_read_write_session_manager(rdb_engine)
+        suffix = uuid4().hex[:8]
+        async with manager() as setup:
+            workspace_id = await _create_workspace(setup, f"root-stale-{suffix}")
+            agent_id = await _create_agent(
+                setup,
+                workspace_id=workspace_id,
+                slug=f"root-stale-{suffix}",
+                policy_paths=["/workspace/agent/project"],
+                revision=9,
+            )
+
+        policy_read = asyncio.Event()
+        resume_root = asyncio.Event()
+
+        class PausedRootCreation(RootAgentSessionCreationRepository):
+            async def _require_automatic_project_policy(
+                self, session: ReadSession, *, agent_id: str
+            ) -> AgentAutomaticProjectPolicy:
+                policy = await super()._require_automatic_project_policy(
+                    session, agent_id=agent_id
+                )
+                policy_read.set()
+                await resume_root.wait()
+                return policy
+
+        base = _service()
+        service = PausedRootCreation(
+            agent_session_repository=base.agent_session_repository,
+            agent_repository=base.agent_repository,
+            automatic_project_repository=base.automatic_project_repository,
+            session_workspace_project_repository=base.session_workspace_project_repository,
+        )
+
+        async def create_root() -> RootAgentSessionCreationResult:
+            # Exercise the production scope's exception rollback, not a
+            # test-specific rollback after observing a partially committed root.
+            async with manager() as root:
+                if team_primary:
+                    return await service.ensure_team_primary(
+                        root, workspace_id=workspace_id, agent_id=agent_id
+                    )
+                return await service.create_root_session(
+                    root,
+                    create=AgentSessionCreate(
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        title=None,
+                        primary_kind=None,
+                        product_mode=AgentSessionProductMode.TEAM,
+                        associated_user_id=None,
+                    ),
+                    workspace_intent=AgentDefaultRootWorkspaceIntent(),
+                )
+
+        root_task = asyncio.create_task(create_root())
+        try:
+            async with asyncio.timeout(10):
+                await policy_read.wait()
+                async with manager() as removal:
+                    await removal.write_session.execute(
+                        sa.delete(RDBAgentRuntime).where(
+                            RDBAgentRuntime.agent_id == agent_id
+                        )
+                    )
+                    await removal.write_session.execute(
+                        sa.update(RDBAgent)
+                        .where(RDBAgent.id == agent_id)
+                        .values(
+                            runtime_capability=AgentRuntimeCapability.NONE,
+                            runtime_capability_version=(
+                                RDBAgent.runtime_capability_version + 1
+                            ),
+                        )
+                    )
+                if reenable_runtime:
+                    async with manager() as reenable:
+                        await reenable.write_session.execute(
+                            sa.update(RDBAgent)
+                            .where(RDBAgent.id == agent_id)
+                            .values(
+                                runtime_capability=AgentRuntimeCapability.MANAGED,
+                                runtime_capability_version=(
+                                    RDBAgent.runtime_capability_version + 1
+                                ),
+                            )
+                        )
+                        await AgentRuntimeRepository().ensure_for_agent(
+                            reenable, agent_id
+                        )
+                resume_root.set()
+                with pytest.raises(
+                    RuntimeError,
+                    match="Agent Runtime authority changed during Session creation",
+                ):
+                    await root_task
+        finally:
+            resume_root.set()
+            if not root_task.done():
+                root_task.cancel()
+            await asyncio.gather(root_task, return_exceptions=True)
+
+        async with manager() as check:
+            for model in (
+                RDBAgentSession,
+                RDBConversation,
+                RDBSessionAgentContext,
+            ):
+                assert (
+                    await check.read_session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(model)
+                        .where(model.agent_id == agent_id)
+                    )
+                    == 0
+                )
+            assert (
+                await check.read_session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(RDBSessionAgent)
+                    .join(
+                        RDBAgentSession,
+                        RDBAgentSession.id == RDBSessionAgent.agent_session_id,
+                    )
+                    .where(RDBAgentSession.agent_id == agent_id)
+                )
+                == 0
+            )
+            assert (
+                await check.read_session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(RDBSessionAgentContextProject)
+                    .join(
+                        RDBSessionAgentContext,
+                        RDBSessionAgentContext.id
+                        == RDBSessionAgentContextProject.session_agent_context_id,
+                    )
+                    .where(RDBSessionAgentContext.agent_id == agent_id)
+                )
+                == 0
+            )
+
+    @pytest.mark.parametrize("team_primary", [False, True])
+    async def test_root_creation_does_not_invert_runtime_insert_fk_lock(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+        team_primary: bool,
+    ) -> None:
+        """The canonical wrapper must not lock Agent before Runtime creation."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_setup:
+            setup = ReadWriteSession(raw_setup)
+            workspace_id = await _create_workspace(setup, f"root-lock-{suffix}")
+            agent_id = await _create_agent(
+                setup,
+                workspace_id=workspace_id,
+                slug=f"root-lock-{suffix}",
+                policy_paths=[],
+                revision=7,
+                runtime_capability=AgentRuntimeCapability.NONE,
+            )
+            await setup.write_session.execute(
+                sa.update(RDBAgent)
+                .where(RDBAgent.id == agent_id)
+                .values(runtime_capability=AgentRuntimeCapability.MANAGED)
+            )
+            await setup.write_session.commit()
+
+        policy_read = asyncio.Event()
+        resume_root = asyncio.Event()
+        runtime_inserted = asyncio.Event()
+        commit_runtime = asyncio.Event()
+
+        class PausedRootCreation(RootAgentSessionCreationRepository):
+            async def _require_automatic_project_policy(
+                self, session: ReadSession, *, agent_id: str
+            ) -> AgentAutomaticProjectPolicy:
+                policy = await super()._require_automatic_project_policy(
+                    session, agent_id=agent_id
+                )
+                policy_read.set()
+                await resume_root.wait()
+                return policy
+
+        base = _service()
+        service = PausedRootCreation(
+            agent_session_repository=base.agent_session_repository,
+            agent_repository=base.agent_repository,
+            automatic_project_repository=base.automatic_project_repository,
+            session_workspace_project_repository=base.session_workspace_project_repository,
+        )
+        async with (
+            AsyncSession(rdb_engine, expire_on_commit=False) as raw_root,
+            AsyncSession(rdb_engine, expire_on_commit=False) as raw_runtime,
+            AsyncSession(rdb_engine) as raw_observer,
+        ):
+            root = ReadWriteSession(raw_root)
+            runtime_session = ReadWriteSession(raw_runtime)
+            observer = ReadWriteSession(raw_observer)
+            root_pid = await root.read_session.scalar(
+                sa.text("SELECT pg_backend_pid()")
+            )
+            runtime_pid = await runtime_session.read_session.scalar(
+                sa.text("SELECT pg_backend_pid()")
+            )
+            assert isinstance(root_pid, int) and isinstance(runtime_pid, int)
+            assert root_pid != runtime_pid
+
+            async def create_root() -> RootAgentSessionCreationResult:
+                if team_primary:
+                    result = await service.ensure_team_primary(
+                        root, workspace_id=workspace_id, agent_id=agent_id
+                    )
+                else:
+                    result = await service.create_root_session(
+                        root,
+                        create=AgentSessionCreate(
+                            workspace_id=workspace_id,
+                            agent_id=agent_id,
+                            title=None,
+                            primary_kind=None,
+                            product_mode=AgentSessionProductMode.TEAM,
+                            associated_user_id=None,
+                        ),
+                        workspace_intent=AgentDefaultRootWorkspaceIntent(),
+                    )
+                await root.write_session.commit()
+                return result
+
+            async def create_runtime() -> str:
+                runtime = await AgentRuntimeRepository().ensure_for_agent(
+                    runtime_session, agent_id
+                )
+                runtime_inserted.set()
+                await commit_runtime.wait()
+                await runtime_session.write_session.commit()
+                return runtime.id
+
+            root_task = asyncio.create_task(create_root())
+            await asyncio.wait_for(policy_read.wait(), timeout=5)
+            runtime_task = asyncio.create_task(create_runtime())
+            try:
+                async with asyncio.timeout(10):
+                    # The old Agent-first guard blocks the Runtime INSERT's FK
+                    # check after its unique index entry has already been added.
+                    while not runtime_inserted.is_set():
+                        blockers = await observer.read_session.scalar(
+                            sa.text("SELECT pg_blocking_pids(:pid)"),
+                            {"pid": runtime_pid},
+                        )
+                        if root_pid in blockers:
+                            break
+                        if runtime_task.done():
+                            runtime_task.result()
+                    resume_root.set()
+                    while True:
+                        blockers = await observer.read_session.scalar(
+                            sa.text("SELECT pg_blocking_pids(:pid)"),
+                            {"pid": root_pid},
+                        )
+                        if runtime_pid in blockers:
+                            break
+                        if root_task.done():
+                            root_task.result()
+                    commit_runtime.set()
+                    runtime_id = await runtime_task
+                    result = await root_task
+            finally:
+                resume_root.set()
+                commit_runtime.set()
+                for task in (root_task, runtime_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(root_task, runtime_task, return_exceptions=True)
+
+        assert result.created and result.policy_revision == 7
+        assert result.initial_project_paths == ()
+        async with AsyncSession(rdb_engine) as raw_check:
+            check = ReadWriteSession(raw_check)
+            bound_runtime = await check.read_session.scalar(
+                sa.select(RDBSessionAgentContext.agent_runtime_id)
+                .join(
+                    RDBSessionAgent,
+                    RDBSessionAgent.context_id == RDBSessionAgentContext.id,
+                )
+                .where(RDBSessionAgent.agent_session_id == result.agent_session.id)
+            )
+            assert bound_runtime == runtime_id
 
     async def test_missing_policy_rolls_back_new_team_primary(
         self,
