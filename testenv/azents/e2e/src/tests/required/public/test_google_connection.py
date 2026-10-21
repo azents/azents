@@ -1,11 +1,13 @@
 """Assembled Google OAuth, review/publication and Worker capability product flows."""
 
+import hashlib
 import json
 from typing import NamedTuple
 from urllib.parse import parse_qs, urlsplit
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
 from azentsadminclient.models.google_application_patch_request import (
@@ -27,11 +29,12 @@ from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.google_cancel_output import GoogleCancelOutput
 from azentspublicclient.models.google_connect_output import GoogleConnectOutput
 from azentspublicclient.models.google_connection_output import GoogleConnectionOutput
+from azentspublicclient.models.google_picker_token_output import GooglePickerTokenOutput
 from azentspublicclient.models.google_published_output import GooglePublishedOutput
 from azentspublicclient.models.google_review import GoogleReview
 from pydantic import BaseModel, ConfigDict
 
-from support.google_provider_fake import CLIENT_ID, CLIENT_SECRET
+from support.google_provider_fake import CLIENT_ID, CLIENT_SECRET, FILE_BYTES, SCOPE
 from support.google_provider_fixture import GoogleProviderFixture
 from support.observations import ToolResultObservation
 from support.utils import single_candidate_model_options, unique
@@ -44,6 +47,7 @@ from tests.required.public.test_per_prompt_inference_profile import (
     _create_profile_session,
 )
 from tests.required.public.test_runtime_optional_capability import _create_workspace
+from tests.required.public.test_user_sessions import _write_user_first_message
 
 E2E_PLANNER_FALLBACK_WEIGHT = 35.0
 
@@ -465,3 +469,224 @@ def test_google_verified_partial_grant_reaches_worker_and_blocks_write(
     assert CLIENT_SECRET not in json.dumps(
         [item.model_dump(mode="json") for item in results]
     )
+
+
+@pytest.mark.parametrize("personal", [False, True])
+def test_google_gmail_drive_runtime_file_roundtrip(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    google_provider_fixture: GoogleProviderFixture | None,
+    personal: bool,
+) -> None:
+    """Prove SDK reads/effects and canonical bytes through a real Runner."""
+    fixture = fixture_ready(google_provider_fixture)
+    scenario(fixture, "full")
+    prepare_operator(admin_api_client)
+    workspace = _create_workspace(
+        public_api_client=public_api_client,
+        admin_api_client=admin_api_client,
+        server_url=azents_public_server_url,
+        with_runtime_profile=True,
+    )
+    headers = {"Authorization": "Bearer " + workspace.token}
+    base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
+    setup_path = "/personal/google" if personal else "/google"
+    scopes = [
+        "openid",
+        "email",
+        SCOPE + "gmail.readonly",
+        SCOPE + "gmail.send",
+        SCOPE + "gmail.settings.basic",
+        SCOPE + "calendar.events",
+        SCOPE + "drive.file",
+    ]
+    prepared = GoogleConnectOutput.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            setup_path + "/connect",
+            {
+                "services": ["calendar", "gmail", "drive"],
+                "oauth_request_scopes": scopes,
+                "timeout": 30,
+            },
+        ).text
+    )
+    assert prepared is not None
+    callback = authorize(fixture, prepared.authorization_url)
+    review = GoogleReview.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            setup_path + "/exchange",
+            {"code": callback.code, "state": callback.state},
+        ).text
+    )
+    assert review is not None and review.grant_result == "full"
+    published = GooglePublishedOutput.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            setup_path + "/attempts/" + review.attempt_id + "/confirm",
+            {
+                "settings": {
+                    **final_settings("google_product"),
+                    "services": ["calendar", "gmail", "drive"],
+                    "oauth_request_scopes": scopes,
+                }
+            },
+        ).text
+    )
+    assert published is not None and published.current
+    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
+        workspace.handle,
+        AgentCreateRequest(
+            name="Google canonical files E2E",
+            selectable_model_options=single_candidate_model_options(
+                workspace.model_selection
+            ),
+            main_model_label="default",
+            lightweight_model_label="default",
+            type=AgentType.PUBLIC,
+            runtime_profile_id=workspace.runtime_profile_id,
+        ),
+        _headers=headers,
+    )
+    if personal:
+        session = _write_user_first_message(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent.id,
+            message="Google Direct E2E files",
+            client_request_id="google-personal-files-" + unique(),
+        ).session_id
+    else:
+        ToolkitV1Api(public_api_client).toolkit_v1_attach_toolkit_to_agent(
+            handle=workspace.handle,
+            agent_id=agent.id,
+            agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                toolkit_id=published.toolkit_id
+            ),
+            _headers=headers,
+        )
+        session = _create_profile_session(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent.id,
+        )
+        submitted = requests.post(
+            f"{azents_public_server_url}/chat/v1/sessions/{session}/inputs",
+            headers=headers,
+            json={
+                "agent_id": agent.id,
+                "client_request_id": "google-files-" + unique(),
+                "message": "Google Direct E2E files",
+                "inference_profile": {
+                    "model_target_label": "default",
+                    "reasoning_effort": None,
+                    "enabled_execution_options": [],
+                },
+            },
+            timeout=15,
+        )
+        submitted.raise_for_status()
+    _wait_for_terminal_session(
+        server_url=azents_public_server_url,
+        token=workspace.token,
+        agent_id=agent.id,
+        session_id=session,
+    )
+    results = {
+        item.call_id: item
+        for event in _tool_events(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=session,
+        )
+        if event.kind == "client_tool_result"
+        for item in [ToolResultObservation.model_validate(event.payload)]
+    }
+    for stage in ("calendar", "mail", "send", "filter", "download", "import", "upload"):
+        result = results["call_google_direct_" + stage]
+        assert result.status == "completed", result.model_dump_json()
+    assert results["call_google_direct_denied"].status == "failed"
+    assert "GOOGLE_E2E_MAIL_OK" in results["call_google_direct_mail"].model_dump_json()
+    assert "artifact://" in results["call_google_direct_download"].model_dump_json()
+    assert (
+        hashlib.sha256(FILE_BYTES).hexdigest()
+        in results["call_google_direct_upload"].model_dump_json()
+    )
+    observed = requests.get(fixture.control_url + "/__testenv/state", timeout=5)
+    observed.raise_for_status()
+    state = ProviderState.model_validate_json(observed.text)
+    assert state.effects == [
+        "calendar.create_event",
+        "gmail.send_message",
+        "gmail.create_filter",
+        "drive.create_file",
+    ]
+    assert state.downloads == len(FILE_BYTES)
+    assert state.uploaded_bytes > len(FILE_BYTES)
+    assert "gmail.get_message" in state.calls
+    assert state.calls.count("drive.get_metadata") == 1
+    if personal:
+        # Exercise the browser credential boundary without a live Picker/Google
+        # session. The access token is consumed only by this manager test client.
+        settings_api = SystemSettingsV1Api(admin_api_client)
+        operator = settings_api.system_settings_v1_get_google_oauth_setting()
+        settings_api.system_settings_v1_patch_google_oauth_setting(
+            GoogleApplicationPatchRequest(
+                expected_version=operator.admin_version,
+                picker_api_key="synthetic-browser-key",
+                picker_app_id="123456789",
+            )
+        )
+        target = "/personal-toolkit-configs/" + published.toolkit_id + "/google"
+        current = GoogleConnectionOutput.from_json(
+            response(base, workspace.token, "GET", target + "/connection").text
+        )
+        assert current is not None and current.connection_id is not None
+        expected = {
+            "expected_revision": current.revision,
+            "connection_id": current.connection_id,
+        }
+        issued = response(
+            base, workspace.token, "POST", target + "/picker-token", expected
+        )
+        assert issued.headers["Cache-Control"] == "no-store"
+        assert issued.headers["Pragma"] == "no-cache"
+        transient = GooglePickerTokenOutput.from_json(issued.text)
+        assert transient is not None
+        assert transient.app_id == "123456789"
+        assert all(
+            transient.access_token not in item.model_dump_json()
+            for item in results.values()
+        )
+        switched = GoogleConnectionOutput.from_json(
+            response(
+                base,
+                workspace.token,
+                "PATCH",
+                target + "/services",
+                {
+                    "expected_revision": current.revision,
+                    "services": [],
+                },
+            ).text
+        )
+        assert switched is not None and switched.connection_id == current.connection_id
+        assert switched.services == []
+        denied_picker = requests.post(
+            base + target + "/picker-token",
+            headers=headers,
+            json=expected,
+            timeout=10,
+        )
+        assert denied_picker.status_code == 409
+        assert "access_token" not in denied_picker.text
+        retained = response(base, workspace.token, "GET", target + "/connection")
+        assert transient.access_token not in retained.text

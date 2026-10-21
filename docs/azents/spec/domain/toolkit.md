@@ -134,7 +134,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-20
+last_verified_at: 2026-10-22
 spec_version: 151
 ---
 
@@ -154,7 +154,7 @@ This domain covers four feature groups.
    `import_file` materializes one selected entry; Memory has no transfer capability.
 
 The [Google connection backend](google-connection.md) adds a `google` provider
-for official Calendar, Drive and Gmail MCP endpoints. It retains Toolkit ownership
+for typed official Calendar, Drive and Gmail SDK operations. It retains Toolkit ownership
 and execution contracts but stores one Google grant separately from generic MCP
 OAuth. Unpublished setup, explicit reduced-capability review and atomic confirm
 precede creation; plain Toolkit CRUD cannot bypass that publication boundary.
@@ -1501,7 +1501,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `gcp`, `aws` | Cloud-provider native auth (IRSA / workload identity) | — (no config) |
 | `kubernetes` | depends on `clusters[].auth_type` — kubeconfig / token / EKS / GKE | kubeconfig secret |
 | `google_analytics` | service account / ADC | — |
-| `google` | current canonical Session owner and enabled effective Toolkit; selected work, actual scopes, verified subject/current client, and screened remote contract | encrypted Google Toolkit-owned grant and current operator `google_oauth` Section |
+| `google` | current canonical Session owner and enabled effective Toolkit; enabled services, actual scopes, verified subject/current client, and typed SDK operation admission | encrypted Google Toolkit-owned grant and current operator `google_oauth` Section |
 | `brave_search` | enabled attached ToolkitConfig with a valid non-empty API key | ToolkitConfig `encrypted_credentials` |
 
 ### Runtime-Only Toolkit Boundary
