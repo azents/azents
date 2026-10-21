@@ -97,7 +97,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-21
 spec_version: 48
 ---
 
@@ -240,17 +240,16 @@ actual request admission evaluates its captured effort/function conditions.
 Configuration and profile controls read complete final lists without inventing
 request dimensions or maintaining a second descriptor authority.
 
-Two reviewed supplements have exact route/feature scope. Eligible authenticated
-Kimi OAuth managed coding inventory establishes function-calling potential; it
-does not establish parallel calls, strict schemas, structured responses, efforts
-or hosted tools. The exact `grok-4.7` model on xAI API-key and xAI OAuth routes has
-a hosted web-search supplement. That web rule does not predict support for
-other model IDs or authentication routes.
+Eligible authenticated Kimi OAuth managed coding inventory establishes
+function-calling potential; it does not establish parallel calls, strict schemas,
+structured responses, efforts or hosted tools. Both xAI auth modes derive model
+capabilities from exact source and account declarations, including structured
+responses, reasoning controls, sampling, modalities and hosted web search.
 
-For Kimi function calling and exact Grok web search, an own-provider null combined
+For Kimi function calling, an own-provider null combined
 with matching-source false denies the final feature while retaining the raw null
 declaration. Explicit own-provider false remains a denial; own-provider true
-retains support over matching generic false. These narrow supplement guards do
+retains support over matching generic false. This narrow supplement guard does
 not extend to other features or convert original evidence into guessed facts.
 
 Catalog diagnostics include applicable installed codec
@@ -340,8 +339,13 @@ presence, numeric evidence, lifecycle dates, derived reasoning consistency and c
 
 Absence, null, false and an explicit empty set are distinct. Exact provider/account
 declarations own their scope and only absent fields may be enriched by an exact
-source match. Native, OAuth and cloud namespaces are separate; literal publisher
-paths are retained. No bare-name twin, alias stripping, model-family inference
+source match. xAI API-key and OAuth selections share the exact `xai` source
+namespace and `xai/{model_identifier}` address. OAuth account visibility,
+provider identity and explicit account declarations remain authoritative; this
+mapping enriches missing capability, context and pricing fields from the source,
+including structured-response support. Other native, OAuth and cloud namespaces
+remain separate; literal publisher paths are retained.
+No bare-name twin, alias stripping, model-family inference
 or cross-host borrowing establishes capability, context or pricing authority.
 System inventory uses descriptive mode/endpoint/lifecycle facts rather than
 prices or name prefixes. Missing source matches never hide valid account-visible
@@ -704,6 +708,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-21 | 48 | Mapped xAI OAuth enrichment and active source capture to exact xAI source records while retaining account declarations and visibility. |
 | 2026-10-05 | 48 | Moved integration CRUD and atomic account-catalog materialization into completed repository operations; kept provider validation in services. |
 | 2026-10-05 | 48 | Reconciled code-path discovery with current defining modules; system behavior is unchanged. |
 | 2026-10-05 | 47 | Removed redundant source/conversation/image key-enumeration locks while retaining exact publisher claims, credential/work-token guards and final accepted-input exclusion. |

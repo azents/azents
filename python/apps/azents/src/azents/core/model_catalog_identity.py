@@ -58,7 +58,7 @@ def catalog_source_keys(
 
 
 def provider_namespace_matches(provider: LLMProvider, source_provider: str) -> bool:
-    """Check host/API scope without equating native, OAuth, or cloud deployments."""
+    """Use xAI metadata for both auth modes while retaining other hosting scopes."""
     match provider:
         case LLMProvider.OPENAI:
             return source_provider == "openai"
@@ -76,10 +76,8 @@ def provider_namespace_matches(provider: LLMProvider, source_provider: str) -> b
             }
         case LLMProvider.CHATGPT_OAUTH:
             return source_provider == "chatgpt"
-        case LLMProvider.XAI:
+        case LLMProvider.XAI | LLMProvider.XAI_OAUTH:
             return source_provider == "xai"
-        case LLMProvider.XAI_OAUTH:
-            return source_provider == "xai_oauth"
         case LLMProvider.KIMI_OAUTH:
             return source_provider == "kimi_oauth"
         case LLMProvider.OPENROUTER:
@@ -98,10 +96,8 @@ def _address_prefix(provider: LLMProvider) -> str:
             return "vertex_ai/"
         case LLMProvider.CHATGPT_OAUTH:
             return "chatgpt/"
-        case LLMProvider.XAI:
+        case LLMProvider.XAI | LLMProvider.XAI_OAUTH:
             return "xai/"
-        case LLMProvider.XAI_OAUTH:
-            return "xai_oauth/"
         case LLMProvider.KIMI_OAUTH:
             return "kimi_oauth/"
         case LLMProvider.OPENROUTER:

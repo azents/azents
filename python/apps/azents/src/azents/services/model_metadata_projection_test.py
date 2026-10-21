@@ -258,25 +258,81 @@ def test_provider_false_and_complete_empty_override_source_controls() -> None:
     assert caps.reasoning.effort_levels == []
 
 
-def test_preparation_captures_exact_values_and_absent_adopted_keys() -> None:
+@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+def test_preparation_captures_exact_values_and_absent_adopted_keys(
+    provider: LLMProvider,
+) -> None:
     candidates = [
-        _candidate(LLMProvider.XAI, "a", ProviderCapabilityEvidence()),
-        _candidate(LLMProvider.XAI, "b", ProviderCapabilityEvidence()),
+        _candidate(provider, "a", ProviderCapabilityEvidence()),
+        _candidate(provider, "b", ProviderCapabilityEvidence()),
     ]
     source = _source({"xai/a": {"litellm_provider": "xai", "max_input_tokens": 10}})
     before = projection_source_expectations(
-        provider=LLMProvider.XAI, candidates=candidates, source=source
+        provider=provider, candidates=candidates, source=source
     )
     assert [item.source_model_key for item in before] == ["xai/a", "xai/b"]
     assert before[0].current is not None
     assert before[1].current is None
     assert before == projection_source_expectations(
-        provider=LLMProvider.XAI, candidates=list(reversed(candidates)), source=source
+        provider=provider, candidates=list(reversed(candidates)), source=source
     )
     changed = _source({"xai/a": {"litellm_provider": "xai", "max_input_tokens": 20}})
     assert before != projection_source_expectations(
-        provider=LLMProvider.XAI, candidates=candidates, source=changed
+        provider=provider, candidates=candidates, source=changed
     )
+
+
+@pytest.mark.parametrize("provider_denial", [False, True])
+def test_xai_oauth_adopts_exact_xai_source_and_preserves_account_evidence(
+    provider_denial: bool,
+) -> None:
+    source = _source(
+        {
+            "xai/grok-4.5": {
+                "litellm_provider": "xai",
+                "mode": "chat",
+                "supports_response_schema": True,
+                "supports_function_calling": True,
+                "max_input_tokens": 500000,
+                "input_cost_per_token": 0.000002,
+                "output_cost_per_token": 0.000006,
+            },
+            "xai/not-account-visible": {
+                "litellm_provider": "xai",
+                "mode": "chat",
+                "supports_response_schema": True,
+            },
+        }
+    )
+    evidence = ProviderCapabilityEvidence(
+        default_input_tokens=CatalogFact(state="value", value=256000),
+        max_input_tokens=CatalogFact(state="value", value=500000),
+        structured_response=CatalogFact(state="value", value=False)
+        if provider_denial
+        else CatalogFact(state="absent", value=None),
+    )
+    entries = project_integration_replacement_entries(
+        integration_id="i" * 32,
+        provider=LLMProvider.XAI_OAUTH,
+        candidates=[_candidate(LLMProvider.XAI_OAUTH, "grok-4.5", evidence)],
+        source=source,
+        provider_listing_source="xai_oauth:grok_models",
+    )
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.provider == LLMProvider.XAI_OAUTH
+    assert entry.provider_model_identifier == "grok-4.5"
+    assert entry.source_metadata is not None
+    assert entry.source_metadata["source_provider_id"] == "xai"
+    assert entry.source_metadata["source_model_id"] == "xai/grok-4.5"
+    assert entry.projection_metadata is not None
+    assert entry.projection_metadata["matched"] is True
+    assert entry.pricing.source_model_key == "xai/grok-4.5"
+    caps = ModelCapabilities.model_validate(entry.normalized_capabilities)
+    assert caps.structured_response is not provider_denial
+    assert caps.tool_calling.supported
+    assert caps.context_window.default_input_tokens == 256000
+    assert caps.context_window.max_input_tokens == 500000
 
 
 def test_projection_describes_only_relevant_runtime_dependencies(

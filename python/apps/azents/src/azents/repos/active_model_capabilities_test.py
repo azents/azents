@@ -60,6 +60,7 @@ from azents.services.active_model_capabilities import (
     apply_to_agent_read,
     apply_to_workspace_read,
 )
+from azents.testing.model_metadata import make_test_source, make_test_source_payload
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -259,6 +260,60 @@ async def test_exact_capture_deduplicates_but_keeps_user_order_without_locks() -
     )
     assert [choice.identity for choice in captured.choices] == [b, a]
     assert order == ["integration:a", "integration:b", "source", "catalog"]
+
+
+async def test_existing_xai_oauth_choice_captures_xai_schema_evidence() -> None:
+    fixture = _repository()
+    selection = make_test_model_selection(
+        integration_id="integration",
+        provider=LLMProvider.XAI_OAUTH,
+        model_identifier="grok-4.5",
+    )
+    identity = ConfiguredModelIdentity.from_selection(selection)
+    previous = _entry()
+    current = CatalogEntryWithCatalog(
+        dataclasses.replace(previous.catalog, provider=LLMProvider.XAI_OAUTH),
+        dataclasses.replace(
+            previous.entry,
+            provider=LLMProvider.XAI_OAUTH,
+            provider_model_identifier="grok-4.5",
+            source_metadata={
+                "provider_metadata": {"api_backend": "responses"},
+                "capability_evidence": ProviderCapabilityEvidence().model_dump(
+                    mode="json"
+                ),
+            },
+        ),
+    )
+    fixture.catalogs.read_integration.return_value = _integration(LLMProvider.XAI_OAUTH)
+    fixture.catalogs.get_selectable_entries_for_identities.return_value = {
+        identity: current
+    }
+    source = make_test_source(
+        make_test_source_payload(
+            {
+                "xai/grok-4.5": {
+                    "litellm_provider": "xai",
+                    "mode": "chat",
+                    "supports_response_schema": True,
+                }
+            }
+        )
+    )
+    fixture.source.get_models.return_value = {("xai", "xai/grok-4.5"): source.models[0]}
+    captured = await fixture.repository.capture_exact_choices(
+        workspace_id="workspace", identities=[identity]
+    )
+    actual = require_selection(
+        compile_capture(captured, selections=[selection]), selection
+    )
+    assert actual.identity.provider == LLMProvider.XAI_OAUTH
+    assert actual.capabilities.structured_response
+    assert not selection.normalized_capabilities.structured_response
+    assert fixture.source.get_models.await_args.kwargs["keys"] == (
+        ("xai", "xai/grok-4.5"),
+    )
+    assert captured.source_expectations[0].current == source.models[0]
 
 
 @pytest.mark.parametrize(

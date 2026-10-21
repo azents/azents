@@ -1,4 +1,4 @@
-"""Producer addressing is exact and does not transfer capabilities between hosts."""
+"""Producer addressing is exact, including the shared xAI auth-mode source."""
 
 import json
 
@@ -7,6 +7,7 @@ import pytest
 from azents.core.enums import LLMProvider
 from azents.core.model_catalog_identity import (
     CatalogIdentityError,
+    catalog_source_keys,
     lookup_catalog_model,
     provider_namespace_matches,
     source_model_matches,
@@ -41,8 +42,8 @@ def _payload(key: str, namespace: str) -> CatalogSourcePayload:
         (LLMProvider.XAI, "xai", "xai/grok-visible", "grok-visible"),
         (
             LLMProvider.XAI_OAUTH,
-            "xai_oauth",
-            "xai_oauth/account-visible",
+            "xai",
+            "xai/account-visible",
             "account-visible",
         ),
         (
@@ -95,7 +96,6 @@ def test_exact_provider_addresses_preserve_full_execution_identifiers(
     ("provider", "namespace", "key", "identifier"),
     [
         (LLMProvider.CHATGPT_OAUTH, "openai", "gpt-visible", "gpt-visible"),
-        (LLMProvider.XAI_OAUTH, "xai", "xai/grok-visible", "grok-visible"),
         (LLMProvider.KIMI_OAUTH, "moonshot", "moonshot/kimi-visible", "kimi-visible"),
         (LLMProvider.AWS_BEDROCK, "anthropic", "claude-visible", "claude-visible"),
         (LLMProvider.AWS_BEDROCK, "bedrock", "bedrock/visible", "visible"),
@@ -177,9 +177,22 @@ def test_conflicting_adopted_scope_is_rejected_without_an_arbitrary_winner() -> 
         )
 
 
-def test_namespaces_do_not_equate_oauth_or_other_bedrock_apis() -> None:
+def test_namespaces_share_xai_metadata_and_preserve_other_hosting_scopes() -> None:
     assert provider_namespace_matches(LLMProvider.XAI, "xai")
-    assert not provider_namespace_matches(LLMProvider.XAI_OAUTH, "xai")
+    assert provider_namespace_matches(LLMProvider.XAI_OAUTH, "xai")
     assert not provider_namespace_matches(LLMProvider.KIMI_OAUTH, "moonshot")
     assert not provider_namespace_matches(LLMProvider.AWS_BEDROCK, "bedrock")
     assert provider_namespace_matches(LLMProvider.AWS_BEDROCK, "bedrock_converse")
+
+
+def test_xai_auth_modes_capture_the_same_exact_source_address() -> None:
+    api_keys = catalog_source_keys(
+        provider=LLMProvider.XAI, model_identifier="grok-4.5"
+    )
+    oauth_keys = catalog_source_keys(
+        provider=LLMProvider.XAI_OAUTH, model_identifier="grok-4.5"
+    )
+    assert oauth_keys == api_keys
+    assert len(oauth_keys) == 1
+    assert oauth_keys[0].provider == "xai"
+    assert oauth_keys[0].source_model_key == "xai/grok-4.5"
