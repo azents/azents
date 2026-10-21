@@ -253,10 +253,14 @@ def compute_failure_next_run_at(
         return now + interval
     if retry_policy.min_delay is None or retry_policy.max_delay is None:
         return now + interval
-    multiplier = 2 ** max(failure_streak - 1, 0)
-    delay = retry_policy.min_delay * multiplier
-    if delay > retry_policy.max_delay:
-        delay = retry_policy.max_delay
+    delay = min(retry_policy.min_delay, retry_policy.max_delay)
+    remaining_doublings = max(failure_streak - 1, 0)
+    while (
+        datetime.timedelta(0) < delay < retry_policy.max_delay and remaining_doublings
+    ):
+        # Saturate before arithmetic can exceed timedelta's representable range.
+        delay += min(delay, retry_policy.max_delay - delay)
+        remaining_doublings -= 1
     return now + delay
 
 
