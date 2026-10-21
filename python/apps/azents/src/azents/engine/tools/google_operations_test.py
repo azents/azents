@@ -10,9 +10,10 @@ import httpx
 import pytest
 from azcommon.result import Success
 
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_runtime import GoogleExecutionState
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
+from azents.core.tools import GoogleToolkitConfig
 from azents.engine.run.types import FunctionToolError, FunctionToolResult
 from azents.engine.tools.google import GoogleToolkit
 from azents.engine.tools.google_files import GoogleFileBridge
@@ -54,7 +55,7 @@ def test_filter_schema_describes_persistent_forwarding(
 
 
 def _workspace_toolkit(
-    task: GoogleTask,
+    service: GoogleService,
     scope: str,
     sdk: GoogleWorkspaceSdk,
     bridge: GoogleFileBridge,
@@ -62,7 +63,11 @@ def _workspace_toolkit(
     h = _harness(expired=False)
     current = dataclasses.replace(
         h.current,
-        config=h.current.config.model_copy(update={"tasks": [task]}),
+        config=GoogleToolkitConfig(
+            services=(service,),
+            oauth_request_scopes=("https://www.googleapis.com/auth/" + scope,),
+            timeout=h.current.config.timeout,
+        ),
         connection=dataclasses.replace(
             h.current.connection,
             candidate=h.current.connection.candidate.model_copy(
@@ -110,7 +115,7 @@ async def test_drive_upload_resolves_and_revalidates_canonical_input(
         return httpx.Response(200, stream=httpx.ByteStream(b'{"id":"created"}'))
 
     toolkit = _workspace_toolkit(
-        GoogleTask.DRIVE_FILES, "drive.file", _sdk(handler), bridge
+        GoogleService.DRIVE, "drive.file", _sdk(handler), bridge
     )
     tool = next(
         item
@@ -167,7 +172,7 @@ async def test_drive_original_output_is_canonical_artifact_not_file_bytes() -> N
         )
 
     toolkit = _workspace_toolkit(
-        GoogleTask.DRIVE_READ, "drive.readonly", _sdk(handler), bridge
+        GoogleService.DRIVE, "drive.readonly", _sdk(handler), bridge
     )
     tool = next(
         item
@@ -213,7 +218,7 @@ async def test_gmail_raw_draft_is_published_with_original_bytes() -> None:
         },
     }
     toolkit = _workspace_toolkit(
-        GoogleTask.GMAIL_DRAFTS,
+        GoogleService.GMAIL,
         "gmail.compose",
         _sdk(
             lambda request: httpx.Response(
@@ -258,7 +263,7 @@ async def test_grant_loss_between_upload_steps_retains_dispatched_uncertainty() 
         )
 
     toolkit = _workspace_toolkit(
-        GoogleTask.DRIVE_FILES, "drive.file", _sdk(handler), bridge
+        GoogleService.DRIVE, "drive.file", _sdk(handler), bridge
     )
     tool = next(
         item

@@ -38,21 +38,7 @@ class TestGoogleApplicationDetail(unittest.TestCase):
                 status = 'not_configured',
                 client_id = '',
                 callback_url = '',
-                preview_verified = True,
-                service_access_verified = True,
-                section = 'google_oauth',
-                schema_version = 56,
-                admin_version = 56,
-                client_id_source = 'admin',
-                client_secret_source = 'admin',
-                client_secret_configured = True
-            )
-        else:
-            return GoogleApplicationDetail(
-                status = 'not_configured',
-                client_id = '',
-                callback_url = '',
-                preview_verified = True,
+                picker_status = 'not_configured',
                 service_access_verified = True,
                 section = 'google_oauth',
                 schema_version = 56,
@@ -60,6 +46,28 @@ class TestGoogleApplicationDetail(unittest.TestCase):
                 client_id_source = 'admin',
                 client_secret_source = 'admin',
                 client_secret_configured = True,
+                picker_api_key = '',
+                picker_app_id = '',
+                picker_api_key_source = 'admin',
+                picker_app_id_source = 'admin'
+            )
+        else:
+            return GoogleApplicationDetail(
+                status = 'not_configured',
+                client_id = '',
+                callback_url = '',
+                picker_status = 'not_configured',
+                service_access_verified = True,
+                section = 'google_oauth',
+                schema_version = 56,
+                admin_version = 56,
+                client_id_source = 'admin',
+                client_secret_source = 'admin',
+                client_secret_configured = True,
+                picker_api_key = '',
+                picker_app_id = '',
+                picker_api_key_source = 'admin',
+                picker_app_id_source = 'admin',
         )
         """
 

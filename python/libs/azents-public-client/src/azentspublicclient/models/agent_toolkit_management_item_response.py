@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentToolkitManagementItemResponse(BaseModel):

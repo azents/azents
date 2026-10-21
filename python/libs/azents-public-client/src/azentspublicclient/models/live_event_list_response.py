@@ -26,7 +26,7 @@ from azentspublicclient.models.goal_state_response import GoalStateResponse
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse
 from azentspublicclient.models.pending_mailbox_envelope import PendingMailboxEnvelope
 from azentspublicclient.models.todo_state_response import TodoStateResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class LiveEventListResponse(BaseModel):

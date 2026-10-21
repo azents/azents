@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_provider_integration_response import LLMProviderIntegrationResponse
 from azentspublicclient.models.xai_o_auth_session_status import XaiOAuthSessionStatus
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class XaiOAuthDeviceStatusResponse(BaseModel):

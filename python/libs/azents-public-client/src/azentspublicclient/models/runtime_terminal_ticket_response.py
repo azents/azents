@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.runtime_terminal_denied_scope import RuntimeTerminalDeniedScope
 from azentspublicclient.models.runtime_terminal_reason_code import RuntimeTerminalReasonCode
 from azentspublicclient.models.runtime_terminal_ticket_status import RuntimeTerminalTicketStatus
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeTerminalTicketResponse(BaseModel):

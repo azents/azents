@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.action_execution_event_response import ActionExecutionEventResponse
 from azentspublicclient.models.action_execution_response import ActionExecutionResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ActionExecutionProjectionResponse(BaseModel):

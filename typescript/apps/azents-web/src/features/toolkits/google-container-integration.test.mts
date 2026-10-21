@@ -9,6 +9,7 @@ import {
   noMutation,
   object,
 } from "../../shared/testing/hook-test-harness.ts";
+import * as googleAccess from "../../shared/toolkits/google-access.ts";
 import * as googleResume from "../../shared/toolkits/google-resume.ts";
 import * as googleTypes from "../../shared/toolkits/google-types.ts";
 import * as popupMessages from "../../shared/toolkits/popup-messages.ts";
@@ -44,16 +45,30 @@ function context(attemptId = "old", toolkitId?: string): GoogleResume {
 const review = {
   attempt_id: "old",
   reconnect_toolkit_id: null,
-  requested_tasks: ["calendar_read"],
+  services: ["calendar"],
+  oauth_request_scopes: [
+    "openid",
+    "email",
+    ...googleAccess.googleDefaultScopes("calendar"),
+  ],
+  granted_scopes: googleAccess.googleDefaultScopes("calendar"),
+  drive_access: {
+    whole_content_read: false,
+    whole_content_write: false,
+    whole_metadata_read: false,
+    whole_metadata_write: false,
+    app_file_read: false,
+    app_file_write: false,
+  },
   timeout: 30,
   expires_at: deadline,
-  tasks: [
+  accesses: [
     {
-      task: "calendar_read",
       service: "calendar",
+      enabled: true,
       status: "partial",
-      permitted_tools: ["list_events"],
-      unavailable_tools: ["list_calendars"],
+      permitted_tools: ["calendar_list_events"],
+      unavailable_tools: ["calendar_list_calendars"],
     },
   ],
   identity: {
@@ -67,7 +82,6 @@ const review = {
   can_confirm: true,
   grant_result: "partial",
   service_access_verified: false,
-  security_notice: "Synthetic notice.",
 };
 
 function callbackHarness(
@@ -282,9 +296,13 @@ for (const agentOwned of [false, true]) {
     const harness = new HookHarness();
     const captured: Array<{ route: string; input: unknown }> = [];
     const oldConfig = {
-      tasks: ["calendar_read", "calendar_edit"],
+      services: ["calendar"],
+      oauth_request_scopes: [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/calendar.events",
+      ],
       timeout: 30,
-      security_risk_acknowledged: true,
     };
     let toolkit = {
       id: "saved",
@@ -441,7 +459,12 @@ for (const agentOwned of [false, true]) {
     harness.render();
     const confirmedConfig = {
       ...oldConfig,
-      tasks: ["calendar_read"],
+      services: ["calendar"],
+      oauth_request_scopes: [
+        "openid",
+        "email",
+        ...googleAccess.googleDefaultScopes("calendar"),
+      ],
       timeout: 12,
     };
     toolkit = { ...toolkit, config: confirmedConfig };
@@ -463,7 +486,7 @@ for (const agentOwned of [false, true]) {
     assert.equal(Object.hasOwn(patch, "config"), false);
     assert.equal(patch.name, "Concurrent renamed metadata");
     assert.equal(toolkit.config.timeout, 12);
-    assert.deepEqual(toolkit.config.tasks, ["calendar_read"]);
+    assert.deepEqual(toolkit.config.services, ["calendar"]);
   });
 }
 
@@ -472,6 +495,10 @@ function setupHarness(
   cancelRequest: () => PromiseLike<unknown>,
   reviewRead: () => Promise<unknown>,
   register: (value: unknown) => void,
+  management: {
+    status: () => unknown;
+    save: (input: unknown) => Promise<unknown>;
+  } | null,
 ): HookHarness {
   const harness = new HookHarness();
   const google: Record<string, unknown> = {
@@ -481,11 +508,11 @@ function setupHarness(
           status: "configured_unverified",
           client_id: "client",
           callback_url: "https://app.example.invalid/oauth/google/callback",
-          preview_verified: false,
+          picker_status: "not_configured",
           service_access_verified: false,
         }),
     },
-    status: { useQuery: () => query(null) },
+    status: { useQuery: () => query(management?.status() ?? null) },
   };
   for (const name of [
     "connect",
@@ -493,12 +520,19 @@ function setupHarness(
     "confirm",
     "reconnectConfirm",
     "disconnect",
+    "services",
+    "pickerToken",
   ]) {
     google[name] = { useMutation: noMutation };
   }
   google.cancel = {
     useMutation: () => ({ ...noMutation(), mutateAsync: cancelRequest }),
   };
+  if (management != null) {
+    google.services = {
+      useMutation: () => ({ ...noMutation(), mutateAsync: management.save }),
+    };
+  }
   const utilsTk: Record<string, unknown> = {};
   for (const name of [
     "listConfigs",
@@ -533,6 +567,14 @@ function setupHarness(
       },
       "../google-resume": googleResume,
       "../google-types": googleTypes,
+      "../google-access": googleAccess,
+      "./useGooglePickerContainer": {
+        useGooglePickerContainer: () => ({
+          picker: { type: "IDLE" },
+          onOpenPicker: () => {},
+          onClosePicker: () => {},
+        }),
+      },
       "../github-wizard-progression": { revealGitHubWizardHeading: () => {} },
     },
     {},
@@ -541,6 +583,7 @@ function setupHarness(
     handle: "team",
     agentId: "agent",
     onAbandonReady: register,
+    ...(management != null ? { toolkitId: "saved" } : {}),
   });
   harness.flushEffects();
   return harness;
@@ -563,6 +606,7 @@ for (const outcome of ["cancelled", "published", "replaced"]) {
       (value) => {
         abandon = value;
       },
+      null,
     );
     cancelled = harness.nativeDeferred();
     reviewed.resolve(review);
@@ -595,3 +639,84 @@ for (const outcome of ["cancelled", "published", "replaced"]) {
     }
   });
 }
+
+void test("saved service switches allow all-off without replacing scope intent or grant", async () => {
+  const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+  const calls: unknown[] = [];
+  let current = {
+    toolkit_id: "saved",
+    revision: 7,
+    connection_id: "same-grant",
+    status: "connected",
+    identity: review.identity,
+    services: ["calendar"],
+    oauth_request_scopes: review.oauth_request_scopes,
+    granted_scopes: review.granted_scopes,
+    accesses: review.accesses,
+    drive_access: review.drive_access,
+    renewable: true,
+    timeout: 30,
+    service_access_verified: false,
+  };
+  const harness = setupHarness(
+    store,
+    () => Promise.reject(new Error("Unexpected cancellation.")),
+    () => Promise.resolve(review),
+    () => {},
+    {
+      status: () => current,
+      save: (input) => {
+        calls.push(input);
+        current = { ...current, revision: 8, services: [] };
+        return Promise.resolve(current);
+      },
+    },
+  );
+  let output = harness.render();
+  invoke(output.onServiceChange, "calendar", false);
+  output = harness.render();
+  assert.equal(output.servicesDirty, true);
+  assert.equal(JSON.stringify(output.services), "[]");
+  await invoke(output.onSaveServices);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    {
+      handle: "team",
+      agentId: "agent",
+      toolkitId: "saved",
+      expectedRevision: 7,
+      services: [],
+    },
+  ]);
+  output = harness.render();
+  assert.equal(object(object(output.saved).detail).connection_id, "same-grant");
+  assert.deepEqual(current.oauth_request_scopes, review.oauth_request_scopes);
+  assert.deepEqual(current.granted_scopes, review.granted_scopes);
+  assert.equal(output.savingServices, false);
+  assert.equal(output.servicesDirty, false);
+});
+
+void test("enabling Drive defaults to whole-file reads while writing remains an explicit request", () => {
+  const h = setupHarness(
+    new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY),
+    () => Promise.reject(new Error("Unexpected cancellation.")),
+    () => Promise.resolve(review),
+    () => {},
+    null,
+  );
+  let output = h.render();
+  invoke(output.onServiceChange, "drive", true);
+  output = h.render();
+  assert.equal(JSON.stringify(output.services), JSON.stringify(["drive"]));
+  assert.equal(
+    JSON.stringify(output.requestScopes),
+    JSON.stringify(["https://www.googleapis.com/auth/drive.readonly"]),
+  );
+  invoke(output.onRequestScopesChange, "drive", [
+    "https://www.googleapis.com/auth/drive",
+  ]);
+  output = h.render();
+  assert.equal(
+    JSON.stringify(output.requestScopes),
+    JSON.stringify(["https://www.googleapis.com/auth/drive"]),
+  );
+});

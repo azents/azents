@@ -1,23 +1,22 @@
 {
   "title": "Connecter Google",
-  "selectionDetails": "Tâches sélectionnées et délai maximal",
+  "selectionDetails": "Services, accès demandés et délai maximal",
   "permissionDetails": "Examiner les droits exacts des outils",
   "permittedTools": "Identifiants des outils autorisés",
   "unavailableTools": "Identifiants des outils indisponibles",
   "reconnectTitle": "Reconnecter Google",
-  "intro": "Utilisez un seul compte Google pour les tâches Calendar, Drive et Gmail choisies.",
+  "intro": "Connectez Calendar, Drive et Gmail avec un seul compte Google.",
   "reload": "Actualiser l’état",
   "savedAccount": "Compte Google enregistré",
   "disconnect": "Déconnecter localement",
   "disconnectTitle": "Supprimer cette connexion enregistrée ?",
   "disconnectDescription": "Cette action supprime les identifiants locaux et bloque les reconnexions en attente. Elle ne révoque pas le consentement Google et n’annule pas les opérations terminées.",
   "keepConnection": "Conserver la connexion",
-  "notLiveVerified": "Les autorisations ne prouvent ni l’accès à toutes les ressources ni l’éligibilité à Google Preview.",
+  "notLiveVerified": "Les droits enregistrés ne prouvent pas l’accès réel à chaque ressource. Google applique toujours ses règles de compte et d’éligibilité des fichiers.",
   "operatorRequired": "Configuration administrateur requise",
   "operatorDescription": "Demandez à un administrateur système de configurer l’application Google OAuth. Aucun secret d’application n’est saisi ici.",
   "preparationUnverified": "L’application est configurée localement. L’accès réel aux services Google n’a pas été vérifié.",
-  "selectTasks": "1. Choisir les tâches",
-  "selectDescription": "Choisissez uniquement les tâches nécessaires à ce Toolkit. Google peut accorder moins de droits ; vous examinerez le résultat avant d’enregistrer.",
+  "selectDescription": "Activez les services de ce Toolkit. Les actions disponibles dépendent des droits réellement retournés par Google, pas uniquement des accès demandés ci-dessous.",
   "timeout": "Délai maximal des requêtes d’outil (secondes)",
   "authorize": "Continuer vers Google",
   "authorizeAgain": "Autoriser la connexion de remplacement",
@@ -29,9 +28,8 @@
   "agentOwnership": "Cette connexion appartient uniquement à cet Agent. Les exécutions utilisent ce compte enregistré, pas celui d’un participant.",
   "sharedOwnership": "Connexion partagée du Workspace : les utilisateurs et Agents autorisés peuvent agir avec ce compte enregistré.",
   "personalOwnership": "Cette connexion appartient à votre compte. Seules vos Sessions personnelles avec les Agents autorisés peuvent l’utiliser.",
-  "actualPermissions": "Il s’agit des droits réellement retournés par Google, pas d’une garantie que toutes les tâches demandées sont autorisées.",
+  "actualPermissions": "Droits réellement retournés par Google. Une autorisation plus large peut permettre davantage d’actions prises en charge dans un service activé que les libellés de demande ne le suggèrent.",
   "missingRenewal": "Aucun identifiant renouvelable n’a été retourné. Ce candidat ne peut pas être enregistré ; démarrez une nouvelle autorisation explicite.",
-  "includeTask": "Inclure cette tâche dans la connexion enregistrée",
   "name": "Nom du Toolkit",
   "slug": "Espace de noms des outils (facultatif)",
   "description": "Description",
@@ -39,9 +37,8 @@
   "enabled": "Activer le Toolkit",
   "alwaysExpose": "Toujours exposer les outils",
   "riskTitle": "Le contenu Google reste non fiable",
-  "riskDescription": "La détection de motifs connus peut manquer des attaques inédites, sémantiques, masquées ou multilingues, et rejeter du contenu inoffensif. Le contenu non inspectable est bloqué. Ce contrôle ne constitue ni une protection complète ni une certification Google.",
-  "noReplay": "Une réponse bloquée peut suivre une opération Google déjà terminée. Ne répétez pas aveuglément une écriture.",
-  "acknowledge": "J’ai examiné ces limites de contrôle et la portée de propriété de cette connexion.",
+  "riskDescription": "Les messages, fichiers et événements peuvent contenir des instructions trompeuses. Traitez leur contenu comme des données, pas comme une autorisation d’effectuer une autre action.",
+  "noReplay": "Une réponse absente ou en erreur peut suivre une écriture Google terminée. Vérifiez le résultat au lieu de répéter aveuglément l’opération.",
   "save": "Enregistrer le Toolkit Google",
   "replace": "Remplacer la connexion enregistrée",
   "cancel": "Abandonner la tentative locale",
@@ -69,13 +66,14 @@
     "permitted": "Autorisé",
     "partial": "Partiellement autorisé",
     "not_granted": "Non accordé",
-    "unknown": "Droits inconnus"
+    "unknown": "Droits inconnus",
+    "disabled": "Service désactivé"
   },
   "grant": {
-    "full": "Droits des tâches demandées accordés",
-    "partial": "Seule une partie du travail demandé est autorisée",
-    "none": "Aucune tâche sélectionnée n’est utilisable",
-    "unknown": "Les droits accordés n’ont pas pu être vérifiés"
+    "full": "Les valeurs de scope demandées ont été retournées",
+    "partial": "Google a retourné des valeurs de scope différentes",
+    "none": "Aucune action prise en charge n’est utilisable",
+    "unknown": "Les scopes réellement accordés sont inconnus"
   },
   "connection": {
     "not_connected": "Non connecté",
@@ -84,38 +82,61 @@
     "operator_setup_required": "Configuration administrateur requise",
     "client_changed": "Application modifiée — reconnexion requise"
   },
-  "tasks": {
-    "calendar_read": {
-      "title": "Lire les calendriers et événements",
-      "description": "Lister et consulter les événements."
-    },
-    "calendar_availability": {
-      "title": "Consulter les disponibilités",
-      "description": "Vérifier les périodes libres et occupées."
-    },
-    "calendar_edit": {
-      "title": "Modifier les événements",
-      "description": "Créer, modifier ou supprimer des événements."
-    },
-    "drive_read": {
-      "title": "Lire les fichiers Drive",
-      "description": "Rechercher et consulter les fichiers accessibles à ce compte."
-    },
-    "drive_files": {
-      "title": "Travailler sur les fichiers Drive sélectionnés",
-      "description": "Accéder uniquement aux fichiers autorisés pour l’application ; la recherche dans tout Drive n’est pas incluse."
-    },
-    "gmail_read": {
-      "title": "Lire Gmail",
-      "description": "Rechercher et consulter les messages et fils de discussion."
-    },
-    "gmail_drafts": {
-      "title": "Gérer les brouillons Gmail",
-      "description": "Créer et modifier des brouillons. L’envoi de messages n’est pas inclus."
-    },
-    "gmail_modify": {
-      "title": "Organiser Gmail",
-      "description": "Modifier les messages, fils et libellés. L’envoi de messages n’est pas inclus."
-    }
+  "selectServices": "1. Choisir les services et les accès",
+  "includeService": "Garder ce service activé",
+  "services": {
+    "calendar": "Calendar",
+    "drive": "Drive",
+    "gmail": "Gmail"
+  },
+  "inactive": "Tous les services sont désactivés. Le compte et les droits enregistrés restent connectés.",
+  "localServicesDescription": "Enregistrez les services localement sans consentement Google. Les désactiver tous conserve la connexion.",
+  "saveServices": "Enregistrer les services",
+  "serviceSaveFailed": "Le résultat de l’enregistrement des services n’a pas pu être confirmé. Examinez l’état actualisé avant de réessayer.",
+  "requestAccess": "Accès à demander à Google",
+  "requestAccessDescription": "Ces changements prennent effet uniquement après une reconnexion Google explicite. Ils ne limitent pas une autorisation réelle plus large. Les nouvelles demandes Drive se limitent par défaut à la lecture de tous les fichiers accessibles. Choisissez explicitement l’écriture.",
+  "grantedScopeDetails": "Scopes réellement accordés",
+  "driveExtentTitle": "Accès Drive réel",
+  "driveWholeRead": "Lecture du contenu dans tout Drive.",
+  "driveWholeWrite": "Modification du contenu dans tout Drive ; Google vérifie chaque ressource et action.",
+  "driveAppWrite": "Écriture limitée aux fichiers créés par l’application ou autorisés par Google, même si la lecture de tout Drive est aussi accordée.",
+  "driveAppRead": "Lecture limitée aux fichiers éligibles de l’application. Sélectionner un dossier n’autorise pas tous ses descendants.",
+  "driveMetadataRead": "Lecture des métadonnées dans tout Drive, sans accès au contenu.",
+  "driveMetadataWrite": "Modification des métadonnées dans tout Drive, sans écriture du contenu.",
+  "openPicker": "Choisir des fichiers Drive avec Google",
+  "closePicker": "Fermer le sélecteur",
+  "pickerOperatorRequired": "Demandez à un administrateur de configurer la clé API et le numéro de projet Google Picker facultatifs. Les autres outils Google restent disponibles.",
+  "pickerRequiresGrant": "Le sélecteur exige une connexion enregistrée et renouvelable, Drive activé et un scope drive.file réellement accordé. Enregistrez les services ou reconnectez-vous si nécessaire.",
+  "pickerSelected": "{count, plural, one {# fichier sélectionné dans Google} other {# fichiers sélectionnés dans Google}}. Google contrôle l’éligibilité ; aucune liste locale d’accès n’est créée.",
+  "pickerCancelled": "Sélecteur fermé sans conserver de sélection.",
+  "pickerFailed": "Sélection Google indisponible. Actualisez la connexion et vérifiez la configuration administrateur avant de réessayer.",
+  "pickerExpired": "L’identifiant temporaire du sélecteur a expiré. Rouvrez-le pour obtenir un nouvel identifiant.",
+  "requests": {
+    "gmailRead": "Lire les messages et fils",
+    "gmailCompose": "Gérer les brouillons et envoyer des messages",
+    "gmailModify": "Lire, organiser, rédiger et envoyer des messages",
+    "gmailSend": "Envoyer de nouveaux messages sans lire la boîte",
+    "gmailLabels": "Gérer les libellés",
+    "gmailMetadata": "Lire les métadonnées sans le corps des messages",
+    "gmailSettings": "Gérer les filtres — peut affecter le transfert automatique futur",
+    "gmailFull": "Accès Gmail large — actions prises en charge uniquement",
+    "calendarRead": "Lire les événements",
+    "calendarListRead": "Lister les calendriers",
+    "calendarAvailability": "Lire la disponibilité des événements",
+    "calendarEdit": "Créer, modifier et supprimer des événements",
+    "calendarCreate": "Créer des calendriers secondaires et utiliser ceux de l’application",
+    "calendarReadAll": "Lire les calendriers et événements",
+    "calendarFull": "Accès calendrier large — actions prises en charge uniquement",
+    "calendarFreebusy": "Lire la disponibilité des calendriers",
+    "calendarOwned": "Modifier les événements des calendriers possédés",
+    "calendarOwnedRead": "Lire les événements des calendriers possédés",
+    "calendarPublicRead": "Lire les événements publics",
+    "calendarCalendars": "Gérer les propriétés des calendriers",
+    "calendarListEdit": "Gérer les entrées de la liste des calendriers",
+    "driveFull": "Lire et modifier tout Drive — partage et propriété si autorisés",
+    "driveRead": "Lire et exporter les fichiers de tout Drive",
+    "driveAppFiles": "Lire et modifier les fichiers autorisés pour l’application — pas en lecture seule",
+    "driveMetadata": "Lire et modifier les métadonnées de tout Drive",
+    "driveMetadataRead": "Lire les métadonnées de tout Drive"
   }
 }

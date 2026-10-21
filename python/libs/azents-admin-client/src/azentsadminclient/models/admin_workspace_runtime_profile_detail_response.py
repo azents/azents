@@ -24,7 +24,7 @@ from typing_extensions import Annotated
 from azentsadminclient.models.runtime_network_projection import RuntimeNetworkProjection
 from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
 from azentsadminclient.models.workspace_runtime_profile_policy import WorkspaceRuntimeProfilePolicy
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):

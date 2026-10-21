@@ -1,6 +1,6 @@
 # GooglePreparation
 
-Public redacted declaration; never claims verified Preview or service access.
+Separate local OAuth and optional Picker preparation, without live claims.
 
 ## Properties
 
@@ -9,7 +9,7 @@ Name | Type | Description | Notes
 **status** | **str** |  | 
 **client_id** | **str** |  | 
 **callback_url** | **str** |  | 
-**preview_verified** | **bool** | Always false for local operator preparation. | 
+**picker_status** | **str** |  | 
 **service_access_verified** | **bool** | Local preparation does not verify live service access. | 
 
 ## Example

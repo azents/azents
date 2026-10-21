@@ -1,6 +1,6 @@
 # GoogleReview
 
-Actual grant result with token-free exact ownership/capability projection.
+Actual grant and reviewed intent remain separate, with no token projection.
 
 ## Properties
 
@@ -12,14 +12,16 @@ Name | Type | Description | Notes
 **client_id** | **str** |  | 
 **ownership** | **str** |  | 
 **reconnect_toolkit_id** | **str** |  | 
-**requested_tasks** | [**List[GoogleTask]**](GoogleTask.md) |  | 
+**services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**oauth_request_scopes** | **List[str]** |  | 
+**granted_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
-**tasks** | [**List[GoogleTaskAccess]**](GoogleTaskAccess.md) |  | 
-**grant_result** | **str** |  | 
+**accesses** | [**List[GoogleServiceAccess]**](GoogleServiceAccess.md) |  | 
+**drive_access** | [**GoogleDriveAccess**](GoogleDriveAccess.md) |  | 
+**grant_result** | **str** | Receipt evidence for requested Workspace scopes, not an action ceiling. Actual supported tools and Drive extent are projected independently. | 
 **renewable** | **bool** |  | 
 **can_confirm** | **bool** |  | 
 **service_access_verified** | **bool** | Scope review does not verify live resource access. | 
-**security_notice** | **str** |  | 
 
 ## Example
 

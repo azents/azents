@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.git_hub_setup_platform_modes import GitHubSetupPlatformModes
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubSetupAvailability(BaseModel):

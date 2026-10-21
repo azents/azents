@@ -10,7 +10,7 @@ import pytest
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.google_oauth import GoogleOAuthError
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.core.tools import ResolveContext, TurnContext
@@ -171,7 +171,7 @@ async def test_projection_uses_current_grants_each_turn_without_provider_request
     _repo(toolkit).load.return_value = dataclasses.replace(
         _repo(toolkit).load.return_value,
         config=_repo(toolkit).load.return_value.config.model_copy(
-            update={"tasks": [GoogleTask.GMAIL_READ]}
+            update={"services": (GoogleService.GMAIL,)}
         ),
     )
     assert not (await toolkit.update_context(_turn())).tools

@@ -17,30 +17,29 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.google_service import GoogleService
-from azentspublicclient.models.google_task import GoogleTask
-from typing import Optional, Set
+from azentspublicclient.models.google_workspace_operation import GoogleWorkspaceOperation
+from typing import List, Optional, Set
 from typing_extensions import Self
 
-class GoogleTaskAccess(BaseModel):
+class GoogleServiceAccess(BaseModel):
     """
-    Task-level permission evidence; no live resource-access promise.
+    Local enablement and actual operation evidence are independent facts.
     """ # noqa: E501
-    task: GoogleTask
     service: GoogleService
+    enabled: StrictBool
     status: StrictStr
-    permitted_tools: List[StrictStr]
-    unavailable_tools: List[StrictStr]
-    additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["task", "service", "status", "permitted_tools", "unavailable_tools"]
+    permitted_tools: List[GoogleWorkspaceOperation]
+    unavailable_tools: List[GoogleWorkspaceOperation]
+    __properties: ClassVar[List[str]] = ["service", "enabled", "status", "permitted_tools", "unavailable_tools"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['permitted', 'partial', 'not_granted', 'unknown']):
-            raise ValueError("must be one of enum values ('permitted', 'partial', 'not_granted', 'unknown')")
+        if value not in set(['disabled', 'permitted', 'partial', 'not_granted', 'unknown']):
+            raise ValueError("must be one of enum values ('disabled', 'permitted', 'partial', 'not_granted', 'unknown')")
         return value
 
     model_config = ConfigDict(
@@ -61,7 +60,7 @@ class GoogleTaskAccess(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of GoogleTaskAccess from a JSON string"""
+        """Create an instance of GoogleServiceAccess from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,10 +72,8 @@ class GoogleTaskAccess(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -84,16 +81,11 @@ class GoogleTaskAccess(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of GoogleTaskAccess from a dict"""
+        """Create an instance of GoogleServiceAccess from a dict"""
         if obj is None:
             return None
 
@@ -103,18 +95,13 @@ class GoogleTaskAccess(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
-            "task": obj.get("task"),
             "service": obj.get("service"),
+            "enabled": obj.get("enabled"),
             "status": obj.get("status"),
             "permitted_tools": obj.get("permitted_tools"),
             "unavailable_tools": obj.get("unavailable_tools")
             }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

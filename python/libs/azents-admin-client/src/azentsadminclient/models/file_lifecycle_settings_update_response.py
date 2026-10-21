@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.archive_retention_application_response import ArchiveRetentionApplicationResponse
 from azentsadminclient.models.file_lifecycle_settings_response import FileLifecycleSettingsResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class FileLifecycleSettingsUpdateResponse(BaseModel):

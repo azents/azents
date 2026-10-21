@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcceptedResponse
 from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnapshotResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ChatWriteResponse(BaseModel):

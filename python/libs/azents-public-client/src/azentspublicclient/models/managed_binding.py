@@ -25,7 +25,7 @@ from azentspublicclient.models.external_channel_provider import ExternalChannelP
 from azentspublicclient.models.external_channel_resource_type import ExternalChannelResourceType
 from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode
 from azentspublicclient.models.managed_work import ManagedWork
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ManagedBinding(BaseModel):

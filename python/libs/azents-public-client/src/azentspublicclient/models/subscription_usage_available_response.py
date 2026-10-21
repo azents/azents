@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.subscription_usage_available_response_financial_details import SubscriptionUsageAvailableResponseFinancialDetails
 from azentspublicclient.models.subscription_usage_limit_response import SubscriptionUsageLimitResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SubscriptionUsageAvailableResponse(BaseModel):

@@ -26,32 +26,30 @@ from azents.core.google_oauth import (
     GoogleSetup,
     GoogleSubject,
 )
-from azents.core.google_policy import (
-    GOOGLE_TOOL_POLICY,
-    GoogleTask,
-    permitted_tools,
-    requested_scopes,
-)
 from azents.core.google_system_setting import (
     GoogleApplicationRegistration,
     GoogleApplicationUnavailable,
     GooglePreparation,
+)
+from azents.core.google_workspace_policy import (
+    IDENTITY_SCOPES,
+    drive_access,
 )
 from azents.core.oauth2 import generate_pkce_pair
 from azents.core.toolkit_ownership import UserToolkitOwner
 from azents.repos.google_oauth.management import GoogleOAuthRepository
 from azents.services.google_application.service import GoogleApplicationService
 from azents.services.google_oauth.data import (
-    GOOGLE_SECURITY_NOTICE,
     GoogleCancelOutput,
     GoogleConnectInput,
     GoogleConnectionOutput,
     GoogleConnectOutput,
     GooglePublishedOutput,
     GoogleReview,
-    GoogleTaskAccess,
+    GoogleServicesUpdateInput,
 )
 from azents.services.google_oauth.provider import GoogleOAuthProvider
+from azents.services.google_oauth.workspace_projection import service_accesses
 
 
 class _CallbackState(BaseModel):
@@ -124,7 +122,8 @@ class GoogleOAuthService:
             state_nonce=secrets.token_urlsafe(32),
             oidc_nonce=secrets.token_urlsafe(32),
             code_verifier=pkce.code_verifier,
-            tasks=tuple(dict.fromkeys(desired.tasks)),
+            services=desired.services,
+            oauth_request_scopes=desired.oauth_request_scopes,
             timeout=desired.timeout,
             target=None,
         )
@@ -254,7 +253,7 @@ class GoogleOAuthService:
                 candidate=GoogleCandidate(
                     identity=identity,
                     tokens=receipt.tokens(),
-                    requested_scopes=requested_scopes(setup.tasks),
+                    requested_scopes=setup.oauth_request_scopes,
                 ),
             )
         except asyncio.CancelledError:
@@ -270,37 +269,6 @@ class GoogleOAuthService:
         return self._review(reviewed)
 
     @staticmethod
-    def _accesses(
-        tasks: tuple[GoogleTask, ...],
-        scopes: tuple[str, ...] | None,
-    ) -> tuple[GoogleTaskAccess, ...]:
-        accesses: list[GoogleTaskAccess] = []
-        for task in tasks:
-            policies = [item for item in GOOGLE_TOOL_POLICY if item.task is task]
-            service = policies[0].service
-            known = {item.name for item in policies}
-            allowed = permitted_tools((task,), scopes, service)
-            status: Literal["permitted", "partial", "not_granted", "unknown"]
-            if scopes is None:
-                status = "unknown"
-            elif not allowed:
-                status = "not_granted"
-            elif allowed == known:
-                status = "permitted"
-            else:
-                status = "partial"
-            accesses.append(
-                GoogleTaskAccess(
-                    task=task,
-                    service=service,
-                    status=status,
-                    permitted_tools=tuple(sorted(allowed)),
-                    unavailable_tools=tuple(sorted(known - allowed)),
-                )
-            )
-        return tuple(accesses)
-
-    @staticmethod
     def _review(attempt: GoogleAttempt) -> GoogleReview:
         setup, candidate = attempt.setup, attempt.candidate
         if (
@@ -310,14 +278,14 @@ class GoogleOAuthService:
         ):
             raise GoogleOAuthError("stale", "Google account is not ready for review.")
         scopes = candidate.tokens.granted_scopes
-        accesses = GoogleOAuthService._accesses(setup.tasks, scopes)
+        accesses = service_accesses(setup.services, scopes)
         usable = any(item.permitted_tools for item in accesses)
         result: Literal["full", "partial", "none", "unknown"]
         if scopes is None:
             result = "unknown"
         elif not usable:
             result = "none"
-        elif all(item.status == "permitted" for item in accesses):
+        elif set(setup.oauth_request_scopes) - IDENTITY_SCOPES <= set(scopes):
             result = "full"
         else:
             result = "partial"
@@ -337,16 +305,18 @@ class GoogleOAuthService:
             reconnect_toolkit_id=None
             if setup.target is None
             else setup.target.toolkit_id,
-            requested_tasks=setup.tasks,
+            services=setup.services,
+            oauth_request_scopes=setup.oauth_request_scopes,
+            granted_scopes=scopes,
             timeout=setup.timeout,
-            tasks=tuple(accesses),
+            accesses=accesses,
+            drive_access=drive_access(setup.services, scopes),
             grant_result=result,
             renewable=renewable,
             can_confirm=usable
             and renewable
             and (candidate.tokens.expires_at > datetime.datetime.now(datetime.UTC)),
             service_access_verified=False,
-            security_notice=GOOGLE_SECURITY_NOTICE,
         )
 
     async def review(self, subject: GoogleManager, attempt_id: str) -> GoogleReview:
@@ -402,6 +372,21 @@ class GoogleOAuthService:
             publication=None if outcome is None else self._publication(outcome),
         )
 
+    async def update_services(
+        self,
+        subject: GoogleManager,
+        toolkit_id: str,
+        desired: GoogleServicesUpdateInput,
+    ) -> GoogleConnectionOutput:
+        """Save local enablement without consent, renewal or credential replacement."""
+        await self.repository.update_services(
+            subject,
+            toolkit_id=toolkit_id,
+            expected_revision=desired.expected_revision,
+            services=desired.services,
+        )
+        return await self.status(subject, toolkit_id)
+
     async def disconnect(self, subject: GoogleManager, toolkit_id: str) -> None:
         await self.repository.disconnect(subject, toolkit_id)
 
@@ -437,12 +422,24 @@ class GoogleOAuthService:
                 )
         return GoogleConnectionOutput(
             toolkit_id=toolkit_id,
+            revision=saved.revision,
+            connection_id=None if connection is None else connection.id,
             status=status,
             identity=None if connection is None else connection.candidate.identity,
-            selected_tasks=saved.tasks,
+            services=saved.services,
+            oauth_request_scopes=saved.oauth_request_scopes,
+            granted_scopes=None
+            if connection is None
+            else connection.candidate.tokens.granted_scopes,
             timeout=saved.timeout,
-            tasks=self._accesses(
-                saved.tasks,
+            accesses=service_accesses(
+                saved.services,
+                None
+                if connection is None
+                else connection.candidate.tokens.granted_scopes,
+            ),
+            drive_access=drive_access(
+                saved.services,
                 None
                 if connection is None
                 else connection.candidate.tokens.granted_scopes,

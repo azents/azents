@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.agent_workspace_move_response import AgentWorkspaceMoveResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentWorkspaceBulkMoveResponse(BaseModel):

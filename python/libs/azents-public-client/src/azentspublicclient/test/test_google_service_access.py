@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.google_task_access import GoogleTaskAccess
+from azentspublicclient.models.google_service_access import GoogleServiceAccess
 
-class TestGoogleTaskAccess(unittest.TestCase):
-    """GoogleTaskAccess unit test stubs"""
+class TestGoogleServiceAccess(unittest.TestCase):
+    """GoogleServiceAccess unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,42 +25,42 @@ class TestGoogleTaskAccess(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> GoogleTaskAccess:
-        """Test GoogleTaskAccess
+    def make_instance(self, include_optional) -> GoogleServiceAccess:
+        """Test GoogleServiceAccess
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `GoogleTaskAccess`
+        # uncomment below to create an instance of `GoogleServiceAccess`
         """
-        model = GoogleTaskAccess()
+        model = GoogleServiceAccess()
         if include_optional:
-            return GoogleTaskAccess(
-                task = 'calendar_read',
+            return GoogleServiceAccess(
                 service = 'calendar',
-                status = 'permitted',
+                enabled = True,
+                status = 'disabled',
                 permitted_tools = [
-                    ''
+                    'gmail_search_messages'
                     ],
                 unavailable_tools = [
-                    ''
+                    'gmail_search_messages'
                     ]
             )
         else:
-            return GoogleTaskAccess(
-                task = 'calendar_read',
+            return GoogleServiceAccess(
                 service = 'calendar',
-                status = 'permitted',
+                enabled = True,
+                status = 'disabled',
                 permitted_tools = [
-                    ''
+                    'gmail_search_messages'
                     ],
                 unavailable_tools = [
-                    ''
+                    'gmail_search_messages'
                     ],
         )
         """
 
-    def testGoogleTaskAccess(self):
-        """Test GoogleTaskAccess"""
+    def testGoogleServiceAccess(self):
+        """Test GoogleServiceAccess"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

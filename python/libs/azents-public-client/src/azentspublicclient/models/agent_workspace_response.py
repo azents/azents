@@ -23,7 +23,7 @@ from azentspublicclient.models.agent_runtime_lifecycle_presentation_response imp
 from azentspublicclient.models.agent_workspace_actions_response import AgentWorkspaceActionsResponse
 from azentspublicclient.models.agent_workspace_runtime_response import AgentWorkspaceRuntimeResponse
 from azentspublicclient.models.workspace import Workspace
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentWorkspaceResponse(BaseModel):

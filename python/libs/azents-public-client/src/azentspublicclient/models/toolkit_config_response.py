@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.git_hub_platform_authorization_state_response import GitHubPlatformAuthorizationStateResponse
 from azentspublicclient.models.git_hub_user_connection_summary_response import GitHubUserConnectionSummaryResponse
 from azentspublicclient.models.mcpo_auth_connection_summary_response import MCPOAuthConnectionSummaryResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ToolkitConfigResponse(BaseModel):

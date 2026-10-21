@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode
 from azentspublicclient.models.managed_connection import ManagedConnection
 from azentspublicclient.models.managed_multi_connection import ManagedMultiConnection
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ManagedConnectionListResponse(BaseModel):

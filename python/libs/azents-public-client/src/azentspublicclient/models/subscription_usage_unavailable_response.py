@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.subscription_usage_unavailable_reason import SubscriptionUsageUnavailableReason
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SubscriptionUsageUnavailableResponse(BaseModel):

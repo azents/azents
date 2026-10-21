@@ -12,7 +12,6 @@ from azents.core.google_oauth import (
     GoogleConnectionStatus,
     GoogleOAuthError,
 )
-from azents.core.google_policy import selected_services
 from azents.core.google_runtime import (
     GoogleExecutionState,
     GoogleOperationAuthorization,
@@ -20,7 +19,7 @@ from azents.core.google_runtime import (
 from azents.core.google_system_setting import GoogleApplicationUnavailable
 from azents.core.google_workspace_policy import (
     GoogleWorkspaceOperation,
-    eligible_operations,
+    eligible_model_operations,
     operation_permitted,
 )
 from azents.core.personal_toolkit_runtime import PersonalToolkitExecutionTarget
@@ -123,12 +122,9 @@ class GoogleRuntimeService:
         operation: GoogleWorkspaceOperation,
         auxiliary: tuple[GoogleWorkspaceOperation, ...],
     ) -> None:
-        # During the nondeployable delivery stack only service membership is
-        # derived from the existing saved config. Direct action authority never
-        # intersects the old selected-task policy. Phase 3 replaces this ingress.
         if not operation_permitted(
             operation,
-            selected_services(tuple(current.config.tasks)),
+            current.config.services,
             current.connection.candidate.tokens.granted_scopes,
             auxiliary,
         ):
@@ -144,8 +140,8 @@ class GoogleRuntimeService:
     ) -> frozenset[GoogleWorkspaceOperation]:
         """Projection reloads current state but never performs provider I/O."""
         current = await self._state(owner, toolkit_id)
-        return eligible_operations(
-            selected_services(tuple(current.config.tasks)),
+        return eligible_model_operations(
+            current.config.services,
             current.connection.candidate.tokens.granted_scopes,
         )
 

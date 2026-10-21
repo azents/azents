@@ -25,7 +25,7 @@ from azentspublicclient.models.kubernetes_din_d_module import KubernetesDinDModu
 from azentspublicclient.models.kubernetes_scheduling_module import KubernetesSchedulingModule
 from azentspublicclient.models.kubernetes_workspace_volume import KubernetesWorkspaceVolume
 from azentspublicclient.models.runtime_network_access import RuntimeNetworkAccess
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class KubernetesPodProfileSpecV3(BaseModel):

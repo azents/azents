@@ -25,7 +25,7 @@ from azentspublicclient.models.agent_run_status import AgentRunStatus
 from azentspublicclient.models.applied_inference_profile import AppliedInferenceProfile
 from azentspublicclient.models.chat_live_run_operation_response import ChatLiveRunOperationResponse
 from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ChatLiveRunStateResponse(BaseModel):

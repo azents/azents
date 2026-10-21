@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput
 from azentspublicclient.models.selectable_model_settings_input import SelectableModelSettingsInput
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SelectableModelCandidateInput(BaseModel):

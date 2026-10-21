@@ -24,7 +24,7 @@ from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
 from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput
 from azentspublicclient.models.subagent_settings import SubagentSettings
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentUpdateRequest(BaseModel):

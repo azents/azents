@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_runtime_lifecycle_provider_response import AgentRuntimeLifecycleProviderResponse
 from azentspublicclient.models.agent_runtime_lifecycle_runner_response import AgentRuntimeLifecycleRunnerResponse
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeLifecyclePresentationResponse(BaseModel):

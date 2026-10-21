@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.discord_thread_auto_archive_duration_minutes import DiscordThreadAutoArchiveDurationMinutes
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class DiscordConnectionConfiguration(BaseModel):

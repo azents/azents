@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.workspace_environment_entry import WorkspaceEnvironmentEntry
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentWorkspaceEnvironmentSettings(BaseModel):

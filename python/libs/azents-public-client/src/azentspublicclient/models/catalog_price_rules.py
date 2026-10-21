@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.catalog_off_peak_rule import CatalogOffPeakRule
 from azentspublicclient.models.catalog_price_issue import CatalogPriceIssue
 from azentspublicclient.models.catalog_price_rate import CatalogPriceRate
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class CatalogPriceRules(BaseModel):

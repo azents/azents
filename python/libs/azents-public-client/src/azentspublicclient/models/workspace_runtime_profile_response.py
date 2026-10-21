@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.runtime_network_projection import RuntimeNetworkProjection
 from azentspublicclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
 from azentspublicclient.models.workspace_runtime_profile_policy import WorkspaceRuntimeProfilePolicy
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class WorkspaceRuntimeProfileResponse(BaseModel):

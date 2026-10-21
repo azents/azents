@@ -6316,10 +6316,14 @@
             ],
             "title": "Callback Url"
           },
-          "preview_verified": {
-            "type": "boolean",
-            "title": "Preview Verified",
-            "description": "Always false for local operator preparation."
+          "picker_status": {
+            "type": "string",
+            "enum": [
+              "not_configured",
+              "incomplete",
+              "configured_unverified"
+            ],
+            "title": "Picker Status"
           },
           "service_access_verified": {
             "type": "boolean",
@@ -6348,6 +6352,34 @@
           "client_secret_configured": {
             "type": "boolean",
             "title": "Client Secret Configured"
+          },
+          "picker_api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picker Api Key"
+          },
+          "picker_app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picker App Id"
+          },
+          "picker_api_key_source": {
+            "$ref": "#/components/schemas/SystemSettingFieldSource"
+          },
+          "picker_app_id_source": {
+            "$ref": "#/components/schemas/SystemSettingFieldSource"
           }
         },
         "type": "object",
@@ -6355,14 +6387,18 @@
           "status",
           "client_id",
           "callback_url",
-          "preview_verified",
+          "picker_status",
           "service_access_verified",
           "section",
           "schema_version",
           "admin_version",
           "client_id_source",
           "client_secret_source",
-          "client_secret_configured"
+          "client_secret_configured",
+          "picker_api_key",
+          "picker_app_id",
+          "picker_api_key_source",
+          "picker_app_id_source"
         ],
         "title": "GoogleApplicationDetail",
         "description": "Admin redacted effective fields and optimistic version, never secret values."
@@ -6384,6 +6420,28 @@
               }
             ],
             "title": "Client Id"
+          },
+          "picker_api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picker Api Key"
+          },
+          "picker_app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picker App Id"
           },
           "client_secret": {
             "$ref": "#/components/schemas/SystemSettingSecretActionRequest"

@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.git_hub_setup_connectivity import GitHubSetupConnectivity
 from azentspublicclient.models.git_hub_setup_installation_observation import GitHubSetupInstallationObservation
 from azentspublicclient.models.identity import Identity
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubSetupVerificationOutput(BaseModel):

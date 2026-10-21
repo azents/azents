@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict
 from azentspublicclient.models.browser_page_response import BrowserPageResponse
 from azentspublicclient.models.browser_projection_response import BrowserProjectionResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class BrowserCreatePageResponse(BaseModel):

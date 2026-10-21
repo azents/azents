@@ -38,7 +38,7 @@ class TestGooglePreparation(unittest.TestCase):
                 status = 'not_configured',
                 client_id = '',
                 callback_url = '',
-                preview_verified = True,
+                picker_status = 'not_configured',
                 service_access_verified = True
             )
         else:
@@ -46,7 +46,7 @@ class TestGooglePreparation(unittest.TestCase):
                 status = 'not_configured',
                 client_id = '',
                 callback_url = '',
-                preview_verified = True,
+                picker_status = 'not_configured',
                 service_access_verified = True,
         )
         """

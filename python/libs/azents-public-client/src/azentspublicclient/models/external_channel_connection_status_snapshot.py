@@ -24,7 +24,7 @@ from azentspublicclient.models.external_channel_capability_snapshot import Exter
 from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus
 from azentspublicclient.models.external_channel_credential_snapshot import ExternalChannelCredentialSnapshot
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ExternalChannelConnectionStatusSnapshot(BaseModel):

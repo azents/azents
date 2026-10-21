@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from azentspublicclient.models.discord_connection_configuration import DiscordConnectionConfiguration
 from azentspublicclient.models.discord_connection_credentials import DiscordConnectionCredentials
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class DiscordConnectionSetupRequest(BaseModel):

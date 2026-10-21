@@ -1,0 +1,17 @@
+openapi: 3.1.0
+info:
+  title: Native boolean constant fixture
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Evidence:
+      type: object
+      required: [verified_false, verified_true]
+      properties:
+        verified_false:
+          type: boolean
+          const: false
+        verified_true:
+          type: boolean
+          const: true

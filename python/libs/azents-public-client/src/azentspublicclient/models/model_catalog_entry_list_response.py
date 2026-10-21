@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope
 from azentspublicclient.models.model_catalog_entry_response import ModelCatalogEntryResponse
 from azentspublicclient.models.model_catalog_sync_status_response import ModelCatalogSyncStatusResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ModelCatalogEntryListResponse(BaseModel):

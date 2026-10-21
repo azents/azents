@@ -17,6 +17,11 @@ import {
 import { trpc } from "@/trpc/client";
 import { revealGitHubWizardHeading } from "../github-wizard-progression";
 import {
+  googleDefaultScopes,
+  googleRequestOptions,
+  googleScopesForServices,
+} from "../google-access";
+import {
   deserializeGoogleResume,
   GOOGLE_RESUME_KEY,
   googleResumeMatches,
@@ -25,6 +30,7 @@ import {
   sameGoogleResumeAttempt,
 } from "../google-resume";
 import { canPublishGoogleReview } from "../google-types";
+import { useGooglePickerContainer } from "./useGooglePickerContainer";
 import type { GoogleResume } from "../google-resume";
 import type {
   GoogleFlowState,
@@ -40,7 +46,7 @@ import type {
 import type {
   GooglePublishedOutput,
   GoogleReview,
-  GoogleTask,
+  GoogleService,
 } from "@azents/public-client";
 
 export type GoogleSetupContainerProps = ToolkitOwnerScope & {
@@ -89,13 +95,17 @@ export function useGoogleSetupContainer(
   const reconnectConfirm = trpc.toolkit.google.reconnectConfirm.useMutation();
   const cancel = trpc.toolkit.google.cancel.useMutation();
   const disconnect = trpc.toolkit.google.disconnect.useMutation();
+  const servicesUpdate = trpc.toolkit.google.services.useMutation({
+    retry: false,
+  });
   const [, saveResume, clearResume] = useSessionStorage<GoogleResume | null>({
     key: GOOGLE_RESUME_KEY,
     defaultValue: null,
     deserialize: deserializeGoogleResume,
   });
   const [flow, setFlow] = useState<GoogleFlowState>({ type: "SELECT" });
-  const [tasks, setTasks] = useState<GoogleTask[]>([]);
+  const [services, setServices] = useState<GoogleService[]>([]);
+  const [requestScopes, setRequestScopes] = useState<string[]>([]);
   const [timeout, setTimeoutValue] = useState(30);
   const [metadata, setMetadata] = useState<GoogleMetadata>({
     name: "",
@@ -105,7 +115,7 @@ export function useGoogleSetupContainer(
     enabled: true,
     alwaysExposeTools: false,
   });
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [savingServices, setSavingServices] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [disconnectConfirmation, setDisconnectConfirmation] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -159,7 +169,6 @@ export function useGoogleSetupContainer(
       clearResume();
     }
     active.current = null;
-    setAcknowledged(false);
     setOperationError(null);
     setFlow({ type: "SELECT" });
   };
@@ -186,9 +195,9 @@ export function useGoogleSetupContainer(
     ]);
   };
   const acceptReview = (review: GoogleReview): void => {
-    setTasks(review.requested_tasks);
+    setServices(review.services);
+    setRequestScopes(review.oauth_request_scopes);
     setTimeoutValue(review.timeout);
-    setAcknowledged(false);
     setFlow({ type: "REVIEW", review });
   };
   const finish = async (
@@ -201,7 +210,6 @@ export function useGoogleSetupContainer(
     const finishingGeneration = epoch.current;
     active.current = null;
     clearResume();
-    setAcknowledged(false);
     setFlow({ type: "COMPLETE", outcome });
     try {
       await invalidate();
@@ -238,7 +246,8 @@ export function useGoogleSetupContainer(
       return;
     }
     initializedSaved.current = true;
-    setTasks(statusQuery.data.selected_tasks);
+    setServices(statusQuery.data.services);
+    setRequestScopes(statusQuery.data.oauth_request_scopes);
     setTimeoutValue(statusQuery.data.timeout);
   }, [statusQuery.data]);
   useEffect(() => {
@@ -295,6 +304,7 @@ export function useGoogleSetupContainer(
     flow.type === "CONFIRMING" ||
     cancelling ||
     disconnecting ||
+    savingServices ||
     (flow.type === "UNKNOWN" && flow.checking);
   useEffect(() => {
     pending.current = busy || flow.type === "UNKNOWN";
@@ -302,16 +312,19 @@ export function useGoogleSetupContainer(
     return () => onPendingChange?.(false);
   }, [busy, flow.type, onPendingChange]);
   async function authorize(): Promise<void> {
-    if (pending.current || tasks.length === 0) {
+    if (pending.current || services.length === 0) {
       return;
     }
     pending.current = true;
     const operation = ++epoch.current;
     setOperationError(null);
-    setAcknowledged(false);
     setFlow({ type: "AUTHORIZING" });
     try {
-      const desired = { tasks, timeout };
+      const desired = {
+        services,
+        oauth_request_scopes: googleScopesForServices(services, requestScopes),
+        timeout,
+      };
       const result =
         toolkitId == null
           ? await connect.mutateAsync({ ...scope, desired })
@@ -348,7 +361,7 @@ export function useGoogleSetupContainer(
       flow.type !== "REVIEW" ||
       active.current == null ||
       !sameGoogleResumeAttempt(readResume(), active.current) ||
-      !canPublishGoogleReview(flow.review, tasks, acknowledged, Date.now())
+      !canPublishGoogleReview(flow.review, services, Date.now())
     ) {
       return;
     }
@@ -360,7 +373,11 @@ export function useGoogleSetupContainer(
     setFlow({ type: "CONFIRMING", review });
     writeResume({ ...context, phase: "PUBLISHING" });
     try {
-      const settings = { tasks, timeout, security_risk_acknowledged: true };
+      const settings = {
+        services,
+        oauth_request_scopes: googleScopesForServices(services, requestScopes),
+        timeout,
+      };
       const outcome =
         toolkitId == null
           ? await confirm.mutateAsync({
@@ -513,38 +530,148 @@ export function useGoogleSetupContainer(
         : statusQuery.isError
           ? { type: "ERROR", message: t("statusFailed") }
           : { type: "READY", detail: statusQuery.data };
+  const servicesDirty =
+    saved.type === "READY" &&
+    [...services].sort().join(",") !==
+      [...saved.detail.services].sort().join(",");
+  const pickerAvailable =
+    saved.type === "READY" &&
+    saved.detail.status === "connected" &&
+    saved.detail.renewable &&
+    saved.detail.connection_id != null &&
+    saved.detail.services.includes("drive") &&
+    (saved.detail.granted_scopes?.includes(
+      "https://www.googleapis.com/auth/drive.file",
+    ) ??
+      false) &&
+    preparation.type === "READY" &&
+    preparation.detail.picker_status === "configured_unverified" &&
+    !servicesDirty &&
+    !busy &&
+    flow.type === "SELECT";
+  const pickerControls = useGooglePickerContainer({
+    enabled: pickerAvailable,
+    contextKey: `${handle}:${agentId}:${toolkitId}:${saved.type === "READY" ? `${saved.detail.revision}:${saved.detail.connection_id}:${saved.detail.status}` : saved.type}`,
+    unavailableMessage: t("pickerFailed"),
+    expiredMessage: t("pickerExpired"),
+    issue: async () => {
+      if (
+        saved.type !== "READY" ||
+        saved.detail.connection_id == null ||
+        toolkitId == null
+      ) {
+        throw new Error("Google Picker requires a current saved connection.");
+      }
+      try {
+        // The imperative typed tRPC client bypasses React Query's mutation
+        // cache entirely: this credential belongs only to the SDK lifecycle.
+        return await utils.client.toolkit.google.pickerToken.mutate({
+          ...scope,
+          toolkitId,
+          expectedRevision: saved.detail.revision,
+          connectionId: saved.detail.connection_id,
+        });
+      } catch {
+        await invalidate();
+        throw new Error("Google Picker is unavailable. Reload the connection.");
+      }
+    },
+  });
+  async function saveServices(): Promise<void> {
+    if (
+      toolkitId == null ||
+      saved.type !== "READY" ||
+      pending.current ||
+      !servicesDirty
+    ) {
+      return;
+    }
+    const operation = ++epoch.current;
+    pending.current = true;
+    setSavingServices(true);
+    setOperationError(null);
+    pickerControls.onClosePicker();
+    try {
+      await servicesUpdate.mutateAsync({
+        ...scope,
+        toolkitId,
+        expectedRevision: saved.detail.revision,
+        services,
+      });
+      if (isCurrent(operation)) {
+        await invalidate();
+      }
+    } catch {
+      if (isCurrent(operation)) {
+        setOperationError(t("serviceSaveFailed"));
+        await invalidate();
+      }
+    } finally {
+      if (isCurrent(operation)) {
+        pending.current = false;
+        setSavingServices(false);
+      }
+    }
+  }
   return {
     preparation,
     saved,
     flow,
-    tasks,
+    services,
+    requestScopes,
     timeout,
     metadata,
-    acknowledged,
     publishingAllowed:
       flow.type === "REVIEW" &&
-      canPublishGoogleReview(flow.review, tasks, acknowledged, Date.now()),
+      canPublishGoogleReview(flow.review, services, Date.now()),
     reconnect: toolkitId != null,
     ownership:
       "owner" in scope ? "user" : scope.agentId != null ? "agent" : "workspace",
     cancelling,
     disconnecting,
+    savingServices,
+    servicesDirty,
+    pickerAvailable,
+    ...pickerControls,
     disconnectConfirmation,
     operationError,
     rootRef,
     embedded,
-    onTaskChange: (task, selected) => {
-      setTasks((current) =>
+    onServiceChange: (service, selected) => {
+      pickerControls.onClosePicker();
+      setServices((current) =>
         selected
-          ? Array.from(new Set([...current, task]))
-          : current.filter((item) => item !== task),
+          ? Array.from(new Set([...current, service]))
+          : current.filter((item) => item !== service),
       );
-      setAcknowledged(false);
+      if (
+        selected &&
+        !requestScopes.some((scope) =>
+          googleRequestOptions.some(
+            (option) => option.service === service && option.scope === scope,
+          ),
+        )
+      ) {
+        setRequestScopes((current) => [
+          ...current,
+          ...googleDefaultScopes(service),
+        ]);
+      }
     },
+    onRequestScopesChange: (service, scopes) =>
+      setRequestScopes((current) => [
+        ...current.filter(
+          (scope) =>
+            !googleRequestOptions.some(
+              (option) => option.service === service && option.scope === scope,
+            ),
+        ),
+        ...scopes,
+      ]),
+    onSaveServices: saveServices,
     onTimeoutChange: setTimeoutValue,
     onMetadataChange: (patch) =>
       setMetadata((current) => ({ ...current, ...patch })),
-    onAcknowledgedChange: setAcknowledged,
     onAuthorize: () => {
       setFocusRequest((value) => value + 1);
       void authorize();

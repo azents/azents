@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.workspace_response import WorkspaceResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class WorkspaceListResponse(BaseModel):

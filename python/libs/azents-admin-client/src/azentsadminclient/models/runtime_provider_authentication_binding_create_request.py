@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeProviderAuthenticationBindingCreateRequest(BaseModel):

@@ -62,9 +62,13 @@ function formFixture(
   const config =
     provider === "google"
       ? {
-          tasks: ["calendar_read"],
+          services: ["calendar"],
+          oauth_request_scopes: [
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/calendar.events.readonly",
+          ],
           timeout: 30,
-          security_risk_acknowledged: true,
         }
       : provider === "github"
         ? {

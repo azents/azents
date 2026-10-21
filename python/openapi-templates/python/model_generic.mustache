@@ -9,7 +9,7 @@ import json
 {{#vendorExtensions.x-py-model-imports}}
 {{{.}}}
 {{/vendorExtensions.x-py-model-imports}}
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 {{#hasChildren}}
@@ -86,8 +86,15 @@ class {{classname}}({{#parent}}{{{.}}}{{/parent}}{{^parent}}BaseModel{{/parent}}
         {{/isMap}}
         {{/isContainer}}
         {{^isContainer}}
+        {{#isBoolean}}
+        # The pinned generator quotes boolean enum/const values as strings.
+        if str(value).lower() not in set([{{#allowableValues}}{{#enumVars}}str({{{value}}}).lower(){{^-last}}, {{/-last}}{{/enumVars}}{{/allowableValues}}]):
+            raise ValueError("must match the declared boolean enum")
+        {{/isBoolean}}
+        {{^isBoolean}}
         if value not in set([{{#allowableValues}}{{#enumVars}}{{{value}}}{{^-last}}, {{/-last}}{{/enumVars}}{{/allowableValues}}]):
             raise ValueError("must be one of enum values ({{#allowableValues}}{{#enumVars}}{{{value}}}{{^-last}}, {{/-last}}{{/enumVars}}{{/allowableValues}})")
+        {{/isBoolean}}
         {{/isContainer}}
         return value
     {{/isEnum}}

@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_candidate_identity import ModelCandidateIdentity
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class PrimaryModelReservation(BaseModel):

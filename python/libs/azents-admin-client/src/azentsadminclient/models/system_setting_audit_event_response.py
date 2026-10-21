@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.system_setting_audit_event_type import SystemSettingAuditEventType
 from azentsadminclient.models.system_setting_audit_source import SystemSettingAuditSource
 from azentsadminclient.models.system_setting_validation_status import SystemSettingValidationStatus
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SystemSettingAuditEventResponse(BaseModel):

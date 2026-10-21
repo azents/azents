@@ -25,7 +25,7 @@ from azentspublicclient.models.git_hub_user_connection_summary_response import G
 from azentspublicclient.models.mcpo_auth_connection_summary_response import MCPOAuthConnectionSummaryResponse
 from azentspublicclient.models.personal_toolkit_access_mode import PersonalToolkitAccessMode
 from azentspublicclient.models.user_toolkit_owner import UserToolkitOwner
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class PersonalToolkitResponse(BaseModel):

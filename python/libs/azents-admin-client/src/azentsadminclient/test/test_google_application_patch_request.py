@@ -37,6 +37,8 @@ class TestGoogleApplicationPatchRequest(unittest.TestCase):
             return GoogleApplicationPatchRequest(
                 expected_version = 0.0,
                 client_id = '',
+                picker_api_key = '',
+                picker_app_id = '',
                 client_secret = azentsadminclient.models.system_setting_secret_action_request.SystemSettingSecretActionRequest(
                     action = 'replace', 
                     value = '', )

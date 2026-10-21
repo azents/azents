@@ -5,10 +5,12 @@ import {
   googleToolkitV1AgentGoogleDisconnect,
   googleToolkitV1AgentGoogleExchange,
   googleToolkitV1AgentGoogleOutcome,
+  googleToolkitV1AgentGooglePickerToken,
   googleToolkitV1AgentGooglePreparation,
   googleToolkitV1AgentGoogleReconnect,
   googleToolkitV1AgentGoogleReconnectConfirm,
   googleToolkitV1AgentGoogleReview,
+  googleToolkitV1AgentGoogleServices,
   googleToolkitV1AgentGoogleStatus,
   googleToolkitV1SharedGoogleCancel,
   googleToolkitV1SharedGoogleConfirm,
@@ -16,10 +18,12 @@ import {
   googleToolkitV1SharedGoogleDisconnect,
   googleToolkitV1SharedGoogleExchange,
   googleToolkitV1SharedGoogleOutcome,
+  googleToolkitV1SharedGooglePickerToken,
   googleToolkitV1SharedGooglePreparation,
   googleToolkitV1SharedGoogleReconnect,
   googleToolkitV1SharedGoogleReconnectConfirm,
   googleToolkitV1SharedGoogleReview,
+  googleToolkitV1SharedGoogleServices,
   googleToolkitV1SharedGoogleStatus,
   personalGoogleToolkitV1PersonalGoogleCancel,
   personalGoogleToolkitV1PersonalGoogleConfirm,
@@ -27,10 +31,12 @@ import {
   personalGoogleToolkitV1PersonalGoogleDisconnect,
   personalGoogleToolkitV1PersonalGoogleExchange,
   personalGoogleToolkitV1PersonalGoogleOutcome,
+  personalGoogleToolkitV1PersonalGooglePickerToken,
   personalGoogleToolkitV1PersonalGooglePreparation,
   personalGoogleToolkitV1PersonalGoogleReconnect,
   personalGoogleToolkitV1PersonalGoogleReconnectConfirm,
   personalGoogleToolkitV1PersonalGoogleReview,
+  personalGoogleToolkitV1PersonalGoogleServices,
   personalGoogleToolkitV1PersonalGoogleStatus,
 } from "@azents/public-client";
 import { z } from "zod/v4";
@@ -38,6 +44,7 @@ import {
   googleDesiredSchema,
   googleFinalSettingsSchema,
   googleReconnectSettingsSchema,
+  googleServiceSchema,
 } from "@/shared/toolkits/google-schemas";
 import { toolkitScopedInput } from "@/shared/toolkits/toolkit-owner-scope";
 import { mapExpectedError } from "../api-error";
@@ -66,6 +73,84 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 export const googleRouter = router({
+  services: publicProcedure
+    .input(
+      toolkitScopedInput({
+        ...savedFields,
+        expectedRevision: z.number().int().nonnegative(),
+        services: z.array(googleServiceSchema),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const path = { handle: input.handle, toolkit_id: input.toolkitId };
+      const body = {
+        expected_revision: input.expectedRevision,
+        services: input.services,
+      };
+      const { data } = await request(() =>
+        "owner" in input
+          ? personalGoogleToolkitV1PersonalGoogleServices({
+              client: ctx.apiClient,
+              path,
+              body,
+              throwOnError: true,
+            })
+          : input.agentId == null
+            ? googleToolkitV1SharedGoogleServices({
+                client: ctx.apiClient,
+                path,
+                body,
+                throwOnError: true,
+              })
+            : googleToolkitV1AgentGoogleServices({
+                client: ctx.apiClient,
+                path: { ...path, agent_id: input.agentId },
+                body,
+                throwOnError: true,
+              }),
+      );
+      return data;
+    }),
+  pickerToken: publicProcedure
+    .input(
+      toolkitScopedInput({
+        ...savedFields,
+        expectedRevision: z.number().int().nonnegative(),
+        connectionId: z.string().min(1).max(64),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      ctx.resHeaders.set("Cache-Control", "no-store");
+      ctx.resHeaders.set("Pragma", "no-cache");
+      const path = { handle: input.handle, toolkit_id: input.toolkitId };
+      const body = {
+        expected_revision: input.expectedRevision,
+        connection_id: input.connectionId,
+      };
+      const { data } = await request(() =>
+        "owner" in input
+          ? personalGoogleToolkitV1PersonalGooglePickerToken({
+              client: ctx.apiClient,
+              path,
+              body,
+              throwOnError: true,
+            })
+          : input.agentId == null
+            ? googleToolkitV1SharedGooglePickerToken({
+                client: ctx.apiClient,
+                path,
+                body,
+                throwOnError: true,
+              })
+            : googleToolkitV1AgentGooglePickerToken({
+                client: ctx.apiClient,
+                path: { ...path, agent_id: input.agentId },
+                body,
+                throwOnError: true,
+              }),
+      );
+      return data;
+    }),
   preparation: publicProcedure
     .input(toolkitScopedInput({}))
     .query(async ({ ctx, input }) => {

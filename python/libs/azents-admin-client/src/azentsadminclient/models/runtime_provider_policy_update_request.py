@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.runtime_provider_availability_mode import RuntimeProviderAvailabilityMode
 from azentsadminclient.models.runtime_provider_lifecycle_state import RuntimeProviderLifecycleState
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeProviderPolicyUpdateRequest(BaseModel):

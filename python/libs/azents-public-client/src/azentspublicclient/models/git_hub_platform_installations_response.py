@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.git_hub_installation_item import GitHubInstallationItem
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubPlatformInstallationsResponse(BaseModel):

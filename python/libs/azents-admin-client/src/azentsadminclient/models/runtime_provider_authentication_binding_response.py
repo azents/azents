@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod
 from azentsadminclient.models.runtime_provider_binding_owner import RuntimeProviderBindingOwner
 from azentsadminclient.models.runtime_provider_binding_state import RuntimeProviderBindingState
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeProviderAuthenticationBindingResponse(BaseModel):

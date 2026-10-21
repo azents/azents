@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.browser_task_response import BrowserTaskResponse
 from azentspublicclient.models.runtime_browser_reason_code import RuntimeBrowserReasonCode
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class BrowserProjectionResponse(BaseModel):

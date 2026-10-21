@@ -35,6 +35,22 @@ def test_patch_has_no_implicit_secret_or_client_mutation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_picker_patch_clears_key_without_changing_oauth() -> None:
+    service = create_autospec(GoogleApplicationService, instance=True)
+    await patch_google_oauth_setting(
+        service,
+        SystemAdmin(user_id="admin", session_id="login"),
+        {"expected_version": 2, "picker_api_key": None, "picker_app_id": "123456789"},
+    )
+    service.patch.assert_awaited_once_with(
+        expected_version=2,
+        config_patch={"picker_api_key": None, "picker_app_id": "123456789"},
+        secret_action=None,
+        actor_user_id="admin",
+    )
+
+
+@pytest.mark.asyncio
 async def test_empty_mutation_does_not_call_service() -> None:
     service = create_autospec(GoogleApplicationService, instance=True)
     with pytest.raises(HTTPException) as caught:

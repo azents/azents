@@ -20,7 +20,7 @@ from typing_extensions import Self
 
 class GoogleService(str, Enum):
     """
-    Fixed official Google Workspace MCP services.
+    Supported Google Workspace services.
     """
 
     """

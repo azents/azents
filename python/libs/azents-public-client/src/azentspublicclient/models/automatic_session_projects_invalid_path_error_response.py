@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.automatic_session_projects_invalid_path_detail import AutomaticSessionProjectsInvalidPathDetail
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AutomaticSessionProjectsInvalidPathErrorResponse(BaseModel):

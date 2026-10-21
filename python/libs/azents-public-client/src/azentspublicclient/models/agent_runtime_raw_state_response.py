@@ -25,7 +25,7 @@ from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLife
 from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState
 from azentspublicclient.models.runtime_provider_observed_state import RuntimeProviderObservedState
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeRawStateResponse(BaseModel):

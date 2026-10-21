@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeWebServiceResponse(BaseModel):

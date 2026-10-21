@@ -8,6 +8,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **expected_version** | **int** |  | 
 **client_id** | **str** |  | [optional] 
+**picker_api_key** | **str** |  | [optional] 
+**picker_app_id** | **str** |  | [optional] 
 **client_secret** | [**SystemSettingSecretActionRequest**](SystemSettingSecretActionRequest.md) |  | [optional] 
 
 ## Example

@@ -10,9 +10,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Annotated, ClassVar, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
-from azents.core.google_policy import GoogleTask
+from azents.core.google_workspace_policy import GoogleWorkspaceConfig
 from azents.core.mailbox_activity import MailboxActivityObserverProtocol
 from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.session_resource_authority import SessionResourceAuthority
@@ -519,13 +519,8 @@ class McpToolkitConfig(BaseModel):
     )
 
 
-class GoogleToolkitConfig(BaseModel):
-    """Google task selection; provider scopes do not silently select work."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    tasks: list[GoogleTask] = Field(min_length=1)
-    timeout: float = Field(default=30.0, gt=0, le=300, allow_inf_nan=False)
-    security_risk_acknowledged: bool
+class GoogleToolkitConfig(GoogleWorkspaceConfig):
+    """Saved service switches and future scope intent, not an operation ceiling."""
 
 
 class GitHubToolkitConfig(BaseModel):

@@ -1,23 +1,23 @@
 {
   "title": "Google 연결",
-  "selectionDetails": "선택한 작업과 제한 시간",
+  "selectionDetails": "서비스·요청할 접근 권한·제한 시간",
   "permissionDetails": "도구별 권한 자세히 보기",
   "permittedTools": "허용된 도구 식별자",
   "unavailableTools": "사용할 수 없는 도구 식별자",
   "reconnectTitle": "Google 재연결",
-  "intro": "하나의 Google 계정으로 선택한 Calendar, Drive, Gmail 작업을 사용합니다.",
+  "intro": "하나의 Google 계정으로 Calendar, Drive, Gmail을 연결합니다.",
   "reload": "상태 새로고침",
   "savedAccount": "저장된 Google 계정",
   "disconnect": "로컬 연결 해제",
   "disconnectTitle": "저장된 연결을 해제할까요?",
   "disconnectDescription": "로컬 인증 정보를 삭제하고 대기 중인 재연결을 중단합니다. Google에서 한 동의나 이미 완료된 작업을 되돌리지는 않습니다.",
   "keepConnection": "연결 유지",
-  "notLiveVerified": "권한 정보만으로 모든 리소스 접근이나 Google Preview 이용 자격이 확인되지는 않습니다.",
+  "notLiveVerified": "저장된 권한만으로 모든 리소스의 실제 접근이 확인되지는 않습니다. 계정 정책과 파일 접근 자격은 Google이 확인합니다.",
   "operatorRequired": "관리자 설정이 필요합니다",
   "operatorDescription": "시스템 관리자에게 Google OAuth 앱 설정을 요청하세요. 이 화면에서는 앱 비밀값을 입력하지 않습니다.",
   "preparationUnverified": "앱이 로컬에 설정되어 있습니다. 실제 Google 서비스 접근은 아직 검증되지 않았습니다.",
-  "selectTasks": "1. 사용할 작업 선택",
-  "selectDescription": "이 Toolkit에 필요한 작업만 선택하세요. Google이 일부 권한만 허용할 수 있으므로 저장 전에 실제 결과를 확인합니다.",
+  "selectServices": "1. 서비스와 접근 권한 선택",
+  "selectDescription": "이 Toolkit에서 사용할 서비스를 켜세요. 사용할 수 있는 작업은 아래 요청 항목만이 아니라 Google이 실제로 반환한 권한에 따라 결정됩니다.",
   "timeout": "도구 요청 제한 시간(초)",
   "authorize": "Google에서 동의하기",
   "authorizeAgain": "교체할 연결에 동의하기",
@@ -29,9 +29,9 @@
   "agentOwnership": "이 연결은 이 Agent만 소유합니다. 실행에는 대화 참여자의 계정이 아닌 저장된 계정이 사용됩니다.",
   "sharedOwnership": "Workspace 공유 연결입니다. 권한이 있는 사용자와 Agent가 이 계정으로 작업할 수 있습니다.",
   "personalOwnership": "내 계정이 소유하는 연결입니다. 허용한 Agent와의 내 개인 Session에서만 사용할 수 있습니다.",
-  "actualPermissions": "Google이 실제 반환한 권한입니다. 요청한 모든 작업이 허용되었다는 뜻은 아닙니다.",
+  "actualPermissions": "Google이 실제 반환한 권한입니다. 넓은 권한이 반환되면 켜진 서비스에서 요청 항목보다 더 많은 지원 작업을 사용할 수 있습니다.",
   "missingRenewal": "갱신 가능한 인증 정보가 반환되지 않았습니다. 이 후보는 저장할 수 없으며 새 동의 절차를 직접 시작해야 합니다.",
-  "includeTask": "저장할 연결에 이 작업 포함",
+  "includeService": "이 서비스를 켠 상태로 저장",
   "name": "Toolkit 이름",
   "slug": "도구 네임스페이스(선택)",
   "description": "설명",
@@ -39,9 +39,8 @@
   "enabled": "Toolkit 활성화",
   "alwaysExpose": "도구 항상 노출",
   "riskTitle": "Google 콘텐츠는 여전히 신뢰할 수 없습니다",
-  "riskDescription": "알려진 패턴 검사는 새로운 유형·의미 기반·난독화·다국어 공격을 놓치거나 정상 콘텐츠를 차단할 수 있습니다. 검사할 수 없는 콘텐츠는 차단됩니다. 완전한 방어나 Google 인증을 보장하지 않습니다.",
-  "noReplay": "응답이 차단되기 전에 Google 작업이 이미 완료되었을 수 있습니다. 쓰기 작업을 무작정 반복하지 마세요.",
-  "acknowledge": "콘텐츠 검사 한계와 이 연결의 소유 범위를 확인했습니다.",
+  "riskDescription": "메일·파일·일정 내용에 오해를 유도하는 지시가 포함될 수 있습니다. 외부 콘텐츠는 다른 작업을 허용하는 지시가 아닌 데이터로 취급하세요.",
+  "noReplay": "응답을 받지 못했거나 오류가 나도 Google의 쓰기 작업은 이미 완료되었을 수 있습니다. 무작정 반복하지 말고 결과를 확인하세요.",
   "save": "Google Toolkit 저장",
   "replace": "저장된 연결 교체",
   "cancel": "로컬 시도 폐기",
@@ -66,16 +65,17 @@
   "staleCallback": "현재 인증 문맥과 일치하지 않는 콜백입니다. 계정을 연결하거나 다른 시도를 취소하지 않았습니다.",
   "returnToSetup": "원래 설정으로 돌아가기",
   "access": {
+    "disabled": "서비스 꺼짐",
     "permitted": "허용됨",
     "partial": "일부 허용",
     "not_granted": "허용되지 않음",
     "unknown": "권한 확인 불가"
   },
   "grant": {
-    "full": "요청한 작업 권한이 허용되었습니다",
-    "partial": "요청한 작업 중 일부만 허용되었습니다",
-    "none": "선택한 작업을 사용할 수 없습니다",
-    "unknown": "허용된 권한을 확인하지 못했습니다"
+    "full": "요청한 scope 값이 반환되었습니다",
+    "partial": "Google이 요청과 다른 scope 값을 반환했습니다",
+    "none": "사용할 수 있는 지원 작업이 없습니다",
+    "unknown": "실제 허용된 scope를 확인할 수 없습니다"
   },
   "connection": {
     "not_connected": "연결 안 됨",
@@ -84,38 +84,59 @@
     "operator_setup_required": "관리자 설정 필요",
     "client_changed": "앱 변경됨 — 재연결 필요"
   },
-  "tasks": {
-    "calendar_read": {
-      "title": "캘린더와 일정 읽기",
-      "description": "캘린더 일정을 조회하고 내용을 확인합니다."
-    },
-    "calendar_availability": {
-      "title": "캘린더 빈 시간 확인",
-      "description": "일정의 바쁨·한가함 정보를 확인합니다."
-    },
-    "calendar_edit": {
-      "title": "캘린더 일정 편집",
-      "description": "일정을 만들거나 수정·삭제합니다."
-    },
-    "drive_read": {
-      "title": "Drive 파일 읽기",
-      "description": "이 계정이 접근할 수 있는 파일을 검색하고 확인합니다."
-    },
-    "drive_files": {
-      "title": "선택된 Drive 파일 작업",
-      "description": "앱에 허용된 파일만 사용합니다. Drive 전체 검색은 포함되지 않습니다."
-    },
-    "gmail_read": {
-      "title": "Gmail 읽기",
-      "description": "메일과 스레드를 찾고 내용을 확인합니다."
-    },
-    "gmail_drafts": {
-      "title": "Gmail 초안 관리",
-      "description": "메일 초안을 만들고 편집합니다. 메일 발송은 포함되지 않습니다."
-    },
-    "gmail_modify": {
-      "title": "Gmail 정리",
-      "description": "메일·스레드·라벨을 변경합니다. 메일 발송은 포함되지 않습니다."
-    }
-  }
+  "services": {
+    "calendar": "Calendar",
+    "drive": "Drive",
+    "gmail": "Gmail"
+  },
+  "requests": {
+    "gmailRead": "메일과 스레드 읽기",
+    "gmailCompose": "초안 관리와 메일 발송",
+    "gmailModify": "메일 읽기·정리·초안 작성·발송",
+    "gmailSend": "메일함 읽기 없이 새 메일 발송",
+    "gmailLabels": "라벨 관리",
+    "gmailMetadata": "본문을 제외한 메일 메타데이터 읽기",
+    "gmailSettings": "필터 관리 — 이후 메일의 자동 전달에 영향을 줄 수 있음",
+    "gmailFull": "넓은 Gmail 접근 — 지원하는 작업만 사용",
+    "calendarRead": "일정 읽기",
+    "calendarListRead": "캘린더 목록 읽기",
+    "calendarAvailability": "일정의 빈 시간 읽기",
+    "calendarEdit": "일정 만들기·수정·삭제",
+    "calendarCreate": "보조 캘린더 만들기와 앱에서 만든 캘린더 사용",
+    "calendarReadAll": "캘린더와 일정 읽기",
+    "calendarFull": "넓은 캘린더 접근 — 지원하는 작업만 사용",
+    "calendarFreebusy": "캘린더의 빈 시간 읽기",
+    "calendarOwned": "소유한 캘린더의 일정 편집",
+    "calendarOwnedRead": "소유한 캘린더의 일정 읽기",
+    "calendarPublicRead": "공개 일정 읽기",
+    "calendarCalendars": "캘린더 속성 관리",
+    "calendarListEdit": "캘린더 목록 항목 관리",
+    "driveFull": "Drive 전체 파일 읽기·변경 — 허용되는 경우 공유와 소유권 변경 포함",
+    "driveRead": "Drive 전체 파일 읽기와 내보내기",
+    "driveAppFiles": "앱에 허용된 파일 읽기·변경 — 읽기 전용 아님",
+    "driveMetadata": "Drive 전체 파일 메타데이터 읽기·변경",
+    "driveMetadataRead": "Drive 전체 파일 메타데이터 읽기"
+  },
+  "inactive": "모든 서비스가 꺼져 있습니다. 저장된 계정과 권한은 연결된 상태로 유지됩니다.",
+  "localServicesDescription": "Google 동의 없이 서비스 사용 여부만 저장합니다. 모두 꺼도 저장된 연결은 유지됩니다.",
+  "saveServices": "서비스 사용 설정 저장",
+  "serviceSaveFailed": "서비스 설정의 저장 결과를 확인하지 못했습니다. 새로고침된 상태를 확인한 뒤 다시 시도하세요.",
+  "requestAccess": "Google에 요청할 접근 권한",
+  "requestAccessDescription": "요청 변경은 Google 재연결을 직접 진행해야 적용됩니다. 실제로 받은 넓은 권한을 제한하지는 않습니다. 새 Drive 요청은 접근 가능한 전체 파일 읽기가 기본값입니다. 쓰기는 직접 선택하세요.",
+  "grantedScopeDetails": "실제 허용된 scope",
+  "driveExtentTitle": "실제 Drive 접근 범위",
+  "driveWholeRead": "Drive 전체의 파일 내용을 읽을 수 있습니다.",
+  "driveWholeWrite": "Drive 전체의 파일 내용을 변경할 수 있습니다. 개별 리소스와 작업 권한은 Google이 확인합니다.",
+  "driveAppWrite": "쓰기 범위는 앱에서 만들었거나 Google이 앱에 허용한 파일뿐입니다. Drive 전체 읽기 권한이 함께 있어도 쓰기 범위는 넓어지지 않습니다.",
+  "driveAppRead": "앱이 접근할 수 있는 파일만 읽습니다. 폴더를 선택해도 모든 하위 파일이 허용되지는 않습니다.",
+  "driveMetadataRead": "Drive 전체 메타데이터를 읽습니다. 파일 내용 읽기는 포함되지 않습니다.",
+  "driveMetadataWrite": "Drive 전체 메타데이터를 변경합니다. 파일 내용 쓰기는 포함되지 않습니다.",
+  "openPicker": "Google에서 Drive 파일 선택",
+  "closePicker": "파일 선택 닫기",
+  "pickerOperatorRequired": "관리자에게 선택 기능용 Google Picker API 키와 프로젝트 번호 설정을 요청하세요. 다른 Google 도구는 계속 사용할 수 있습니다.",
+  "pickerRequiresGrant": "Drive가 켜진 저장된 연결, 갱신 가능한 인증 정보, 실제 drive.file 권한이 필요합니다. 서비스 변경을 저장하거나 필요하면 재연결하세요.",
+  "pickerSelected": "Google에서 파일 {count}개를 선택했습니다. 접근 자격은 Google이 관리하며 로컬 허용 목록으로 저장하지 않습니다.",
+  "pickerCancelled": "선택 결과를 보관하지 않고 파일 선택을 닫았습니다.",
+  "pickerFailed": "Google 파일 선택을 사용할 수 없습니다. 연결 상태를 새로고침하고 관리자 설정을 확인한 뒤 다시 시도하세요.",
+  "pickerExpired": "파일 선택용 임시 인증 정보가 만료되었습니다. 선택 창을 다시 열어 새 인증 정보를 받으세요."
 }

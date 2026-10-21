@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.platform_git_hub_app_authorization_reason import PlatformGitHubAppAuthorizationReason
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubPlatformAuthorizationStateResponse(BaseModel):

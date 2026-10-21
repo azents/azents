@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.runtime_provider_authentication_binding_response import RuntimeProviderAuthenticationBindingResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeProviderAuthenticationBindingRotateResponse(BaseModel):

@@ -5,22 +5,14 @@ export function GoogleApplicationSetupGuide(): React.ReactElement {
     <Stack gap="sm">
       <Text size="sm">
         Set up one operator-owned OAuth application, then let users connect
-        their Google accounts from the Google Toolkit setup.
+        their Google accounts from Google Toolkit settings.
       </Text>
       <List type="ordered" spacing="md" size="sm">
         <List.Item>
           <Text size="sm" fw={600}>
-            Get Preview access and choose a Cloud project
+            Choose a Cloud project and enable the APIs
           </Text>
-          Confirm access to the{" "}
-          <Anchor
-            href="https://developers.google.com/workspace/preview"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Google Workspace Developer Preview Program
-          </Anchor>
-          . In the{" "}
+          In the{" "}
           <Anchor
             href="https://console.cloud.google.com/"
             target="_blank"
@@ -28,39 +20,20 @@ export function GoogleApplicationSetupGuide(): React.ReactElement {
           >
             Google Cloud console
           </Anchor>
-          , create or select the project that will own this OAuth application.
-          Use the same project for the following steps.
-        </List.Item>
-        <List.Item>
-          <Text size="sm" fw={600}>
-            Enable the Google services you plan to use
-          </Text>
-          In APIs &amp; Services → Library, enable Google Calendar API, Google
-          Drive API and Gmail API for the services you need. Also enable their
-          MCP services: <Code>calendarmcp.googleapis.com</Code>,{" "}
-          <Code>drivemcp.googleapis.com</Code> and{" "}
-          <Code>gmailmcp.googleapis.com</Code>. Follow Google&apos;s{" "}
-          <Anchor
-            href="https://developers.google.com/workspace/guides/configure-mcp-servers"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Workspace MCP setup guide
-          </Anchor>{" "}
-          for current Preview enrollment and service-enablement instructions.
-          Azents uses Calendar, Drive and Gmail, not every Workspace service
-          listed in that guide.
+          , create or select the project that owns the OAuth application. In
+          APIs &amp; Services → Library, enable Google Calendar API, Google
+          Drive API and Gmail API for the services you need. Azents uses their
+          supported direct APIs. Optional file selection also requires the
+          Google Picker API in the same project.
         </List.Item>
         <List.Item>
           <Text size="sm" fw={600}>
             Configure the OAuth consent screen
           </Text>
-          Open Google Auth Platform. In Branding, enter the app name, support
-          email and developer contact details. In Audience, choose Internal
-          (eligible Workspace organizations only) or External. If External is in
-          Testing, add each account that will connect under Test users. In Data
-          Access, add scopes for the tasks you intend to allow; see
-          Google&apos;s{" "}
+          In Google Auth Platform, configure Branding, Audience and Data Access.
+          Choose Internal for eligible Workspace organizations or External. For
+          an External application in Testing, add each connecting account under
+          Test users. Follow Google&apos;s{" "}
           <Anchor
             href="https://developers.google.com/workspace/guides/configure-oauth-consent"
             target="_blank"
@@ -68,50 +41,66 @@ export function GoogleApplicationSetupGuide(): React.ReactElement {
           >
             consent setup instructions
           </Anchor>
-          . Azents requests only the selected Toolkit tasks plus account
-          identity (openid and email). Publishing and any required Google
-          verification are separate from saving these settings.
+          . Add only the access requests you intend to offer, plus openid and
+          email for account identity. Publishing, restricted-scope verification
+          and account-policy eligibility remain separate Google requirements;
+          saving these settings does not verify them.
           <details>
-            <summary>OAuth scopes for supported tasks</summary>
+            <summary>
+              Examples of access requests and their consequences
+            </summary>
             <Stack gap="xs" mt="xs">
               <Text size="sm">
-                Add only the scopes for tasks you intend to offer, plus openid
-                and email for account identity. These are the exact service
-                scope values used by Azents:
+                Request choices construct consent, not an execution ceiling.
+                Actual returned scopes determine supported actions in each
+                enabled service.
               </Text>
               <Text size="sm" fw={600}>
-                Calendar: read, availability and edit
+                Calendar
               </Text>
               <Code
                 block
-                style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
-              >
-                {`https://www.googleapis.com/auth/calendar.calendarlist.readonly
-https://www.googleapis.com/auth/calendar.events.readonly
+              >{`https://www.googleapis.com/auth/calendar.events.readonly
+https://www.googleapis.com/auth/calendar.calendarlist.readonly
 https://www.googleapis.com/auth/calendar.events.freebusy
-https://www.googleapis.com/auth/calendar.events`}
-              </Code>
+https://www.googleapis.com/auth/calendar.events
+https://www.googleapis.com/auth/calendar.app.created`}</Code>
+              <Text size="sm">
+                Event editing includes deletion and supported status changes.
+                Secondary-calendar creation is a separate request.
+              </Text>
               <Text size="sm" fw={600}>
-                Drive: read and selected-file access
+                Drive
               </Text>
               <Code
                 block
                 style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
-              >
-                {`https://www.googleapis.com/auth/drive.readonly
-https://www.googleapis.com/auth/drive.file`}
-              </Code>
+              >{`https://www.googleapis.com/auth/drive
+https://www.googleapis.com/auth/drive.readonly
+https://www.googleapis.com/auth/drive.file`}</Code>
+              <Text size="sm">
+                New Drive requests default to whole-Drive read access; writing
+                must be chosen explicitly. App-file access is read/write, not
+                read-only. Whole-Drive read plus app-file access permits whole
+                reads but only app-file writes; selecting a folder does not
+                authorize every descendant.
+              </Text>
               <Text size="sm" fw={600}>
-                Gmail: read, drafts and modification
+                Gmail
               </Text>
               <Code
                 block
                 style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
-              >
-                {`https://www.googleapis.com/auth/gmail.readonly
+              >{`https://www.googleapis.com/auth/gmail.readonly
 https://www.googleapis.com/auth/gmail.compose
-https://www.googleapis.com/auth/gmail.modify`}
-              </Code>
+https://www.googleapis.com/auth/gmail.modify
+https://www.googleapis.com/auth/gmail.send
+https://www.googleapis.com/auth/gmail.settings.basic`}</Code>
+              <Text size="sm">
+                Compose and modify grants include supported sending; they are
+                not drafts-only or organize-only. Filter management can affect
+                future automatic forwarding.
+              </Text>
             </Stack>
           </details>
         </List.Item>
@@ -119,37 +108,54 @@ https://www.googleapis.com/auth/gmail.modify`}
           <Text size="sm" fw={600}>
             Create a Web application client and register the callback
           </Text>
-          Go to Google Auth Platform → Clients → Create Client. Choose Web
-          application and enter a name. Under Authorized redirect URIs (not
-          Authorized JavaScript origins), add the exact Registered callback URL
-          displayed below, then create the client. The scheme, host and path
-          must all match; do not add a trailing slash. If the URL is
-          unavailable, configure Azents&apos; public Web URL first.
+          Go to Google Auth Platform → Clients → Create Client, choose Web
+          application, and add the exact Registered callback URL under
+          Authorized redirect URIs. The scheme, host and path must match. If
+          unavailable, configure the public Web URL first.
         </List.Item>
         <List.Item>
           <Text size="sm" fw={600}>
-            Save the credentials here, then connect a Toolkit
+            Optionally prepare Google Picker
           </Text>
-          Copy Google&apos;s Client ID into Client ID below and its Client
-          secret into Client secret replacement, then select Save application
-          settings. Do not paste a downloaded client JSON file or share the
-          secret. Next, create a Google Toolkit in Azents, select the tasks you
-          need, connect a Google account, review the returned permissions and
-          security notice, and explicitly save the connection.
+          Enable the Google Picker API. Create a browser API key restricted to
+          the public Web origin using HTTP referrers and restrict its API use to
+          Google Picker. Enter the key and numeric Cloud project number below.
+          Use the same project as the OAuth application. See the{" "}
+          <Anchor
+            href="https://developers.google.com/workspace/drive/picker/guides/web-picker"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            official Picker integration guide
+          </Anchor>
+          . Picker needs an actual drive.file grant and a renewable saved
+          connection. No main account token is delivered to the browser;
+          unavailable minimal credentials leave other Google tools unaffected.
+        </List.Item>
+        <List.Item>
+          <Text size="sm" fw={600}>
+            Save credentials, then connect a Toolkit
+          </Text>
+          Save Client ID and Client secret replacement below. Do not share the
+          secret or paste a downloaded client JSON file. In Toolkit settings,
+          choose services and access requests, connect a Google account, review
+          actual permissions, then explicitly save. Later service switches save
+          locally without new consent. Changed access requests use ordinary
+          reconnection.
         </List.Item>
       </List>
       <Text size="sm" c="dimmed">
         Environment-managed installations can set{" "}
-        <Code>AZ_GOOGLE_OAUTH_CLIENT_ID</Code> and{" "}
-        <Code>AZ_GOOGLE_OAUTH_CLIENT_SECRET</Code> instead. A field supplied by
-        the process environment is read-only here; update it in the deployment
-        configuration.
+        <Code>AZ_GOOGLE_OAUTH_CLIENT_ID</Code>,{" "}
+        <Code>AZ_GOOGLE_OAUTH_CLIENT_SECRET</Code>, and optional{" "}
+        <Code>AZ_GOOGLE_PICKER_API_KEY</Code> /{" "}
+        <Code>AZ_GOOGLE_PICKER_APP_ID</Code>. Environment-owned fields are
+        read-only here.
       </Text>
       <Text size="sm" c="dimmed">
-        This screen saves the OAuth application, not a Google account
-        connection, and does not test Preview eligibility or live service
-        access. Google Toolkits do not expose Gmail sending. Drive selected-file
-        access (drive.file) does not enable whole-Drive search.
+        This screen saves application preparation, not an account connection,
+        and does not test live service access or Google verification. Actual
+        account and resource restrictions continue to apply.
       </Text>
     </Stack>
   );

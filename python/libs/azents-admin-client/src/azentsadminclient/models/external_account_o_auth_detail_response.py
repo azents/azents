@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.external_account_o_auth_field_response import ExternalAccountOAuthFieldResponse
 from azentsadminclient.models.external_account_o_auth_health_response import ExternalAccountOAuthHealthResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ExternalAccountOAuthDetailResponse(BaseModel):

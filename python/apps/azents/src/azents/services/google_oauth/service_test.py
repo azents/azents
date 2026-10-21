@@ -13,6 +13,8 @@ from azents.core.google_oauth import (
     GoogleAttempt,
     GoogleAttemptStatus,
     GoogleCandidate,
+    GoogleConnection,
+    GoogleConnectionStatus,
     GoogleIdentity,
     GoogleOAuthError,
     GooglePersonalSubject,
@@ -21,13 +23,17 @@ from azents.core.google_oauth import (
     GoogleSetup,
     GoogleSubject,
 )
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.toolkit_ownership import ToolkitOwnerKind, UserToolkitOwner
 from azents.repos.google_oauth.management import GoogleOAuthRepository
 from azents.repos.google_oauth.management_test import _settings
 from azents.services.google_application.service import GoogleApplicationService
-from azents.services.google_oauth.data import GoogleConnectInput
+from azents.services.google_oauth.data import (
+    GoogleConnectInput,
+    GoogleServicesUpdateInput,
+)
 from azents.services.google_oauth.provider import (
     GoogleOAuthProvider,
     GoogleTokenResponse,
@@ -71,7 +77,11 @@ def _harness(
         state_nonce="state",
         oidc_nonce="oidc",
         code_verifier="pkce",
-        tasks=(GoogleTask.CALENDAR_READ, GoogleTask.GMAIL_READ),
+        services=(GoogleService.CALENDAR, GoogleService.GMAIL),
+        oauth_request_scopes=(
+            "https://www.googleapis.com/auth/calendar.events.readonly",
+            "https://www.googleapis.com/auth/gmail.readonly",
+        ),
         timeout=30.0,
         target=None,
     )
@@ -132,6 +142,86 @@ def _harness(
         attempt,
         state,
     )
+
+
+async def test_all_off_save_remains_connected_without_provider_io() -> None:
+    h = _harness()
+    candidate = h.repo.stage.return_value.candidate
+    assert isinstance(candidate, GoogleCandidate)
+    connection = GoogleConnection(
+        "connection",
+        "toolkit",
+        "client",
+        candidate,
+        GoogleConnectionStatus.CONNECTED,
+        datetime.datetime.now(datetime.UTC),
+        "encrypted-current",
+    )
+    h.repo.saved.return_value = GoogleSavedConnection(
+        "toolkit",
+        8,
+        (),
+        ("https://www.googleapis.com/auth/calendar.events.readonly",),
+        30.0,
+        connection,
+    )
+    result = await h.service.update_services(
+        h.subject,
+        "toolkit",
+        GoogleServicesUpdateInput(expected_revision=7, services=()),
+    )
+    assert result.status == "connected" and result.services == ()
+    assert result.connection_id == connection.id and result.revision == 8
+    assert result.identity == candidate.identity and result.renewable
+    assert all(item.status == "disabled" for item in result.accesses)
+    h.repo.update_services.assert_awaited_once_with(
+        h.subject, toolkit_id="toolkit", expected_revision=7, services=()
+    )
+    h.provider.refresh.assert_not_awaited()
+    h.provider.exchange.assert_not_awaited()
+
+
+async def test_broader_receipt_exposes_actual_tools_outside_requested_intent() -> None:
+    h = _harness(scope="https://www.googleapis.com/auth/calendar")
+    result = await h.service.exchange(h.subject, code="CODE-SECRET", state=h.state)
+    calendar = next(
+        item for item in result.accesses if item.service is GoogleService.CALENDAR
+    )
+    assert Op.CALENDAR_CREATE_EVENT in calendar.permitted_tools
+    assert result.can_confirm and result.granted_scopes == (
+        "https://www.googleapis.com/auth/calendar",
+    )
+
+
+async def test_gmail_scope_receipt_difference_does_not_imply_read_or_send_denial() -> (
+    None
+):
+    h = _harness(scope="https://www.googleapis.com/auth/gmail.modify")
+    setup = h.attempt.setup
+    assert setup is not None
+    setup = setup.model_copy(
+        update={
+            "services": (GoogleService.GMAIL,),
+            "oauth_request_scopes": (
+                "openid",
+                "email",
+                "https://www.googleapis.com/auth/gmail.readonly",
+            ),
+        }
+    )
+    h.repo.claim.return_value = dataclasses.replace(h.attempt, setup=setup)
+    staged = h.repo.stage.return_value
+    assert isinstance(staged, GoogleAttempt)
+    h.repo.stage.return_value = dataclasses.replace(staged, setup=setup)
+    result = await h.service.exchange(h.subject, code="CODE-SECRET", state=h.state)
+    gmail = next(
+        item for item in result.accesses if item.service is GoogleService.GMAIL
+    )
+    assert result.grant_result == "partial"
+    assert result.can_confirm
+    assert result.granted_scopes == ("https://www.googleapis.com/auth/gmail.modify",)
+    assert Op.GMAIL_GET_MESSAGE in gmail.permitted_tools
+    assert Op.GMAIL_SEND_MESSAGE in gmail.permitted_tools
 
 
 async def test_personal_callback_is_distinct_and_returns_same_grant_review() -> None:
@@ -231,7 +321,7 @@ async def test_tampered_state_fails_without_plaintext_diagnostics() -> None:
         ("", "none", False),
         ("https://www.googleapis.com/auth/calendar.events.readonly", "partial", True),
         (
-            "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/gmail.readonly",
             "full",
             True,
         ),
@@ -317,7 +407,13 @@ async def test_start_returns_ciphertext_and_distinct_oidc_nonce() -> None:
     h.provider.authorization_url.return_value = "https://accounts.google.com/authorize"
     await h.service.connect(
         h.subject,
-        GoogleConnectInput(tasks=(GoogleTask.CALENDAR_READ,), timeout=30.0),
+        GoogleConnectInput(
+            services=(GoogleService.CALENDAR,),
+            oauth_request_scopes=(
+                "https://www.googleapis.com/auth/calendar.events.readonly",
+            ),
+            timeout=30.0,
+        ),
         target_toolkit_id=None,
     )
     encrypted = h.provider.authorization_url.call_args.args[1]
@@ -332,7 +428,9 @@ async def test_disconnected_status_has_no_identity_or_google_network_call() -> N
     h = _harness()
     h.repo.saved.return_value = GoogleSavedConnection(
         "toolkit",
-        (GoogleTask.CALENDAR_READ,),
+        1,
+        (GoogleService.CALENDAR,),
+        ("https://www.googleapis.com/auth/calendar.events.readonly",),
         30.0,
         None,
     )

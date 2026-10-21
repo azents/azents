@@ -10,11 +10,13 @@ from pydantic import ValidationError
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.google_system_setting import (
+    GoogleApplicationConfig,
     GoogleApplicationConfigPatch,
     GoogleApplicationDetail,
     GoogleApplicationRegistration,
     GoogleApplicationSecrets,
     GoogleApplicationUnavailable,
+    GooglePickerApplication,
     GooglePreparation,
     google_preparation,
     resolve_google_registration,
@@ -50,6 +52,22 @@ class GoogleApplicationService:
         current = await self._current()
         return resolve_google_registration(current, self.callback_url())
 
+    async def picker(self) -> GooglePickerApplication:
+        """Require optional browser fields without changing ordinary OAuth readiness."""
+        current = await self._current()
+        registration = resolve_google_registration(current, self.callback_url())
+        config = current.config
+        if not isinstance(config, GoogleApplicationConfig):
+            raise TypeError("Unexpected Google application config.")
+        if config.picker_api_key is None or config.picker_app_id is None:
+            raise GoogleApplicationUnavailable(
+                "Ask the operator to configure Google Picker browser API key "
+                "and project/app ID."
+            )
+        return GooglePickerApplication(
+            registration, config.picker_api_key, config.picker_app_id
+        )
+
     async def _current(self) -> ResolvedSystemSetting:
         try:
             return await self.settings.resolve(SystemSettingSection.GOOGLE_OAUTH)
@@ -84,13 +102,16 @@ class GoogleApplicationService:
             redirect_uri = None
         preparation = google_preparation(current, redirect_uri)
         secrets = current.secrets
+        configuration = current.config
         if not isinstance(secrets, GoogleApplicationSecrets):
             raise TypeError("Unexpected Google application secrets.")
+        if not isinstance(configuration, GoogleApplicationConfig):
+            raise TypeError("Unexpected Google application config.")
         return GoogleApplicationDetail(
             status=preparation.status,
             client_id=preparation.client_id,
             callback_url=preparation.callback_url,
-            preview_verified=False,
+            picker_status=preparation.picker_status,
             service_access_verified=False,
             section="google_oauth",
             schema_version=current.schema_version,
@@ -98,6 +119,10 @@ class GoogleApplicationService:
             client_id_source=current.field_sources["client_id"],
             client_secret_source=current.field_sources["client_secret"],
             client_secret_configured=secrets.client_secret is not None,
+            picker_api_key=configuration.picker_api_key,
+            picker_app_id=configuration.picker_app_id,
+            picker_api_key_source=current.field_sources["picker_api_key"],
+            picker_app_id_source=current.field_sources["picker_app_id"],
         )
 
     async def patch(

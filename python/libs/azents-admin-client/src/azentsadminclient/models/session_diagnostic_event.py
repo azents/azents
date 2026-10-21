@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.event_kind import EventKind
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SessionDiagnosticEvent(BaseModel):

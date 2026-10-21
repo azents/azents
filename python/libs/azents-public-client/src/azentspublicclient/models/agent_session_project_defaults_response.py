@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.agent_session_project_defaults_response_items_inner import AgentSessionProjectDefaultsResponseItemsInner
 from azentspublicclient.models.agent_session_project_defaults_source_response import AgentSessionProjectDefaultsSourceResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentSessionProjectDefaultsResponse(BaseModel):

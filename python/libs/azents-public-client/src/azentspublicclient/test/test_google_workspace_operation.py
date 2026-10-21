@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.google_task import GoogleTask
+from azentspublicclient.models.google_workspace_operation import GoogleWorkspaceOperation
 
-class TestGoogleTask(unittest.TestCase):
-    """GoogleTask unit test stubs"""
+class TestGoogleWorkspaceOperation(unittest.TestCase):
+    """GoogleWorkspaceOperation unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,9 +25,9 @@ class TestGoogleTask(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def testGoogleTask(self):
-        """Test GoogleTask"""
-        # inst = GoogleTask()
+    def testGoogleWorkspaceOperation(self):
+        """Test GoogleWorkspaceOperation"""
+        # inst = GoogleWorkspaceOperation()
 
 if __name__ == '__main__':
     unittest.main()

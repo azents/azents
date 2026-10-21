@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
 from azentspublicclient.models.runtime_network_projection import RuntimeNetworkProjection
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SelectableInfrastructureProfileResponse(BaseModel):
