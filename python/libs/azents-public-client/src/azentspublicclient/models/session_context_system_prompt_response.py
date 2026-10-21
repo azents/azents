@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.session_context_system_prompt_fragment_response import SessionContextSystemPromptFragmentResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SessionContextSystemPromptResponse(BaseModel):

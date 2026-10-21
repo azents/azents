@@ -1,14 +1,14 @@
 # GoogleReconnectSettings
 
-Reconnect changes authentication selection, not unrelated saved metadata.
+Reconnect changes reviewed request intent, not unrelated saved metadata.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**tasks** | [**List[GoogleTask]**](GoogleTask.md) |  | 
+**services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**oauth_request_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
-**security_risk_acknowledged** | **bool** |  | 
 
 ## Example
 

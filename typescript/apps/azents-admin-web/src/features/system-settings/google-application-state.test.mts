@@ -10,7 +10,11 @@ const detail: GoogleApplicationDetail = {
   status: "configured_unverified",
   client_id: "operator-client",
   callback_url: "https://app.example.invalid/oauth/google/callback",
-  preview_verified: false,
+  picker_status: "not_configured",
+  picker_api_key: null,
+  picker_app_id: null,
+  picker_api_key_source: "unset",
+  picker_app_id_source: "unset",
   service_access_verified: false,
   section: "google_oauth",
   schema_version: 1,
@@ -49,5 +53,31 @@ void test("Google operator replacement binds optimistic version and exact submit
     googleApplicationPatch({ ...draft, clearSecret: true }, 4).client_secret
       ?.action,
     "clear",
+  );
+});
+
+void test("Optional Picker fields preserve omission, environment display and explicit clears", () => {
+  const draft = googleApplicationDraft({
+    ...detail,
+    picker_api_key: "browser-key",
+    picker_api_key_source: "environment",
+    picker_app_id: "1234",
+    picker_app_id_source: "admin",
+  });
+  assert.equal(draft.pickerApiKey, "browser-key");
+  assert.equal(draft.pickerAppId, "1234");
+  assert.deepEqual(googleApplicationPatch(draft, 4), { expected_version: 4 });
+  assert.deepEqual(
+    googleApplicationPatch(
+      {
+        ...draft,
+        pickerApiKey: " ",
+        pickerApiKeyTouched: true,
+        pickerAppId: "4567",
+        pickerAppIdTouched: true,
+      },
+      4,
+    ),
+    { expected_version: 4, picker_api_key: null, picker_app_id: "4567" },
   );
 });

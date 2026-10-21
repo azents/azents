@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.price_metric import PriceMetric
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class CatalogPriceIssue(BaseModel):

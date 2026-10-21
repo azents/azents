@@ -1,5 +1,6 @@
 """Redacted preparation and one current operator authority."""
 
+import dataclasses
 from unittest.mock import create_autospec
 
 import pytest
@@ -29,6 +30,8 @@ def _current(client: str | None, secret: str | None) -> ResolvedSystemSetting:
         field_sources={
             "client_id": SystemSettingFieldSource.ADMIN,
             "client_secret": SystemSettingFieldSource.ENVIRONMENT,
+            "picker_api_key": SystemSettingFieldSource.UNSET,
+            "picker_app_id": SystemSettingFieldSource.UNSET,
         },
         effective_generation="INTERNAL-GENERATION",
     )
@@ -48,7 +51,7 @@ async def test_detail_never_projects_secret_or_generation_or_claims_live_access(
     assert detail.client_secret_configured
     assert detail.client_secret_source is SystemSettingFieldSource.ENVIRONMENT
     assert detail.callback_url == "https://app.example.invalid/oauth/google/callback"
-    assert not detail.preview_verified
+    assert detail.picker_status == "not_configured"
     assert not detail.service_access_verified
     assert "SECRET-ONLY" not in encoded
     assert "INTERNAL-GENERATION" not in encoded
@@ -109,6 +112,58 @@ async def test_explicit_null_patch_is_distinct_from_omission() -> None:
     assert mutation.config_patch == {"client_id": None}
     assert mutation.secret_actions == {}
     assert mutation.actor_user_id == "admin"
+
+
+@pytest.mark.parametrize(
+    "key,app_id,picker_status",
+    [
+        (None, None, "not_configured"),
+        ("BROWSER-KEY", None, "incomplete"),
+        (None, "123456789", "incomplete"),
+        ("BROWSER-KEY", "123456789", "configured_unverified"),
+    ],
+)
+async def test_optional_picker_preparation_preserves_normal_oauth_readiness(
+    key: str | None,
+    app_id: str | None,
+    picker_status: str,
+) -> None:
+    current = _current("client", "SERVER-SECRET")
+    current = dataclasses.replace(
+        current,
+        config=GoogleApplicationConfig(
+            client_id="client", picker_api_key=key, picker_app_id=app_id
+        ),
+        field_sources={
+            **current.field_sources,
+            "picker_api_key": SystemSettingFieldSource.UNSET
+            if key is None
+            else SystemSettingFieldSource.ADMIN,
+            "picker_app_id": SystemSettingFieldSource.UNSET
+            if app_id is None
+            else SystemSettingFieldSource.ADMIN,
+        },
+    )
+    settings = create_autospec(SystemSettingsService, instance=True)
+    settings.resolve.return_value = current
+    config = create_autospec(Config, instance=True)
+    config.web_url = "https://app.example.invalid"
+    application = GoogleApplicationService(settings, config)
+    assert (await application.resolve()).client_id == "client"
+    assert await application.creation_available()
+    preparation = await application.preparation()
+    assert preparation.status == "configured_unverified"
+    assert preparation.picker_status == picker_status
+    assert "BROWSER-KEY" not in preparation.model_dump_json()
+    if key is None or app_id is None:
+        with pytest.raises(GoogleApplicationUnavailable, match="Picker"):
+            await application.picker()
+    else:
+        picker = await application.picker()
+        assert picker.api_key == key and picker.app_id == app_id
+        assert picker.registration.effective_generation == current.effective_generation
+        assert "BROWSER-KEY" not in repr(picker)
+        assert "SERVER-SECRET" not in repr(picker)
 
 
 @pytest.mark.asyncio

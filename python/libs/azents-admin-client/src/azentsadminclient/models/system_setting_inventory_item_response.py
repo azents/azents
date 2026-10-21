@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.platform_git_hub_app_effective_status import PlatformGitHubAppEffectiveStatus
 from azentsadminclient.models.system_setting_validation_status import SystemSettingValidationStatus
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SystemSettingInventoryItemResponse(BaseModel):

@@ -11,7 +11,7 @@ from azents.core.google_oauth import (
     GoogleOAuthError,
     GoogleTokens,
 )
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_system_setting import (
     GoogleApplicationConfig,
     GoogleApplicationRegistration,
@@ -61,8 +61,11 @@ async def test_google_personal_current_admission_and_post_gap_refresh_publicatio
             update={
                 "toolkit_type": "google",
                 "config": {
-                    "tasks": [GoogleTask.CALENDAR_READ.value],
-                    "security_risk_acknowledged": True,
+                    "services": [GoogleService.CALENDAR.value],
+                    "oauth_request_scopes": [
+                        "https://www.googleapis.com/auth/calendar.events.readonly"
+                    ],
+                    "timeout": 30.0,
                 },
                 "credentials": None,
             }

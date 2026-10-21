@@ -20,12 +20,12 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.google_published_output import GooglePublishedOutput
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleCancelOutput(BaseModel):
     """
-    Publication won the race or candidate was locally abandoned.
+    Publication won the race or the candidate was locally abandoned.
     """ # noqa: E501
     cancelled: StrictBool
     publication: Optional[GooglePublishedOutput]

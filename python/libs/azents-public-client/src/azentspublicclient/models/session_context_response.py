@@ -24,7 +24,7 @@ from azentspublicclient.models.session_context_raw_event_response import Session
 from azentspublicclient.models.session_context_session_response import SessionContextSessionResponse
 from azentspublicclient.models.session_context_stats_response import SessionContextStatsResponse
 from azentspublicclient.models.session_context_system_prompt_response import SessionContextSystemPromptResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SessionContextResponse(BaseModel):

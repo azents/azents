@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict
 from azentspublicclient.models.google_reconnect_settings import GoogleReconnectSettings
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleReconnectConfirmRequest(BaseModel):

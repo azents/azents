@@ -7,7 +7,12 @@ from typing import assert_never
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
+from azents.core.google_workspace_policy import (
+    GoogleWorkspaceConfig,
+    GoogleWorkspaceConnectInput,
+    GoogleWorkspaceFinalSettings,
+)
 from azents.core.toolkit_ownership import (
     AgentToolkitOwner,
     ToolkitOwner,
@@ -139,7 +144,7 @@ class GoogleCandidate(BaseModel):
     requested_scopes: tuple[str, ...]
 
 
-class GoogleSavedTarget(BaseModel):
+class GoogleSavedTarget(GoogleWorkspaceConfig):
     """Reconnect authority comparison excludes routine access-token renewal."""
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
@@ -149,12 +154,9 @@ class GoogleSavedTarget(BaseModel):
     subject: str | None
     granted_scopes: tuple[str, ...] | None
     status: GoogleConnectionStatus | None
-    tasks: tuple[GoogleTask, ...]
-    timeout: float
-    security_risk_acknowledged: bool
 
 
-class GoogleSetup(BaseModel):
+class GoogleSetup(GoogleWorkspaceConnectInput):
     """Encrypted attempt inputs; OAuth state and OIDC nonce remain distinct."""
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
@@ -164,33 +166,15 @@ class GoogleSetup(BaseModel):
     state_nonce: str = Field(repr=False)
     oidc_nonce: str = Field(repr=False)
     code_verifier: str = Field(repr=False)
-    tasks: tuple[GoogleTask, ...]
-    timeout: float
     target: GoogleSavedTarget | None
 
 
-class GoogleFinalSettings(BaseModel):
-    """Complete final reviewed settings; no provider permission booleans accepted."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    name: str | None = Field(max_length=255)
-    slug: str | None
-    description: str | None
-    prompt: str | None
-    enabled: bool
-    always_expose_tools: bool
-    tasks: tuple[GoogleTask, ...]
-    timeout: float = Field(gt=0, le=300, allow_inf_nan=False)
-    security_risk_acknowledged: bool = Field(strict=True)
+class GoogleFinalSettings(GoogleWorkspaceFinalSettings):
+    """Complete reviewed metadata and service/request settings; never grants."""
 
 
-class GoogleReconnectSettings(BaseModel):
-    """Reconnect changes authentication selection, not unrelated saved metadata."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    tasks: tuple[GoogleTask, ...]
-    timeout: float = Field(gt=0, le=300, allow_inf_nan=False)
-    security_risk_acknowledged: bool = Field(strict=True)
+class GoogleReconnectSettings(GoogleWorkspaceConfig):
+    """Reconnect changes reviewed request intent, not unrelated saved metadata."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -235,6 +219,8 @@ class GoogleSavedConnection:
     """Management-only current state; never return credentials directly."""
 
     toolkit_id: str
-    tasks: tuple[GoogleTask, ...]
+    revision: int
+    services: tuple[GoogleService, ...]
+    oauth_request_scopes: tuple[str, ...]
     timeout: float
     connection: GoogleConnection | None = dataclasses.field(repr=False)

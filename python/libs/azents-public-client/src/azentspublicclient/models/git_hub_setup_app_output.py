@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.git_hub_setup_app_identity import GitHubSetupAppIdentity
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubSetupAppOutput(BaseModel):

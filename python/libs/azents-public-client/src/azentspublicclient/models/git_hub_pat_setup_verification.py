@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict
 from typing_extensions import Annotated
 from azentspublicclient.models.git_hub_setup_transport import GitHubSetupTransport
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubPATSetupVerification(BaseModel):

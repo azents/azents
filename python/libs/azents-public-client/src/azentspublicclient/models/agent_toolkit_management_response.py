@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.agent_toolkit_management_item_response import AgentToolkitManagementItemResponse
 from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentToolkitManagementResponse(BaseModel):

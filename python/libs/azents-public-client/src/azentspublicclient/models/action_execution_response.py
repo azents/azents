@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.action import Action
 from azentspublicclient.models.json_value import JSONValue
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ActionExecutionResponse(BaseModel):

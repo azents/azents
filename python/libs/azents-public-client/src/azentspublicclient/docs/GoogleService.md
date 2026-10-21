@@ -1,6 +1,6 @@
 # GoogleService
 
-Fixed official Google Workspace MCP services.
+Supported Google Workspace services.
 
 ## Enum
 

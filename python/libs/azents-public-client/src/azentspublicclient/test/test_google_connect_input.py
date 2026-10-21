@@ -35,15 +35,21 @@ class TestGoogleConnectInput(unittest.TestCase):
         model = GoogleConnectInput()
         if include_optional:
             return GoogleConnectInput(
-                tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
+                    ],
+                oauth_request_scopes = [
+                    ''
                     ],
                 timeout = 1.337
             )
         else:
             return GoogleConnectInput(
-                tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
+                    ],
+                oauth_request_scopes = [
+                    ''
                     ],
                 timeout = 1.337,
         )

@@ -324,17 +324,21 @@ __all__ = [
     "GoogleConnectInput",
     "GoogleConnectOutput",
     "GoogleConnectionOutput",
+    "GoogleDriveAccess",
     "GoogleExchangeRequest",
     "GoogleFinalSettings",
     "GoogleIdentity",
+    "GooglePickerTokenInput",
+    "GooglePickerTokenOutput",
     "GooglePreparation",
     "GooglePublishedOutput",
     "GoogleReconnectConfirmRequest",
     "GoogleReconnectSettings",
     "GoogleReview",
     "GoogleService",
-    "GoogleTask",
-    "GoogleTaskAccess",
+    "GoogleServiceAccess",
+    "GoogleServicesUpdateInput",
+    "GoogleWorkspaceOperation",
     "HTTPValidationError",
     "HealthStatus",
     "HistoricalMemoryListResponse",
@@ -1013,17 +1017,21 @@ from azentspublicclient.models.google_confirm_request import GoogleConfirmReques
 from azentspublicclient.models.google_connect_input import GoogleConnectInput as GoogleConnectInput
 from azentspublicclient.models.google_connect_output import GoogleConnectOutput as GoogleConnectOutput
 from azentspublicclient.models.google_connection_output import GoogleConnectionOutput as GoogleConnectionOutput
+from azentspublicclient.models.google_drive_access import GoogleDriveAccess as GoogleDriveAccess
 from azentspublicclient.models.google_exchange_request import GoogleExchangeRequest as GoogleExchangeRequest
 from azentspublicclient.models.google_final_settings import GoogleFinalSettings as GoogleFinalSettings
 from azentspublicclient.models.google_identity import GoogleIdentity as GoogleIdentity
+from azentspublicclient.models.google_picker_token_input import GooglePickerTokenInput as GooglePickerTokenInput
+from azentspublicclient.models.google_picker_token_output import GooglePickerTokenOutput as GooglePickerTokenOutput
 from azentspublicclient.models.google_preparation import GooglePreparation as GooglePreparation
 from azentspublicclient.models.google_published_output import GooglePublishedOutput as GooglePublishedOutput
 from azentspublicclient.models.google_reconnect_confirm_request import GoogleReconnectConfirmRequest as GoogleReconnectConfirmRequest
 from azentspublicclient.models.google_reconnect_settings import GoogleReconnectSettings as GoogleReconnectSettings
 from azentspublicclient.models.google_review import GoogleReview as GoogleReview
 from azentspublicclient.models.google_service import GoogleService as GoogleService
-from azentspublicclient.models.google_task import GoogleTask as GoogleTask
-from azentspublicclient.models.google_task_access import GoogleTaskAccess as GoogleTaskAccess
+from azentspublicclient.models.google_service_access import GoogleServiceAccess as GoogleServiceAccess
+from azentspublicclient.models.google_services_update_input import GoogleServicesUpdateInput as GoogleServicesUpdateInput
+from azentspublicclient.models.google_workspace_operation import GoogleWorkspaceOperation as GoogleWorkspaceOperation
 from azentspublicclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus
 from azentspublicclient.models.historical_memory_list_response import HistoricalMemoryListResponse as HistoricalMemoryListResponse

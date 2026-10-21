@@ -18,6 +18,9 @@ def _scope(name: str) -> str:
     return _FULL_MAIL if name == "mail" else _SCOPE_PREFIX + name
 
 
+GOOGLE_PICKER_SCOPE = _scope("drive.file")
+
+
 # Only supported Workspace access requests belong here. Actual receipt evidence is
 # retained verbatim elsewhere, including unknown scopes; it is not request input.
 REQUEST_SCOPE_SERVICES = MappingProxyType(
@@ -650,6 +653,16 @@ def eligible_operations(
         for policy in GOOGLE_WORKSPACE_OPERATIONS.values()
         if policy.service in services and policy.permits(granted)
     )
+
+
+def eligible_model_operations(
+    services: tuple[GoogleService, ...],
+    actual_scopes: tuple[str, ...] | None,
+) -> frozenset[GoogleWorkspaceOperation]:
+    """Retain internal prerequisites for admission, not model-facing capability."""
+    return eligible_operations(services, actual_scopes) - {
+        GoogleWorkspaceOperation.GMAIL_GET_SEND_AS
+    }
 
 
 def operation_permitted(

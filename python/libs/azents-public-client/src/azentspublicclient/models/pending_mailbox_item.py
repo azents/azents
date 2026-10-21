@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.presentation import Presentation
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class PendingMailboxItem(BaseModel):

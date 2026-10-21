@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.runtime_provider_operational_warning_response import RuntimeProviderOperationalWarningResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeProviderOperationalDiagnosticsResponse(BaseModel):

@@ -1,23 +1,23 @@
 {
   "title": "Connect Google",
-  "selectionDetails": "Task selection and timeout",
+  "selectionDetails": "Services, access requests and timeout",
   "permissionDetails": "Inspect exact tool permissions",
   "permittedTools": "Permitted tool identifiers",
   "unavailableTools": "Unavailable tool identifiers",
   "reconnectTitle": "Reconnect Google",
-  "intro": "Use one Google account for the Calendar, Drive and Gmail tasks you choose.",
+  "intro": "Connect Calendar, Drive and Gmail using one Google account.",
   "reload": "Reload status",
   "savedAccount": "Saved Google account",
   "disconnect": "Disconnect locally",
   "disconnectTitle": "Remove this saved connection?",
   "disconnectDescription": "This removes the local credentials and stops pending reconnections. It does not revoke Google consent or undo completed operations.",
   "keepConnection": "Keep connection",
-  "notLiveVerified": "Permission evidence does not verify access to every resource or Google Preview eligibility.",
+  "notLiveVerified": "Saved permissions do not verify live access to every resource. Google still enforces account policy and file eligibility.",
   "operatorRequired": "Administrator preparation required",
   "operatorDescription": "Ask a system administrator to configure the Google OAuth application. Application secrets are not entered here.",
   "preparationUnverified": "The application is configured locally. Live Google service access has not been verified.",
-  "selectTasks": "1. Choose tasks",
-  "selectDescription": "Choose only the tasks this Toolkit needs. Google may grant fewer permissions; you will review the actual result before saving.",
+  "selectServices": "1. Choose services and access",
+  "selectDescription": "Enable the services this Toolkit should use. Available actions depend on the actual permissions returned by Google, not only the access requested below.",
   "timeout": "Tool request timeout (seconds)",
   "authorize": "Continue to Google",
   "authorizeAgain": "Authorize replacement connection",
@@ -29,9 +29,9 @@
   "agentOwnership": "This connection belongs only to this Agent. Runs use this saved account, not a participant's account.",
   "sharedOwnership": "Workspace-shared connection: authorized users and Agents may act using this saved account.",
   "personalOwnership": "This connection belongs to your account. Only your personal Sessions with allowed Agents can use it.",
-  "actualPermissions": "These are Google's returned permissions, not a claim that all requested tasks were granted.",
+  "actualPermissions": "These are Google's actual returned permissions. A broader grant may enable more supported actions in an enabled service than the request labels suggest.",
   "missingRenewal": "No renewable credential was returned. This candidate cannot be saved; start a new explicit authorization.",
-  "includeTask": "Keep this task in the saved connection",
+  "includeService": "Keep this service enabled",
   "name": "Toolkit name",
   "slug": "Tool namespace (optional)",
   "description": "Description",
@@ -39,9 +39,8 @@
   "enabled": "Enable Toolkit",
   "alwaysExpose": "Always expose tools",
   "riskTitle": "Google content remains untrusted",
-  "riskDescription": "Known-pattern screening can miss novel, semantic, obfuscated or multilingual attacks, and can reject harmless content. Uninspectable content is blocked. Screening is not complete prevention or Google certification.",
-  "noReplay": "A blocked response may follow an already completed Google operation. Do not blindly repeat a write.",
-  "acknowledge": "I have reviewed these screening limits and the ownership of this connection.",
+  "riskDescription": "Messages, files and calendar content can contain misleading instructions. Treat their content as data, not authorization to perform another action.",
+  "noReplay": "A missing or failed response can follow a completed Google write. Check the result instead of blindly repeating the operation.",
   "save": "Save Google Toolkit",
   "replace": "Replace saved connection",
   "cancel": "Discard local attempt",
@@ -66,16 +65,17 @@
   "staleCallback": "This callback does not match the active authorization context. No account was attached and no other attempt was cancelled.",
   "returnToSetup": "Return to the original setup",
   "access": {
+    "disabled": "Service off",
     "permitted": "Permitted",
     "partial": "Partially permitted",
     "not_granted": "Not granted",
     "unknown": "Unknown permissions"
   },
   "grant": {
-    "full": "Requested task permissions granted",
-    "partial": "Only part of the requested work is permitted",
-    "none": "No selected task is usable",
-    "unknown": "Granted permissions could not be verified"
+    "full": "Requested scope values returned",
+    "partial": "Google returned different scope values",
+    "none": "No supported actions are usable",
+    "unknown": "Granted scope evidence is unavailable"
   },
   "connection": {
     "not_connected": "Not connected",
@@ -84,38 +84,59 @@
     "operator_setup_required": "Administrator preparation required",
     "client_changed": "Application changed — reconnect required"
   },
-  "tasks": {
-    "calendar_read": {
-      "title": "Read calendars and events",
-      "description": "List and inspect calendar events."
-    },
-    "calendar_availability": {
-      "title": "Check calendar availability",
-      "description": "Check free/busy information."
-    },
-    "calendar_edit": {
-      "title": "Edit calendar events",
-      "description": "Create, update or delete events."
-    },
-    "drive_read": {
-      "title": "Read Drive files",
-      "description": "Search and inspect files accessible to this account."
-    },
-    "drive_files": {
-      "title": "Work with selected Drive files",
-      "description": "Access app-authorized files only; this does not enable whole-Drive search."
-    },
-    "gmail_read": {
-      "title": "Read Gmail",
-      "description": "Find and inspect messages and threads."
-    },
-    "gmail_drafts": {
-      "title": "Manage Gmail drafts",
-      "description": "Create and edit drafts. Sending mail is not included."
-    },
-    "gmail_modify": {
-      "title": "Organize Gmail",
-      "description": "Modify messages, threads and labels. Sending mail is not included."
-    }
-  }
+  "services": {
+    "calendar": "Calendar",
+    "drive": "Drive",
+    "gmail": "Gmail"
+  },
+  "requests": {
+    "gmailRead": "Read mail and threads",
+    "gmailCompose": "Manage drafts and send mail",
+    "gmailModify": "Read, organize, draft and send mail",
+    "gmailSend": "Send new mail without mailbox reads",
+    "gmailLabels": "Manage labels",
+    "gmailMetadata": "Read mail metadata, not message bodies",
+    "gmailSettings": "Manage filters — may affect future mail forwarding",
+    "gmailFull": "Broad Gmail access — supported actions only",
+    "calendarRead": "Read events",
+    "calendarListRead": "List calendars",
+    "calendarAvailability": "Read event availability",
+    "calendarEdit": "Create, edit and delete events",
+    "calendarCreate": "Create secondary calendars and use app-created calendars",
+    "calendarReadAll": "Read calendars and events",
+    "calendarFull": "Broad calendar access — supported actions only",
+    "calendarFreebusy": "Read calendar availability",
+    "calendarOwned": "Edit events on owned calendars",
+    "calendarOwnedRead": "Read events on owned calendars",
+    "calendarPublicRead": "Read public events",
+    "calendarCalendars": "Manage calendar properties",
+    "calendarListEdit": "Manage calendar-list entries",
+    "driveFull": "Read and change files across Drive — including sharing and ownership where allowed",
+    "driveRead": "Read and export files across Drive",
+    "driveAppFiles": "Read and change app-authorized files — not read-only",
+    "driveMetadata": "Read and change file metadata across Drive",
+    "driveMetadataRead": "Read file metadata across Drive"
+  },
+  "inactive": "All services are off. The saved account and grant remain connected.",
+  "localServicesDescription": "Save service switches locally without Google consent. Turning every service off keeps the saved connection.",
+  "saveServices": "Save service switches",
+  "serviceSaveFailed": "The service-save result could not be confirmed. Review refreshed status before retrying.",
+  "requestAccess": "Access to request from Google",
+  "requestAccessDescription": "Changing these requests takes effect only through explicit Google reconnection. It does not restrict a broader actual grant. New Drive requests default to reading all accessible files. Choose write access explicitly.",
+  "grantedScopeDetails": "Actual granted scopes",
+  "driveExtentTitle": "Actual Drive access",
+  "driveWholeRead": "Read content across Drive.",
+  "driveWholeWrite": "Change content across Drive; Google still checks each resource and action.",
+  "driveAppWrite": "Write only app-created or Google-authorized app files, even when whole-Drive reads are also granted.",
+  "driveAppRead": "Read only eligible app files. Selecting a folder does not authorize all descendants.",
+  "driveMetadataRead": "Read metadata across Drive; this does not grant content reads.",
+  "driveMetadataWrite": "Change metadata across Drive; this does not grant content writes.",
+  "openPicker": "Choose Drive files with Google",
+  "closePicker": "Close file chooser",
+  "pickerOperatorRequired": "Ask an administrator to configure the optional Google Picker API key and project number. Other Google tools remain available.",
+  "pickerRequiresGrant": "Picker requires a saved, renewable connection with Drive enabled and an actual drive.file grant. Save service changes or reconnect if needed.",
+  "pickerSelected": "{count, plural, one {# file selected in Google} other {# files selected in Google}}. Google controls eligibility; this is not a local access list.",
+  "pickerCancelled": "File selection closed without retaining a selection.",
+  "pickerFailed": "Google file selection is unavailable. Reload the connection and check administrator preparation before trying again.",
+  "pickerExpired": "The temporary file-selection credential expired. Open the chooser again for a new credential."
 }

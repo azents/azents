@@ -25,7 +25,7 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.model_capabilities import ModelCapabilities
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from azentspublicclient.models.model_pricing_definition import ModelPricingDefinition
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentModelSelection(BaseModel):

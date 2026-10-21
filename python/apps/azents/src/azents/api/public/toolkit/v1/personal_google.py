@@ -13,9 +13,13 @@ from azents.services.google_oauth.data import (
     GoogleConnectInput,
     GoogleConnectionOutput,
     GoogleConnectOutput,
+    GooglePickerTokenInput,
+    GooglePickerTokenOutput,
     GooglePublishedOutput,
     GoogleReview,
+    GoogleServicesUpdateInput,
 )
+from azents.services.google_oauth.picker import GooglePickerService
 from azents.services.google_oauth.service import GoogleOAuthService
 
 from .google import (
@@ -29,6 +33,7 @@ from .google import (
 router = APIRouter(prefix="/workspaces/{handle}", route_class=GoogleRoute)
 Account = Annotated[WorkspaceMember, Depends(get_workspace_member)]
 Service = Annotated[GoogleOAuthService, Depends(GoogleOAuthService)]
+Picker = Annotated[GooglePickerService, Depends(GooglePickerService)]
 
 
 def _subject(account: WorkspaceMember) -> GooglePersonalSubject:
@@ -142,6 +147,32 @@ async def personal_google_status(
     """Return the same redacted grant/readiness information as other owners."""
     with _errors():
         return await service.status(_subject(account), toolkit_id)
+
+
+@router.post("/personal-toolkit-configs/{toolkit_id}/google/picker-token")
+async def personal_google_picker_token(
+    account: Account,
+    picker: Picker,
+    toolkit_id: str,
+    expected: GooglePickerTokenInput,
+    response: Response,
+) -> GooglePickerTokenOutput:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    with _errors():
+        return await picker.issue(_subject(account), toolkit_id, expected)
+
+
+@router.patch("/personal-toolkit-configs/{toolkit_id}/google/services")
+async def personal_google_services(
+    account: Account,
+    service: Service,
+    toolkit_id: str,
+    desired: GoogleServicesUpdateInput,
+) -> GoogleConnectionOutput:
+    """Save personal service switches without replacing the connected identity."""
+    with _errors():
+        return await service.update_services(_subject(account), toolkit_id, desired)
 
 
 @router.delete("/personal-toolkit-configs/{toolkit_id}/google/connection")

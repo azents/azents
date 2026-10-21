@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.historical_memory_settings_scope import HistoricalMemorySettingsScope
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ConsolidatedMemoryResponse(BaseModel):

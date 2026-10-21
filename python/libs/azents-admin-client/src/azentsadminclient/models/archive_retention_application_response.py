@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.archived_session_retention_application_status import ArchivedSessionRetentionApplicationStatus
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ArchiveRetentionApplicationResponse(BaseModel):

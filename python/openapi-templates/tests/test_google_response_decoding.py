@@ -7,6 +7,15 @@ from azentspublicclient.models.google_connection_output import GoogleConnectionO
 from azentspublicclient.models.google_preparation import GooglePreparation
 from azentspublicclient.models.google_review import GoogleReview
 
+_NO_DRIVE = {
+    "whole_content_read": False,
+    "whole_content_write": False,
+    "whole_metadata_read": False,
+    "whole_metadata_write": False,
+    "app_file_read": False,
+    "app_file_write": False,
+}
+
 
 class GoogleResponseDecodingTests(unittest.TestCase):
     def test_public_preparation_boolean_evidence(self) -> None:
@@ -15,13 +24,13 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "status": "configured_unverified",
                 "client_id": "test-client",
                 "callback_url": "https://app.example.invalid/oauth/google/callback",
-                "preview_verified": False,
+                "picker_status": "not_configured",
                 "service_access_verified": False,
             }
         )
         self.assertIsNotNone(decoded)
         assert decoded is not None
-        self.assertIs(decoded.preview_verified, False)
+        self.assertEqual(decoded.picker_status, "not_configured")
         self.assertIs(decoded.service_access_verified, False)
 
     def test_admin_preparation_boolean_evidence(self) -> None:
@@ -30,7 +39,7 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "status": "configured_unverified",
                 "client_id": "test-client",
                 "callback_url": "https://app.example.invalid/oauth/google/callback",
-                "preview_verified": False,
+                "picker_status": "not_configured",
                 "service_access_verified": False,
                 "section": "google_oauth",
                 "schema_version": 1,
@@ -38,11 +47,15 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "client_id_source": "admin",
                 "client_secret_source": "admin",
                 "client_secret_configured": True,
+                "picker_api_key": None,
+                "picker_app_id": None,
+                "picker_api_key_source": "unset",
+                "picker_app_id_source": "unset",
             }
         )
         self.assertIsNotNone(decoded)
         assert decoded is not None
-        self.assertIs(decoded.preview_verified, False)
+        self.assertEqual(decoded.picker_status, "not_configured")
         self.assertIs(decoded.service_access_verified, False)
 
     def test_public_partial_review_boolean_evidence(self) -> None:
@@ -58,22 +71,26 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "client_id": "test-client",
                 "ownership": "workspace_shared",
                 "reconnect_toolkit_id": None,
-                "requested_tasks": ["calendar_read"],
+                "services": ["calendar"],
+                "oauth_request_scopes": ["openid", "email"],
+                "granted_scopes": [
+                    "https://www.googleapis.com/auth/calendar.events.readonly"
+                ],
+                "drive_access": _NO_DRIVE,
                 "timeout": 30.0,
-                "tasks": [
+                "accesses": [
                     {
-                        "task": "calendar_read",
                         "service": "calendar",
+                        "enabled": True,
                         "status": "partial",
-                        "permitted_tools": ["list_events"],
-                        "unavailable_tools": ["list_calendars"],
+                        "permitted_tools": ["calendar_list_events"],
+                        "unavailable_tools": ["calendar_list_calendars"],
                     }
                 ],
                 "grant_result": "partial",
                 "renewable": True,
                 "can_confirm": True,
                 "service_access_verified": False,
-                "security_notice": "Known-pattern limits.",
             }
         )
         self.assertIsNotNone(decoded)
@@ -85,11 +102,16 @@ class GoogleResponseDecodingTests(unittest.TestCase):
         decoded = GoogleConnectionOutput.from_dict(
             {
                 "toolkit_id": "toolkit",
+                "revision": 3,
+                "connection_id": None,
                 "status": "not_connected",
                 "identity": None,
-                "selected_tasks": ["calendar_read"],
+                "services": [],
+                "oauth_request_scopes": ["openid", "email"],
+                "granted_scopes": None,
+                "drive_access": _NO_DRIVE,
                 "timeout": 30.0,
-                "tasks": [],
+                "accesses": [],
                 "renewable": False,
                 "service_access_verified": False,
             }

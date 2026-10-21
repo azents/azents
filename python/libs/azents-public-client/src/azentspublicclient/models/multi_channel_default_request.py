@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class MultiChannelDefaultRequest(BaseModel):

@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.external_channel_access_request_status import ExternalChannelAccessRequestStatus
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ManagedApprovalRequest(BaseModel):

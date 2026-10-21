@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictInt
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.system_setting_audit_event_response import SystemSettingAuditEventResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SystemSettingAuditEventListResponse(BaseModel):

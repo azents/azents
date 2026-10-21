@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.invitation_status import InvitationStatus
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class InvitationResponse(BaseModel):

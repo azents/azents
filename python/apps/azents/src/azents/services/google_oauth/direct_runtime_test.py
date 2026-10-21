@@ -1,4 +1,4 @@
-"""Current direct-operation admission is independent of the former task ceiling."""
+"""Direct-operation admission follows actual scopes and current service switches."""
 
 import dataclasses
 import datetime
@@ -6,18 +6,21 @@ import datetime
 import pytest
 
 from azents.core.google_oauth import GoogleOAuthError
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
+from azents.core.tools import GoogleToolkitConfig
 from azents.services.google_oauth.runtime_test import _harness
 
 
-async def test_broad_actual_grant_admits_write_under_old_read_service_membership() -> (
-    None
-):
+async def test_broad_actual_grant_admits_write_under_readonly_request_intent() -> None:
     h = _harness(expired=False)
     current = dataclasses.replace(
         h.current,
-        config=h.current.config.model_copy(update={"tasks": [GoogleTask.GMAIL_READ]}),
+        config=GoogleToolkitConfig(
+            services=(GoogleService.GMAIL,),
+            oauth_request_scopes=("https://www.googleapis.com/auth/gmail.readonly",),
+            timeout=h.current.config.timeout,
+        ),
         connection=dataclasses.replace(
             h.current.connection,
             candidate=h.current.connection.candidate.model_copy(
@@ -180,7 +183,7 @@ async def test_service_loss_blocks_subsequent_admission() -> None:
     )
     h.repo.load.return_value = dataclasses.replace(
         h.current,
-        config=h.current.config.model_copy(update={"tasks": [GoogleTask.GMAIL_READ]}),
+        config=h.current.config.model_copy(update={"services": (GoogleService.GMAIL,)}),
     )
     with pytest.raises(GoogleOAuthError) as error:
         await h.service.recheck_operation(receipt)

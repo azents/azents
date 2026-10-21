@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.system_setting_inventory_item_response import SystemSettingInventoryItemResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SystemSettingInventoryResponse(BaseModel):

@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ModelExecutionOptionDefinition(BaseModel):

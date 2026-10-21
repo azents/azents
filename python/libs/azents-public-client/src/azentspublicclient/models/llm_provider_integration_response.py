@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_response_config import LLMProviderIntegrationResponseConfig
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class LLMProviderIntegrationResponse(BaseModel):

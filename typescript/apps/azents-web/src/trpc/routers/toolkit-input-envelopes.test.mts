@@ -66,8 +66,16 @@ const saved = { ...scope, toolkitId: "saved" };
 const configured = { ...scope, toolkitConfigId: "saved" };
 const attempt = { ...scope, attemptId: "attempt" };
 const exchange = { ...configured, code: "synthetic", state: "opaque" };
-const desired = { tasks: ["calendar_read"], timeout: 30 };
-const reconnectSettings = { ...desired, security_risk_acknowledged: true };
+const desired = {
+  services: ["calendar"],
+  oauth_request_scopes: [
+    "openid",
+    "email",
+    "https://www.googleapis.com/auth/calendar.events.readonly",
+  ],
+  timeout: 30,
+};
+const reconnectSettings = { ...desired };
 const settings = {
   ...reconnectSettings,
   name: null,
@@ -226,6 +234,11 @@ const googleFixtures: OperationFixture[] = [
   { name: "outcome", input: attempt },
   { name: "status", input: saved },
   { name: "disconnect", input: saved },
+  { name: "services", input: { ...saved, services: [], expectedRevision: 1 } },
+  {
+    name: "pickerToken",
+    input: { ...saved, expectedRevision: 1, connectionId: "connection" },
+  },
 ];
 function record(value: unknown): Record<string, unknown> {
   assert.ok(
@@ -257,6 +270,7 @@ function routerFixture(
 ): {
   procedures: Record<string, unknown>;
   sdkCalls: unknown[];
+  resHeaders: Headers;
   call: (name: string, input: unknown) => Promise<unknown>;
 } {
   const path = new URL(file, import.meta.url);
@@ -333,8 +347,10 @@ function routerFixture(
     { filename: path.pathname },
   ).runInContext(context);
   const actualRouter = exports[exportName];
+  const resHeaders = new Headers();
   const caller = invoke(record(actualRouter).createCaller, actualRouter, {
     apiClient: {},
+    resHeaders,
   });
   assert.ok(
     caller != null &&
@@ -343,6 +359,7 @@ function routerFixture(
   return {
     procedures: record(record(record(actualRouter)._def).procedures),
     sdkCalls,
+    resHeaders,
     call: async (name, input) =>
       await invoke(Reflect.get(caller, name), null, input),
   };
@@ -477,6 +494,16 @@ void test("Toolkit envelopes preserve opaque records, defaults and nullable patc
   assert.ok(Array.isArray(noInput));
   assert.equal(noInput.length, 0);
 });
+void test("Google Picker relay retains non-cacheable browser response headers", async () => {
+  const fixture = routerFixture("./google.ts", "googleRouter");
+  await fixture.call("pickerToken", {
+    ...saved,
+    expectedRevision: 1,
+    connectionId: "connection",
+  });
+  assert.equal(fixture.resHeaders.get("Cache-Control"), "no-store");
+  assert.equal(fixture.resHeaders.get("Pragma"), "no-cache");
+});
 void test("Google nested schemas retain required nullable settings and reject nested protocol extras", () => {
   assert.ok(
     googleSchemas.googleFinalSettingsSchema.safeParse(settings).success,
@@ -497,7 +524,7 @@ void test("Google nested schemas retain required nullable settings and reject ne
   assert.equal(
     googleSchemas.googleReconnectSettingsSchema.safeParse({
       ...reconnectSettings,
-      security_risk_acknowledged: "true",
+      access_token: "injected-credential",
     }).success,
     false,
   );

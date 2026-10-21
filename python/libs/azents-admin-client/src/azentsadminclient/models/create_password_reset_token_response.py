@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.password_reset_token_response import PasswordResetTokenResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class CreatePasswordResetTokenResponse(BaseModel):

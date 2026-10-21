@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from azentspublicclient.models.workspace_environment_entry_edit import WorkspaceEnvironmentEntryEdit
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class WorkspaceEnvironmentReplace(BaseModel):

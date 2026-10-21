@@ -19,23 +19,30 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GooglePreparation(BaseModel):
     """
-    Public redacted declaration; never claims verified Preview or service access.
+    Separate local OAuth and optional Picker preparation, without live claims.
     """ # noqa: E501
     status: StrictStr
     client_id: Optional[StrictStr]
     callback_url: Optional[StrictStr]
-    preview_verified: StrictBool = Field(description="Always false for local operator preparation.")
+    picker_status: StrictStr
     service_access_verified: StrictBool = Field(description="Local preparation does not verify live service access.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "preview_verified", "service_access_verified"]
+    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "picker_status", "service_access_verified"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
+            raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
+        return value
+
+    @field_validator('picker_status')
+    def picker_status_validate_enum(cls, value):
         """Validates the enum"""
         if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
             raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
@@ -114,7 +121,7 @@ class GooglePreparation(BaseModel):
             "status": obj.get("status"),
             "client_id": obj.get("client_id"),
             "callback_url": obj.get("callback_url"),
-            "preview_verified": obj.get("preview_verified"),
+            "picker_status": obj.get("picker_status"),
             "service_access_verified": obj.get("service_access_verified")
             }.items() if _key in obj
         })

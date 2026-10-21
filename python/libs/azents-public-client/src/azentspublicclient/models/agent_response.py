@@ -28,7 +28,7 @@ from azentspublicclient.models.model_parameters import ModelParameters
 from azentspublicclient.models.selectable_model_option_response import SelectableModelOptionResponse
 from azentspublicclient.models.subagent_settings import SubagentSettings
 from azentspublicclient.models.uploaded_image import UploadedImage
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentResponse(BaseModel):

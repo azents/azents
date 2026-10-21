@@ -25,7 +25,7 @@ from azentspublicclient.models.workspace_upload_failure import WorkspaceUploadFa
 from azentspublicclient.models.workspace_upload_identity_response import WorkspaceUploadIdentityResponse
 from azentspublicclient.models.workspace_upload_outcome import WorkspaceUploadOutcome
 from azentspublicclient.models.workspace_upload_phase import WorkspaceUploadPhase
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class WorkspaceUploadStatusResponse(BaseModel):

@@ -126,7 +126,11 @@ const detail: GoogleApplicationDetail = {
   status: "not_configured",
   client_id: null,
   callback_url: "https://azents.example.invalid/oauth/google/callback",
-  preview_verified: false,
+  picker_status: "not_configured",
+  picker_api_key: null,
+  picker_app_id: null,
+  picker_api_key_source: "unset",
+  picker_app_id_source: "unset",
   service_access_verified: false,
   section: "google_oauth",
   schema_version: 1,
@@ -156,25 +160,17 @@ function cardProps(overrides: Partial<GoogleApplicationDetail> = {}): unknown {
 void test("Google guide renders the complete operator setup flow with official links", () => {
   const html = render(Guide, {});
   for (const step of [
-    "Get Preview access",
-    "Enable the Google services",
+    "Choose a Cloud project and enable the APIs",
     "Configure the OAuth consent screen",
     "Create a Web application client",
-    "Save the credentials here",
+    "Optionally prepare Google Picker",
+    "Save credentials, then connect a Toolkit",
   ]) {
     assert.ok(html.includes(step), step);
   }
-  for (const host of [
-    "calendarmcp.googleapis.com",
-    "drivemcp.googleapis.com",
-    "gmailmcp.googleapis.com",
-  ]) {
-    assert.ok(html.includes(host));
-  }
   for (const path of [
-    "preview",
-    "guides/configure-mcp-servers",
     "guides/configure-oauth-consent",
+    "drive/picker/guides/web-picker",
   ]) {
     assert.ok(
       html.includes(`href="https://developers.google.com/workspace/${path}"`),
@@ -192,16 +188,21 @@ void test("Google guide renders the complete operator setup flow with official l
     "gmail.readonly",
     "gmail.compose",
     "gmail.modify",
+    "drive",
+    "gmail.send",
+    "gmail.settings.basic",
   ]) {
     assert.ok(html.includes(`https://www.googleapis.com/auth/${scope}`));
   }
   assert.match(html, /AZ_GOOGLE_OAUTH_CLIENT_SECRET/);
   assert.match(
     html,
-    /does not test Preview eligibility or live service access/,
+    /does not test live service access or Google verification/,
   );
-  assert.match(html, /do not expose Gmail sending/);
-  assert.match(html, /does not enable whole-Drive search/);
+  assert.match(html, /Compose and modify grants include supported sending/);
+  assert.match(html, /whole reads but only app-file writes/);
+  assert.match(html, /AZ_GOOGLE_PICKER_API_KEY/);
+  assert.match(html, /numeric Cloud project number/);
 });
 
 void test("Google card opens help for setup and preserves the server callback and write-only secret", () => {

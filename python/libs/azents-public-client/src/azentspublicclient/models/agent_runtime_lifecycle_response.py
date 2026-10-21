@@ -23,7 +23,7 @@ from azentspublicclient.models.agent_runtime_configuration_status_response impor
 from azentspublicclient.models.agent_runtime_lifecycle_presentation_response import AgentRuntimeLifecyclePresentationResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeLifecycleResponse(BaseModel):

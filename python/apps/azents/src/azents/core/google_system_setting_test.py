@@ -20,6 +20,8 @@ def test_google_operator_definition_has_one_direct_current_authority() -> None:
     } == {
         "AZ_GOOGLE_OAUTH_CLIENT_ID",
         "AZ_GOOGLE_OAUTH_CLIENT_SECRET",
+        "AZ_GOOGLE_PICKER_API_KEY",
+        "AZ_GOOGLE_PICKER_APP_ID",
     }
 
 
@@ -50,3 +52,16 @@ def test_operator_secret_model_does_not_include_secret_in_repr() -> None:
     assert "PRIVATE-SECRET" not in repr(
         GoogleApplicationSecrets(client_secret="PRIVATE-SECRET")
     )
+
+
+@pytest.mark.parametrize("value", ["", "  ", " padded "])
+def test_picker_api_key_validation_is_redacted(value: str) -> None:
+    with pytest.raises(ValidationError) as error:
+        GoogleApplicationConfig(picker_api_key=value)
+    assert "input_value" not in str(error.value)
+
+
+@pytest.mark.parametrize("value", ["", "project-name", "-1", " 123 "])
+def test_picker_app_id_is_a_project_number(value: str) -> None:
+    with pytest.raises(ValidationError):
+        GoogleApplicationConfig(picker_app_id=value)

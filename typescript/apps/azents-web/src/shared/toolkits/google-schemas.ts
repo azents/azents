@@ -1,30 +1,22 @@
 import { z } from "zod/v4";
 
-export const googleTaskSchema = z.enum([
-  "calendar_read",
-  "calendar_availability",
-  "calendar_edit",
-  "drive_read",
-  "drive_files",
-  "gmail_read",
-  "gmail_drafts",
-  "gmail_modify",
-]);
+export const googleServiceSchema = z.enum(["calendar", "drive", "gmail"]);
 export const googleScopeSchema = z
   .object({
     handle: z.string().min(1),
     agentId: z.string().min(1).optional(),
   })
   .strict();
-export const googleDesiredSchema = z
+export const googleReconnectSettingsSchema = z
   .object({
-    tasks: z.array(googleTaskSchema).min(1),
+    services: z.array(googleServiceSchema),
+    oauth_request_scopes: z.array(z.string().min(1)),
     timeout: z.number().positive().max(300),
   })
   .strict();
-export const googleReconnectSettingsSchema = googleDesiredSchema
+export const googleDesiredSchema = googleReconnectSettingsSchema
   .extend({
-    security_risk_acknowledged: z.boolean(),
+    services: z.array(googleServiceSchema).min(1),
   })
   .strict();
 export const googleFinalSettingsSchema = googleReconnectSettingsSchema

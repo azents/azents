@@ -480,7 +480,7 @@ class ToolkitService:
         update = identifier_update.update
 
         if "config" in update:
-            config_error = self._validate_config(
+            config_error = self._validate_update_config(
                 existing.toolkit_type,
                 update["config"],
             )
@@ -844,6 +844,20 @@ class ToolkitService:
         if mcp_config is None or mcp_config.auth_type != "oauth2":
             return output
         return output.model_copy(update={"oauth_connection": value.oauth_connection})
+
+    def _validate_update_config(
+        self, toolkit_type: str, config: dict[str, object]
+    ) -> InvalidConfig | None:
+        """Keep Google policy writes on their current-revision/reviewed contracts."""
+        if toolkit_type == "google":
+            return InvalidConfig(
+                toolkit_type="google",
+                detail=(
+                    "Save Google services through Google connection settings. "
+                    "Change requested access and timeout through reviewed reconnection."
+                ),
+            )
+        return self._validate_config(toolkit_type, config)
 
     @staticmethod
     def _build_repo_update(
@@ -1405,7 +1419,7 @@ class ToolkitService:
         update = identifier_update.update
 
         if "config" in update:
-            config_error = self._validate_config(
+            config_error = self._validate_update_config(
                 existing.toolkit_type,
                 update["config"],
             )

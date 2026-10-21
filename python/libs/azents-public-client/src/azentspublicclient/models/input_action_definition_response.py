@@ -23,7 +23,7 @@ from azentspublicclient.models.action1 import Action1
 from azentspublicclient.models.input_action_attachment_policy_response import InputActionAttachmentPolicyResponse
 from azentspublicclient.models.input_action_availability_hint_response import InputActionAvailabilityHintResponse
 from azentspublicclient.models.input_action_message_policy_response import InputActionMessagePolicyResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class InputActionDefinitionResponse(BaseModel):

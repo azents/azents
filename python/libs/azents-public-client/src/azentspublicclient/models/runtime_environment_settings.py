@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.runtime_environment_entry import RuntimeEnvironmentEntry
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeEnvironmentSettings(BaseModel):

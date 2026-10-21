@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.kimi_o_auth_session_status import KimiOAuthSessionStatus
 from azentspublicclient.models.llm_provider_integration_response import LLMProviderIntegrationResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class KimiOAuthDeviceStatusResponse(BaseModel):

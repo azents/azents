@@ -13,7 +13,7 @@ from azents.core.google_oauth import (
     GoogleOAuthError,
     GoogleTokens,
 )
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_runtime import GoogleExecutionState
 from azents.core.google_system_setting import GoogleApplicationRegistration
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
@@ -56,9 +56,12 @@ def _harness(*, expired: bool) -> Harness:
         )
     current = GoogleExecutionState(
         GoogleToolkitConfig(
-            tasks=[GoogleTask.CALENDAR_READ, GoogleTask.CALENDAR_EDIT],
+            services=(GoogleService.CALENDAR,),
+            oauth_request_scopes=(
+                "https://www.googleapis.com/auth/calendar.events.readonly",
+                "https://www.googleapis.com/auth/calendar.events",
+            ),
             timeout=30.0,
-            security_risk_acknowledged=True,
         ),
         GoogleConnection(
             "connection",
