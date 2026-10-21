@@ -7,11 +7,13 @@ header and retries with exponential backoff.
 
 import asyncio
 import logging
+import math
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import NamedTuple
 
 import httpx2 as httpx
+from mcp import MCPError
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 # 429 Rate Limit retry settings
 _RATE_LIMIT_MAX_RETRIES = 3
 _RATE_LIMIT_BASE_DELAY = 1.0  # seconds
+_DISCOVERY_MAX_RETRY_DELAY = 60.0
 
 
 class McpToolListResult(NamedTuple):
@@ -72,6 +75,18 @@ def _extract_rate_limit_delay(exc: Exception) -> float | None:
                 pass
         return 0.0  # 429 without Retry-After; caller applies backoff
     return None
+
+
+def discovery_rate_limit_delay(exc: Exception) -> float | None:
+    """Classify discovery throttling without hiding unrelated grouped failures."""
+    if isinstance(exc, ExceptionGroup):
+        delays = [discovery_rate_limit_delay(sub) for sub in exc.exceptions]
+        if any(delay is None for delay in delays):
+            return None
+        return max(delay for delay in delays if delay is not None)
+    if isinstance(exc, MCPError) and exc.message.casefold() == "too many requests":
+        return 0.0
+    return _extract_rate_limit_delay(exc)
 
 
 @asynccontextmanager
@@ -154,7 +169,8 @@ async def list_tools(
 ) -> McpToolListResult:
     """Fetch tool list from MCP server.
 
-    Try Streamable HTTP first and fall back to SSE on HTTP 405.
+    Retry throttled discovery at most three times. Try Streamable HTTP first
+    and fall back to SSE on HTTP 405. Tool execution is never replayed here.
 
     :param server_url: MCP server URL
     :param headers: Authentication headers
@@ -163,6 +179,39 @@ async def list_tools(
     :param auth: httpx Auth handler
     :return: (tool list, whether streamable_http was used)
     """
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            return await _list_tools_once(
+                server_url, headers, timeout, proxy_url=proxy_url, auth=auth
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            delay = discovery_rate_limit_delay(exc)
+            if delay is None or attempt >= _RATE_LIMIT_MAX_RETRIES:
+                raise
+            if delay == 0.0:
+                delay = _RATE_LIMIT_BASE_DELAY * (2**attempt)
+            # Do not retry earlier than Retry-After or wait without a bound.
+            if not math.isfinite(delay) or not 0 <= delay <= _DISCOVERY_MAX_RETRY_DELAY:
+                raise
+            logger.warning(
+                "MCP discovery rate limited, retrying",
+                extra={"attempt": attempt + 1, "retry_after_secs": delay},
+            )
+            await asyncio.sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+async def _list_tools_once(
+    server_url: str,
+    headers: dict[str, str],
+    timeout: float,
+    *,
+    proxy_url: str | None,
+    auth: httpx.Auth | None,
+) -> McpToolListResult:
+    """Discover tools once with the existing transport negotiation."""
     try:
         async with _mcp_session(
             server_url,
