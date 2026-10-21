@@ -61,7 +61,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-20
+last_verified_at: 2026-10-22
 spec_version: 87
 ---
 
@@ -829,6 +829,11 @@ Always-on required CI does not depend on external credentials.
   generated manifest. Missing or malformed digests, missing archives, substituted
   bytes and unsafe or duplicate ZIP paths fail closed. Historical raw evidence
   remains preserved; incomplete evidence is not upgraded to verified success.
+  Explicit JUnit testcase times, pytest phase/fixture numbers, image timing
+  numbers and lane durations must be finite and nonnegative. Malformed or
+  non-finite measurements fail parsing instead of becoming zero or valid
+  analysis. An omitted optional JUnit testcase time retains its zero default;
+  a supplied invalid time is not treated as omission.
   CoreSimulator runtime listing, device creation and native XCTest execution record
   timestamped start/end markers and original command exit status in
   `simulator-setup.log`, included by the existing always-upload diagnostic path.

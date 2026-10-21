@@ -3,6 +3,7 @@
 import argparse
 import html
 import json
+import math
 import xml.etree.ElementTree as element_tree
 from collections import defaultdict
 from collections.abc import Sequence
@@ -378,7 +379,14 @@ def _required_float(payload: dict[str, object], field: str) -> float:
     value = payload.get(field)
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{field} must be a number")
-    return float(value)
+    return _finite_nonnegative(float(value), field)
+
+
+def _finite_nonnegative(value: float, label: str) -> float:
+    """Validate measurement numbers at the evidence decoding boundary."""
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{label} must be finite and nonnegative")
+    return value
 
 
 def _required_bool(payload: dict[str, object], field: str) -> bool:
@@ -540,10 +548,9 @@ def _parse_test_case(element: element_tree.Element) -> TestCaseResult:
     classname = element.attrib.get("classname", "unknown")
     name = element.attrib.get("name", "unknown")
     duration_text = element.attrib.get("time", "0")
-    try:
-        duration_seconds = float(duration_text)
-    except ValueError:
-        duration_seconds = 0.0
+    duration_seconds = _finite_nonnegative(
+        float(duration_text), "JUnit testcase duration"
+    )
 
     if element.find("failure") is not None:
         outcome = "failed"
@@ -570,10 +577,9 @@ def _inline_code(value: str) -> str:
 
 
 def _parse_duration(path: Path) -> float:
-    duration_seconds = float(path.read_text(encoding="utf-8").strip())
-    if duration_seconds < 0:
-        raise ValueError("lane duration must not be negative")
-    return duration_seconds
+    return _finite_nonnegative(
+        float(path.read_text(encoding="utf-8").strip()), "Lane duration"
+    )
 
 
 def _format_duration(duration_seconds: float) -> str:
