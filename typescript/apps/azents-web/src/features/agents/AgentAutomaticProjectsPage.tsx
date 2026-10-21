@@ -1,8 +1,8 @@
 "use client";
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
 import { AgentAutomaticProjects } from "./components/AgentAutomaticProjects";
-import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import { useAgentAutomaticProjectsContainer } from "./containers/useAgentAutomaticProjectsContainer";
 import type { AgentAutomaticProjectsContainerOutput } from "./containers/useAgentAutomaticProjectsContainer";
 

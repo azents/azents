@@ -1,45 +1,27 @@
 "use client";
-
+import { Box, Text } from "@mantine/core";
+import { useAgentRunIndicatorController } from "../containers/useAgentRunIndicatorController";
 /**
  * Agent model call progress indicator rendered inline in the chat timeline.
  */
-
-import { Box, Text } from "@mantine/core";
-import { useEffect, useState } from "react";
 import styles from "./AgentRunIndicator.module.css";
 import { ChatTimelineItem } from "./ChatTimelineItem";
-import {
-  formatElapsedDuration,
-  startElapsedDurationTimer,
-  visibleElapsedDurationSeconds,
-} from "./elapsedDuration";
+import { formatElapsedDuration } from "./elapsedDuration";
+import type { AgentRunIndicatorViewProps } from "../containers/useAgentRunIndicatorController";
 
 interface AgentRunIndicatorProps {
   lastEventReceivedAt: string | null;
 }
 
-function useVisibleEventSilenceDuration(
-  lastEventReceivedAt: string | null,
-): number | null {
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    return startElapsedDurationTimer(
-      lastEventReceivedAt,
-      () => setTick((tick) => tick + 1),
-      (callback, delay) => window.setInterval(callback, delay),
-      (timerId) => window.clearInterval(timerId),
-    );
-  }, [lastEventReceivedAt]);
-
-  return visibleElapsedDurationSeconds(lastEventReceivedAt, Date.now(), 10);
+export function AgentRunIndicator(
+  props: AgentRunIndicatorProps,
+): React.ReactElement {
+  return <AgentRunIndicatorView {...useAgentRunIndicatorController(props)} />;
 }
 
-export function AgentRunIndicator({
-  lastEventReceivedAt,
-}: AgentRunIndicatorProps): React.ReactElement {
-  const durationSeconds = useVisibleEventSilenceDuration(lastEventReceivedAt);
-
+export function AgentRunIndicatorView({
+  durationSeconds,
+}: AgentRunIndicatorViewProps): React.ReactElement {
   return (
     <ChatTimelineItem kind="activity">
       <Box className={styles.root}>

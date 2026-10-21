@@ -1,12 +1,11 @@
 "use client";
+import { Alert, Anchor, Stack, Text } from "@mantine/core";
+import { IconCheck, IconX } from "@tabler/icons-react";
 
 /** Send the OAuth result to the opener and render the callback outcome. */
 
-import { Alert, Anchor, Stack, Text } from "@mantine/core";
-import { IconCheck, IconX } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { useEffect } from "react";
-import { isWindowMessageTarget } from "@/shared/lib/window-message-target";
+import { useOAuthMcpCallbackResultController } from "../containers/useOAuthMcpCallbackResultController";
+import type { OAuthMcpCallbackResultViewProps } from "../containers/useOAuthMcpCallbackResultController";
 
 interface OAuthMcpCallbackResultProps {
   success: boolean;
@@ -14,23 +13,22 @@ interface OAuthMcpCallbackResultProps {
   returnHref: string | null;
 }
 
-export function OAuthMcpCallbackResult({
+export function OAuthMcpCallbackResult(
+  props: OAuthMcpCallbackResultProps,
+): React.ReactElement {
+  return (
+    <OAuthMcpCallbackResultView
+      {...useOAuthMcpCallbackResultController(props)}
+    />
+  );
+}
+
+export function OAuthMcpCallbackResultView({
   success,
   message,
   returnHref,
-}: OAuthMcpCallbackResultProps): React.ReactElement {
-  const t = useTranslations("oauth");
-
-  useEffect(() => {
-    const opener: unknown = window.opener;
-    if (isWindowMessageTarget(opener)) {
-      opener.postMessage(
-        { type: "azents-oauth-callback", success },
-        window.location.origin,
-      );
-    }
-  }, [success]);
-
+  t,
+}: OAuthMcpCallbackResultViewProps): React.ReactElement {
   if (success) {
     return (
       <Stack align="center">

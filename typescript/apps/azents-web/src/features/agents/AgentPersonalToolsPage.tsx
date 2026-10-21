@@ -1,6 +1,6 @@
 "use client";
 
-import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
+import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
 import type { AgentResponse } from "@azents/public-client";
 
 export function AgentPersonalToolsPage({

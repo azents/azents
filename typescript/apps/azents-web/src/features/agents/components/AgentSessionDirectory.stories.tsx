@@ -95,6 +95,12 @@ const archivedSession: AgentSessionResponse = {
   updated_at: "2026-07-18T04:30:00Z",
 };
 
+const activeSnapshot = {
+  sessions: [activeSession],
+  totalCount: 1,
+  currentArchiveRetentionDays: 30,
+};
+
 const meta = {
   component: AgentSessionDirectory,
   decorators: [
@@ -112,11 +118,7 @@ const meta = {
     status: "active",
     page: 1,
     pageSize: 25,
-    sessions: [activeSession],
-    totalCount: 1,
-    currentArchiveRetentionDays: 30,
-    loading: false,
-    error: null,
+    queryState: { type: "LOADED", snapshot: activeSnapshot },
     actionError: null,
     renamingSessionId: null,
     archivingSessionId: null,
@@ -155,7 +157,10 @@ export const DeletionErrorInspection: Story = {
   tags: ["ci-contract"],
   args: {
     agent: { ...agent, deletion_status: "deletion_error" },
-    totalCount: 52,
+    queryState: {
+      type: "LOADED",
+      snapshot: { ...activeSnapshot, totalCount: 52 },
+    },
     onStatusChange: fn(),
     onPageChange: fn(),
     onCreateSession: fn(),
@@ -196,7 +201,10 @@ export const DeletingArchivedInspection: Story = {
   args: {
     agent: { ...agent, deletion_status: "deleting" },
     status: "archived",
-    sessions: [archivedSession],
+    queryState: {
+      type: "LOADED",
+      snapshot: { ...activeSnapshot, sessions: [archivedSession] },
+    },
     onRestoreSession: fn(),
   },
   play: async ({ canvasElement, args }) => {
@@ -220,35 +228,52 @@ export const Active = {} satisfies Story;
 export const Archived = {
   args: {
     status: "archived",
-    sessions: [archivedSession],
+    queryState: {
+      type: "LOADED",
+      snapshot: { ...activeSnapshot, sessions: [archivedSession] },
+    },
   },
 } satisfies Story;
 
 export const Empty = {
   args: {
-    sessions: [],
-    totalCount: 0,
+    queryState: {
+      type: "LOADED",
+      snapshot: { ...activeSnapshot, sessions: [], totalCount: 0 },
+    },
   },
 } satisfies Story;
 
 export const Loading = {
   args: {
-    sessions: [],
-    loading: true,
+    queryState: {
+      type: "LOADING",
+      snapshot: { ...activeSnapshot, sessions: [] },
+      message: null,
+    },
   },
 } satisfies Story;
 
 export const ErrorState = {
   args: {
-    sessions: [],
-    error: "Failed to load sessions",
+    queryState: {
+      type: "ERROR",
+      snapshot: { ...activeSnapshot, sessions: [] },
+      message: "Failed to load sessions",
+    },
   },
 } satisfies Story;
 
 export const Paginated = {
   args: {
     page: 2,
-    sessions: [activeSession, { ...activeSession, id: "sess_follow_up" }],
-    totalCount: 52,
+    queryState: {
+      type: "LOADED",
+      snapshot: {
+        ...activeSnapshot,
+        sessions: [activeSession, { ...activeSession, id: "sess_follow_up" }],
+        totalCount: 52,
+      },
+    },
   },
 } satisfies Story;

@@ -1,9 +1,9 @@
 "use client";
 
 import { Box, rem } from "@mantine/core";
-import { RuntimeWebServices } from "@/features/runtime-web/components/RuntimeWebServices";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
-import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
+import { RuntimeWebServices } from "@/shared/runtime-web/components/RuntimeWebServices";
+import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
 import { useAgentRuntimeWebServicesContainer } from "./containers/useAgentRuntimeWebServicesContainer";
 import type { AgentRuntimeWebServicesContainerOutput } from "./containers/useAgentRuntimeWebServicesContainer";
 

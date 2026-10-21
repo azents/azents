@@ -6,8 +6,8 @@ import { rem } from "@mantine/core";
 import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { trpc } from "@/trpc/client";
+import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
 import { AgentSettingsHub } from "./components/AgentSettingsHub";
-import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHubContainerProps {

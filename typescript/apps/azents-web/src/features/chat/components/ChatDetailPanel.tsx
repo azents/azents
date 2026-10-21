@@ -2,7 +2,7 @@ import { Paper, ScrollArea } from "@mantine/core";
 import {
   activityDetailScrollAreaProps,
   activityDetailScrollbarSize,
-} from "./activityRowPresentation";
+} from "../../../shared/chat-presentation/components/activityRowPresentation";
 import { chatContentMaxWidth } from "./ChatTimelineItem";
 import type { ReactElement, ReactNode } from "react";
 

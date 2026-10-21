@@ -156,6 +156,9 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/apps/azents-web/src/shared/chat-presentation/**
+  - typescript/apps/azents-web/src/shared/runtime-web/**
+  - typescript/apps/azents-web/src/app/composition/AgentSettingsSectionPage.tsx
   - typescript/packages/azents-session-core/**
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**

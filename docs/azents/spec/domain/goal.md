@@ -30,6 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/apps/azents-web/src/shared/chat-presentation/**
 last_verified_at: 2026-10-05
 spec_version: 18
 ---

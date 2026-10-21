@@ -5,8 +5,8 @@
  */
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
 import { AgentSettings } from "./components/AgentSettings";
-import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import { useAgentSettingsContainer } from "./containers/useAgentSettingsContainer";
 import type { AgentSettingsContainerOutput } from "./containers/useAgentSettingsContainer";
 

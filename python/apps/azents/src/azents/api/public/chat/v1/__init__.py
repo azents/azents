@@ -421,6 +421,19 @@ async def _run_session_loops(
         registration.clear(generation)
 
 
+@dataclasses.dataclass(frozen=True)
+class _SubscriptionHealthCheck:
+    request_id: str | None
+
+
+def _decode_subscription_health_check(value: object) -> _SubscriptionHealthCheck | None:
+    """Project supported controls while preserving ignored/additive wire values."""
+    if not isinstance(value, dict) or value.get("type") != "subscription_health_check":
+        return None
+    request_id = value.get("request_id")
+    return _SubscriptionHealthCheck(request_id if isinstance(request_id, str) else None)
+
+
 async def _run_session_receive_loop(
     websocket: WebSocket,
     *,
@@ -431,21 +444,18 @@ async def _run_session_receive_loop(
 ) -> None:
     """Handle client controls for the confirmed subscription generation."""
     while True:
-        message = await websocket.receive_json()
-        if not isinstance(message, dict):
-            continue
-        if message.get("type") != "subscription_health_check":
+        control = _decode_subscription_health_check(await websocket.receive_json())
+        if control is None:
             continue
         if not registration.confirmed(generation):
             continue
-        request_id = message.get("request_id")
         async with send_lock:
             if not registration.confirmed(generation):
                 continue
             await websocket.send_json(
                 chat_subscription_health_check_ack_dump(
                     session_id,
-                    request_id if isinstance(request_id, str) else None,
+                    control.request_id,
                 )
             )
 

@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Anchor,
   Badge,
@@ -13,7 +12,6 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import {
   IconBrandDiscord,
   IconBrandSlack,
@@ -21,11 +19,13 @@ import {
   IconCopy,
   IconExternalLink,
 } from "@tabler/icons-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
+import { useExternalChannelMessageController } from "../containers/useExternalChannelMessageController";
 import { ActivityRow } from "./ActivityRow";
 import { ChatDetailPanel } from "./ChatDetailPanel";
 import { ChatTimelineItem } from "./ChatTimelineItem";
-import { MarkdownContent } from "./MarkdownContent";
+import type { ExternalChannelMessageViewProps } from "../containers/useExternalChannelMessageController";
 import type { ExternalChannelMessagePresentation } from "../externalChannelMessage";
 
 interface ExternalChannelMessageProps {
@@ -126,17 +126,28 @@ function summaryPreview(value: string): string {
   return compact.length > maximum ? `${compact.slice(0, maximum)}…` : compact;
 }
 
-export function ExternalChannelMessage({
-  source,
-  partial = false,
-  actions = null,
-}: ExternalChannelMessageProps): React.ReactElement {
-  const t = useTranslations("chat");
-  const locale = useLocale();
-  const [opened, { toggle }] = useDisclosure(false);
-  const [detailsOpened, details] = useDisclosure(false);
-  const sourceLabel = `${source.senderDisplayName} · ${source.resourceLabel}`;
+export function ExternalChannelMessage(
+  props: ExternalChannelMessageProps,
+): React.ReactElement {
+  return (
+    <ExternalChannelMessageView
+      {...useExternalChannelMessageController(props)}
+    />
+  );
+}
 
+export function ExternalChannelMessageView({
+  source,
+  partial,
+  actions,
+  t,
+  locale,
+  opened,
+  toggle,
+  detailsOpened,
+  details,
+  sourceLabel,
+}: ExternalChannelMessageViewProps): React.ReactElement {
   return (
     <ChatTimelineItem kind="activity">
       <ActivityRow

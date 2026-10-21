@@ -8,8 +8,8 @@ import {
   IconSquareMinus,
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
+import { activityRowIconSize } from "../../../shared/chat-presentation/components/activityRowPresentation";
 import { ActivityRow } from "./ActivityRow";
-import { activityRowIconSize } from "./activityRowPresentation";
 import { ChatDetailPanel } from "./ChatDetailPanel";
 import type {
   RoutineJudgmentMessage,

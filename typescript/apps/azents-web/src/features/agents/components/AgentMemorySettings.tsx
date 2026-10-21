@@ -33,7 +33,7 @@ import {
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import Link from "next/link";
-import { MarkdownContent } from "@/features/chat/components/MarkdownContent";
+import { MarkdownContent } from "@/shared/chat-presentation/components/MarkdownContent";
 import type {
   ConsolidatedMemoryState,
   DraftState,

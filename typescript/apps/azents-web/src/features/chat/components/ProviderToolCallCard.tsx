@@ -16,13 +16,13 @@ import {
 } from "@mantine/core";
 import { IconDots, IconTool, IconWorld } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { ActivityRow } from "./ActivityRow";
 import {
   activityDetailScrollAreaProps,
   activityDetailScrollbarSize,
   activityRowBorder,
   activityRowIconSize,
-} from "./activityRowPresentation";
+} from "../../../shared/chat-presentation/components/activityRowPresentation";
+import { ActivityRow } from "./ActivityRow";
 import { ChatDetailPanel } from "./ChatDetailPanel";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation";

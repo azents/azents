@@ -28,7 +28,7 @@ import {
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
-import { ElevationView } from "@/features/security/components/ElevationView";
+import { ElevationView } from "@/shared/elevation/components/ElevationView";
 import type { ExternalAccountLinksContainerProps } from "../containers/useExternalAccountLinksContainer";
 import type {
   AccountLinkFailureReason,

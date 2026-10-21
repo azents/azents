@@ -3,8 +3,8 @@
 /** Workspace settings overview page. */
 
 import { rem } from "@mantine/core";
+import { WorkspaceSettingsLayout } from "../../shared/workspace-settings/WorkspaceSettingsLayout";
 import { WorkspaceSettingsHub } from "./components/WorkspaceSettingsHub";
-import { WorkspaceSettingsLayout } from "./components/WorkspaceSettingsLayout";
 import type { WorkspaceResponse } from "@azents/public-client";
 
 interface WorkspaceSettingsHubPageProps {

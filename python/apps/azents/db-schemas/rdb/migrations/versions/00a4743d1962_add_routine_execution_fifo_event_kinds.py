@@ -1,16 +1,9 @@
-"""Add Routine execution FIFO event kinds
-
-Revision ID: 00a4743d1962
-Revises: 854782c43687
-Create Date: 2026-10-18 14:40:02.340338
-
-"""
+"""Add Routine execution FIFO event kinds."""
 
 from typing import Sequence
 
 from alembic import op
 
-# revision identifiers, used by Alembic.
 revision: str = "00a4743d1962"
 down_revision: str | Sequence[str] | None = "854782c43687"
 branch_labels: str | Sequence[str] | None = None

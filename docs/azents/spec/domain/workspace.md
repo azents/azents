@@ -97,6 +97,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/workspace-settings/**
+  - typescript/apps/azents-web/src/shared/workspace-settings/**
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**

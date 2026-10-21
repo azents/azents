@@ -1,5 +1,4 @@
 "use client";
-
 /**
  * Step-up authentication view.
  *
@@ -19,11 +18,11 @@ import {
 } from "@mantine/core";
 import { IconLock, IconMail } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useEmailCodeStepController } from "../containers/useEmailCodeStepController";
+import { usePasswordStepController } from "../containers/usePasswordStepController";
 import type { ElevationModalContainerProps } from "../containers/useElevationModal";
-
-/** Timer expiration time (seconds) */
-const CODE_EXPIRY_SECONDS = 10 * 60;
+import type { EmailCodeStepViewProps } from "../containers/useEmailCodeStepController";
+import type { PasswordStepViewProps } from "../containers/usePasswordStepController";
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -124,56 +123,28 @@ function ChooseMethod({
 }
 
 /** Email OTP input */
-function EmailCodeStep({
-  sentAt,
-  error,
-  isPending,
-  onSubmit,
-  onResend,
-}: {
+function EmailCodeStep(props: {
   sentAt: number;
   error: string | null;
   isPending: boolean;
   onSubmit: (code: string) => void;
   onResend: () => void;
 }): React.ReactElement {
-  const t = useTranslations("elevation");
-  const [code, setCode] = useState("");
-  const [remainingSeconds, setRemainingSeconds] = useState(() => {
-    const elapsed = Math.floor((Date.now() - sentAt) / 1000);
-    return Math.max(0, CODE_EXPIRY_SECONDS - elapsed);
-  });
+  return <EmailCodeStepView {...useEmailCodeStepController(props)} />;
+}
 
-  useEffect(() => {
-    const calcRemaining = (): number => {
-      const elapsed = Math.floor((Date.now() - sentAt) / 1000);
-      return Math.max(0, CODE_EXPIRY_SECONDS - elapsed);
-    };
-    setRemainingSeconds(calcRemaining());
-    setCode("");
-    const timer = setInterval(() => {
-      const remaining = calcRemaining();
-      setRemainingSeconds(remaining);
-      if (remaining <= 0) {
-        clearInterval(timer);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [sentAt]);
-
-  const handleChange = useCallback((value: string) => {
-    setCode(value.toUpperCase());
-  }, []);
-
-  const handleComplete = useCallback(
-    (value: string) => {
-      onSubmit(value);
-    },
-    [onSubmit],
-  );
-
-  const isExpired = remainingSeconds === 0;
-
+export function EmailCodeStepView({
+  error,
+  isPending,
+  onSubmit,
+  onResend,
+  t,
+  code,
+  remainingSeconds,
+  handleChange,
+  handleComplete,
+  isExpired,
+}: EmailCodeStepViewProps): React.ReactElement {
   return (
     <Stack gap="md" align="center">
       <Title order={4}>{t("emailCodeHeadline")}</Title>
@@ -229,25 +200,22 @@ function EmailCodeStep({
 }
 
 /** Password input */
-function PasswordStep({
-  error,
-  isPending,
-  onSubmit,
-}: {
+function PasswordStep(props: {
   error: string | null;
   isPending: boolean;
   onSubmit: (password: string) => void;
 }): React.ReactElement {
-  const t = useTranslations("elevation");
-  const [password, setPassword] = useState("");
+  return <PasswordStepView {...usePasswordStepController(props)} />;
+}
 
-  function handleSubmit(e: React.FormEvent): void {
-    e.preventDefault();
-    if (password) {
-      onSubmit(password);
-    }
-  }
-
+export function PasswordStepView({
+  error,
+  isPending,
+  t,
+  password,
+  setPassword,
+  handleSubmit,
+}: PasswordStepViewProps): React.ReactElement {
   return (
     <form onSubmit={handleSubmit}>
       <Stack gap="md">

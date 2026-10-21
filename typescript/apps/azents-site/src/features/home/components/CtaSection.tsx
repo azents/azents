@@ -12,10 +12,20 @@ import {
 } from "@mantine/core";
 import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { trackCtaClick } from "@/shared/lib/analytics";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { SITE_LINKS } from "@/shared/lib/links";
+import { useCtaSection } from "../containers/useCtaSection";
+import type { CtaSectionViewProps } from "../containers/useCtaSection";
 
-export function CtaSection(): React.ReactElement {
+export const CtaSection = createReactContainer(
+  "CtaSection",
+  useCtaSection,
+  CtaSectionView,
+);
+
+export function CtaSectionView({
+  onGithub,
+}: CtaSectionViewProps): React.ReactElement {
   const t = useTranslations("finalCta");
 
   return (
@@ -42,13 +52,7 @@ export function CtaSection(): React.ReactElement {
                 component="a"
                 href={SITE_LINKS.github}
                 leftSection={<IconBrandGithub size={20} />}
-                onClick={() =>
-                  trackCtaClick({
-                    ctaId: "final_cta_github",
-                    ctaLocation: "final_cta",
-                    destinationUrl: SITE_LINKS.github,
-                  })
-                }
+                onClick={onGithub}
                 radius="md"
                 size="lg"
                 target="_blank"

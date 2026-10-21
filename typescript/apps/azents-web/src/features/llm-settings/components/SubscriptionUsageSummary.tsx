@@ -1,5 +1,4 @@
 "use client";
-
 import {
   ActionIcon,
   Alert,
@@ -24,12 +23,9 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
-import { useState } from "react";
-import {
-  subscriptionUsageAdditionalLimits,
-  subscriptionUsageProgressColor,
-  subscriptionUsageSummaryLimits,
-} from "@/shared/subscription-usage/subscriptionUsage";
+import { subscriptionUsageProgressColor } from "@/shared/subscription-usage/subscriptionUsage";
+import { useAvailableUsageContentController } from "../containers/useAvailableUsageContentController";
+import type { AvailableUsageContentViewProps } from "../containers/useAvailableUsageContentController";
 import type {
   SubscriptionUsageSnapshot,
   SubscriptionUsageState,
@@ -163,17 +159,24 @@ function AvailableUsage({
   );
 }
 
-function AvailableUsageContent({
-  snapshot,
-}: {
+function AvailableUsageContent(props: {
   snapshot: SubscriptionUsageAvailableResponse;
 }): React.ReactElement {
-  const t = useTranslations("workspace.llmSettings.subscriptionUsage");
-  const [additionalOpened, setAdditionalOpened] = useState(false);
-  const [financialOpened, setFinancialOpened] = useState(false);
-  const summaryLimits = subscriptionUsageSummaryLimits(snapshot);
-  const additionalLimits = subscriptionUsageAdditionalLimits(snapshot);
+  return (
+    <AvailableUsageContentView {...useAvailableUsageContentController(props)} />
+  );
+}
 
+export function AvailableUsageContentView({
+  snapshot,
+  t,
+  additionalOpened,
+  setAdditionalOpened,
+  financialOpened,
+  setFinancialOpened,
+  summaryLimits,
+  additionalLimits,
+}: AvailableUsageContentViewProps): React.ReactElement {
   return (
     <Stack gap="sm">
       {snapshot.plan_label ? (

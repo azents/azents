@@ -1,30 +1,26 @@
 "use client";
 
+import { Button, Stack, Text, Title } from "@mantine/core";
+import { IconLock } from "@tabler/icons-react";
+import Link from "next/link";
 /**
  * Login required page component
  *
  * Rendered when server-side auth check determines unauthenticated.
  * Provides login link containing current path in next query param.
  */
-import { Button, Stack, Text, Title } from "@mantine/core";
-import { IconLock } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
 import { FormPageLayout } from "@/shared/components/FormPageLayout";
+import { useLoginRequiredController } from "../containers/useLoginRequiredController";
+import type { LoginRequiredViewProps } from "../containers/useLoginRequiredController";
 
 export function LoginRequired(): React.ReactElement {
-  const t = useTranslations("auth");
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  return <LoginRequiredView {...useLoginRequiredController()} />;
+}
 
-  /** Current full path (including query params) */
-  const currentPath = searchParams.toString()
-    ? `${pathname}?${searchParams.toString()}`
-    : pathname;
-
-  const loginUrl = `/login?next=${encodeURIComponent(currentPath)}`;
-
+export function LoginRequiredView({
+  t,
+  loginUrl,
+}: LoginRequiredViewProps): React.ReactElement {
   return (
     <FormPageLayout>
       <Stack gap="lg" align="center">

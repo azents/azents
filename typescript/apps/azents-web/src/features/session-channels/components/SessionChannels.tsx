@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Alert,
   Anchor,
@@ -17,7 +16,6 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { useModals } from "@mantine/modals";
 import {
   IconAlertCircle,
   IconArchive,
@@ -28,17 +26,19 @@ import {
   IconShieldCheck,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { useSessionChannelsController } from "../containers/useSessionChannelsController";
 import type { SessionChannelsContainerOutput } from "../containers/useSessionChannelsContainer";
-type SessionChannelsProps = Omit<
-  SessionChannelsContainerOutput,
-  "session" | "onUpdateTitle"
->;
+import type { SessionChannelsViewProps } from "../containers/useSessionChannelsController";
 import type {
   ManagedBinding,
   ManagedGrant,
   ManagedWork,
   ManagedWorkTask,
 } from "@azents/public-client";
+type SessionChannelsProps = Omit<
+  SessionChannelsContainerOutput,
+  "session" | "onUpdateTitle"
+>;
 
 function formatDate(value: string | null): string {
   return value === null ? "—" : new Date(value).toLocaleString();
@@ -417,7 +417,13 @@ function GrantsPanel({
   );
 }
 
-export function SessionChannels({
+export function SessionChannels(
+  props: SessionChannelsProps,
+): React.ReactElement {
+  return <SessionChannelsView {...useSessionChannelsController(props)} />;
+}
+
+export function SessionChannelsView({
   agent,
   state,
   actionError,
@@ -425,23 +431,11 @@ export function SessionChannels({
   responseModeDrafts,
   updatingResponseModeId,
   responseModeError,
-  onDisconnect,
   onResponseModeChange,
   onSaveResponseMode,
-}: SessionChannelsProps): React.ReactElement {
-  const t = useTranslations("workspace.agents.sessionChannels");
-  const modals = useModals();
-  const openDisconnectConfirm = (binding: ManagedBinding): void => {
-    modals.openConfirmModal({
-      title: t("disconnect"),
-      children: <Text size="sm">{t("disconnectConfirm")}</Text>,
-      labels: { confirm: t("disconnect"), cancel: t("cancel") },
-      confirmProps: { color: "red" },
-      centered: true,
-      onConfirm: () => onDisconnect(binding),
-    });
-  };
-
+  t,
+  openDisconnectConfirm,
+}: SessionChannelsViewProps): React.ReactElement {
   return (
     <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
       <Stack gap="lg" p="lg" maw={rem(960)} mx="auto" w="100%">

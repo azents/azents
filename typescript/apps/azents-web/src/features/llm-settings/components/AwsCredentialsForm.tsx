@@ -1,96 +1,30 @@
 "use client";
-
+import { Autocomplete, Button, Group, Stack, TextInput } from "@mantine/core";
+import { AWS_REGIONS } from "../constants/regions";
 /**
  * AWS Bedrock provider form.
  *
  * Access Key ID, Secret Access Key, Region input form.
  * Config (accessKeyId, region) is pre-filled on EDIT; Secret (secretAccessKey) is empty.
  */
-
-import { Autocomplete, Button, Group, Stack, TextInput } from "@mantine/core";
-import { useForm } from "@mantine/form";
-import { useTranslations } from "next-intl";
-import { AWS_REGIONS } from "../constants/regions";
+import { useAwsCredentialsFormController } from "../containers/useAwsCredentialsFormController";
+import type { AwsCredentialsFormViewProps } from "../containers/useAwsCredentialsFormController";
 import type { ProviderFormProps } from "./IntegrationFormModal";
 
-interface AwsFormValues {
-  accessKeyId: string;
-  secretAccessKey: string;
-  region: string;
-  roleArn: string;
+export function AwsCredentialsForm(
+  props: ProviderFormProps,
+): React.ReactElement {
+  return <AwsCredentialsFormView {...useAwsCredentialsFormController(props)} />;
 }
 
-export function AwsCredentialsForm({
-  name,
-  provider,
-  integration,
+export function AwsCredentialsFormView({
   isCreate,
   isSubmitting,
-  onCreate,
-  onUpdate,
   onClose,
-}: ProviderFormProps): React.ReactElement {
-  const t = useTranslations("workspace.llmSettings");
-
-  const config = integration?.config;
-  const awsConfig = config?.type === "aws_credentials" ? config : null;
-  const form = useForm<AwsFormValues>({
-    mode: "controlled",
-    initialValues: {
-      accessKeyId: awsConfig ? awsConfig.access_key_id : "",
-      secretAccessKey: "",
-      region: awsConfig ? awsConfig.region : "",
-      roleArn: awsConfig?.role_arn ?? "",
-    },
-  });
-
-  function handleSubmit(values: AwsFormValues): void {
-    if (isCreate) {
-      if (
-        !provider ||
-        !values.accessKeyId ||
-        !values.secretAccessKey ||
-        !values.region
-      ) {
-        return;
-      }
-      onCreate({
-        provider,
-        ...(name ? { name } : {}),
-        secrets: {
-          type: "aws_credentials",
-          secret_access_key: values.secretAccessKey,
-        },
-        config: {
-          type: "aws_credentials",
-          access_key_id: values.accessKeyId,
-          region: values.region,
-          ...(values.roleArn ? { role_arn: values.roleArn } : {}),
-        },
-      });
-    } else {
-      const data: Parameters<ProviderFormProps["onUpdate"]>[0] = {};
-      if (name) {
-        data.name = name;
-      }
-      if (values.secretAccessKey) {
-        data.secrets = {
-          type: "aws_credentials",
-          secret_access_key: values.secretAccessKey,
-        };
-      }
-      if (values.accessKeyId && values.region) {
-        data.config = {
-          type: "aws_credentials",
-          access_key_id: values.accessKeyId,
-          region: values.region,
-          ...(values.roleArn ? { role_arn: values.roleArn } : {}),
-        };
-      }
-      onUpdate(data);
-    }
-  }
-
+  t,
+  form,
+  handleSubmit,
+}: AwsCredentialsFormViewProps): React.ReactElement {
   return (
     <form onSubmit={form.onSubmit(handleSubmit)}>
       <Stack gap="md">

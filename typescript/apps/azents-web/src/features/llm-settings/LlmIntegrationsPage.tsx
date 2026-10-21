@@ -3,8 +3,8 @@
 /** Focused LLM integrations settings page entry. */
 
 import { rem } from "@mantine/core";
-import { WorkspaceSettingsLayout } from "@/features/workspace-settings/components/WorkspaceSettingsLayout";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { WorkspaceSettingsLayout } from "@/shared/workspace-settings/WorkspaceSettingsLayout";
 import { LlmIntegrations } from "./components/LlmIntegrations";
 import { SubscriptionUsageContainer } from "./containers/SubscriptionUsageContainer";
 import { useLlmIntegrationsContainer } from "./containers/useLlmIntegrationsContainer";

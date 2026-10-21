@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from typing import Any, Literal, assert_never, cast
+from typing import Literal, assert_never
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -37,6 +37,7 @@ from azents.engine.routine_judgment_context_test import request
 from azents.repos.routine.judgment_inbox import (
     RoutineJudgmentSettlement,
 )
+from azents.repos.skill_state_store import SkillStateStore
 from azents.services.routine.judgment import RoutineJudgmentService
 from azents.services.session_git_worktree import (
     SessionGitWorktreeService,
@@ -67,8 +68,14 @@ OperationMethodName = Literal[
 ]
 
 
-class _Service:
+class _Service(SessionGitWorktreeService):
     """Operation service test double with one mock per registration."""
+
+    run_git_worktree_action: AsyncMock
+    run_cleanup_orphan_git_worktrees_action: AsyncMock
+    run_create_session_working_folder_action: AsyncMock
+    run_agent_create_git_worktree_action: AsyncMock
+    run_agent_remove_git_worktree_action: AsyncMock
 
     def __init__(self) -> None:
         self.run_git_worktree_action = AsyncMock(return_value=_RESULT)
@@ -138,13 +145,10 @@ def _registry(
     return OperationActionExecutorRegistry(
         routine_judgment_service=Mock(spec=RoutineJudgmentService),
         capabilities=TurnActionCapabilityRegistry(
-            skill_store=cast(Any, object()),
+            skill_store=Mock(spec=SkillStateStore),
             vfs_projection_service=None,
         ),
-        session_git_worktree_service=cast(
-            SessionGitWorktreeService,
-            service or _service(),
-        ),
+        session_git_worktree_service=service or _service(),
     )
 
 
@@ -254,8 +258,10 @@ async def test_execute_dispatches_every_operation_registration(
         assert kwargs["predecessor_run_id"] == "run-1"
     else:
         assert "predecessor_run_id" not in kwargs
+    calls = tuple(vars(service).values())
+    assert all(isinstance(value, AsyncMock) for value in calls)
     assert (
-        sum(cast(AsyncMock, value).await_count for value in vars(service).values()) == 1
+        sum(value.await_count for value in calls if isinstance(value, AsyncMock)) == 1
     )
 
 
@@ -274,8 +280,10 @@ async def test_agent_bridge_requires_active_processing_run(
             context=_context(_execution(action), active_run_id=None),
         )
 
+    calls = tuple(vars(service).values())
+    assert all(isinstance(value, AsyncMock) for value in calls)
     assert all(
-        cast(AsyncMock, value).await_count == 0 for value in vars(service).values()
+        value.await_count == 0 for value in calls if isinstance(value, AsyncMock)
     )
 
 

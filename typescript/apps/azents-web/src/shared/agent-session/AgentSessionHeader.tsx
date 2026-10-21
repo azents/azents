@@ -1,9 +1,4 @@
 "use client";
-
-/**
- * Session title and controls above the persistent conversation workspace.
- */
-
 import {
   ActionIcon,
   Box,
@@ -15,36 +10,24 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { useDocumentTitle } from "@mantine/hooks";
 import {
   IconLayoutSidebarRight,
   IconMenu2,
   IconPencil,
   IconTrash,
 } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+/**
+ * Session title and controls above the persistent conversation workspace.
+ */
+import { type ReactNode } from "react";
 import { AgentAvatar } from "./AgentAvatar";
 import { AgentDeletionBadge, AgentDeletionNotice } from "./AgentDeletionStatus";
-import { useAgentFocusedShellMobileNav } from "./AgentFocusedShellMobileNav";
+import { useAgentSessionHeaderController } from "./containers/useAgentSessionHeaderController";
+import type { AgentSessionHeaderViewProps } from "./containers/useAgentSessionHeaderController";
 import type {
   AgentResponse,
   AgentSessionResponse,
 } from "@azents/public-client";
-
-function getSessionDisplayTitle(
-  session: AgentSessionResponse,
-  t: ReturnType<typeof useTranslations>,
-): string {
-  const title = session.title?.trim();
-  if (title) {
-    return title;
-  }
-  if (session.primary_kind === "team_primary") {
-    return t("sessions.primary");
-  }
-  return t("sessions.session");
-}
 
 interface AgentSessionHeaderProps {
   agent: AgentResponse;
@@ -56,65 +39,31 @@ interface AgentSessionHeaderProps {
   chatControls?: ReactNode;
 }
 
-export function AgentSessionHeader({
+export function AgentSessionHeader(
+  props: AgentSessionHeaderProps,
+): React.ReactElement {
+  return <AgentSessionHeaderView {...useAgentSessionHeaderController(props)} />;
+}
+
+export function AgentSessionHeaderView({
   agent,
-  session: initialSession,
-  onUpdateTitle,
-  onSessionTitleChange,
   onTogglePanel,
   panelOpened,
   chatControls,
-}: AgentSessionHeaderProps): React.ReactElement {
-  const t = useTranslations("workspace.agents.detail");
-  const tPanel = useTranslations("chat.sessionPanel");
-  const mobileNav = useAgentFocusedShellMobileNav();
-  const [session, setSession] = useState(initialSession);
-  const [renameBusy, setRenameBusy] = useState(false);
-  useEffect(() => {
-    setSession(initialSession);
-  }, [initialSession]);
-  const sessionTitle = getSessionDisplayTitle(session, t);
-  useDocumentTitle(`${sessionTitle} - Azents`);
-  const [editingOpened, setEditingOpened] = useState(false);
-  const [editingTitle, setEditingTitle] = useState("");
-
-  const handleOpenRename = useCallback((): void => {
-    setEditingTitle(session.title ?? "");
-    setEditingOpened(true);
-  }, [session.title]);
-
-  const handleCloseRename = useCallback((): void => {
-    setEditingOpened(false);
-    setEditingTitle("");
-  }, []);
-
-  const updateSessionTitle = useCallback(
-    async (title: string | null): Promise<void> => {
-      setRenameBusy(true);
-      try {
-        const updatedSession = await onUpdateTitle(title);
-        setSession(updatedSession);
-        onSessionTitleChange?.(updatedSession);
-        handleCloseRename();
-      } finally {
-        setRenameBusy(false);
-      }
-    },
-    [handleCloseRename, onSessionTitleChange, onUpdateTitle],
-  );
-
-  const handleSubmitRename = useCallback(async (): Promise<void> => {
-    const title = editingTitle.trim();
-    if (!title) {
-      return;
-    }
-    await updateSessionTitle(title);
-  }, [editingTitle, updateSessionTitle]);
-
-  const handleClearTitle = useCallback(async (): Promise<void> => {
-    await updateSessionTitle(null);
-  }, [updateSessionTitle]);
-
+  t,
+  tPanel,
+  mobileNav,
+  session,
+  renameBusy,
+  sessionTitle,
+  editingOpened,
+  editingTitle,
+  setEditingTitle,
+  handleOpenRename,
+  handleCloseRename,
+  handleSubmitRename,
+  handleClearTitle,
+}: AgentSessionHeaderViewProps): React.ReactElement {
   return (
     <>
       <Modal

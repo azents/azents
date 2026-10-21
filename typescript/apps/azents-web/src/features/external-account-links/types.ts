@@ -1,4 +1,4 @@
-import type { ElevationModalContainerProps } from "@/features/security/containers/useElevationModal";
+import type { ElevationModalContainerProps } from "@/shared/elevation/containers/useElevationModal";
 import type { AccountLinkApiFailureReason } from "@/trpc/account-link-error";
 
 export type ExternalAccountProvider = "slack" | "discord";

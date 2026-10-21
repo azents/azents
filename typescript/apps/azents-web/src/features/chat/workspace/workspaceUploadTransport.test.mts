@@ -4,11 +4,13 @@ import test from "node:test";
 import {
   startWorkspaceUploadPut,
   type WorkspaceUploadPutInput,
+  type WorkspaceUploadPutTask,
+  type WorkspaceUploadRequest,
 } from "./workspaceUploadTransport.ts";
 
 type Handler = (() => void) | null;
 
-class FakeXmlHttpRequest {
+class FakeXmlHttpRequest implements WorkspaceUploadRequest {
   public static readonly DONE = 4;
 
   public static latest: FakeXmlHttpRequest | null = null;
@@ -46,6 +48,33 @@ class FakeXmlHttpRequest {
   public onerror: Handler = null;
 
   public onabort: Handler = null;
+
+  public get done(): boolean {
+    return this.readyState === FakeXmlHttpRequest.DONE;
+  }
+
+  public setProgressHandler(
+    callback: (
+      loaded: number,
+      total: number,
+      lengthComputable: boolean,
+    ) => void,
+  ): void {
+    this.upload.onprogress = (event) =>
+      callback(event.loaded, event.total, event.lengthComputable);
+  }
+
+  public setLoadHandler(callback: () => void): void {
+    this.onload = callback;
+  }
+
+  public setErrorHandler(callback: () => void): void {
+    this.onerror = callback;
+  }
+
+  public setAbortHandler(callback: () => void): void {
+    this.onabort = callback;
+  }
 
   public open(method: string, url: string): void {
     this.method = method;
@@ -88,23 +117,25 @@ class FakeXmlHttpRequest {
   }
 }
 
-const originalXmlHttpRequest = globalThis.XMLHttpRequest;
-
-function start(inputOverrides: Partial<WorkspaceUploadPutInput> = {}) {
-  globalThis.XMLHttpRequest =
-    FakeXmlHttpRequest as unknown as typeof XMLHttpRequest;
-
+function start(inputOverrides: Partial<WorkspaceUploadPutInput> = {}): {
+  task: WorkspaceUploadPutTask;
+  file: File;
+  progress: Array<[number, number]>;
+} {
   const file = new File(["hello"], "hello.txt", { type: "text/plain" });
   const progress: Array<[number, number]> = [];
   return {
-    task: startWorkspaceUploadPut({
-      url: "https://storage.example/upload",
-      method: "PUT",
-      headers: { "Content-Type": "text/plain" },
-      file,
-      onProgress: (loaded, total) => progress.push([loaded, total]),
-      ...inputOverrides,
-    }),
+    task: startWorkspaceUploadPut(
+      {
+        url: "https://storage.example/upload",
+        method: "PUT",
+        headers: { "Content-Type": "text/plain" },
+        file,
+        onProgress: (loaded, total) => progress.push([loaded, total]),
+        ...inputOverrides,
+      },
+      () => new FakeXmlHttpRequest(),
+    ),
     file,
     progress,
   };
@@ -117,7 +148,6 @@ function currentRequest(): FakeXmlHttpRequest {
 }
 
 test.afterEach(() => {
-  globalThis.XMLHttpRequest = originalXmlHttpRequest;
   FakeXmlHttpRequest.latest = null;
 });
 

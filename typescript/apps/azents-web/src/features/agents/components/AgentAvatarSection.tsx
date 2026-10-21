@@ -1,5 +1,6 @@
 "use client";
-
+import { Alert, Button, Group, Stack, Text, Title } from "@mantine/core";
+import { IconTrash, IconUpload } from "@tabler/icons-react";
 /**
  * Agent profile image management section.
  *
@@ -7,12 +8,9 @@
  * flow delegated to `useAgentAvatarContainer`. First implementation uses native file selection +
  * client square validation only — crop UI will be added in separate PR.
  */
-
-import { Alert, Button, Group, Stack, Text, Title } from "@mantine/core";
-import { IconTrash, IconUpload } from "@tabler/icons-react";
-import { useCallback, useRef } from "react";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
-import { useAgentAvatarContainer } from "../containers/useAgentAvatarContainer";
+import { useAgentAvatarSectionController } from "../containers/useAgentAvatarSectionController";
+import type { AgentAvatarSectionViewProps } from "../containers/useAgentAvatarSectionController";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentAvatarSectionProps {
@@ -20,40 +18,21 @@ interface AgentAvatarSectionProps {
   agent: AgentResponse;
 }
 
-export function AgentAvatarSection({
-  handle,
+export function AgentAvatarSection(
+  props: AgentAvatarSectionProps,
+): React.ReactElement {
+  return <AgentAvatarSectionView {...useAgentAvatarSectionController(props)} />;
+}
+
+export function AgentAvatarSectionView({
   agent,
-}: AgentAvatarSectionProps): React.ReactElement {
-  const { state, uploadFile, removeAvatar, reset } = useAgentAvatarContainer({
-    handle,
-    agentId: agent.id,
-  });
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handlePickFile = useCallback(() => {
-    reset();
-    inputRef.current?.click();
-  }, [reset]);
-
-  const handleFileChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      event.target.value = "";
-      if (!file) {
-        return;
-      }
-      void uploadFile(file);
-    },
-    [uploadFile],
-  );
-
-  const busy =
-    state.type === "validating" ||
-    state.type === "requesting-url" ||
-    state.type === "uploading" ||
-    state.type === "finalizing" ||
-    state.type === "removing";
-
+  state,
+  removeAvatar,
+  inputRef,
+  handlePickFile,
+  handleFileChange,
+  busy,
+}: AgentAvatarSectionViewProps): React.ReactElement {
   return (
     <Stack gap="md">
       <Title order={5}>Profile image</Title>

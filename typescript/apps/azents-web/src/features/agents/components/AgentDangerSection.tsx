@@ -1,18 +1,13 @@
 "use client";
-
+import { Alert, Button, Group, Modal, Stack, Text, Title } from "@mantine/core";
 /**
  * Agent deletion (danger) section.
  *
  * Deletes with agent.remove after confirmation modal and moves to /agents list.
  */
-
-import { Alert, Button, Group, Modal, Stack, Text, Title } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import { IconTrash } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
-import { useCallback } from "react";
-import { trpc } from "@/trpc/client";
+import { useAgentDangerSectionController } from "../containers/useAgentDangerSectionController";
+import type { AgentDangerSectionViewProps } from "../containers/useAgentDangerSectionController";
 
 interface AgentDangerSectionProps {
   readOnly: boolean;
@@ -20,28 +15,22 @@ interface AgentDangerSectionProps {
   agentId: string;
 }
 
-export function AgentDangerSection({
+export function AgentDangerSection(
+  props: AgentDangerSectionProps,
+): React.ReactElement {
+  return <AgentDangerSectionView {...useAgentDangerSectionController(props)} />;
+}
+
+export function AgentDangerSectionView({
   readOnly,
-  handle,
-  agentId,
-}: AgentDangerSectionProps): React.ReactElement {
-  const t = useTranslations("workspace.agents");
-  const tDanger = useTranslations("workspace.agents.detail.danger");
-  const router = useRouter();
-  const utils = trpc.useUtils();
-  const [opened, { open, close }] = useDisclosure(false);
-
-  const deleteMutation = trpc.agent.remove.useMutation({
-    onSuccess: () => {
-      void utils.agent.list.invalidate({ handle });
-      router.push(`/w/${handle}/agents`);
-    },
-  });
-
-  const handleDelete = useCallback(() => {
-    deleteMutation.mutate({ handle, agentId });
-  }, [deleteMutation, handle, agentId]);
-
+  t,
+  tDanger,
+  opened,
+  open,
+  close,
+  deleteMutation,
+  handleDelete,
+}: AgentDangerSectionViewProps): React.ReactElement {
   return (
     <Stack gap="md">
       <Title order={4} c="red">

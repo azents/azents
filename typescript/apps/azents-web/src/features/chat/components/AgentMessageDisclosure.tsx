@@ -1,11 +1,11 @@
 "use client";
 
 import { IconRobot } from "@tabler/icons-react";
+import { activityRowIconSize } from "../../../shared/chat-presentation/components/activityRowPresentation";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
 import { ActivityRow } from "./ActivityRow";
-import { activityRowIconSize } from "./activityRowPresentation";
 import { ChatDetailPanel } from "./ChatDetailPanel";
 import { ChatTimelineItem } from "./ChatTimelineItem";
-import { MarkdownContent } from "./MarkdownContent";
 
 interface AgentMessageDisclosureProps {
   title: string;

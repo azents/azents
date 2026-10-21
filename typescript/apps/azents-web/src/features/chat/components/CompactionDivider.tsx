@@ -1,38 +1,28 @@
 "use client";
-
+import { Box, Collapse, Group, rem, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronRight } from "@tabler/icons-react";
 /**
  * Compaction summary divider.
  *
  * Shows when previous conversation turns were summarized and lets users expand
  * or collapse the generated summary inline.
  */
-
-import { Box, Collapse, Group, rem, Text, UnstyledButton } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useRef } from "react";
-import inlineControlClasses from "./ChatInlineControl.module.css";
-import { ChatTimelineItem } from "./ChatTimelineItem";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
   chatCollapsibleChevronSize,
-} from "./collapsiblePresentation";
-import { MarkdownContent } from "./MarkdownContent";
+} from "../../../shared/chat-presentation/components/collapsiblePresentation";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
+import { useCompactionDividerController } from "../containers/useCompactionDividerController";
+import inlineControlClasses from "./ChatInlineControl.module.css";
+import { ChatTimelineItem } from "./ChatTimelineItem";
+import type { CompactionDividerViewProps } from "../containers/useCompactionDividerController";
 
 const dashedLineStyle: React.CSSProperties = {
   flex: 1,
   borderBottom: `${rem(1)} dashed var(--mantine-color-default-border)`,
 };
-
-function isElementVisibleInViewport(element: HTMLElement): boolean {
-  const rect = element.getBoundingClientRect();
-  const viewportHeight =
-    window.innerHeight || document.documentElement.clientHeight;
-
-  return rect.top >= 0 && rect.bottom <= viewportHeight;
-}
 
 interface SummaryToggleButtonProps {
   opened: boolean;
@@ -76,42 +66,21 @@ interface CompactionDividerProps {
   initialOpened?: boolean;
 }
 
-export function CompactionDivider({
+export function CompactionDivider(
+  props: CompactionDividerProps,
+): React.ReactElement {
+  return <CompactionDividerView {...useCompactionDividerController(props)} />;
+}
+
+export function CompactionDividerView({
   content,
-  initialOpened = false,
-}: CompactionDividerProps): React.ReactElement {
-  const t = useTranslations("chat");
-  const toggleItemRef = useRef<HTMLDivElement>(null);
-  const [opened, { close, toggle }] = useDisclosure(initialOpened);
-
-  function collapseFromSummaryBody(): void {
-    const shouldScrollToToggle = toggleItemRef.current
-      ? !isElementVisibleInViewport(toggleItemRef.current)
-      : false;
-
-    close();
-
-    if (shouldScrollToToggle) {
-      requestAnimationFrame(() => {
-        toggleItemRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      });
-    }
-  }
-
-  function handleSummaryBodyKeyDown(
-    event: React.KeyboardEvent<HTMLDivElement>,
-  ): void {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-
-    event.preventDefault();
-    collapseFromSummaryBody();
-  }
-
+  t,
+  toggleItemRef,
+  opened,
+  toggle,
+  collapseFromSummaryBody,
+  handleSummaryBodyKeyDown,
+}: CompactionDividerViewProps): React.ReactElement {
   return (
     <ChatTimelineItem kind="boundary">
       <Group gap="xs" align="center">

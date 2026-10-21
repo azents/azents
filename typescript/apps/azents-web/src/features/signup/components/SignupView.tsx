@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Alert,
   Button,
@@ -11,30 +10,31 @@ import {
   Title,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { FormPageLayout } from "@/shared/components/FormPageLayout";
+import { useSignupFormController } from "../containers/useSignupFormController";
 import type { SignupContainerProps } from "../containers/useSignupContainer";
+import type { SignupFormViewProps } from "../containers/useSignupFormController";
 
-function SignupForm({
-  emailHint,
-  error,
-  submitting,
-  onSubmit,
-}: {
+function SignupForm(props: {
   emailHint: string;
   error: string | null;
   submitting: boolean;
   onSubmit: (email: string, password: string) => void;
 }): React.ReactElement {
-  const t = useTranslations("auth.signup");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  return <SignupFormView {...useSignupFormController(props)} />;
+}
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    onSubmit(email.trim(), password);
-  }
-
+export function SignupFormView({
+  emailHint,
+  error,
+  submitting,
+  t,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  handleSubmit,
+}: SignupFormViewProps): React.ReactElement {
   return (
     <form onSubmit={handleSubmit}>
       <Stack gap="lg">

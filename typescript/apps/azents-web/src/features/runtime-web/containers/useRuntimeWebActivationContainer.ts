@@ -11,7 +11,7 @@ import { useRuntimeWebActivationDuration } from "./useRuntimeWebActivationDurati
 import type {
   RuntimeWebActivationState,
   RuntimeWebDurationSeconds,
-} from "../types";
+} from "../../../shared/runtime-web/types";
 
 export interface RuntimeWebActivationContainerProps {
   serviceId: string;

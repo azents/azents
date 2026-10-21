@@ -33,6 +33,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/apps/azents-web/src/shared/chat-presentation/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-05

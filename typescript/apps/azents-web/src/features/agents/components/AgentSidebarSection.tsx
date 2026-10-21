@@ -1,13 +1,4 @@
 "use client";
-
-/**
- * Sidebar agent section — exposes only pinned + recent (full directory is Home).
- *
- * Highlight current page agent.
- * Show up to 8 sorted by updated_at descending.
- * "+" creates new agent; footer "View all agents (N)" enters Home.
- */
-
 import {
   ActionIcon,
   Box,
@@ -19,12 +10,17 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { IconLayoutGrid, IconPlus, IconSearch } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
+/**
+ * Sidebar agent section — exposes only pinned + recent (full directory is Home).
+ *
+ * Highlight current page agent.
+ * Show up to 8 sorted by updated_at descending.
+ * "+" creates new agent; footer "View all agents (N)" enters Home.
+ */
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
-import { trpc } from "@/trpc/client";
+import { useAgentSidebarSectionController } from "../containers/useAgentSidebarSectionController";
 import { AgentSidebarRow } from "./AgentSidebarRow";
+import type { AgentSidebarSectionViewProps } from "../containers/useAgentSidebarSectionController";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSidebarSectionProps {
@@ -32,84 +28,25 @@ interface AgentSidebarSectionProps {
   onNavigate?: () => void;
 }
 
-/** Maximum agents exposed in sidebar (pinned + recent combined) */
-const MAX_SIDEBAR_ROWS = 8;
-/** Extract active agent/session ID from pathname */
-function resolveActive(
-  pathname: string,
-  basePath: string,
-): {
-  agentId: string | null;
-} {
-  if (!pathname.startsWith(basePath)) {
-    return { agentId: null };
-  }
-  const rest = pathname.slice(basePath.length + 1); // after basePath + "/"
-  const parts = rest.split("/");
-  // rest is like "agents/{agentId}/settings" or "agents/{agentId}/sessions/{sessionId}"
-  if (parts[0] === "agents" && parts[1] && parts[1] !== "new") {
-    const agentId = parts[1];
-    return { agentId };
-  }
-  return { agentId: null };
+export function AgentSidebarSection(
+  props: AgentSidebarSectionProps,
+): React.ReactElement {
+  return (
+    <AgentSidebarSectionView {...useAgentSidebarSectionController(props)} />
+  );
 }
 
-export function AgentSidebarSection({
-  handle,
+export function AgentSidebarSectionView({
   onNavigate,
-}: AgentSidebarSectionProps): React.ReactElement {
-  const t = useTranslations("workspace.sidebar");
-  const pathname = usePathname();
-  const workspaceBase = `/w/${handle}`;
-  const agentsBase = `${workspaceBase}/agents`;
-
-  const agentsQuery = trpc.agent.list.useQuery(
-    { handle },
-    {
-      refetchInterval: (query) =>
-        query.state.data?.items.some((agent) => agent.deletion_status !== null)
-          ? 5000
-          : false,
-      refetchIntervalInBackground: false,
-      refetchOnWindowFocus: true,
-    },
-  );
-
-  const { agentId: activeAgentId } = useMemo(
-    () => resolveActive(pathname, workspaceBase),
-    [pathname, workspaceBase],
-  );
-
-  const [query, setQuery] = useState("");
-
-  const sidebarAgents = useMemo(() => {
-    const items = agentsQuery.data?.items ?? [];
-    const q = query.toLowerCase();
-    const filtered = items
-      .filter((a) => a.enabled || a.deletion_status !== null)
-      .filter(
-        (a) =>
-          !q ||
-          a.name.toLowerCase().includes(q) ||
-          (a.description ?? "").toLowerCase().includes(q),
-      );
-
-    // Separately pick active agent to always include it.
-    const alwaysInclude = activeAgentId
-      ? filtered.filter((agent) => agent.id === activeAgentId)
-      : [];
-    const recent = filtered
-      .filter((agent) => agent.id !== activeAgentId)
-      .sort(
-        (a, b) =>
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-      );
-
-    const slots = Math.max(0, MAX_SIDEBAR_ROWS - alwaysInclude.length);
-    const visible = [...alwaysInclude, ...recent.slice(0, slots)];
-    return { visible, totalCount: filtered.length };
-  }, [agentsQuery.data, query, activeAgentId]);
-
+  t,
+  workspaceBase,
+  agentsBase,
+  agentsQuery,
+  activeAgentId,
+  query,
+  setQuery,
+  sidebarAgents,
+}: AgentSidebarSectionViewProps): React.ReactElement {
   return (
     <Stack gap={4}>
       <Group justify="space-between" px="xs" pt="xs">

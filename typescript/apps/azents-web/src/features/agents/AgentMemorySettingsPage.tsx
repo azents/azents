@@ -3,8 +3,8 @@
 /** Agent Memory settings page entry. */
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
 import { AgentMemorySettings } from "./components/AgentMemorySettings";
-import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import { useAgentMemorySettingsContainer } from "./containers/useAgentMemorySettingsContainer";
 import type { AgentMemorySettingsContainerOutput } from "./containers/useAgentMemorySettingsContainer";
 

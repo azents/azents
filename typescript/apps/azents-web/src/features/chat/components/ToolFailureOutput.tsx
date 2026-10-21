@@ -2,7 +2,7 @@ import { Code, rem, ScrollArea } from "@mantine/core";
 import {
   activityDetailScrollAreaProps,
   activityDetailScrollbarSize,
-} from "./activityRowPresentation";
+} from "../../../shared/chat-presentation/components/activityRowPresentation";
 import type { ReactElement } from "react";
 
 export function ToolFailureOutput({

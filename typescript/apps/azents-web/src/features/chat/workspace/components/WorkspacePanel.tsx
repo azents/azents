@@ -31,9 +31,9 @@ import {
   IconWorld,
 } from "@tabler/icons-react";
 import Link from "next/link";
-import { RuntimeWebServices } from "@/features/runtime-web/components/RuntimeWebServices";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/shared/runtime-metrics/components/RuntimeSystemMetricsOverview";
+import { RuntimeWebServices } from "@/shared/runtime-web/components/RuntimeWebServices";
 import { FileBrowserContainer } from "../containers/FileBrowserContainer";
 import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
@@ -55,8 +55,8 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
-import type { RuntimeWebServicesContainerOutput } from "@/features/runtime-web/containers/useRuntimeWebServicesContainer";
 import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
+import type { RuntimeWebServicesContainerOutput } from "@/shared/runtime-web/containers/useRuntimeWebServicesContainer";
 
 const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
   type: "CLOSED",

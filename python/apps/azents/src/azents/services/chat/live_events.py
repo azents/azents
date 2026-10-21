@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 import hashlib
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Annotated, Literal, Protocol, assert_never
 
 from fastapi import Depends
@@ -420,6 +420,26 @@ def _mailbox_item_requested_profile(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class _MailboxActionVisibility:
+    hidden: bool
+
+
+def _decode_mailbox_action_visibility(
+    action: Mapping[str, object],
+) -> _MailboxActionVisibility:
+    """Project the outer action only, retaining legacy membership/error semantics."""
+    return _MailboxActionVisibility(
+        hidden=action.get("type")
+        in {
+            "create_session_working_folder",
+            "agent_create_git_worktree",
+            "agent_remove_git_worktree",
+            "routine_judgment",
+        }
+    )
+
+
 def mailbox_item_is_publicly_presentable(mailbox_item: MailboxItem) -> bool:
     """Return whether a pending mailbox item has a public chat presentation."""
     if mailbox_item.kind in {
@@ -432,13 +452,7 @@ def mailbox_item_is_publicly_presentable(mailbox_item: MailboxItem) -> bool:
     return not (
         mailbox_item.kind is MailboxItemKind.ACTION_MESSAGE
         and mailbox_item.action is not None
-        and mailbox_item.action.get("type")
-        in {
-            "create_session_working_folder",
-            "agent_create_git_worktree",
-            "agent_remove_git_worktree",
-            "routine_judgment",
-        }
+        and _decode_mailbox_action_visibility(mailbox_item.action).hidden
     )
 
 

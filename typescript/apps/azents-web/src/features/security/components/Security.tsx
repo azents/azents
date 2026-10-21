@@ -1,11 +1,4 @@
 "use client";
-
-/**
- * Security settings UI.
- *
- * Authentication method list display + password management.
- * Show modal when elevation is required.
- */
 import {
   Badge,
   Center,
@@ -19,10 +12,17 @@ import {
 } from "@mantine/core";
 import { IconLock, IconMail } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useElevationModal } from "../containers/useElevationModal";
-import { ElevationView } from "./ElevationView";
+import { ElevationView } from "../../../shared/elevation/components/ElevationView";
+import { useElevationRequiredViewController } from "../containers/useElevationRequiredViewController";
 import { PasswordForm } from "./PasswordForm";
+import type { ElevationRequiredViewViewProps } from "../containers/useElevationRequiredViewController";
 import type { SecurityContainerProps } from "../containers/useSecurityContainer";
+/**
+ * Security settings UI.
+ *
+ * Authentication method list display + password management.
+ * Show modal when elevation is required.
+ */
 import type { AuthMethod } from "@azents/public-client";
 
 export function Security({
@@ -109,29 +109,17 @@ export function Security({
 }
 
 /** Elevation required view — rendered directly in main view */
-function ElevationRequiredView({
-  elevationMethods,
-  onElevated,
-}: {
+function ElevationRequiredView(props: {
   elevationMethods: AuthMethod[] | null;
   onElevated: () => void;
 }): React.ReactElement {
-  /** Use auth methods fetched from server; show only email while loading */
-  const methods = elevationMethods ?? [createEmailFallbackMethod()];
-  const elevation = useElevationModal(methods, onElevated);
-
-  return <ElevationView {...elevation} />;
+  return (
+    <ElevationRequiredViewView {...useElevationRequiredViewController(props)} />
+  );
 }
 
-function createEmailFallbackMethod(): AuthMethod {
-  return {
-    type: "email",
-    enabled: true,
-    configured: true,
-    valid: true,
-    can_login: true,
-    can_elevate: true,
-    can_remove: false,
-    unavailable_reason: null,
-  };
+export function ElevationRequiredViewView({
+  elevation,
+}: ElevationRequiredViewViewProps): React.ReactElement {
+  return <ElevationView {...elevation} />;
 }

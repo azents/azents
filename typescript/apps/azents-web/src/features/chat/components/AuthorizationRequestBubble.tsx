@@ -1,4 +1,6 @@
 "use client";
+import { Alert, Button, Group, Text } from "@mantine/core";
+import { IconLock } from "@tabler/icons-react";
 
 /**
  * OAuth2 per-user authorization request card.
@@ -7,12 +9,9 @@
  * authorization URL new tab in can open button includes..
  */
 
-import { Alert, Button, Group, Text } from "@mantine/core";
-import { IconLock } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { isRecord } from "@/shared/lib/unknown-value";
+import { useAuthorizationRequestBubbleController } from "../containers/useAuthorizationRequestBubbleController";
 import { ChatTimelineItem } from "./ChatTimelineItem";
+import type { AuthorizationRequestBubbleViewProps } from "../containers/useAuthorizationRequestBubbleController";
 
 interface AuthorizationRequestBubbleProps {
   toolkitName: string;
@@ -24,68 +23,23 @@ interface AuthorizationRequestBubbleProps {
   onAuthorized: () => void;
 }
 
-export function AuthorizationRequestBubble({
+export function AuthorizationRequestBubble(
+  props: AuthorizationRequestBubbleProps,
+): React.ReactElement {
+  return (
+    <AuthorizationRequestBubbleView
+      {...useAuthorizationRequestBubbleController(props)}
+    />
+  );
+}
+
+export function AuthorizationRequestBubbleView({
   toolkitName,
-  authorizationUrl,
-  variant = "card",
-  getAuthorizationUrl,
-  onAuthorized,
-}: AuthorizationRequestBubbleProps): React.ReactElement {
-  const t = useTranslations("chat.authorization");
-  const popupRef = useRef<Window | null>(null);
-  const [isOpening, setIsOpening] = useState(false);
-
-  /** OAuth open popup */
-  const handleClick = useCallback(async () => {
-    setIsOpening(true);
-
-    // Open popup before async URL fetch to avoid popup blocker.
-    const popup = window.open(
-      "about:blank",
-      "azents-oauth",
-      "width=600,height=700,popup=yes",
-    );
-    popupRef.current = popup;
-
-    try {
-      const resolvedUrl = authorizationUrl || (await getAuthorizationUrl?.());
-      if (!resolvedUrl) {
-        popup?.close();
-        return;
-      }
-
-      if (popup && !popup.closed) {
-        popup.location.href = resolvedUrl;
-      } else {
-        window.open(resolvedUrl, "_blank", "noopener,noreferrer");
-      }
-    } catch {
-      popup?.close();
-    } finally {
-      setIsOpening(false);
-    }
-  }, [authorizationUrl, getAuthorizationUrl]);
-
-  /** postMessage handler: OAuth receive result from callback popup */
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent<unknown>): void => {
-      if (event.origin !== window.location.origin) {
-        return;
-      }
-      const data = event.data;
-      if (!isRecord(data) || data.type !== "azents-oauth-callback") {
-        return;
-      }
-
-      if (data.success === true) {
-        onAuthorized();
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [onAuthorized]);
-
+  variant,
+  t,
+  isOpening,
+  handleClick,
+}: AuthorizationRequestBubbleViewProps): React.ReactElement {
   if (variant === "compact") {
     return (
       <Button

@@ -1,4 +1,4 @@
-import { Box } from "@mantine/core";
+import { Box, Button } from "@mantine/core";
 import { useCallback, useState } from "react";
 import {
   expect,
@@ -52,22 +52,31 @@ function DirectoryBrowser({
     useState<WorkspaceDirectoryLoadState>(initialLoadState);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [awaitingChildren, setAwaitingChildren] = useState(false);
   const onOpenDirectory = useCallback(
     (path: string): void => {
       if (path !== directoryPath || !resolveChildren) {
         return;
       }
       setLoadState({ type: "LOADING" });
-      window.setTimeout(() => {
-        setEntriesByPath({ [directoryPath]: [child] });
-        setLoadState({ type: "LOADED" });
-      }, 100);
+      setAwaitingChildren(true);
     },
     [resolveChildren],
   );
 
   return (
     <Box h="30rem" w="28rem">
+      {awaitingChildren && (
+        <Button
+          onClick={() => {
+            setEntriesByPath({ [directoryPath]: [child] });
+            setLoadState({ type: "LOADED" });
+            setAwaitingChildren(false);
+          }}
+        >
+          Resolve directory children
+        </Button>
+      )}
       <FileBrowserContainer
         readOnly={false}
         root={root}
@@ -139,7 +148,7 @@ export const ExpandAllIdleDirectory = {
     const canvas = within(canvasElement);
     const body = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByLabelText("Actions"));
-    await userEvent.click(body.getByText("Expand all"));
+    await userEvent.click(await body.findByText("Expand all"));
     await expect(canvas.queryByText("Loading directory…")).toBeNull();
     await expect(canvas.queryByRole("alert")).toBeNull();
   },
@@ -185,6 +194,9 @@ export const AsyncDirectoryChildren = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByText("slow-directory"));
     await expect(canvas.getByText("Loading directory…")).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Resolve directory children" }),
+    );
     await expect(await canvas.findByText("child.txt")).toBeVisible();
   },
 } satisfies Story;

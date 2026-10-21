@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Alert,
   Badge,
@@ -24,11 +23,11 @@ import {
   IconTrash,
   IconWorld,
 } from "@tabler/icons-react";
-import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+
+import { useRuntimeWebServicesController } from "../containers/useRuntimeWebServicesController";
 import type { RuntimeWebServicesContainerOutput } from "../containers/useRuntimeWebServicesContainer";
+import type { RuntimeWebServicesViewProps } from "../containers/useRuntimeWebServicesController";
 import type { RuntimeWebDurationSeconds } from "../types";
-import type { RuntimeWebServiceResponse } from "@azents/public-client";
 
 export type RuntimeWebServicesProps = RuntimeWebServicesContainerOutput;
 
@@ -56,54 +55,44 @@ function formatTime(value: string, locale: string): string {
   }).format(date);
 }
 
-export function RuntimeWebServices({
+export function RuntimeWebServices(
+  props: RuntimeWebServicesProps,
+): React.ReactElement {
+  return <RuntimeWebServicesView {...useRuntimeWebServicesController(props)} />;
+}
+
+export function RuntimeWebServicesView({
   readOnly,
   state,
   action,
   mutationError,
-  onCreate,
-  onUpdate,
   onTurnOn,
   onTurnOff,
   onReset,
-  onDelete,
-}: RuntimeWebServicesProps): React.ReactElement {
-  const t = useTranslations("runtimeWeb");
-  const locale = useLocale();
-  const [createOpened, setCreateOpened] = useState(false);
-  const [port, setPort] = useState<number | string>(3000);
-  const [label, setLabel] = useState("");
-  const [duration, setDuration] = useState<RuntimeWebDurationSeconds>(3600);
-  const [turnOn, setTurnOn] = useState(false);
-  const [editing, setEditing] = useState<RuntimeWebServiceResponse | null>(
-    null,
-  );
-  const [editLabel, setEditLabel] = useState("");
-  const [editDuration, setEditDuration] =
-    useState<RuntimeWebDurationSeconds>(3600);
-  const [deleting, setDeleting] = useState<RuntimeWebServiceResponse | null>(
-    null,
-  );
-  const submittedAction = useRef<"create" | "update" | "delete" | null>(null);
-
-  useEffect(() => {
-    if (action !== null || mutationError !== null) {
-      return;
-    }
-    if (submittedAction.current === "create") {
-      setCreateOpened(false);
-      setPort(3000);
-      setLabel("");
-      setDuration(3600);
-      setTurnOn(false);
-    } else if (submittedAction.current === "update") {
-      setEditing(null);
-    } else if (submittedAction.current === "delete") {
-      setDeleting(null);
-    }
-    submittedAction.current = null;
-  }, [action, mutationError]);
-
+  t,
+  locale,
+  createOpened,
+  setCreateOpened,
+  port,
+  setPort,
+  label,
+  setLabel,
+  duration,
+  setDuration,
+  turnOn,
+  setTurnOn,
+  editing,
+  setEditing,
+  editLabel,
+  setEditLabel,
+  editDuration,
+  setEditDuration,
+  deleting,
+  setDeleting,
+  submitServiceAction1,
+  submitServiceAction2,
+  submitServiceAction3,
+}: RuntimeWebServicesViewProps): React.ReactElement {
   if (state.type === "LOADING") {
     return (
       <Group gap="xs" p="md">
@@ -362,18 +351,7 @@ export function RuntimeWebServices({
             <Button
               loading={action === "create"}
               disabled={!validPort || mutating}
-              onClick={() => {
-                if (typeof port !== "number") {
-                  return;
-                }
-                submittedAction.current = "create";
-                onCreate({
-                  port,
-                  label: label.trim() || null,
-                  selectedDurationSeconds: duration,
-                  turnOn,
-                });
-              }}
+              onClick={() => submitServiceAction1()}
             >
               {t("panel.create")}
             </Button>
@@ -422,13 +400,7 @@ export function RuntimeWebServices({
               <Button
                 loading={action === "update"}
                 disabled={mutating}
-                onClick={() => {
-                  submittedAction.current = "update";
-                  onUpdate(editing, {
-                    label: editLabel.trim() || null,
-                    selectedDurationSeconds: editDuration,
-                  });
-                }}
+                onClick={() => submitServiceAction2(editing)}
               >
                 {t("actions.save")}
               </Button>
@@ -458,10 +430,7 @@ export function RuntimeWebServices({
                 color="red"
                 loading={action === "delete"}
                 disabled={mutating}
-                onClick={() => {
-                  submittedAction.current = "delete";
-                  onDelete(deleting);
-                }}
+                onClick={() => submitServiceAction3(deleting)}
               >
                 {t("actions.delete")}
               </Button>

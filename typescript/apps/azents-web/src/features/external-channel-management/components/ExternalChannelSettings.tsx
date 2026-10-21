@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Alert,
   Badge,
@@ -27,8 +26,6 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { useModals } from "@mantine/modals";
 import {
   IconBrandDiscord,
   IconBrandSlack,
@@ -43,6 +40,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+
 import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
 import {
   discordSuppressUrlPreviewsFromConfiguration,
@@ -50,7 +48,11 @@ import {
   discordThreadAutoArchiveDurationFromSelectValue,
 } from "@/shared/lib/discord-thread-auto-archive-duration";
 import { isOneOf } from "@/shared/lib/unknown-value";
+import { useConnectionPermissionsController } from "../containers/useConnectionPermissionsController";
+import { useExternalChannelSettingsController } from "../containers/useExternalChannelSettingsController";
+import type { ConnectionPermissionsViewProps } from "../containers/useConnectionPermissionsController";
 import type { ExternalChannelSettingsContainerOutput } from "../containers/useExternalChannelSettingsContainer";
+import type { ExternalChannelSettingsViewProps } from "../containers/useExternalChannelSettingsController";
 import type {
   ConnectionDialogState,
   DiscordConnectionDialogState,
@@ -117,37 +119,6 @@ type ConnectionPermissionName =
 interface ConnectionPermission {
   name: ConnectionPermissionName;
   enabled: boolean;
-}
-
-const CORE_CONNECTION_PERMISSION_NAMES: readonly ConnectionPermissionName[] = [
-  "inbound_events",
-  "thread_history",
-  "post_messages",
-  "update_messages",
-  "delete_messages",
-  "download_files",
-  "upload_files",
-];
-
-const SLACK_CONNECTION_PERMISSION_NAMES: readonly ConnectionPermissionName[] = [
-  ...CORE_CONNECTION_PERMISSION_NAMES,
-  "customize_messages",
-];
-
-function connectionPermissionEntries(
-  connection: ManagedConnection,
-): ConnectionPermission[] {
-  if (connection.capabilities === null) {
-    return [];
-  }
-  const names =
-    connection.provider === "slack"
-      ? SLACK_CONNECTION_PERMISSION_NAMES
-      : CORE_CONNECTION_PERMISSION_NAMES;
-  return names.map((name) => ({
-    name,
-    enabled: connection.capabilities?.[name] === true,
-  }));
 }
 
 function slackPermissionScope(
@@ -230,17 +201,24 @@ function PermissionSection({
   );
 }
 
-function ConnectionPermissions({
-  connection,
-}: {
+function ConnectionPermissions(props: {
   connection: ManagedConnection;
 }): React.ReactElement {
-  const t = useTranslations("workspace.agents.externalChannels");
-  const [opened, { open, close }] = useDisclosure(false);
-  const permissions = connectionPermissionEntries(connection);
-  const granted = permissions.filter((permission) => permission.enabled);
-  const missing = permissions.filter((permission) => !permission.enabled);
+  return (
+    <ConnectionPermissionsView {...useConnectionPermissionsController(props)} />
+  );
+}
 
+export function ConnectionPermissionsView({
+  connection,
+  t,
+  opened,
+  open,
+  close,
+  permissions,
+  granted,
+  missing,
+}: ConnectionPermissionsViewProps): React.ReactElement {
   if (permissions.length === 0) {
     return (
       <Box>
@@ -1220,7 +1198,17 @@ function DiscordConnectionDialog({
   );
 }
 
-export function ExternalChannelSettings({
+export function ExternalChannelSettings(
+  props: ExternalChannelSettingsContainerOutput,
+): React.ReactElement {
+  return (
+    <ExternalChannelSettingsView
+      {...useExternalChannelSettingsController(props)}
+    />
+  );
+}
+
+export function ExternalChannelSettingsView({
   handle,
   state,
   manifestState,
@@ -1259,31 +1247,10 @@ export function ExternalChannelSettings({
   onSaveDiscordUrlPreview,
   onRevokeGrant,
   onRemoveBlock,
-}: ExternalChannelSettingsContainerOutput): React.ReactElement {
-  const t = useTranslations("workspace.agents.externalChannels");
-  const modals = useModals();
-  const loaded = state.type === "LOADED" ? state : null;
-  const openConfirm = ({
-    title,
-    description,
-    confirmLabel,
-    onConfirm,
-  }: {
-    title: string;
-    description: string;
-    confirmLabel: string;
-    onConfirm: () => void;
-  }): void => {
-    modals.openConfirmModal({
-      title,
-      children: <Text size="sm">{description}</Text>,
-      labels: { confirm: confirmLabel, cancel: t("cancel") },
-      confirmProps: { color: "red" },
-      centered: true,
-      onConfirm,
-    });
-  };
-
+  t,
+  loaded,
+  openConfirm,
+}: ExternalChannelSettingsViewProps): React.ReactElement {
   return (
     <Box style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
       <Stack gap="lg" p="md" maw={rem(960)} mx="auto" w="100%">

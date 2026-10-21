@@ -21,6 +21,24 @@ export function completedToolkitEditor(
     : { type: "CLOSED" };
 }
 
+interface ToolkitOAuthEligibility {
+  githubUser: boolean;
+  mcpOauth: boolean;
+}
+
+function decodeToolkitOAuthEligibility(
+  toolkitType: string,
+  config: Record<string, unknown>,
+): ToolkitOAuthEligibility {
+  return {
+    githubUser:
+      toolkitType === "github" &&
+      (config.github_auth_type === "github_app_user" ||
+        config.github_auth_type === "github_app_platform_user"),
+    mcpOauth: toolkitType === "mcp" && config.auth_type === "oauth2",
+  };
+}
+
 export function canAuthorizeAgentToolkitOAuth(
   item: AgentToolkitManagementItemResponse,
   canAuthorizeShared: boolean,
@@ -31,14 +49,15 @@ export function canAuthorizeAgentToolkitOAuth(
   ) {
     return false;
   }
+  const eligibility = decodeToolkitOAuthEligibility(
+    item.toolkit.toolkit_type,
+    item.toolkit.config,
+  );
   return (
-    (item.toolkit.toolkit_type === "github" &&
-      (item.toolkit.config.github_auth_type === "github_app_user" ||
-        item.toolkit.config.github_auth_type === "github_app_platform_user")) ||
+    (item.toolkit.toolkit_type === "github" && eligibility.githubUser) ||
     item.toolkit.toolkit_type === "notion" ||
     item.toolkit.toolkit_type === "sentry" ||
-    (item.toolkit.toolkit_type === "mcp" &&
-      item.toolkit.config.auth_type === "oauth2")
+    (item.toolkit.toolkit_type === "mcp" && eligibility.mcpOauth)
   );
 }
 

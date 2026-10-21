@@ -1,10 +1,10 @@
 /** common layout for input-buffer bubbles. */
 
 import { Box, Group, rem, Stack, Text } from "@mantine/core";
+import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
 import { ChatHumanMessageBody } from "./ChatHumanMessageBody";
 import { chatHumanMessageMaxWidth, ChatTimelineItem } from "./ChatTimelineItem";
 import { extractFilename, FileAttachmentList } from "./FileAttachmentList";
-import { MarkdownContent } from "./MarkdownContent";
 import type { ChatAction, FileAttachment } from "@azents/session-core/types";
 
 interface InputBufferBubbleFrameProps {

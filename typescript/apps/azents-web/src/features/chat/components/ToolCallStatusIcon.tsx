@@ -5,7 +5,7 @@ import {
   IconHelpCircle,
   IconX,
 } from "@tabler/icons-react";
-import { activityRowIconSize } from "./activityRowPresentation";
+import { activityRowIconSize } from "../../../shared/chat-presentation/components/activityRowPresentation";
 import type { ReactElement } from "react";
 
 export type ToolCallStatus =

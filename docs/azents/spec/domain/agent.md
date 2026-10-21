@@ -122,6 +122,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/agentAvatarImageSource.ts
   - typescript/apps/azents-web/src/shared/runtime-terminal/**
   - typescript/apps/azents-web/src/features/runtime-web/**
+  - typescript/apps/azents-web/src/shared/runtime-web/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
   - /agent/v1/workspaces/{handle}/agents

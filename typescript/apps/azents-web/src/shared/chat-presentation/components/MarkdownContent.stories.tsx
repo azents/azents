@@ -3,7 +3,7 @@ import {
   codeReadabilityMarkdownSample,
   markdownSample,
   mermaidMarkdownSample,
-} from "../story-fixtures";
+} from "../markdown-story-fixtures";
 import { MarkdownContent } from "./MarkdownContent";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 

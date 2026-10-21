@@ -1,4 +1,4 @@
-import { LoginRequired } from "@/features/auth/components/LoginRequired";
+import { LoginRequired } from "@/shared/auth/components/LoginRequired";
 import { WorkspacesListPage } from "./pages/WorkspacesListPage";
 
 interface WorkspacesPageProps {

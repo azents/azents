@@ -1,5 +1,5 @@
 import langMap from "lang-map";
-import { supportedCodeLanguage } from "./codeLanguage.ts";
+import { supportedCodeLanguage } from "../../shared/chat-presentation/codeLanguage.ts";
 
 function languageLookupKey(path: string): string | null {
   const fileName = path.replaceAll("\\", "/").split("/").at(-1)?.trim();

@@ -4,13 +4,13 @@ import { Box, Loader, rem, Text } from "@mantine/core";
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
-import { useToolActivityGroup } from "../containers/useToolActivityGroup";
-import { ActivityEventList } from "./ActivityEventList";
-import { ActivityRow } from "./ActivityRow";
 import {
   activityRowIconSize,
   activityRowSummarySize,
-} from "./activityRowPresentation";
+} from "../../../shared/chat-presentation/components/activityRowPresentation";
+import { useToolActivityGroup } from "../containers/useToolActivityGroup";
+import { ActivityEventList } from "./ActivityEventList";
+import { ActivityRow } from "./ActivityRow";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import { ChatTimelineItem } from "./ChatTimelineItem";
 import { formatElapsedDuration } from "./elapsedDuration";

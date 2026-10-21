@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useElevationModal } from "@/features/security/containers/useElevationModal";
+import { useElevationModal } from "@/shared/elevation/containers/useElevationModal";
 import { trpc } from "@/trpc/client";
 import { elevationMethodsOrEmpty } from "../elevation-methods";
 import {

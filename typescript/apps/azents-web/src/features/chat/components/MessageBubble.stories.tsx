@@ -1,11 +1,11 @@
 import { rem } from "@mantine/core";
+import { markdownSample } from "@/shared/chat-presentation/markdown-story-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   attachmentToolCall,
   binaryAttachment,
   createChatMessage,
   imageAttachment,
-  markdownSample,
   preparingToolCall,
   textAttachment,
 } from "../story-fixtures";

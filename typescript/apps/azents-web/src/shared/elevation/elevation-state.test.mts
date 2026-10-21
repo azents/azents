@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { synchronizeElevationState } from "./elevation-state.ts";
-import type { ElevationState } from "./types.ts";
+import type { ElevationState } from "@/shared/elevation/types";
 import type { AuthMethod } from "@azents/public-client";
 
 const passwordMethod: AuthMethod = {

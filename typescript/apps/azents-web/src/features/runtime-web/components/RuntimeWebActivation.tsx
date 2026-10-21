@@ -17,8 +17,8 @@ import {
 } from "@mantine/core";
 import { IconExternalLink, IconPower, IconWorld } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import type { RuntimeWebDurationSeconds } from "../../../shared/runtime-web/types";
 import type { RuntimeWebActivationContainerOutput } from "../containers/useRuntimeWebActivationContainer";
-import type { RuntimeWebDurationSeconds } from "../types";
 
 function durationValue(value: string | null): RuntimeWebDurationSeconds | null {
   switch (value) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { startRuntimeWebAuth } from "../runtimeWebAuthBootstrap";
-import type { RuntimeWebAuthState } from "../types";
+import type { RuntimeWebAuthState } from "../../../shared/runtime-web/types";
 
 interface RuntimeWebAuthContainerInput {
   serviceId: string;
