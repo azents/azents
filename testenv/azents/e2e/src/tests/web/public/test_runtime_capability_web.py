@@ -712,6 +712,18 @@ def test_runtime_free_add_and_remove_progress(
     )
     assert runtime_before_reset.lifecycle is not None
     reset_generation = runtime_before_reset.lifecycle.desired_generation
+    # Metrics resolve independently above the lifecycle controls. Wait for their
+    # real ready state before targeting a destructive-action button after
+    # navigation; the loading-to-ready layout must not move the click target.
+    _assert_visible_text(browser_driver, "Scope: Container", timeout_seconds=120)
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[role='img'][aria-label='Recent one-hour usage trend']",
+            )
+        )
+    )
     _click_button(browser_driver, "Reset")
     _assert_visible_text(browser_driver, "Reset Runtime state?")
     _wait(browser_driver).until(
