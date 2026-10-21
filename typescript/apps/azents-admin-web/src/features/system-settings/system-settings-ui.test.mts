@@ -205,6 +205,16 @@ void test("Google guide renders the complete operator setup flow with official l
   assert.match(html, /numeric Cloud project number/);
 });
 
+void test("all Google scope examples wrap instead of widening the setup list", () => {
+  const html = render(Guide, {});
+  const blocks = [...html.matchAll(/<pre\b[^>]*>/g)];
+  assert.equal(blocks.length, 3);
+  for (const [tag] of blocks) {
+    assert.match(tag, /white-space:pre-wrap/);
+    assert.match(tag, /overflow-wrap:anywhere/);
+  }
+});
+
 void test("Google card opens help for setup and preserves the server callback and write-only secret", () => {
   const html = render(Card, cardProps());
   assert.match(html, /aria-expanded="true"/);
