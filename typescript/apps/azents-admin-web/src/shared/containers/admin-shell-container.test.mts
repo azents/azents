@@ -4,9 +4,17 @@ import { adminNavigation } from "../lib/admin-navigation.ts";
 import { getPublicRoutePath } from "../lib/auth-policy.ts";
 import { HookHarness, invoke, record } from "../testing/hook-harness.ts";
 
-function setup(desktop: boolean): { harness: HookHarness; calls: unknown[] } {
+function setup(
+  desktop: boolean,
+  initialSection: string | null = "audit",
+): {
+  harness: HookHarness;
+  calls: unknown[];
+  selectSection: (value: string | null) => void;
+} {
   const harness = new HookHarness();
   const calls: unknown[] = [];
+  let sectionValue = initialSection;
   harness.load(
     new URL("./useAdminShellContainer.ts", import.meta.url),
     "useAdminShellContainer",
@@ -20,7 +28,6 @@ function setup(desktop: boolean): { harness: HookHarness; calls: unknown[] } {
         }),
       },
       "@mantine/hooks": {
-        useHash: () => ["#audit", (): void => {}],
         useMediaQuery: () => desktop,
         useDisclosure: () => [
           true,
@@ -46,6 +53,10 @@ function setup(desktop: boolean): { harness: HookHarness; calls: unknown[] } {
       },
       "next/navigation": {
         usePathname: () => "/gateway/admin/system-settings",
+        useSearchParams: () => ({
+          get: (key: string): string | null =>
+            key === "section" ? sectionValue : null,
+        }),
       },
       "@/config/client": {
         useConfig: () => ({
@@ -65,10 +76,16 @@ function setup(desktop: boolean): { harness: HookHarness; calls: unknown[] } {
       "../lib/auth-policy": { getPublicRoutePath },
     },
   );
-  return { harness, calls };
+  return {
+    harness,
+    calls,
+    selectSection: (value): void => {
+      sectionValue = value;
+    },
+  };
 }
 
-void test("shared shell projects the current fragment and preserves theme and logout collaborators", () => {
+void test("shared shell projects the current query and preserves theme and logout collaborators", () => {
   const { harness, calls } = setup(false);
   const output = harness.render({ children: "current screen" });
   harness.flushEffects();
@@ -93,4 +110,25 @@ void test("resizing to desktop closes a previously opened mobile navigation draw
   harness.render({ children: "current screen" });
   harness.flushEffects();
   assert.deepEqual(calls, ["close"]);
+});
+
+void test("query-only Next navigation updates the shell location without a remount or browser event", () => {
+  const { harness, selectSection } = setup(false, "github");
+  assert.equal(
+    record(harness.render({ children: "current screen" }).location).label,
+    "GitHub",
+  );
+  selectSection("audit");
+  assert.equal(
+    record(harness.render({ children: "current screen" }).location).label,
+    "Audit log",
+  );
+});
+
+void test("missing query selects the default screen without accessing window", () => {
+  const { harness } = setup(false, null);
+  assert.equal(
+    record(harness.render({ children: "current screen" }).location).label,
+    "Google",
+  );
 });

@@ -1,9 +1,9 @@
 "use client";
 
 import { useMantineColorScheme } from "@mantine/core";
-import { useDisclosure, useHash, useMediaQuery } from "@mantine/hooks";
+import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { useGetIdentity, useLogout } from "@refinedev/core";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { useConfig } from "@/config/client";
 import { useColorMode } from "@/providers/color-mode";
@@ -23,7 +23,7 @@ export function useAdminShellContainer({
   children: React.ReactNode;
 }): AdminShellProps {
   const pathname = usePathname();
-  const [hash] = useHash();
+  const sectionValue = useSearchParams().get("section");
   const { publicBaseUrl } = useConfig();
   const [opened, { toggle, close }] = useDisclosure();
   const isDesktop = useMediaQuery("(min-width: 48em)", true);
@@ -36,7 +36,7 @@ export function useAdminShellContainer({
   const { setColorScheme } = useMantineColorScheme();
   const { data: user } = useGetIdentity<UserIdentity>();
   const { mutate: logout } = useLogout();
-  const navigation = adminNavigation(publicBaseUrl, pathname, hash);
+  const navigation = adminNavigation(publicBaseUrl, pathname, sectionValue);
   return {
     children,
     ...navigation,

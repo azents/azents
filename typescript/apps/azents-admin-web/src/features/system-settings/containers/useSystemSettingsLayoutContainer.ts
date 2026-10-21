@@ -1,7 +1,7 @@
 "use client";
 
-import { useHash } from "@mantine/hooks";
-import { settingsSectionFromHash } from "@/shared/lib/admin-navigation";
+import { useSearchParams } from "next/navigation";
+import { settingsSectionFromValue } from "@/shared/lib/admin-navigation";
 import type { SettingsSection } from "@/shared/lib/admin-navigation";
 
 export interface SystemSettingsLayoutInput {
@@ -15,6 +15,6 @@ export interface SystemSettingsLayoutProps extends SystemSettingsLayoutInput {
 export function useSystemSettingsLayoutContainer({
   sections,
 }: SystemSettingsLayoutInput): SystemSettingsLayoutProps {
-  const [hash] = useHash();
-  return { sections, activeSection: settingsSectionFromHash(hash) };
+  const sectionValue = useSearchParams().get("section");
+  return { sections, activeSection: settingsSectionFromValue(sectionValue) };
 }

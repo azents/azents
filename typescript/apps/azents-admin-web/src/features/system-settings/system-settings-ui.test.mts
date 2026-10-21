@@ -11,7 +11,7 @@ import ts from "typescript";
 import {
   adminNavigation,
   SETTINGS_SECTIONS,
-  settingsSectionFromHash,
+  settingsSectionFromValue,
 } from "../../shared/lib/admin-navigation.ts";
 import { googleApplicationDraft } from "./google-application-state.ts";
 import type { GoogleApplicationDetail } from "@azents/admin-client";
@@ -82,13 +82,16 @@ void test("the shared Admin shell renders all destinations and settings in a sin
     "AdminShell",
     {
       "next/link": (props: ComponentProps<"a">): ReactElement =>
-        createElement("a", props),
+        createElement("a", {
+          ...props,
+          className: `${props.className ?? ""} test-next-link`,
+        }),
     },
   );
   const navigation = adminNavigation(
     "https://example.invalid/admin",
     "/admin/system-settings",
-    "#google",
+    "google",
   );
   const html = render(Shell, {
     ...navigation,
@@ -109,7 +112,11 @@ void test("the shared Admin shell renders all destinations and settings in a sin
   assert.equal((html.match(/aria-label="Admin navigation"/g) ?? []).length, 1);
   assert.equal((html.match(/aria-current="page"/g) ?? []).length, 1);
   for (const item of navigation.groups.flatMap((group) => group.items)) {
-    assert.ok(html.includes(`href="${item.href}"`));
+    const anchor = [...html.matchAll(/<a\b[^>]*>/g)]
+      .map((match) => match[0])
+      .find((tag) => tag.includes(`href="${item.href}"`));
+    assert.ok(anchor);
+    assert.equal(anchor.includes("test-next-link"), true);
   }
   assert.match(html, /aria-label="Color scheme"/);
   assert.match(html, /Save application settings/);
@@ -227,12 +234,12 @@ void test("Google card opens help for setup and preserves the server callback an
   );
 });
 
-void test("settings navigation accepts known fragments and safely defaults unknown ones", () => {
+void test("settings navigation accepts known query values and safely defaults unknown ones", () => {
   for (const section of SETTINGS_SECTIONS) {
-    assert.equal(settingsSectionFromHash(`#${section.value}`), section.value);
+    assert.equal(settingsSectionFromValue(section.value), section.value);
   }
-  assert.equal(settingsSectionFromHash(""), "google");
-  assert.equal(settingsSectionFromHash("#unknown"), "google");
+  assert.equal(settingsSectionFromValue(null), "google");
+  assert.equal(settingsSectionFromValue("unknown"), "google");
 });
 
 void test("settings layout exposes one section while retaining every draft subtree", () => {

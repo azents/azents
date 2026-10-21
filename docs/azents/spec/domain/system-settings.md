@@ -279,10 +279,12 @@ Admin Web exposes System Settings in authenticated Admin navigation. The workspa
 shows one purpose-based section at a time: Google, GitHub, Account linking (Slack
 and Discord), File transfers, Memory, or Audit log. These destinations are links
 in the shared Admin navigation's Settings group, not a second sidebar inside the
-settings workspace. URL fragments preserve the selected
-section across reload and browser history; missing or unknown fragments select
-Google. Section subtrees remain mounted while navigating, preserving in-progress
-drafts without saving them. Each section retains its independent save controls.
+settings workspace. The Next-managed `section` query parameter preserves the
+selection across reload and browser history; missing or unknown values select
+Google. Header, active link and content read the same query state. The workspace
+is mounted by the persistent `/system-settings` route layout, so query navigation
+does not recreate its state owners. Section subtrees remain mounted, preserving
+in-progress drafts without saving them. Each section retains independent save controls.
 
 Platform GitHub App detail, field source and fallback state, explicit secret
 actions, candidate validation and health, aggregate binding impact, and

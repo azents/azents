@@ -64,9 +64,11 @@ export const SETTINGS_SECTIONS = [
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["value"];
 
-export function settingsSectionFromHash(hash: string): SettingsSection {
+export function settingsSectionFromValue(
+  value: string | null,
+): SettingsSection {
   return (
-    SETTINGS_SECTIONS.find((section) => `#${section.value}` === hash)?.value ??
+    SETTINGS_SECTIONS.find((section) => section.value === value)?.value ??
     "google"
   );
 }
@@ -169,7 +171,7 @@ export function adminRouteMatches(pathname: string, path: string): boolean {
 export function adminNavigation(
   publicBaseUrl: string,
   pathname: string,
-  hash: string,
+  sectionValue: string | null,
 ): { groups: AdminNavigationGroup[]; location: AdminLocation } {
   const groups: AdminNavigationGroup[] = [];
   let location: AdminLocation = { group: "Administration", label: "Overview" };
@@ -184,13 +186,13 @@ export function adminNavigation(
       groups.push(group);
     }
     if (resource.name === "system-settings") {
-      const selected = settingsSectionFromHash(hash);
+      const selected = settingsSectionFromValue(sectionValue);
       for (const section of SETTINGS_SECTIONS) {
         const isActive = active && selected === section.value;
         group.items.push({
           key: `settings-${section.value}`,
           label: section.label,
-          href: `${href}#${section.value}`,
+          href: `${href}?section=${section.value}`,
           active: isActive,
           Icon: section.Icon,
         });
