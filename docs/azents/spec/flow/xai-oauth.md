@@ -38,7 +38,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-21
 spec_version: 13
 ---
 
@@ -282,13 +282,12 @@ local source facts and reviewed route bounds into boolean/list membership.
 Provider/source omissions and completeness remain diagnostic inputs rather than
 an unknown capability authority. Active reads and NEW operations use the central
 same-identity local capture; existing operations retain their captured candidates
-and replay metadata. API-key records are not OAuth capability evidence.
+and replay metadata. Exact `xai/{model_identifier}` source records enrich absent
+OAuth declarations; the runtime provider and account inventory remain OAuth-owned.
 
-The exact `grok-4.7` identity has the reviewed hosted web-search supplement on
-this OAuth inference route as well. Own-provider null with matching-source false
-denies web search while retaining the null evidence; own false remains a denial
-and own true retains support over matching generic false. This is an exact-model
-web rule, not borrowing from an API-key twin or predicting other model features.
+Structured responses, reasoning controls, sampling, modalities and hosted web
+search use exact source and account declarations for every model. Account
+declarations retain precedence; only absent declarations receive source enrichment.
 
 Actual request admission follows the encoded tool/scalar/output envelope.
 Unspecified client strictness is resolved before SDK customization, while explicit
@@ -299,11 +298,11 @@ Each `xai_oauth` integration owns a stored account-specific catalog. Before sync
 
 The returned account-visible models are authoritative and may differ from API-key integrations.
 Provider context-window, reasoning-effort, backend-search, and API-backend fields override optional
-current exact source-model enrichment within the OAuth-specific source namespace.
+current exact source-model enrichment within the shared `xai` source namespace.
 An exact match may fill missing metadata, but a miss does not hide a model. Picker reads
 use current stored entries and latest sync state, without catalog snapshot history.
 Runtime uses exact raw provider IDs. Selection saves its own normalized available or
-unavailable pricing definition; dispatch does not borrow a native API-key twin or
+unavailable pricing definition from the matched source; dispatch does not
 read a newer source to estimate usage.
 
 ## Frontend UX Rules

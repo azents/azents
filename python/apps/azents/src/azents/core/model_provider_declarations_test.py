@@ -131,10 +131,10 @@ def test_ultra_is_not_borrowed_by_other_provider_declarations(
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ({}, "high"),
+        ({}, None),
         ({"reasoning_effort": None}, None),
         ({"reasoning_effort": "future-level"}, None),
-        ({"reasoning_effort": "low"}, "low"),
+        ({"supports_reasoning_effort": True, "reasoning_effort": "low"}, "low"),
         ({"reasoning_efforts": [{"id": "high", "default": True}]}, "high"),
         (
             {
@@ -155,7 +155,7 @@ def test_ultra_is_not_borrowed_by_other_provider_declarations(
         ({"supports_reasoning_effort": False, "reasoning_effort": "high"}, None),
     ],
 )
-def test_grok_reviewed_default_fills_only_absent_compatible_knowledge(
+def test_grok_account_default_preserves_compatible_knowledge(
     raw: dict[str, object], expected: str | None
 ) -> None:
     evidence = _decode(LLMProvider.XAI_OAUTH, raw)
@@ -361,19 +361,3 @@ def test_kimi_sparse_account_declarations_replay_managed_function_contract(
     assert compiled.capabilities.built_in_tools.supported == []
     assert compiled.facts.declarations.function_calling.state == "absent"
     assert compiled.facts.provider_declarations == replayed
-
-
-@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
-def test_grok47_sparse_stored_discovery_replays_hosted_web_contract(
-    provider: LLMProvider,
-) -> None:
-    evidence = _decode(provider, {})
-    compiled = compile_stored_choice(
-        provider=provider,
-        exact_model="grok-4.7",
-        source_model=None,
-        evidence=evidence,
-        model_developer=LLMModelDeveloper.XAI,
-    )
-    assert compiled.capabilities.supports(ModelCapabilityFeature.WEB_SEARCH)
-    assert compiled.facts.declarations.web_search.state == "absent"

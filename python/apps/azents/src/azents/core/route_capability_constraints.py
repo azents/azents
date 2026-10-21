@@ -143,12 +143,6 @@ def resolve_route_capabilities(
         LLMProvider.XAI_OAUTH,
         LLMProvider.KIMI_OAUTH,
     }
-    # Exact model evidence: xAI grok-4.7 reference and scoped provider acceptance
-    # establish these features on the API inference route used by both auth modes.
-    grok47 = (
-        provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}
-        and exact_model == "grok-4.7"
-    )
     # Codex's common strict-schema producer grammar plus reviewed 2026-10-04
     # same-host nonce acceptance establish these exact OAuth model contracts.
     # This is support potential, not account entitlement or every-schema-subset
@@ -157,7 +151,7 @@ def resolve_route_capabilities(
         "gpt-6-astra",
         "gpt-6.1-sol",
     }
-    function_contract = coding_functions or grok47
+    function_contract = coding_functions
     if (
         provider is LLMProvider.KIMI_OAUTH
         and declared.function_calling.value is not True
@@ -175,18 +169,16 @@ def resolve_route_capabilities(
     function = _supported(declared.function_calling, contract=function_contract)
     if function:
         features.add(ModelCapabilityFeature.FUNCTION_CALLING)
-    parallel = function and _supported(
-        declared.parallel_function_calling, contract=grok47
-    )
+    parallel = function and _supported(declared.parallel_function_calling)
     strict = function and _supported(
         declared.strict_function_schema,
-        contract=grok47 or chatgpt_schemas or provider is LLMProvider.OPENAI,
+        contract=chatgpt_schemas or provider is LLMProvider.OPENAI,
     )
     if parallel:
         features.add(ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS)
     if strict:
         features.add(ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA)
-    if _supported(declared.structured_response, contract=grok47 or chatgpt_schemas):
+    if _supported(declared.structured_response, contract=chatgpt_schemas):
         features.add(ModelCapabilityFeature.STRUCTURED_RESPONSE)
     if protocol == "bedrock" and ModelCapabilityFeature.STRUCTURED_RESPONSE in features:
         features.remove(ModelCapabilityFeature.STRUCTURED_RESPONSE)
@@ -200,16 +192,9 @@ def resolve_route_capabilities(
     efforts = (
         declared.reasoning_efforts.value
         if declared.reasoning_efforts.value is not None
-        else (
-            ModelReasoningEffort.LOW,
-            ModelReasoningEffort.MEDIUM,
-            ModelReasoningEffort.HIGH,
-            ModelReasoningEffort.XHIGH,
-        )
-        if grok47
         else ()
     )
-    reasoning = _supported(declared.reasoning, contract=grok47 or bool(efforts))
+    reasoning = _supported(declared.reasoning, contract=bool(efforts))
     if reasoning:
         features.add(ModelCapabilityFeature.REASONING)
     else:
@@ -237,25 +222,19 @@ def resolve_route_capabilities(
     efforts = tuple(
         level for level in ModelReasoningEffort if level in efforts and level in allowed
     )
-    default = (
-        declared.default_reasoning_effort.value
-        if declared.default_reasoning_effort.value is not None
-        else ModelReasoningEffort.HIGH
-        if grok47 and declared.default_reasoning_effort.state == "absent"
-        else None
-    )
+    default = declared.default_reasoning_effort.value
     if (
         not reasoning
         or default not in allowed
         or (declared.reasoning_efforts.state == "value" and default not in efforts)
     ):
         default = None
-    if _supported(declared.reasoning_summaries, contract=grok47):
+    if _supported(declared.reasoning_summaries):
         features.add(ModelCapabilityFeature.REASONING_SUMMARIES)
 
     scalar_facts = (
-        (ModelCapabilityFeature.TEMPERATURE, declared.temperature, grok47),
-        (ModelCapabilityFeature.TOP_P, declared.top_p, grok47),
+        (ModelCapabilityFeature.TEMPERATURE, declared.temperature, False),
+        (ModelCapabilityFeature.TOP_P, declared.top_p, False),
         (ModelCapabilityFeature.TOP_K, declared.top_k, False),
         (ModelCapabilityFeature.STOP_SEQUENCES, declared.stop_sequences, False),
         (ModelCapabilityFeature.MAX_OUTPUT_TOKENS, declared.max_output_parameter, True),
@@ -310,7 +289,7 @@ def resolve_route_capabilities(
     for item in facts.input_modalities:
         media_contract = item.modality is ModelModality.TEXT or (
             item.modality is ModelModality.IMAGE
-            and (provider is LLMProvider.CHATGPT_OAUTH or grok47)
+            and provider is LLMProvider.CHATGPT_OAUTH
         )
         if not _supported(item.declaration, contract=media_contract):
             continue
@@ -364,24 +343,7 @@ def resolve_route_capabilities(
                 )
             )
 
-    # xAI's exact grok-4.7 model contract and /developers/tools/web-search
-    # document hosted web_search on its Responses inference route. Discovery
-    # omissions do not deny it; explicit declarations still own denials.
-    web_contract = provider is LLMProvider.CHATGPT_OAUTH or grok47
-    if (
-        grok47
-        and declared.web_search.value is not True
-        and source is not None
-        and source.web_search.value is False
-    ):
-        web_contract = False
-        exclusions.append(
-            RouteFeatureExclusion(
-                ModelCapabilityFeature.WEB_SEARCH,
-                "The exact xAI source denies hosted web search and no positive "
-                "provider declaration overrides it; the route contract is withheld.",
-            )
-        )
+    web_contract = provider is LLMProvider.CHATGPT_OAUTH
     web = _supported(declared.web_search, contract=web_contract)
     if web and protocol not in {"bedrock", "chat"}:
         features.add(ModelCapabilityFeature.WEB_SEARCH)

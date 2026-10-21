@@ -8,6 +8,9 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter
 from azents.core.agent import AgentModelSelection, SelectableModelCandidate
 from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_identity import lookup_catalog_model
+from azents.core.model_provider_declarations import decode_stored_provider_evidence
 from azents.core.routine_judgment_test import JUDGMENT_TIME, candidate
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import (
@@ -26,6 +29,7 @@ from azents.engine.routine_judgment_test import history
 from azents.engine.run.contracts import RunRequest, ToolkitBinding
 from azents.engine.run.emit import PublishedEvent
 from azents.services.model_file import ModelFileDownload, ModelFileResolveError
+from azents.testing.model_metadata import make_test_source_payload
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -160,3 +164,65 @@ async def test_foreign_context_rejected_before_toolkit_or_model_work() -> None:
             ),
             model_file_service=UnusedFileDownloader(),
         )
+
+
+async def test_sparse_xai_oauth_inventory_uses_xai_source_for_judge_schema() -> None:
+    payload = make_test_source_payload(
+        {
+            "xai/grok-4.5": {
+                "litellm_provider": "xai",
+                "mode": "chat",
+                "supports_response_schema": True,
+                "supports_reasoning": True,
+                "supports_function_calling": True,
+            }
+        }
+    )
+    source = lookup_catalog_model(
+        payload, provider=LLMProvider.XAI_OAUTH, model_identifier="grok-4.5"
+    )
+    assert source is not None
+    evidence = decode_stored_provider_evidence(
+        provider=LLMProvider.XAI_OAUTH,
+        provider_metadata={
+            "context_window": 256000,
+            "context_windows": [256000, 500000],
+            "api_backend": "responses",
+            "supports_reasoning_effort": True,
+        },
+        capability_evidence=None,
+    )
+    selection = make_test_model_selection(
+        provider=LLMProvider.XAI_OAUTH, model_identifier="grok-4.5"
+    )
+    capabilities = project_capabilities(
+        provider=selection.provider,
+        exact_model=selection.model_identifier,
+        source_model=source,
+        evidence=evidence,
+        model_developer=selection.model_developer,
+    )
+    assert capabilities.structured_response
+    selection = selection.model_copy(update={"normalized_capabilities": capabilities})
+    prepared = await prepare_canonical_routine_judgment(
+        run_request=request(selection),
+        model_selection=selection,
+        transcript=history(),
+        candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
+        context=TurnContext(
+            workspace_id="workspace",
+            model="grok-4.5",
+            run_id="host-run",
+            publish_event=publish,
+            session_id="judgment-session",
+        ),
+        model_file_service=UnusedFileDownloader(),
+    )
+    native = prepared.request
+    assert isinstance(native, PydanticAIRequest)
+    assert prepared.selection.provider == LLMProvider.XAI_OAUTH
+    assert native.model == "grok-4.5"
+    assert native.parameters.output_mode == "native"
+    assert native.parameters.output_object is not None
+    assert not native.parameters.function_tools

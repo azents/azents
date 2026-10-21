@@ -31,7 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-10-04
+last_verified_at: 2026-10-21
 spec_version: 7
 ---
 
@@ -83,12 +83,9 @@ compiled. Source absence stays diagnostic rather than a final unknown state.
 Picker reads use only current stored integration entries and latest sync state and do not call xAI. Runtime uses the same exact raw provider ID;
 `xai/` belongs only to the metadata source's lookup vocabulary.
 
-The exact `grok-4.7` identity has a reviewed hosted web-search supplement on the
-xAI API inference route. An omitted discovery flag does not suppress that web
-contract. Own-provider null with matching-source false still denies web search
-without rewriting the null declaration; explicit own false denies it, while own
-true retains support over matching generic false. This web supplement and its
-guard do not apply to other model IDs or other feature fields.
+Structured responses, reasoning controls, sampling, modalities and hosted web
+search use exact source and provider declarations for every model. Explicit
+provider declarations retain precedence; absent fields receive source enrichment.
 
 Selection copies its exact-scope normalized available or unavailable price definition.
 Each physical call captures the saved candidate and aware call time without a pricing DB

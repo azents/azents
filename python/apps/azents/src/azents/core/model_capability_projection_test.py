@@ -123,7 +123,7 @@ def test_explicit_function_denial_remains_a_final_denial(provider: LLMProvider) 
 
 @pytest.mark.parametrize(
     "provider,namespace",
-    [(LLMProvider.CHATGPT_OAUTH, "chatgpt"), (LLMProvider.XAI_OAUTH, "xai_oauth")],
+    [(LLMProvider.CHATGPT_OAUTH, "chatgpt"), (LLMProvider.XAI_OAUTH, "xai")],
 )
 def test_exact_source_denial_is_not_overwritten_by_coding_contract(
     provider: LLMProvider, namespace: str
@@ -208,16 +208,44 @@ def test_actual_chatgpt_astra_sol_rows_retain_limits_levels_defaults_and_tools()
 
 
 @pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
-def test_actual_grok47_provider_acceptance_features_are_exact_model_scoped(
+@pytest.mark.parametrize("model", ["grok-4.5", "grok-4.6", "grok-4.7"])
+def test_xai_models_compile_source_features_and_account_controls(
     provider: LLMProvider,
+    model: str,
 ) -> None:
     caps = _compile(
         provider,
-        model="grok-4.7",
+        model=model,
+        source=_source(
+            "xai",
+            model,
+            {
+                "supports_function_calling": True,
+                "supports_parallel_function_calling": True,
+                "supports_response_schema": True,
+                "supports_reasoning": True,
+                "supports_vision": True,
+                "supports_sampling_params": True,
+            },
+        ),
         evidence=ProviderCapabilityEvidence(
             default_input_tokens=CatalogFact(state="value", value=256000),
             max_input_tokens=CatalogFact(state="value", value=500000),
             web_search=CatalogFact(state="value", value=True),
+            strict_function_schema=CatalogFact(state="value", value=True),
+            reasoning_summaries=CatalogFact(state="value", value=True),
+            reasoning_efforts=CatalogFact(
+                state="value",
+                value=(
+                    ModelReasoningEffort.LOW,
+                    ModelReasoningEffort.MEDIUM,
+                    ModelReasoningEffort.HIGH,
+                    ModelReasoningEffort.XHIGH,
+                ),
+            ),
+            default_reasoning_effort=CatalogFact(
+                state="value", value=ModelReasoningEffort.HIGH
+            ),
         ),
     ).capabilities
     assert caps.tool_calling.supported is True
@@ -241,10 +269,6 @@ def test_actual_grok47_provider_acceptance_features_are_exact_model_scoped(
     assert caps.parameters.top_p is True
     assert caps.parameters.top_k is False
     assert caps.parameters.stop_sequences is False
-    other = _compile(provider, model="unrelated-account-model").capabilities
-    assert ModelModality.IMAGE not in other.modalities.input
-    assert other.structured_response is False
-    assert other.tool_calling.strict_json_schema is False
 
 
 @pytest.mark.parametrize("provider", [LLMProvider.CHATGPT_OAUTH, LLMProvider.XAI_OAUTH])
@@ -389,10 +413,19 @@ def test_chatgpt_web_policy_preserves_explicit_false_and_supplements_missing_kno
     assert caps.supports(ModelCapabilityFeature.WEB_SEARCH) is (value is not False)
 
 
-def test_explicit_denials_win_over_grok_contract() -> None:
+def test_explicit_xai_account_denials_override_positive_source() -> None:
     caps = _compile(
         LLMProvider.XAI_OAUTH,
-        model="grok-4.7",
+        model="grok-4.5",
+        source=_source(
+            "xai",
+            "grok-4.5",
+            {
+                "supports_response_schema": True,
+                "supports_reasoning": True,
+                "supports_sampling_params": True,
+            },
+        ),
         evidence=ProviderCapabilityEvidence(
             structured_response=CatalogFact(state="value", value=False),
             strict_function_schema=CatalogFact(state="value", value=False),
@@ -693,59 +726,22 @@ def test_kimi_function_contract_is_not_a_name_or_developer_guess(
     ("declaration", "expected"),
     [
         (CatalogFact[bool](state="absent", value=None), True),
-        (CatalogFact[bool](state="null", value=None), True),
+        (CatalogFact[bool](state="null", value=None), False),
         (CatalogFact[bool](state="value", value=True), True),
         (CatalogFact[bool](state="value", value=False), False),
     ],
 )
-def test_exact_grok47_hosted_web_contract_preserves_provider_declarations(
+def test_xai_hosted_web_preserves_provider_declarations(
     provider: LLMProvider, declaration: CatalogFact[bool], expected: bool
 ) -> None:
     compiled = _compile(
         provider,
-        model="grok-4.7",
+        model="grok-4.5",
+        source=_source("xai", "grok-4.5", {"supports_web_search": True}),
         evidence=ProviderCapabilityEvidence(web_search=declaration),
     )
     assert compiled.capabilities.supports(ModelCapabilityFeature.WEB_SEARCH) is expected
-    assert compiled.facts.declarations.web_search == declaration
-
-
-@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
-@pytest.mark.parametrize("source_value", [None, False, True])
-def test_exact_grok47_hosted_web_contract_preserves_matching_source_denial(
-    provider: LLMProvider, source_value: bool | None
-) -> None:
-    compiled = _compile(
-        provider,
-        model="grok-4.7",
-        source=_source(
-            provider.value, "grok-4.7", {"supports_web_search": source_value}
-        ),
-    )
-    assert compiled.capabilities.supports(ModelCapabilityFeature.WEB_SEARCH) is (
-        source_value is not False
-    )
-    assert compiled.facts.declarations.web_search.value is source_value
-
-
-@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
-@pytest.mark.parametrize("model", ["grok-4.70", "grok-4.7-other", "unrelated-model"])
-def test_grok47_hosted_web_contract_does_not_predict_other_model_support(
-    provider: LLMProvider, model: str
-) -> None:
-    assert not _compile(provider, model=model).capabilities.supports(
-        ModelCapabilityFeature.WEB_SEARCH
-    )
-
-
-@pytest.mark.parametrize("provider", list(LLMProvider))
-def test_grok47_hosted_web_contract_is_bound_to_its_actual_auth_routes(
-    provider: LLMProvider,
-) -> None:
-    caps = _compile(provider, model="grok-4.7").capabilities
-    assert caps.supports(ModelCapabilityFeature.WEB_SEARCH) is (
-        provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH, LLMProvider.CHATGPT_OAUTH}
-    )
+    assert compiled.facts.provider_declarations.web_search == declaration
 
 
 @pytest.mark.parametrize("provider_value", [None, False, True])
@@ -777,39 +773,11 @@ def test_kimi_function_supplement_respects_source_denial_without_changing_facts(
     ) is (source_value is False and provider_value is not True)
 
 
-@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
-@pytest.mark.parametrize("provider_value", [None, False, True])
-@pytest.mark.parametrize("source_value", [False, True])
-def test_grok_web_supplement_respects_source_denial_without_changing_facts(
-    provider: LLMProvider, provider_value: bool | None, source_value: bool
-) -> None:
-    declaration = CatalogFact[bool](
-        state="null" if provider_value is None else "value", value=provider_value
-    )
-    compiled = _compile(
-        provider,
-        model="grok-4.7",
-        source=_source(
-            provider.value, "grok-4.7", {"supports_web_search": source_value}
-        ),
-        evidence=ProviderCapabilityEvidence(web_search=declaration),
-    )
-    assert compiled.capabilities.supports(ModelCapabilityFeature.WEB_SEARCH) is (
-        provider_value is True or (provider_value is None and source_value)
-    )
-    assert compiled.facts.provider_declarations.web_search == declaration
-    assert compiled.facts.declarations.web_search == declaration
-    assert any(
-        exclusion.feature == ModelCapabilityFeature.WEB_SEARCH
-        for exclusion in compiled.route_exclusions
-    ) is (source_value is False and provider_value is not True)
-
-
 @pytest.mark.parametrize("provider", [LLMProvider.CHATGPT_OAUTH, LLMProvider.XAI_OAUTH])
 def test_new_kimi_guard_does_not_change_other_coding_function_contracts(
     provider: LLMProvider,
 ) -> None:
-    namespace = "chatgpt" if provider == LLMProvider.CHATGPT_OAUTH else "xai_oauth"
+    namespace = "chatgpt" if provider == LLMProvider.CHATGPT_OAUTH else "xai"
     declaration = CatalogFact[bool](state="null", value=None)
     compiled = _compile(
         provider,
