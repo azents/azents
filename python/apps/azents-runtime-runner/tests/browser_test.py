@@ -728,9 +728,17 @@ async def test_frame_navigation_wait_and_page_only_rejection(
 ) -> None:
     a = authority(tmp_path)
     opened = await manager.execute(BrowserOpenCommand(a, None, site, None))
-    assert opened.page is not None
-    frame = next(f for f in opened.page.frames if f.url.endswith("/frame"))
-    scoped = target(opened, frame.id)
+    current = target(opened)
+    _, resource, _ = manager.target(a, current)
+    await (
+        resource.page.frame_locator("iframe")
+        .get_by_role("button", name="Frame", exact=True)
+        .wait_for()
+    )
+    observed = await observe(manager, a, current)
+    assert observed.page is not None
+    frame = next(f for f in observed.page.frames if f.url.endswith("/frame"))
+    scoped = target(observed, frame.id)
     for kind in ("back", "forward", "reload", "close_page", "dialog"):
         assert kind in {"back", "forward", "reload", "close_page", "dialog"}
         with pytest.raises(BrowserFailure, match="main page"):
