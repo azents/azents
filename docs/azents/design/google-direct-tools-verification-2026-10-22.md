@@ -60,10 +60,13 @@ From `testenv/azents/e2e`:
   ignored TypeScript output was freshly generated in this worktree.
 - `python scripts/docs_catalog.py validate` and `git diff --check`: passed.
 
-Phase 3's unchanged production-source evidence remains applicable: **14,046 backend
-tests**, **799 Web tests**, **135 Admin tests**, **29 Chromium component cases**,
-both production builds and source generation. No Phase 4 product API, frontend
-component or backend implementation change is hidden behind that reused evidence.
+The initial Phase 4 pass reused Phase 3's unchanged production-source evidence:
+**14,046 backend tests**, **799 Web tests**, **135 Admin tests**, **29 Chromium
+component cases**, both production builds and source generation. The subsequent
+fixed CI repeat exposed a shared root-creation backend defect described below.
+That foundation correction intentionally changes common backend source; the prior
+backend and remote green results cannot substitute for fresh assembled-stack
+validation. The Google API and frontend components themselves remain unchanged.
 
 ### Observed Product Outcomes
 
@@ -130,6 +133,39 @@ all pure operation matrices.
   a definitive reconstruction of the historical browser event; product Runtime
   behavior, action submission, duration thresholds and retry policy are unchanged.
 
+### Shared Root-Creation Correction from Fixed CI Repeat
+
+Foundation CI run `39653017262` passed attempt 1 on `d12324401`; the prescribed
+unchanged-SHA attempt 2 failed in Session Browser Team-primary setup with HTTP 500.
+The preserved server trace identifies PostgreSQL `DeadlockDetected` in Runtime
+insertion, not a Google provider or browser assertion failure. The canonical root
+wrapper acquired Agent `FOR UPDATE` before Runtime acquisition, reversing the
+existing Runtime-first repository/reconciliation order.
+
+The foundation correction removes that preliminary lock while preserving inactive
+Agent errors, Runtime-first acquisition, FK-compatible Runtime `KEY SHARE` and the
+lower final ACTIVE/capability/version fence. Independent review also identified a
+stale-authority gap between wrapper Project validation and lower authority capture.
+After Project writes, both canonical created paths now revalidate the **original**
+capability/version with the same lower fence. A removal or remove/re-enable ABA
+transition rejects the transaction; existing-primary reuse remains unchanged.
+
+Two deterministic real-PostgreSQL lock-order regressions cover non-primary and
+Team-primary creation. Four additional cases cover both entrypoints under removal
+and ABA; all four first reproduced stale acceptance, then passed with the original
+snapshot fence. They exercise the production write-scope rollback and independently
+verify no Session, Conversation, root/context or Project rows remain. The focused
+repository suite passes **75 tests**; backend and E2E Ruff/format/strict ty and the
+fresh previously failing browser journey (**84.97 s**) pass. The same sole reviewer
+cleared the complete correction and Conversation Spec with no remaining findings.
+
+Complete failed-run metadata and raw artifacts are preserved. Fresh whole-backend,
+assembled Google and current-SHA stack CI evidence is required after propagation,
+including two successful complete Linux foundation attempts on one unchanged SHA.
+No application retry, fixed sleep, timeout/gate relaxation or manual success status
+was introduced. [Conversation](../spec/domain/conversation.md) records the current
+lock-order and original-authority contract; immutable feature authority is unchanged.
+
 ## Removal and Spec Promotion
 
 The active-source audit covers backend, Web/Admin, generated contracts, E2E and
@@ -147,10 +183,11 @@ approved Design remain the historical authority; shipping plans are temporary.
 
 Local success does **not** mean the stack's remote CI is green. PRs
 [#2372](https://github.com/azents/azents/pull/2372),
-[#2374](https://github.com/azents/azents/pull/2374) and
-[#2375](https://github.com/azents/azents/pull/2375) require owning-phase test/fixture
-corrections and final current-SHA functional, migration, support, assembled E2E,
-build, duration and asynchronous rollup verification. Final evidence belongs in
+[#2374](https://github.com/azents/azents/pull/2374),
+[#2375](https://github.com/azents/azents/pull/2375) and
+[#2376](https://github.com/azents/azents/pull/2376) require fresh final current-SHA
+functional, migration, support, assembled E2E, build, duration and asynchronous
+rollup verification after the shared foundation correction. Final evidence belongs in
 the PR checks and the completion report, not a manually overwritten success status.
 
 No live Google OAuth or Picker, real-account ACLs, quota/load test, actual restricted-
