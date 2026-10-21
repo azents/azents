@@ -166,6 +166,29 @@ No application retry, fixed sleep, timeout/gate relaxation or manual success sta
 was introduced. [Conversation](../spec/domain/conversation.md) records the current
 lock-order and original-authority contract; immutable feature authority is unchanged.
 
+### Duration-Gate Test-Setup Correction
+
+Execution CI `39667450452` passed its functional workflow on `994ef039b`, but the
+trusted asynchronous comparison reported **471.17 s** against a **434.96 s** limit.
+All 365 Required testcase IDs and lane assignments matched the foundation sample;
+CPU-pressure and runner differences prevent attributing the timing change to Google
+product code. The failed duration verdict and complete artifacts remain preserved.
+
+The critical lane included five xAI image-generation provider/storage journeys that
+created and started unused Docker Runtimes. Their actual assertions use API, Worker,
+provider/OAuth, Exchange and ModelFile storage, not Runner. The execution-phase
+correction explicitly creates Runtime-free Agents and verifies that capability,
+retaining all five testcase IDs and all 35 original assertions. Separate Runtime
+lifecycle/recreation and canonical Runner transfer coverage is unchanged.
+
+Same-host fresh-stack runs pass all five cases before and twice after the change.
+Call sums are **27.590817 s** before, **9.819407 s** and **9.877810 s** after. These
+are local mechanism observations, not a causal whole-CI speed claim. E2E static
+checks and **1,490 support tests** pass. The same sole reviewer cleared the one-file
+setup change with no Spec impact. Final acceptance still requires two complete
+successful unchanged-SHA execution CI attempts and fresh downstream rollups; no
+product code, gate, timeout, retry, scheduling or runner count was changed.
+
 ## Removal and Spec Promotion
 
 The active-source audit covers backend, Web/Admin, generated contracts, E2E and
