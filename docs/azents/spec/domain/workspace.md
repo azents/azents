@@ -161,7 +161,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-20
 spec_version: 97
 ---
 
@@ -824,6 +824,11 @@ A Git worktree-created Project is an Agent Workspace Project whose directory is 
 A non-primary session can own a Git worktree allocation created by a `create_git_worktree` setup action. The action is stored as an ordered `action_message` input before the first user message and is consumed without appending an `action_message` transcript event. Preparation durably claims execution by `input_buffer_id` before deleting the buffer. Successful action execution invalidates the prepared context until the worktree path is created, registered as the session Project, and the next processing boundary rebuilds context; failed action execution is terminal, appends durable result history, and FIFO input processing continues.
 
 Each created worktree is prompt-eligible only through its context-owned `SessionWorkspaceProject` projection, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Explicit user-requested cleanup remains session-scoped. After a Session archive transaction commits, archive makes one forced best-effort pass over every non-cleaned root-tree allocation. Successful cleanup removes the owned worktree and Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog and linked Project rows, and marks the allocation cleaned. Failure is recorded and logged but does not fail archive or schedule retry. Durable purge does not inspect or remove physical worktrees and deletes allocation rows through database finalization regardless of cleanup status.
+
+The dynamic worktree Toolkit exposes both `create_git_worktree` and
+`remove_git_worktree` independently of current Project or allocation eligibility.
+Admission still revalidates the exact Session context, Runtime and Project or
+allocation authority; visibility alone does not authorize an operation.
 
 An eligible root or subagent may also create a worktree on demand from an exact Git Project already
 registered in its shared current Session context. The Agent-facing action pins the source Project

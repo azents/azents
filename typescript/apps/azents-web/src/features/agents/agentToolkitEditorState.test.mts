@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { completedToolkitEditor } from "./agentToolkitManagementState.ts";
+import {
+  completedToolkitEditor,
+  removedToolkitEditor,
+} from "./agentToolkitManagementState.ts";
 import type { AgentToolkitEditorState } from "./types";
 
 void test("a completed write cannot close another editor, even for the same type", () => {
@@ -21,4 +24,21 @@ void test("a completed write cannot close another editor, even for the same type
     type: "DETAIL",
     toolkitConfigId: "exact-toolkit",
   });
+});
+
+void test("successful detach and delete close the removed toolkit editor", () => {
+  for (const type of ["DETAIL", "EDIT"] as const) {
+    const submitted: AgentToolkitEditorState = {
+      type,
+      toolkitConfigId: "removed-toolkit",
+    };
+    assert.deepEqual(removedToolkitEditor(submitted, submitted), {
+      type: "CLOSED",
+    });
+    const later: AgentToolkitEditorState = {
+      type: "DETAIL",
+      toolkitConfigId: "another-toolkit",
+    };
+    assert.equal(removedToolkitEditor(later, submitted), later);
+  }
 });

@@ -64,7 +64,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-19
+last_verified_at: 2026-10-20
 spec_version: 70
 ---
 
@@ -73,8 +73,10 @@ spec_version: 70
 ## Explicit Publication Boundary
 
 Normal model output is never relayed to a provider. The only model-facing publication
-path is the unprefixed `channel_action` tool. It is available only when the root
-AgentSession has at least one connected External Channel binding. When Tool Search is
+path is the unprefixed `channel_action` tool. Eligible root Runs expose
+`channel_action` and `download_external_file` independently of current bindings
+or Runtime file storage. Invocation still validates binding, execution and file
+authority, and missing Runtime storage produces a Tool error. When Tool Search is
 enabled, `channel_action` and `download_external_file` are deferred discovery targets;
 when disabled, the complete catalog exposes them directly.
 

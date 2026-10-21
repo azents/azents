@@ -105,6 +105,7 @@ const modelOptions: ModelSelectionOption[] = [
 ];
 
 const baseAgent: AgentResponse = {
+  deletion_status: null,
   id: "agent-1",
   name: "Snapshot Agent",
   description: "Exercises model selection snapshot settings.",
@@ -172,7 +173,8 @@ const baseAgent: AgentResponse = {
   tool_search_enabled: false,
   max_turns: null,
   auto_archive_ttl_days: 30,
-  routine_check_interval_minutes: 30,
+  routine_check_interval_minutes: 180,
+  routine_min_action_delay_minutes: 30,
   subagent_settings: { max_subagents: 3, max_depth: 1 },
   avatar: null,
   created_at: "2026-05-14T00:00:00Z",
@@ -251,6 +253,7 @@ function storyFormValues(formState: AgentFormState): AgentFormValues {
       max_turns: agent.max_turns,
       auto_archive_ttl_days: agent.auto_archive_ttl_days,
       routine_check_interval_minutes: agent.routine_check_interval_minutes,
+      routine_min_action_delay_minutes: agent.routine_min_action_delay_minutes,
       subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
       subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
     };
@@ -271,7 +274,8 @@ function storyFormValues(formState: AgentFormState): AgentFormValues {
     tool_search_enabled: true,
     max_turns: null,
     auto_archive_ttl_days: 30,
-    routine_check_interval_minutes: 30,
+    routine_check_interval_minutes: 180,
+    routine_min_action_delay_minutes: 30,
     subagent_max_subagents: 3,
     subagent_max_depth: 1,
   };
@@ -288,6 +292,14 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
           .success
           ? null
           : t("routineCheckIntervalError"),
+      routine_min_action_delay_minutes: (value, values) =>
+        agentFormSchema.shape.routine_min_action_delay_minutes.safeParse(value)
+          .success &&
+        typeof value === "number" &&
+        typeof values.routine_check_interval_minutes === "number" &&
+        value <= values.routine_check_interval_minutes
+          ? null
+          : t("routineMinActionDelayError"),
     },
   });
   const selectedMainModelOption = findSelectableModelOptionByLabel(
@@ -362,29 +374,59 @@ type Story = StoryObj<typeof meta>;
 
 export const DefaultPreselected = {} satisfies Story;
 
+export const DeletingReadOnly = {
+  tags: ["ci-contract"],
+  args: {
+    section: "profile",
+    formState: {
+      type: "EDIT",
+      agent: { ...baseAgent, deletion_status: "deleting" },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(canvas.getByRole("link", { name: "Cancel" })).toBeVisible();
+    await expect(
+      canvas.getByLabelText("Routine tick (minutes)"),
+    ).toBeDisabled();
+  },
+} satisfies Story;
+
+export const RoutineCadenceDefaults = {
+  args: { section: "profile" },
+} satisfies Story;
+
 export const RoutineCheckInterval = {
   tags: ["ci-contract"],
   args: { section: "profile", onSubmit: fn() },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    const input = canvas.getByLabelText("Routine check interval (minutes)");
-    await expect(input).toHaveValue("30");
+    const input = canvas.getByLabelText("Routine tick (minutes)");
+    const minimum = canvas.getByLabelText(
+      "Minimum Routine action delay (minutes)",
+    );
+    await expect(input).toHaveValue("180");
+    await expect(minimum).toHaveValue("30");
     await userEvent.clear(input);
     await userEvent.click(canvas.getByRole("button", { name: "Save" }));
     await expect(
-      canvas.getByText("Enter a whole number from 1 to 1440."),
+      canvas.getByText("Enter a whole number from 30 to 1440."),
     ).toBeVisible();
     await expect(args.onSubmit).not.toHaveBeenCalled();
     await userEvent.type(input, "1441");
     await userEvent.click(canvas.getByRole("button", { name: "Save" }));
     await expect(args.onSubmit).not.toHaveBeenCalled();
     await userEvent.clear(input);
-    await userEvent.type(input, "5");
+    await userEvent.type(input, "60");
     await userEvent.click(canvas.getByRole("button", { name: "Save" }));
     await expect(args.onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ routine_check_interval_minutes: 5 }),
+      expect.objectContaining({
+        routine_check_interval_minutes: 60,
+        routine_min_action_delay_minutes: 30,
+      }),
     );
-    for (const value of ["1", "1440"]) {
+    for (const value of ["30", "1440"]) {
       await userEvent.clear(input);
       await userEvent.type(input, value);
       await userEvent.click(canvas.getByRole("button", { name: "Save" }));
@@ -394,6 +436,47 @@ export const RoutineCheckInterval = {
         }),
       );
     }
+    await userEvent.clear(input);
+    await userEvent.type(input, "60");
+    await userEvent.clear(minimum);
+    await userEvent.type(minimum, "90");
+    await expect(input).toHaveValue("90");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        routine_check_interval_minutes: 90,
+        routine_min_action_delay_minutes: 90,
+      }),
+    );
+    await userEvent.clear(minimum);
+    await userEvent.type(minimum, "60");
+    await expect(input).toHaveValue("90");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        routine_check_interval_minutes: 90,
+        routine_min_action_delay_minutes: 60,
+      }),
+    );
+    await userEvent.clear(input);
+    await userEvent.type(input, "30");
+    const submitted = 5;
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(
+      canvas.getByText(
+        "Enter a whole number of at least 30, no greater than tick.",
+      ),
+    ).toBeVisible();
+    await expect(args.onSubmit).toHaveBeenCalledTimes(submitted);
+    await userEvent.clear(input);
+    await userEvent.type(input, "60");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        routine_check_interval_minutes: 60,
+        routine_min_action_delay_minutes: 60,
+      }),
+    );
   },
 } satisfies Story;
 
@@ -408,7 +491,7 @@ export const RoutineCheckIntervalSaved = {
   },
   play: async ({ canvasElement }) => {
     await expect(
-      within(canvasElement).getByLabelText("Routine check interval (minutes)"),
+      within(canvasElement).getByLabelText("Routine tick (minutes)"),
     ).toHaveValue("60");
   },
 } satisfies Story;

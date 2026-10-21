@@ -95,7 +95,7 @@ export function RuntimeTerminalPanel({
         <Group
           justify="space-between"
           px="sm"
-          py={6}
+          py={rem(6)}
           wrap="nowrap"
           style={{ minHeight: rem(40) }}
         >
@@ -114,7 +114,7 @@ export function RuntimeTerminalPanel({
                 terminal.connection.type === "reconnecting" ||
                 terminal.connection.type === "terminating"
               }
-              size={8}
+              size={rem(8)}
             >
               <IconTerminal2 size={rem(18)} />
             </Indicator>
@@ -127,7 +127,7 @@ export function RuntimeTerminalPanel({
               </Text>
             ) : null}
           </Group>
-          <Group gap={4} wrap="nowrap">
+          <Group gap={rem(4)} wrap="nowrap">
             {collapsed ? (
               <Button
                 size="compact-sm"
@@ -200,7 +200,11 @@ export function RuntimeTerminalPanel({
             <Stack gap="sm">
               <Text size="sm">{t("stoppedDescription")}</Text>
               {projection.can_start_runtime ? (
-                <Button size="xs" onClick={onStartRuntime}>
+                <Button
+                  size="xs"
+                  onClick={onStartRuntime}
+                  disabled={terminal.readOnly}
+                >
                   {t("startRuntime")}
                 </Button>
               ) : null}
@@ -236,6 +240,7 @@ export function RuntimeTerminalPanel({
                 variant="subtle"
                 leftSection={<IconRefresh size={rem(14)} />}
                 onClick={terminal.onRetry}
+                disabled={terminal.readOnly}
               >
                 {t("retry")}
               </Button>
@@ -274,13 +279,13 @@ export function RuntimeTerminalPanel({
             background: "var(--mantine-color-dark-9)",
           }}
         >
-          <Box ref={terminal.hostRef} h="100%" p={6} />
+          <Box ref={terminal.hostRef} h="100%" p={rem(6)} />
         </Box>
 
         {mobile && focused ? (
           <ScrollArea type="never" offsetScrollbars={false}>
             <Group
-              gap={4}
+              gap={rem(4)}
               px="xs"
               pt="xs"
               wrap="nowrap"
@@ -293,6 +298,7 @@ export function RuntimeTerminalPanel({
                 size="compact-xs"
                 variant={terminal.ctrlActive ? "filled" : "default"}
                 onClick={terminal.onToggleCtrl}
+                disabled={terminal.readOnly}
               >
                 Ctrl
               </Button>
@@ -300,6 +306,7 @@ export function RuntimeTerminalPanel({
                 size="compact-xs"
                 variant={terminal.altActive ? "filled" : "default"}
                 onClick={terminal.onToggleAlt}
+                disabled={terminal.readOnly}
               >
                 Alt
               </Button>
@@ -309,6 +316,7 @@ export function RuntimeTerminalPanel({
                   size="compact-xs"
                   variant="default"
                   onClick={() => terminal.onSoftwareKey(key)}
+                  disabled={terminal.readOnly}
                 >
                   {label}
                 </Button>
@@ -317,6 +325,7 @@ export function RuntimeTerminalPanel({
                 aria-label={t("focusKeyboard")}
                 variant="default"
                 onClick={terminal.onFocusKeyboard}
+                disabled={terminal.readOnly}
               >
                 <IconKeyboard size={rem(16)} />
               </ActionIcon>

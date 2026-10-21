@@ -22,6 +22,7 @@ from azents.core.scheduled_task_management import (
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
@@ -436,12 +437,7 @@ class ScheduledTaskManagementRepository:
         agent_id: str,
     ) -> None:
         agent = await self.agent_repository.get_by_id(session, agent_id)
-        if (
-            agent is None
-            or agent.workspace_id != workspace_id
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            or not agent.enabled
-        ):
+        if agent is None or agent.workspace_id != workspace_id or not agent.enabled:
             raise ScheduledTaskManagementUnavailable("not_found")
 
     async def _lock_and_require_task(
@@ -480,6 +476,14 @@ class ScheduledTaskManagementRepository:
         session_id: str,
     ) -> AgentSession:
         """Lock and revalidate one writable root Session and its Agent."""
+        await self._require_session(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        await require_active_agent(session, agent_id=agent_id)
         agent_session = await self.agent_session_repository.lock_by_id(
             session,
             session_id,

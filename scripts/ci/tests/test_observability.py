@@ -1,11 +1,13 @@
 """Contracts for general CI evidence, identity, bounded reports and safe hooks."""
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -24,6 +26,17 @@ from scripts.ci.observability import merge_worker_fixture_timings
 from scripts.ci.workflow_report import decode_run, metrics, render
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def stamp_archive(root: Path, name: str, artifact_id: int) -> str:
+    """Build authenticated synthetic ZIP evidence, never production measurements."""
+    source = root / "artifacts" / name
+    archive = root / f"artifact-{artifact_id}.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        for path in sorted(source.rglob("*")):
+            if path.is_file():
+                zipped.write(path, path.relative_to(source).as_posix())
+    return "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
 
 
 def job(
@@ -92,6 +105,7 @@ def stamp_provenance(root: Path, attempt: int) -> None:
                         {
                             "id": attempt,
                             "name": name,
+                            "digest": stamp_archive(root, name, attempt),
                             "created_at": "2026-10-15T00:00:49Z",
                             "expired": False,
                             "workflow_run": {"id": 100, "head_sha": "a" * 40},
@@ -152,6 +166,7 @@ def lane_sample(root: Path, attempt: int, assignments: dict[str, list[str]]) -> 
             {
                 "id": attempt * 10 + index,
                 "name": name,
+                "digest": stamp_archive(root, name, attempt * 10 + index),
                 "created_at": "2026-10-15T00:00:49Z",
                 "expired": False,
                 "workflow_run": {"id": 100, "head_sha": "a" * 40},
@@ -268,6 +283,7 @@ class WorkflowReportTest(unittest.TestCase):
                             {
                                 "id": index,
                                 "name": f"ios-diagnostics-{sha}",
+                                "digest": "sha256:" + "c" * 64,
                                 "created_at": "2026-10-15T00:00:49Z",
                                 "expired": False,
                                 "workflow_run": {"id": 100, "head_sha": "a" * 40},

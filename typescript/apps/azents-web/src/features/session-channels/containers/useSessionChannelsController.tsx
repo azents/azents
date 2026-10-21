@@ -10,6 +10,7 @@ type SessionChannelsProps = Omit<
 >;
 
 export interface SessionChannelsViewProps {
+  agent: SessionChannelsProps["agent"];
   state: SessionChannelsProps["state"];
   actionError: SessionChannelsProps["actionError"];
   disconnectingId: SessionChannelsProps["disconnectingId"];
@@ -23,6 +24,7 @@ export interface SessionChannelsViewProps {
   openDisconnectConfirm: (binding: ManagedBinding) => void;
 }
 export function useSessionChannelsController({
+  agent,
   state,
   actionError,
   disconnectingId,
@@ -46,6 +48,7 @@ export function useSessionChannelsController({
     });
   };
   return {
+    agent,
     state,
     actionError,
     disconnectingId,

@@ -253,6 +253,7 @@ void test("ordinary admitted contexts and notifications are explicit semantic me
       slug: "traffic",
       title: "Traffic anomalies",
       content: "A verified change needs attention.",
+      attachments: [],
     }),
   );
   assert.equal(notification?.role, "assistant");

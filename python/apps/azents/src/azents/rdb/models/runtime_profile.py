@@ -513,11 +513,8 @@ class RDBRuntimeRecreationOperationItem(RDBModel):
         sa.ForeignKey("runtime_recreation_operations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    runtime_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_runtimes.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
+    # Historical target identity survives terminal Runtime and Agent deletion.
+    runtime_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     expected_configuration_sequence: Mapped[int] = mapped_column(
         sa.BigInteger, nullable=False
     )

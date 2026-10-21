@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self, TypedDict
 
 from azents.core.agent import (
@@ -14,6 +14,7 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SubagentSettings,
 )
+from azents.core.agent_deletion import AgentDeletionStatus
 from azents.core.enums import AgentRuntimeCapability, AgentType
 from azents.core.upload_images import UploadedImage
 from azents.repos.agent.data import Agent
@@ -37,6 +38,7 @@ class AgentOutput(BaseModel):
     model_parameters: ModelParameters | None
     system_prompt: str | None
     enabled: bool
+    deletion_status: AgentDeletionStatus | None
     type: AgentType
     runtime_profile_id: str | None
     runtime_profile_selection_version: int
@@ -72,6 +74,7 @@ class AgentOutput(BaseModel):
     max_turns: int | None
     auto_archive_ttl_days: int
     routine_check_interval_minutes: int
+    routine_min_action_delay_minutes: int
     subagent_settings: SubagentSettings
     avatar: UploadedImage | None
     created_at: datetime.datetime
@@ -98,6 +101,7 @@ class AgentOutput(BaseModel):
         ]
         | None,
         can_manage: bool,
+        deletion_status: AgentDeletionStatus | None,
     ) -> Self:
         """Create output by combining domain `Agent` and resolved `avatar`."""
         return cls(
@@ -117,6 +121,7 @@ class AgentOutput(BaseModel):
             model_parameters=data.model_parameters,
             system_prompt=data.system_prompt,
             enabled=data.enabled,
+            deletion_status=deletion_status,
             type=data.type,
             runtime_profile_id=data.runtime_profile_id,
             runtime_profile_selection_version=(data.runtime_profile_selection_version),
@@ -134,10 +139,14 @@ class AgentOutput(BaseModel):
                 )
             ),
             runtime_add_available=(
-                can_manage and data.runtime_capability is AgentRuntimeCapability.NONE
+                can_manage
+                and deletion_status is None
+                and data.runtime_capability is AgentRuntimeCapability.NONE
             ),
             runtime_remove_available=(
-                can_manage and data.runtime_capability is AgentRuntimeCapability.MANAGED
+                can_manage
+                and deletion_status is None
+                and data.runtime_capability is AgentRuntimeCapability.MANAGED
             ),
             toolkit_management_available=can_manage,
             terminal_enabled=data.terminal_enabled,
@@ -151,6 +160,7 @@ class AgentOutput(BaseModel):
             max_turns=data.max_turns,
             auto_archive_ttl_days=data.auto_archive_ttl_days,
             routine_check_interval_minutes=data.routine_check_interval_minutes,
+            routine_min_action_delay_minutes=data.routine_min_action_delay_minutes,
             subagent_settings=data.subagent_settings,
             avatar=avatar,
             created_at=data.created_at,
@@ -235,10 +245,22 @@ class AgentCreateInput(BaseModel):
         gt=0,
         description="Inactivity period before automatic Session archive",
     )
-    routine_check_interval_minutes: int = Field(default=30, ge=1, le=1440, strict=True)
+    routine_check_interval_minutes: int = Field(
+        default=180, ge=30, le=1440, strict=True
+    )
+    routine_min_action_delay_minutes: int = Field(
+        default=30, ge=30, le=1440, strict=True
+    )
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
+
+    @model_validator(mode="after")
+    def validate_routine_cadence(self) -> Self:
+        """Validate the complete cadence on internal creation too."""
+        if self.routine_min_action_delay_minutes > self.routine_check_interval_minutes:
+            raise ValueError("Minimum Routine action delay must not exceed tick.")
+        return self
 
 
 class AgentUpdateInput(TypedDict, total=False):
@@ -284,7 +306,8 @@ class AgentUpdateInput(TypedDict, total=False):
         int,
         Field(gt=0, description="Inactivity period before automatic Session archive"),
     ]
-    routine_check_interval_minutes: Annotated[int, Field(ge=1, le=1440, strict=True)]
+    routine_check_interval_minutes: Annotated[int, Field(ge=30, le=1440, strict=True)]
+    routine_min_action_delay_minutes: Annotated[int, Field(ge=30, le=1440, strict=True)]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")
     ]

@@ -27,6 +27,7 @@ import {
   type ChatScrollAnchor,
   restorePrependScrollTop,
 } from "../hooks/chatScrollAnchor";
+import { useChatComposerOverlay } from "./useChatComposerOverlay";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type {
   AgentResponse,
@@ -378,6 +379,7 @@ type ActivityPresentationItem = Extract<
 >;
 
 export type ChatViewContainerOutput = RequiredChatViewProps & {
+  composerOverlay: ReturnType<typeof useChatComposerOverlay>;
   t: ReturnType<typeof useTranslations>;
   scrollAreaRef: RefObject<HTMLDivElement | null>;
   viewportRef: RefObject<HTMLDivElement | null>;
@@ -477,6 +479,7 @@ export function useChatViewContainer({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const composerOverlay = useChatComposerOverlay();
   const isInitialScrollRef = useRef(true);
   const {
     pendingFiles,
@@ -949,23 +952,6 @@ export function useChatViewContainer({
   }, [schedulePinToBottom]);
 
   useEffect(() => {
-    const visualViewport = window.visualViewport;
-    if (!visualViewport) {
-      return;
-    }
-    const handleViewportChange = (): void => {
-      if (isFollowingLatestRef.current) {
-        schedulePinToBottom();
-      }
-    };
-    visualViewport.addEventListener("resize", handleViewportChange);
-    visualViewport.addEventListener("scroll", handleViewportChange);
-    return () => {
-      visualViewport.removeEventListener("resize", handleViewportChange);
-      visualViewport.removeEventListener("scroll", handleViewportChange);
-    };
-  }, [schedulePinToBottom]);
-  useEffect(() => {
     if (chatViewState.type === "LOADING_HISTORY" && !hasTimelineItems) {
       isInitialScrollRef.current = true;
       isReadyForPaginationRef.current = false;
@@ -1217,6 +1203,7 @@ export function useChatViewContainer({
     scrollAreaRef,
     viewportRef,
     contentRef,
+    composerOverlay,
     pendingFiles,
     addFiles,
     removeFile,

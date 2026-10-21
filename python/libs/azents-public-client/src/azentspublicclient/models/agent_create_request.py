@@ -47,9 +47,10 @@ class AgentCreateRequest(BaseModel):
     tool_search_enabled: Optional[StrictBool] = Field(default=True, description="Tool Search enabled state")
     max_turns: Optional[StrictInt] = None
     auto_archive_ttl_days: Optional[StrictInt] = Field(default=30, description="Inactivity period before automatic Session archive")
-    routine_check_interval_minutes: Optional[Annotated[int, Field(le=1440, strict=True, ge=1)]] = Field(default=30, description="Routine checking interval in minutes")
+    routine_check_interval_minutes: Optional[Annotated[int, Field(le=1440, strict=True, ge=30)]] = Field(default=180, description="Routine checking interval in minutes")
+    routine_min_action_delay_minutes: Optional[Annotated[int, Field(le=1440, strict=True, ge=30)]] = Field(default=30, description="Minimum Routine action delay in minutes")
     subagent_settings: Optional[SubagentSettings] = Field(default=None, description="Subagent execution settings")
-    __properties: ClassVar[List[str]] = ["name", "selectable_model_options", "main_model_label", "lightweight_model_label", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "browser_enabled", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "routine_check_interval_minutes", "subagent_settings"]
+    __properties: ClassVar[List[str]] = ["name", "selectable_model_options", "main_model_label", "lightweight_model_label", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "browser_enabled", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "routine_check_interval_minutes", "routine_min_action_delay_minutes", "subagent_settings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -173,7 +174,8 @@ class AgentCreateRequest(BaseModel):
             "tool_search_enabled": obj.get("tool_search_enabled") if obj.get("tool_search_enabled") is not None else True,
             "max_turns": obj.get("max_turns"),
             "auto_archive_ttl_days": obj.get("auto_archive_ttl_days") if obj.get("auto_archive_ttl_days") is not None else 30,
-            "routine_check_interval_minutes": obj.get("routine_check_interval_minutes") if obj.get("routine_check_interval_minutes") is not None else 30,
+            "routine_check_interval_minutes": obj.get("routine_check_interval_minutes") if obj.get("routine_check_interval_minutes") is not None else 180,
+            "routine_min_action_delay_minutes": obj.get("routine_min_action_delay_minutes") if obj.get("routine_min_action_delay_minutes") is not None else 30,
             "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None
             }.items() if _key in obj
         })

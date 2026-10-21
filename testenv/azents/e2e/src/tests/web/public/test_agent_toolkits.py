@@ -344,17 +344,38 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
         "Edit and deletion remain in Workspace Toolkit management.",
     )
     detach_button = _wait(browser_driver).until(
-        ec.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Detach']"))
+        ec.element_to_be_clickable(
+            (By.XPATH, "//*[@role='dialog']//button[normalize-space()='Detach']")
+        )
     )
     detach_button.send_keys(Keys.ENTER)
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//*[@role='dialog']"
+                "[.//*[normalize-space()='Remove toolkit from this agent']]"
+                "//button[normalize-space()='Detach']",
+            )
+        )
+    ).click()
     _wait(browser_driver).until(
         ec.invisibility_of_element_located(
             (By.XPATH, f"//*[normalize-space()={shared_name!r}]")
         )
     )
-    browser_driver.find_element(
-        By.XPATH, "//button[contains(@class, 'mantine-Modal-close')]"
-    ).click()
+    _wait(browser_driver).until(
+        ec.invisibility_of_element_located((By.CSS_SELECTOR, '[role="dialog"]'))
+    )
+    assert any(
+        item.name == shared_name
+        for item in ToolkitV1Api(public_api_client)
+        .toolkit_v1_list_toolkit_configs(
+            handle=context.handle,
+            _headers=_headers(context.owner_token),
+        )
+        .items
+    )
 
     _click_button(browser_driver, "Add Toolkit")
     _click_button(browser_driver, "MCP")
@@ -394,16 +415,26 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _click_button(browser_driver, "Enable")
     _assert_visible_text(browser_driver, "Ready")
 
-    _click_button(browser_driver, "Delete")
-    _click_button(browser_driver, "Delete toolkit")
-    _assert_visible_text(
-        browser_driver,
-        "This toolkit is no longer available. Close details and refresh the list.",
-    )
-    browser_driver.find_element(
-        By.XPATH, "//button[contains(@class, 'mantine-Modal-close')]"
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//*[@role='dialog']//button[normalize-space()='Delete']")
+        )
     ).click()
+    _click_button(browser_driver, "Delete toolkit")
+    _wait(browser_driver).until(
+        ec.invisibility_of_element_located((By.CSS_SELECTOR, '[role="dialog"]'))
+    )
+    _wait(browser_driver).until(
+        ec.invisibility_of_element_located(
+            (By.XPATH, f"//article[@aria-label={toolkit_name!r}]")
+        )
+    )
+    browser_driver.refresh()
+    _assert_visible_text(browser_driver, "Toolkits")
     _assert_visible_text(browser_driver, existing_name)
+    assert not browser_driver.find_elements(
+        By.XPATH, f"//article[@aria-label={toolkit_name!r}]"
+    )
 
     _login_main_web(
         browser_driver,

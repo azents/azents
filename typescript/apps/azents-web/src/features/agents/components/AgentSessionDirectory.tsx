@@ -138,6 +138,7 @@ export function AgentSessionDirectoryView({
 }: AgentSessionDirectoryViewProps): React.ReactElement {
   const { sessions, totalCount, currentArchiveRetentionDays } =
     queryState.snapshot;
+  const readOnly = agent.deletion_status !== null;
   const renderActiveSession = (
     session: AgentSessionResponse,
   ): React.ReactElement => {
@@ -211,6 +212,7 @@ export function AgentSessionDirectoryView({
                   variant="subtle"
                   size="sm"
                   aria-label={t("sessions.actions")}
+                  disabled={readOnly}
                   loading={
                     renamingSessionId === session.id || archiving || pinning
                   }
@@ -225,6 +227,7 @@ export function AgentSessionDirectoryView({
               <Menu.Dropdown>
                 <Menu.Item
                   leftSection={<IconPencil size={rem(16)} />}
+                  disabled={readOnly}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -236,7 +239,7 @@ export function AgentSessionDirectoryView({
                 {!isPrimary && (
                   <Menu.Item
                     leftSection={<IconPin size={rem(16)} />}
-                    disabled={pinning}
+                    disabled={readOnly || pinning}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -250,6 +253,7 @@ export function AgentSessionDirectoryView({
                   <Menu.Item
                     color="red"
                     leftSection={<IconTrash size={rem(16)} />}
+                    disabled={readOnly}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -316,6 +320,7 @@ export function AgentSessionDirectoryView({
             size="sm"
             aria-label={t("sessions.restore")}
             loading={restoring}
+            disabled={readOnly}
             onClick={() => onRestoreSession(session.id)}
           >
             <IconRefresh size={rem(16)} />
@@ -328,7 +333,7 @@ export function AgentSessionDirectoryView({
   return (
     <>
       <Modal
-        opened={editingSession !== null}
+        opened={editingSession !== null && !readOnly}
         onClose={handleCloseRename}
         title={t("sessions.renameTitle")}
         centered
@@ -374,7 +379,7 @@ export function AgentSessionDirectoryView({
       </Modal>
 
       <Modal
-        opened={archiveTarget !== null}
+        opened={archiveTarget !== null && !readOnly}
         onClose={() => setArchiveTarget(null)}
         title={t("sessions.archiveConfirmTitle")}
         centered
@@ -411,6 +416,7 @@ export function AgentSessionDirectoryView({
               size="compact-sm"
               leftSection={<IconPlus size={rem(16)} />}
               onClick={onCreateSession}
+              disabled={readOnly}
             >
               {t("sessions.new")}
             </Button>

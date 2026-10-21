@@ -2,6 +2,7 @@
 
 import datetime
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -13,7 +14,7 @@ from azents.core.auth.permissions import Permissions, has_permission
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.enums import WorkspaceUserRole
 from azents.core.github_user_oauth import (
     GitHubPersonalRequester,
     GitHubToolkitRequester,
@@ -42,6 +43,7 @@ from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.account_access import evaluate_active_subject
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.github_user_oauth.guards import (
     capture_and_clear_user_tokens,
     capture_registration,
@@ -69,6 +71,18 @@ from azents.repos.toolkit_operations import get_encrypted_toolkit_repository
 from azents.repos.user import UserRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
+
+
+@dataclass(frozen=True)
+class _RegistrationMode:
+    """Consumed provider mode; unknown or malformed fields remain stale."""
+
+    auth_type: str | None
+
+
+def _decode_registration_mode(config: Mapping[str, object]) -> _RegistrationMode:
+    value = config.get("github_auth_type")
+    return _RegistrationMode(auth_type=value if isinstance(value, str) else None)
 
 
 @dataclass(frozen=True)
@@ -134,7 +148,7 @@ class GitHubUserOAuthOperationRepository:
 
     async def authorize_scope_in_session(
         self,
-        session: ReadSession,
+        session: WriteSession,
         *,
         user_id: str,
         session_id: str,
@@ -169,11 +183,7 @@ class GitHubUserOAuthOperationRepository:
                 )
         else:
             agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.workspace_id != workspace_id
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
+            if agent is None or agent.workspace_id != workspace_id:
                 raise GitHubUserOAuthError(
                     GitHubUserErrorCode.NOT_FOUND, "Agent not found."
                 )
@@ -187,6 +197,7 @@ class GitHubUserOAuthOperationRepository:
                     GitHubUserErrorCode.AUTHORITY,
                     "Agent management permission required.",
                 )
+            await require_active_agent(session, agent_id=agent_id)
 
     async def authorize_scope(
         self, *, user_id: str, session_id: str, workspace_id: str, agent_id: str | None
@@ -274,9 +285,8 @@ class GitHubUserOAuthOperationRepository:
             if registration.source == "platform_user"
             else "github_app_user"
         )
-        if (
-            toolkit.revision != registration.toolkit_revision
-            or toolkit.config.get("github_auth_type") != auth_type
+        if toolkit.revision != registration.toolkit_revision or (
+            _decode_registration_mode(toolkit.config).auth_type != auth_type
         ):
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.STALE,

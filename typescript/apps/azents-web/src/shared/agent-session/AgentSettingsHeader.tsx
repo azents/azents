@@ -4,6 +4,7 @@ import { IconMenu2 } from "@tabler/icons-react";
 /** Agent settings page header without session tabs. */
 import { type ReactNode } from "react";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
+import { AgentDeletionBadge, AgentDeletionNotice } from "./AgentDeletionStatus";
 import { useAgentSettingsHeaderController } from "./containers/useAgentSettingsHeaderController";
 import type { AgentSettingsHeaderViewProps } from "./containers/useAgentSettingsHeaderController";
 import type { AgentResponse } from "@azents/public-client";
@@ -48,18 +49,22 @@ export function AgentSettingsHeaderView({
           avatar={agent.avatar ?? null}
           size={40}
         />
-        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+        <Stack gap={rem(2)} style={{ flex: 1, minWidth: 0 }}>
           <Group gap="xs" wrap="wrap">
             <Text fw={600} size="md">
               {agent.name}
             </Text>
-            <Badge
-              size="sm"
-              variant="dot"
-              color={agent.enabled ? "green" : "gray"}
-            >
-              {agent.enabled ? t("status.enabled") : t("status.disabled")}
-            </Badge>
+            {agent.deletion_status !== null ? (
+              <AgentDeletionBadge status={agent.deletion_status} />
+            ) : (
+              <Badge
+                size="sm"
+                variant="dot"
+                color={agent.enabled ? "green" : "gray"}
+              >
+                {agent.enabled ? t("status.enabled") : t("status.disabled")}
+              </Badge>
+            )}
             <Badge
               size="sm"
               variant="light"
@@ -104,8 +109,10 @@ export function AgentSettingsHeaderView({
         <Text fw={600} size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
           {agent.name}
         </Text>
+        <AgentDeletionBadge status={agent.deletion_status} />
         {controls}
       </Group>
+      <AgentDeletionNotice status={agent.deletion_status} />
     </Box>
   );
 }

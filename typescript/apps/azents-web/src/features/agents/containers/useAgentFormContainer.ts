@@ -8,7 +8,7 @@
  */
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   buildProviderIntegrationOptions,
   fallbackSelectableModelLabel,
@@ -90,8 +90,23 @@ export function useAgentFormContainer(
 
   const agentQuery = trpc.agent.get.useQuery(
     { handle, agentId: agentId ?? "" },
-    { enabled: isEditMode },
+    {
+      enabled: isEditMode,
+      refetchInterval: (query) =>
+        query.state.error?.data?.code === "NOT_FOUND"
+          ? false
+          : query.state.data?.deletion_status != null
+            ? 5000
+            : false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: true,
+    },
   );
+  useEffect(() => {
+    if (agentQuery.error?.data?.code === "NOT_FOUND") {
+      router.replace(`/w/${encodeURIComponent(handle)}/agents`);
+    }
+  }, [agentQuery.error, handle, router]);
   const integrationsQuery = trpc.llmProviderIntegration.list.useQuery({
     handle,
   });
@@ -219,7 +234,10 @@ export function useAgentFormContainer(
 
   const onSubmit = useCallback(
     (values: AgentFormValues): void => {
-      if (typeof values.routine_check_interval_minutes !== "number") {
+      if (
+        typeof values.routine_check_interval_minutes !== "number" ||
+        typeof values.routine_min_action_delay_minutes !== "number"
+      ) {
         return;
       }
       setMutationState({ type: "SUBMITTING" });
@@ -240,6 +258,8 @@ export function useAgentFormContainer(
           handle,
           agentId,
           routine_check_interval_minutes: values.routine_check_interval_minutes,
+          routine_min_action_delay_minutes:
+            values.routine_min_action_delay_minutes,
           name: values.name,
           description: values.description ?? null,
           selectable_model_options: selectableModelOptions,
@@ -263,6 +283,8 @@ export function useAgentFormContainer(
         createMutation.mutate({
           handle,
           routine_check_interval_minutes: values.routine_check_interval_minutes,
+          routine_min_action_delay_minutes:
+            values.routine_min_action_delay_minutes,
           name: values.name,
           description: values.description,
           selectable_model_options: selectableModelOptions,

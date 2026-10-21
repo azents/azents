@@ -31,9 +31,10 @@ from azentspublicclient.models.slack_connection_setup_request import (
     SlackConnectionSetupRequest,
 )
 from docker.models.containers import Container
+from pydantic import StrictBool, StrictInt, StrictStr
 
 from support import routine_model_fixture as model
-from support.observations import ToolResultObservation
+from support.observations import ExtensionObservation, ToolResultObservation
 from support.utils import AgentSessionSetup, unique, wait_until
 from tests.required.public.external_channel_scenarios import (
     _APP_ID,
@@ -56,6 +57,14 @@ from tests.required.public.test_routines import (
 from tests.required.public.test_run_tool_to_file import _history, _live_idle
 
 
+class _RoutineUpload(ExtensionObservation):
+    operation: StrictStr
+    outcome: StrictStr
+    file_count: StrictInt
+    total_bytes: StrictInt
+    has_initial_comment: StrictBool
+
+
 @pytest.mark.parametrize("delivery", ["delivered", "failed"])
 def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
     request: pytest.FixtureRequest,
@@ -63,7 +72,7 @@ def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_admin_server_url: str,
-    azents_engine_worker_container: Container,
+    ordinary_model_stream_worker: object,
     azents_external_channel_gateway_factory: Callable[
         [], AbstractContextManager[Container]
     ],
@@ -72,7 +81,7 @@ def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
     delivery: Literal["delivered", "failed"],
 ) -> None:
     """Channel-created Session keeps Primary delivery separate from work outcome."""
-    del azents_engine_worker_container
+    del ordinary_model_stream_worker
     gateway = azents_external_channel_gateway_factory()
     gateway.__enter__()
     request.addfinalizer(lambda: gateway.__exit__(None, None, None))
@@ -255,19 +264,35 @@ def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
         )
         requests.post(
             f"{slack_provider_fake_url}/__testenv/configure",
-            json={"delivery_scenarios": {"chat.postMessage": delivery}},
+            json={
+                "file_scenarios": {
+                    "files.completeUploadExternal": (
+                        "available" if delivery == "delivered" else "rejected"
+                    )
+                }
+            },
             timeout=10,
         ).raise_for_status()
         return session_id
 
     def verify(setup: AgentSessionSetup) -> None:
         state = _provider_observation(slack_provider_fake_url)
-        assert state.request_counts.get("chat.postMessage") == 1
+        assert state.request_counts.get("files.getUploadURLExternal") == 1
+        assert state.request_counts.get("file.upload") == 1
+        assert state.request_counts.get("files.completeUploadExternal") == 1
+        assert state.request_counts.get("chat.postMessage", 0) == 0
         notifications = [
-            item for item in state.deliveries if item.operation == "chat.postMessage"
+            _RoutineUpload.model_validate(item.model_dump())
+            for item in state.deliveries
+            if item.operation == "files.completeUploadExternal"
         ]
         if delivery == "delivered":
             assert len(notifications) == 1 and notifications[0].outcome == "delivered"
+            assert notifications[0].file_count == 1
+            assert notifications[0].total_bytes == len(
+                (model.RUNTIME_PROOF + "\n").encode()
+            )
+            assert notifications[0].has_initial_comment
         else:
             assert notifications == []
         _write_evidence(
@@ -275,7 +300,9 @@ def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
             "primary-delivery",
             {
                 "provider": "local_slack_fake",
-                "post_attempt_count": state.request_counts["chat.postMessage"],
+                "upload_attempt_count": state.request_counts[
+                    "files.completeUploadExternal"
+                ],
                 "expected_delivery": delivery,
                 "notifications": [
                     item.model_dump(mode="json") for item in notifications

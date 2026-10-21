@@ -1,0 +1,20 @@
+.timelineScrollbar[data-orientation="vertical"] {
+  bottom: var(--chat-composer-top-inset, 0rem);
+}
+
+.timelineViewport {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    var(--mantine-color-black) 0,
+    var(--mantine-color-black) calc(100% - var(--chat-composer-top-inset, 0rem)),
+    transparent calc(100% - var(--chat-composer-bottom-inset, 0rem)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    var(--mantine-color-black) 0,
+    var(--mantine-color-black) calc(100% - var(--chat-composer-top-inset, 0rem)),
+    transparent calc(100% - var(--chat-composer-bottom-inset, 0rem)),
+    transparent 100%
+  );
+}

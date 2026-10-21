@@ -21,6 +21,7 @@ import {
  */
 import { type ReactNode } from "react";
 import { AgentAvatar } from "./AgentAvatar";
+import { AgentDeletionBadge, AgentDeletionNotice } from "./AgentDeletionStatus";
 import { useAgentSessionHeaderController } from "./containers/useAgentSessionHeaderController";
 import type { AgentSessionHeaderViewProps } from "./containers/useAgentSessionHeaderController";
 import type {
@@ -76,7 +77,7 @@ export function AgentSessionHeaderView({
             label={t("sessions.renameLabel")}
             value={editingTitle}
             maxLength={200}
-            disabled={renameBusy}
+            disabled={renameBusy || agent.deletion_status !== null}
             onChange={(event) => setEditingTitle(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && editingTitle.trim()) {
@@ -90,7 +91,9 @@ export function AgentSessionHeaderView({
               variant="subtle"
               color="red"
               leftSection={<IconTrash size={rem(16)} />}
-              disabled={renameBusy || !session.title}
+              disabled={
+                renameBusy || !session.title || agent.deletion_status !== null
+              }
               onClick={() => void handleClearTitle()}
             >
               {t("sessions.clearTitle")}
@@ -101,7 +104,9 @@ export function AgentSessionHeaderView({
               </Button>
               <Button
                 loading={renameBusy}
-                disabled={!editingTitle.trim()}
+                disabled={
+                  !editingTitle.trim() || agent.deletion_status !== null
+                }
                 onClick={() => void handleSubmitRename()}
               >
                 {t("sessions.save")}
@@ -126,14 +131,16 @@ export function AgentSessionHeaderView({
           pb="xs"
           wrap="nowrap"
         >
-          <Group gap={4} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={rem(4)} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
             <Text fw={600} size="md" truncate>
               {sessionTitle}
             </Text>
+            <AgentDeletionBadge status={agent.deletion_status} />
             <ActionIcon
               variant="subtle"
               size="sm"
               onClick={handleOpenRename}
+              disabled={agent.deletion_status !== null}
               aria-label={t("sessions.rename")}
               style={{ flexShrink: 0 }}
             >
@@ -173,14 +180,16 @@ export function AgentSessionHeaderView({
             avatar={agent.avatar ?? null}
             size={24}
           />
-          <Group gap={4} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={rem(4)} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
             <Text fw={600} size="sm" truncate style={{ minWidth: 0 }}>
               {sessionTitle}
             </Text>
+            <AgentDeletionBadge status={agent.deletion_status} />
             <ActionIcon
               variant="subtle"
               size="sm"
               onClick={handleOpenRename}
+              disabled={agent.deletion_status !== null}
               aria-label={t("sessions.rename")}
               style={{ flexShrink: 0 }}
             >
@@ -199,6 +208,7 @@ export function AgentSessionHeaderView({
             </ActionIcon>
           </Group>
         </Group>
+        <AgentDeletionNotice status={agent.deletion_status} />
       </Box>
     </>
   );

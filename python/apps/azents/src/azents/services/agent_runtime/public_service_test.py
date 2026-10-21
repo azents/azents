@@ -114,6 +114,7 @@ def _agent(
         max_turns=None,
         auto_archive_ttl_days=30,
         routine_check_interval_minutes=30,
+        routine_min_action_delay_minutes=30,
         avatar=None,
         created_at=_NOW,
         updated_at=_NOW,

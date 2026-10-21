@@ -1,5 +1,6 @@
 "use client";
 
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { useRuntimeWebServicesContainer } from "@/shared/runtime-web/containers/useRuntimeWebServicesContainer";
 import { trpc } from "@/trpc/client";
 import type { RuntimeWebServicesContainerOutput } from "@/shared/runtime-web/containers/useRuntimeWebServicesContainer";
@@ -16,8 +17,13 @@ export interface AgentRuntimeWebServicesContainerOutput extends AgentRuntimeWebS
 
 export function useAgentRuntimeWebServicesContainer({
   handle,
-  agent,
+  agent: initialAgent,
 }: AgentRuntimeWebServicesContainerProps): AgentRuntimeWebServicesContainerOutput {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const runtime = trpc.chat.getAgentRuntime.useQuery({
     handle,
     agentId: agent.id,

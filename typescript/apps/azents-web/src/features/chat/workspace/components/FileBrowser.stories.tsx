@@ -78,6 +78,7 @@ function DirectoryBrowser({
         </Button>
       )}
       <FileBrowserContainer
+        readOnly={false}
         root={root}
         cwd={root}
         path={root}

@@ -19,18 +19,26 @@ import {
 } from "@mantine/core";
 import { IconCheck, IconSend } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import type { WorkspaceJoinViewProps } from "../containers/useWorkspaceJoinContainer";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useWorkspaceJoinViewController } from "../containers/useWorkspaceJoinViewController";
+import type { WorkspaceJoinViewOutput } from "../containers/useWorkspaceJoinViewController";
 
-export function WorkspaceJoinView({
+export const WorkspaceJoinView = createReactContainer(
+  "WorkspaceJoinView",
+  useWorkspaceJoinViewController,
+  WorkspaceJoinContent,
+);
+
+export function WorkspaceJoinContent({
   handle,
   state,
-  onSubmitRequest,
+  message,
+  setMessage,
+  submitMessage,
   onAcceptInvitation,
   onDeclineInvitation,
-}: WorkspaceJoinViewProps): React.ReactElement {
+}: WorkspaceJoinViewOutput): React.ReactElement {
   const t = useTranslations("workspace.join");
-  const [message, setMessage] = useState("");
 
   return (
     <Container size="xs" py="xl">
@@ -82,9 +90,7 @@ export function WorkspaceJoinView({
             />
             <Button
               leftSection={<IconSend size={16} />}
-              onClick={() =>
-                onSubmitRequest(message.trim() ? message.trim() : null)
-              }
+              onClick={submitMessage}
             >
               {t("submitRequest")}
             </Button>

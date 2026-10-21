@@ -21,10 +21,12 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
-from azents.core.agent_errors import NotFound
+from azents.core.agent_deletion import AgentDeletionStatus
+from azents.core.agent_errors import InvalidRoutineCadence, NotFound
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
@@ -417,6 +419,7 @@ class AgentService:
             max_turns=create.max_turns,
             auto_archive_ttl_days=create.auto_archive_ttl_days,
             routine_check_interval_minutes=create.routine_check_interval_minutes,
+            routine_min_action_delay_minutes=create.routine_min_action_delay_minutes,
             subagent_settings=create.subagent_settings,
         )
         create_result = await self.repository.create(
@@ -459,11 +462,19 @@ class AgentService:
             )
         agents = await self._project_active_agents(workspace_id, result.items)
         source_snapshot = await self._capture_context_source(agents)
+        deletion_errors = await self.repository.deletion_errors_by_agent(
+            [
+                agent.id
+                for agent in agents
+                if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ]
+        )
         items = [
             await self._build_output(
                 agent,
                 can_manage=agent.id in managed_agent_ids,
                 source_snapshot=source_snapshot,
+                deletion_status=self._deletion_status(agent, deletion_errors),
             )
             for agent in agents
         ]
@@ -520,7 +531,8 @@ class AgentService:
         | InvalidModelParameters
         | RuntimeProfileSelectionInvalid
         | RuntimeProfileSelectionVersionRequired
-        | RuntimeProfileSelectionVersionConflict,
+        | RuntimeProfileSelectionVersionConflict
+        | InvalidRoutineCadence,
     ]:
         """Update Agent by ID."""
         existing = await self.repository.get_by_id(agent_id)
@@ -643,6 +655,10 @@ class AgentService:
             repo_update["routine_check_interval_minutes"] = update[
                 "routine_check_interval_minutes"
             ]
+        if "routine_min_action_delay_minutes" in update:
+            repo_update["routine_min_action_delay_minutes"] = update[
+                "routine_min_action_delay_minutes"
+            ]
         if "subagent_settings" in update:
             repo_update["subagent_settings"] = update["subagent_settings"]
 
@@ -697,6 +713,8 @@ class AgentService:
                         return Failure(NotBelongToWorkspace(agent_id=agent_id))
                     case AgentOperationNotAdmin():
                         return Failure(NotAdmin(agent_id=agent_id))
+                    case InvalidRoutineCadence():
+                        return Failure(error)
                     case AgentOperationRuntimeProfileInvalid(code):
                         return Failure(RuntimeProfileSelectionInvalid(code=code))
                     case AgentOperationRuntimeProfileVersionRequired():
@@ -1085,11 +1103,27 @@ class AgentService:
     ) -> AgentOutput:
         """Resolve current capabilities at the detached product read boundary."""
         projected = (await self._project_active_agents(agent.workspace_id, [agent]))[0]
+        deletion_errors = await self.repository.deletion_errors_by_agent(
+            [agent.id]
+            if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            else []
+        )
         return await self._build_output(
             projected,
             can_manage=can_manage,
             source_snapshot=await self._capture_context_source([projected]),
+            deletion_status=self._deletion_status(agent, deletion_errors),
         )
+
+    @staticmethod
+    def _deletion_status(
+        agent: Agent, errors: dict[str, bool]
+    ) -> AgentDeletionStatus | None:
+        if agent.lifecycle_status is AgentLifecycleStatus.ACTIVE:
+            return None
+        if errors.get(agent.id, True):
+            return AgentDeletionStatus.ERROR
+        return AgentDeletionStatus.DELETING
 
     async def _capture_context_source(
         self, agents: list[Agent]
@@ -1111,6 +1145,7 @@ class AgentService:
         *,
         can_manage: bool,
         source_snapshot: CapturedContextSource | None,
+        deletion_status: AgentDeletionStatus | None,
     ) -> AgentOutput:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
@@ -1164,6 +1199,7 @@ class AgentService:
             effective_terminal_enabled=terminal_denied_scope is None,
             terminal_denied_scope=terminal_denied_scope,
             can_manage=can_manage,
+            deletion_status=deletion_status,
         )
 
     @staticmethod

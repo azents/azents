@@ -10,6 +10,7 @@ import { useAgentDangerSectionController } from "../containers/useAgentDangerSec
 import type { AgentDangerSectionViewProps } from "../containers/useAgentDangerSectionController";
 
 interface AgentDangerSectionProps {
+  readOnly: boolean;
   handle: string;
   agentId: string;
 }
@@ -21,6 +22,7 @@ export function AgentDangerSection(
 }
 
 export function AgentDangerSectionView({
+  readOnly,
   t,
   tDanger,
   opened,
@@ -42,6 +44,7 @@ export function AgentDangerSectionView({
               color="red"
               leftSection={<IconTrash size={14} />}
               onClick={open}
+              disabled={readOnly}
               variant="filled"
             >
               {t("delete")}
@@ -60,6 +63,7 @@ export function AgentDangerSectionView({
             <Button
               color="red"
               onClick={handleDelete}
+              disabled={readOnly}
               loading={deleteMutation.isPending}
             >
               {t("delete")}

@@ -5,6 +5,7 @@ import type { AdminListState } from "../types";
 import type { MemberItem } from "./useAgentFormContainer";
 import type { AgentAdminResponse } from "@azents/public-client";
 interface AgentAdminSectionProps {
+  readOnly: boolean;
   adminListState: AdminListState;
   members: MemberItem[];
   onAddAdmin: (workspaceUserId: string) => void;
@@ -12,6 +13,7 @@ interface AgentAdminSectionProps {
 }
 
 export interface AgentAdminSectionViewProps {
+  readOnly: boolean;
   adminListState: AgentAdminSectionProps["adminListState"];
   onRemoveAdmin: AgentAdminSectionProps["onRemoveAdmin"];
   t: ReturnType<typeof useTranslations<"workspace.agents">>;
@@ -22,6 +24,7 @@ export interface AgentAdminSectionViewProps {
   handleAddAdmin: () => void;
 }
 export function useAgentAdminSectionController({
+  readOnly,
   adminListState,
   members,
   onAddAdmin,
@@ -56,6 +59,7 @@ export function useAgentAdminSectionController({
     }
   };
   return {
+    readOnly,
     adminListState,
     onRemoveAdmin,
     t,

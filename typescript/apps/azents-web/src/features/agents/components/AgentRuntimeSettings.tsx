@@ -185,6 +185,7 @@ function RuntimeProfileSelect({
 }
 
 function RuntimeFreeView({
+  readOnly,
   runtime,
   profiles,
   selectedProfileId,
@@ -200,6 +201,7 @@ function RuntimeFreeView({
   selectedProfileId: string | null;
   addConfirmOpen: boolean;
   isAdding: boolean;
+  readOnly: boolean;
   onSelectProfile: (profileId: string | null) => void;
   onOpenAddConfirm: () => void;
   onCloseAddConfirm: () => void;
@@ -209,6 +211,7 @@ function RuntimeFreeView({
   const selectedProfile =
     profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const canAdd =
+    !readOnly &&
     runtime.actions.add &&
     selectedProfile !== null &&
     selectedProfile.available;
@@ -237,7 +240,7 @@ function RuntimeFreeView({
             runtime={runtime}
             profiles={profiles}
             selectedProfileId={selectedProfileId}
-            disabled={isAdding}
+            disabled={isAdding || readOnly}
             onSelectProfile={onSelectProfile}
           />
           <Group justify="flex-end">
@@ -422,6 +425,7 @@ function LifecycleControls({
 }
 
 function ManagedView({
+  readOnly,
   environmentVariables,
   runtime,
   profiles,
@@ -449,6 +453,7 @@ function ManagedView({
   onConfirmReset,
 }: {
   environmentVariables?: React.ReactNode;
+  readOnly: boolean;
   runtime: AgentRuntimeResponse;
   profiles: WorkspaceRuntimeProfileResponse[];
   selectedProfileId: string | null;
@@ -477,6 +482,7 @@ function ManagedView({
   const t = useTranslations("workspace.agents.runtimeSettings");
   const impact = runtime.removal_impact;
   const profileChanged =
+    !readOnly &&
     selectedProfileId !== null &&
     selectedProfileId !== runtime.runtime_profile_id;
 
@@ -494,7 +500,7 @@ function ManagedView({
             runtime={runtime}
             profiles={profiles}
             selectedProfileId={selectedProfileId}
-            disabled={isUpdatingProfile}
+            disabled={isUpdatingProfile || readOnly}
             onSelectProfile={onSelectProfile}
           />
           <Group justify="flex-end">
@@ -733,7 +739,21 @@ export function AgentRuntimeSettings({
     );
   }
 
-  const { runtime, profiles } = state;
+  const { profiles } = state;
+  const readOnly = agent.deletion_status !== null;
+  const runtime = readOnly
+    ? {
+        ...state.runtime,
+        actions: {
+          ...state.runtime.actions,
+          add: false,
+          remove: false,
+          start: false,
+          restart: false,
+          reset: false,
+        },
+      }
+    : state.runtime;
   return (
     <Box style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
       <Stack gap="lg" p="md" maw={rem(960)} mx="auto" w="100%">
@@ -777,10 +797,11 @@ export function AgentRuntimeSettings({
 
         {runtime.capability === "none" ? (
           <RuntimeFreeView
+            readOnly={readOnly}
             runtime={runtime}
             profiles={profiles}
             selectedProfileId={selectedProfileId}
-            addConfirmOpen={addConfirmOpen}
+            addConfirmOpen={addConfirmOpen && !readOnly}
             isAdding={isAdding}
             onSelectProfile={onSelectProfile}
             onOpenAddConfirm={onOpenAddConfirm}
@@ -795,7 +816,9 @@ export function AgentRuntimeSettings({
               description={t("browserDescription")}
               checked={agent.browser_enabled}
               disabled={
-                isUpdatingBrowser || !agent.toolkit_management_available
+                readOnly ||
+                isUpdatingBrowser ||
+                !agent.toolkit_management_available
               }
               onChange={(event) =>
                 onBrowserEnabledChange(event.currentTarget.checked)
@@ -805,15 +828,16 @@ export function AgentRuntimeSettings({
         ) : null}
         {runtime.capability === "managed" ? (
           <ManagedView
+            readOnly={readOnly}
             environmentVariables={environmentVariables}
             runtime={runtime}
             profiles={profiles}
             selectedProfileId={selectedProfileId}
             isUpdatingProfile={isUpdatingProfile}
             isRemoving={isRemoving}
-            removeConfirmOpen={removeConfirmOpen}
-            restartConfirmOpen={restartConfirmOpen}
-            resetConfirmOpen={resetConfirmOpen}
+            removeConfirmOpen={removeConfirmOpen && !readOnly}
+            restartConfirmOpen={restartConfirmOpen && !readOnly}
+            resetConfirmOpen={resetConfirmOpen && !readOnly}
             removalAcknowledged={removalAcknowledged}
             lifecycleAction={lifecycleAction}
             onSelectProfile={onSelectProfile}

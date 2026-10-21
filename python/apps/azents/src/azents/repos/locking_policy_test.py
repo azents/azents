@@ -14,7 +14,10 @@ _EXPECTED_TRANSACTION_OWNERS = {
         "interrupt",
     },
     "chat_operations.py": {"archive_agent_session", "restore_agent_session"},
-    "chat_write_operations.py": {"request_session_stop"},
+    "chat_write_operations.py": {
+        "request_session_stop",
+        "create_idempotent_failed_run_retry",
+    },
     "archived_session_purge_operations.py": {"prepare_root", "finalize"},
     "agent_decommission_operations.py": {"retire_root_tree"},
     "owner_lifecycle_operations.py": {"retire_root_tree"},
@@ -83,7 +86,7 @@ def test_hierarchy_retry_is_limited_to_complete_owning_operation_closure() -> No
                     node.name
                 )
     assert observed == _EXPECTED_TRANSACTION_OWNERS
-    assert sum(len(entries) for entries in observed.values()) == 47
+    assert sum(len(entries) for entries in observed.values()) == 48
 
 
 def test_inventoried_nonwaiting_acquisition_surfaces_are_removed() -> None:

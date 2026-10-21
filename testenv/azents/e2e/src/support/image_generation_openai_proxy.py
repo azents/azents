@@ -2418,6 +2418,9 @@ class _State:
     routine_runtime_barrier: ClassVar[routine_model_fixture.RuntimeBarrier] = (
         routine_model_fixture.RuntimeBarrier()
     )
+    routine_judgment_barrier: ClassVar[routine_model_fixture.RuntimeBarrier] = (
+        routine_model_fixture.RuntimeBarrier()
+    )
     routine_judgment_rounds: ClassVar[dict[tuple[str, ...], int]] = {}
     routine_judgment_choices: ClassVar[dict[str, bool]] = {}
     routine_continuations: ClassVar[OrderedDict[str, tuple[_ModelInputItem, ...]]] = (
@@ -2448,6 +2451,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
+        if self.path == routine_model_fixture.JUDGMENT_BARRIER_PATH:
+            self._write_json(200, _State.routine_judgment_barrier.evidence())
+            return
         if self.path == routine_model_fixture.RUNTIME_BARRIER_PATH:
             self._write_json(200, _State.routine_runtime_barrier.evidence())
             return
@@ -2506,6 +2512,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
+        if self.path == routine_model_fixture.JUDGMENT_BARRIER_PATH:
+            _State.routine_judgment_barrier.arm()
+            self._write_json(201, _State.routine_judgment_barrier.evidence())
+            return
+        if self.path == routine_model_fixture.JUDGMENT_BARRIER_PATH + "/release":
+            _State.routine_judgment_barrier.release()
+            self._write_json(200, _State.routine_judgment_barrier.evidence())
+            return
         if self.path == routine_model_fixture.RUNTIME_BARRIER_PATH:
             _State.routine_runtime_barrier.arm()
             self._write_json(201, _State.routine_runtime_barrier.evidence())
@@ -2681,6 +2695,16 @@ class _Handler(BaseHTTPRequestHandler):
                     _State.routine_requests.append(
                         routine_model_fixture.evidence(routine)
                     )
+            # A future source clock must not race a real-time judgment settlement
+            # while the same source pass is still paging eligible Sessions.
+            if (
+                routine.kind == "judgment"
+                and not _State.routine_judgment_barrier.wait()
+            ):
+                self._write_json(
+                    408, {"error": {"message": "Judgment barrier expired"}}
+                )
+                return
             plan = routine_model_fixture.plan(routine)
             if isinstance(plan, routine_model_fixture.Call):
                 self._write_function_call_response(

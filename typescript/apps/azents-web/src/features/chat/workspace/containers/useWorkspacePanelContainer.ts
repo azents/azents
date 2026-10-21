@@ -2,6 +2,7 @@
 
 /** Workspace panel container hook. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import {
   shouldPollAgentWorkspaceLifecycle,
@@ -52,6 +53,7 @@ interface UseWorkspacePanelContainerInput {
 }
 
 export interface WorkspacePanelContainerOutput {
+  readOnly: boolean;
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
@@ -156,6 +158,7 @@ export function useWorkspacePanelContainer({
   activationRevision,
   autoRefreshVisible,
 }: UseWorkspacePanelContainerInput): WorkspacePanelContainerOutput {
+  const { readOnly } = useAgentLifecycle({ handle, agentId });
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
     string | null
   >(null);
@@ -1441,6 +1444,7 @@ export function useWorkspacePanelContainer({
 
   return {
     state,
+    readOnly,
     projectState,
     metricsState: metrics.state,
     workspaceUploads,

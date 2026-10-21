@@ -12,7 +12,6 @@ from azents.engine.run.types import FunctionToolError
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.services.session_git_worktree import (
     AgentCreateGitWorktreeAdmission,
-    AgentGitWorktreeToolAvailability,
     AgentRemoveGitWorktreeAdmission,
     SessionGitWorktreeService,
 )
@@ -66,14 +65,9 @@ class _Service(SessionGitWorktreeService):
         *,
         agent_id: str,
         session_id: str,
-    ) -> AgentGitWorktreeToolAvailability:
-        """Return both configured tools from one descriptive projection."""
-        assert agent_id == "agent-1"
-        assert session_id == "session-1"
-        return AgentGitWorktreeToolAvailability(
-            create=self.available,
-            remove=self.remove_available,
-        )
+    ) -> None:
+        """Discovery must not depend on descriptive eligibility reads."""
+        raise AssertionError("Tool discovery must not query worktree eligibility")
 
     async def admit_agent_create_git_worktree(
         self,
@@ -166,8 +160,8 @@ def _toolkit(service: _Service, broker: _Broker) -> DynamicWorktreeToolkit:
 
 
 @pytest.mark.asyncio
-async def test_projects_create_tool_only_when_current_session_is_eligible() -> None:
-    """Eligibility changes only the projected tool list."""
+async def test_worktree_tools_remain_visible_across_session_eligibility() -> None:
+    """Current resources do not change either worktree tool's schema."""
     service = _Service(available=False)
     toolkit = _toolkit(service, _Broker())
 
@@ -176,9 +170,14 @@ async def test_projects_create_tool_only_when_current_session_is_eligible() -> N
     enabled = await toolkit.update_context(_turn_context())
 
     assert disabled.status is ToolkitStatus.ENABLED
-    assert disabled.tools == []
+    assert [tool.spec.name for tool in disabled.tools] == [
+        "create_git_worktree",
+        "remove_git_worktree",
+    ]
     assert enabled.status is ToolkitStatus.ENABLED
-    assert [tool.spec.name for tool in enabled.tools] == ["create_git_worktree"]
+    assert [tool.spec for tool in enabled.tools] == [
+        tool.spec for tool in disabled.tools
+    ]
 
 
 @pytest.mark.asyncio
@@ -254,7 +253,7 @@ async def test_create_admits_authoritative_call_and_marks_run_boundary() -> None
 @pytest.mark.asyncio
 async def test_rejected_admission_has_no_boundary_or_wake_side_effect() -> None:
     """An admission failure remains a normal tool error without wake routing."""
-    service = _Service()
+    service = _Service(available=False)
     service.failure = ValueError("source_project_path must identify a current Project.")
     broker = _Broker()
     toolkit = _toolkit(service, broker)
@@ -282,14 +281,17 @@ async def test_rejected_admission_has_no_boundary_or_wake_side_effect() -> None:
 
 
 @pytest.mark.asyncio
-async def test_remove_projects_only_for_current_managed_worktree_context() -> None:
-    """Removal appears independently from creation eligibility."""
+async def test_worktree_tools_remain_visible_with_only_removal_eligible() -> None:
+    """Admission eligibility does not hide either operation."""
     service = _Service(available=False, remove_available=True)
     toolkit = _toolkit(service, _Broker())
 
     state = await toolkit.update_context(_turn_context())
 
-    assert [tool.spec.name for tool in state.tools] == ["remove_git_worktree"]
+    assert [tool.spec.name for tool in state.tools] == [
+        "create_git_worktree",
+        "remove_git_worktree",
+    ]
 
 
 @pytest.mark.asyncio

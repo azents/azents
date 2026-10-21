@@ -25,8 +25,8 @@ code_paths:
 api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug}
-last_verified_at: 2026-10-19
-spec_version: 2
+last_verified_at: 2026-10-20
+spec_version: 3
 ---
 
 # Session Routine Domain Spec
@@ -75,19 +75,27 @@ use the existing execution-generation fences.
 
 Settled judgment advances the Session checking checkpoint to completion time;
 the next regular opportunity follows the Agent's `routine_check_interval_minutes`
-(default 30; whole minutes from 1 to 1440), independently of selected-work
-completion. Agent administrators edit it in profile settings through the existing
-Agent save flow. Omitted updates preserve it; null, fractional, boolean and
-out-of-range values are rejected. Source collection also advances the checkpoint while a judgment is
+(new-Agent default 180 minutes), independently of selected-work completion.
+The separate Agent `routine_min_action_delay_minutes` uses the existing
+last-action reference and defaults to 30 minutes.
+Agent administrators edit both in profile settings through the existing save
+flow. Strict whole-minute values satisfy `30 <= minimum delay <= tick <= 1440`.
+Supplying minimum delay automatically raises tick when needed, using the supplied
+tick or the current stored tick. Reducing delay never reduces tick. Tick-only
+inversions, invalid create pairs, null, fractional, boolean and out-of-range
+values are rejected. Other omitted values are preserved. Source collection also advances the checkpoint while a judgment is
 queued. Selection respects the later of the checking and minimum-action-delay
 boundaries. No-action and failed judgment advance the checking checkpoint but
 do not advance the last-action reference. The shared Scheduler uses the earliest
 eligible Session time, capped at the regular 30-minute discovery interval.
-Due selection and fenced admission read the same current Agent value. Changes
+Due selection and fenced admission read the same current Agent values. Changes
 apply at the next scheduled scan, which may take up to the discovery interval
 plus normal scheduling latency, and do not cancel queued or running judgments.
-The separate minimum action delay remains 30 minutes; short check intervals do
-not guarantee investigations or notifications at that frequency.
+Capture and final settlement re-read the current minimum delay at their existing
+action-admission gates. Tick is not a second execution gate for already captured
+judgment. Existing Agents transfer old tick to minimum delay with a 30-minute
+floor, then set new tick to at least 180 minutes. Neither setting guarantees
+investigations or notifications at that frequency.
 An early scan schedules the remaining delay instead of another full interval;
 normal scheduler polling and FIFO work may add latency. Source evidence remains
 durable and ongoing incomplete occurrences are excluded from selection.
@@ -131,9 +139,12 @@ not added. This read-only snapshot does not rebind a host Run or grant context,
 completion or idle-continuation authority for another Run's work.
 
 `record_routine_result` requires the admitted, started, current-owner identity.
-Its `work` contains `objective_outcome` (`finished` or `failed`), nonblank `result`
-and `next_hint`, independent `notify`, and nullable `message`. A notifying result
-requires a nonblank message; a silent result requires null. Completion atomically
+Its input is flat: `slug`, `execution_id`, `objective_outcome` (`finished` or
+`failed`), nonblank `result` and `next_hint`, independent `notify`, nullable
+`message`, and nullable `files`. The tool does not accept a nested `work` object.
+A notifying result requires a nonblank message and may attach up to 20 files
+using absolute Runtime paths or authorized `exchange://` references. Silent
+results require both message and files to be null. Completion atomically
 closes only that item and retains its canonical record. Repeating completion
 returns the existing stored work without another notification. The newest 100
 records per definition are retained. Judgment continuity uses latest work only.
@@ -154,7 +165,17 @@ means delivery to the originating Session chat. An existing but unavailable,
 replaced or failed Primary does not fall back to another Session/channel. Delivery
 is a post-commit, one-attempt effect with separate observation; uncertain or failed
 publication is not an automatic retry queue. Objective outcome, record success
-and delivery status remain distinct. Backfill preserves all existing Bindings:
+and delivery status remain distinct. Files are prepared with existing Runtime
+transfer/Exchange authority before completion, outside database transactions.
+Runtime sources are first published as verified Exchange objects for both
+destinations; external uploads consume those authorized immutable sources rather
+than holding a Runtime transfer open through provider completion.
+Preparation failure leaves work incomplete. File-bearing delivery is pinned to
+the observed Primary (including its absence) and rejects a destination change.
+Channel notifications use existing outbound file manifests; Session chat
+notifications retain Exchange attachments in their durable notification event.
+Repeated completion does not prepare or send files again.
+Backfill preserves all existing Bindings:
 zero eligible connections means no Primary, one unambiguous connection selects it,
 and multiple or inconsistent connections block migration for explicit resolution.
 

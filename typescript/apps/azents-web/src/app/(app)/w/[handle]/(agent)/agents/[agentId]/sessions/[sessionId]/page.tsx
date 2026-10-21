@@ -2,6 +2,11 @@ import { TRPCError } from "@trpc/server";
 import { notFound, redirect } from "next/navigation";
 import { trpc } from "@/trpc/server";
 import { AgentSessionPage } from "./AgentSessionPage";
+import type { Viewport } from "next";
+
+export const viewport: Viewport = {
+  interactiveWidget: "resizes-content",
+};
 
 export default async function Page({
   params,

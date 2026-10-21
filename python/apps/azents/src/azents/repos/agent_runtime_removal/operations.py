@@ -22,6 +22,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
@@ -83,6 +84,7 @@ class AgentRuntimeRemovalOperationsRepository:
                     code="agent_not_found",
                     message="Agent is unavailable for Runtime removal.",
                 )
+            await require_active_agent(session, agent_id=request.agent_id)
             active = await self.removal_repository.get_active_by_agent_id(
                 session,
                 request.agent_id,

@@ -182,7 +182,8 @@ export const SilentCompletion: Story = {
         {
           slug: "traffic",
           execution_id: "occurrence-a",
-          work: routineWorkFixture,
+          ...routineWorkFixture,
+          files: null,
         },
         "completed",
         { created: true, execution: routineCompletionFixture },
@@ -198,10 +199,9 @@ export const ExistingCompletion: Story = {
         {
           slug: "traffic",
           execution_id: "occurrence-a",
-          work: {
-            ...routineWorkFixture,
-            result: "A new request that does not replace the saved result.",
-          },
+          ...routineWorkFixture,
+          result: "A new request that does not replace the saved result.",
+          files: null,
         },
         "completed",
         { created: false, execution: routineCompletionFixture },
@@ -235,11 +235,10 @@ export const DeliveryFailure: Story = {
         {
           slug: "traffic",
           execution_id: "occurrence-a",
-          work: {
-            ...routineWorkFixture,
-            notify: true,
-            message: "Traffic needs attention.",
-          },
+          ...routineWorkFixture,
+          notify: true,
+          message: "Traffic needs attention.",
+          files: null,
         },
         "completed",
         {

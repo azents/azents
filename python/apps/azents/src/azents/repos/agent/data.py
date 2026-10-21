@@ -3,7 +3,7 @@
 import datetime
 from typing import Annotated, TypeAlias
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self, TypedDict
 
 from azents.core.agent import (
@@ -78,7 +78,8 @@ class Agent(BaseModel):
         gt=0,
         description="Inactivity period before automatic Session archive",
     )
-    routine_check_interval_minutes: int = Field(ge=1, le=1440, strict=True)
+    routine_check_interval_minutes: int = Field(ge=30, le=1440, strict=True)
+    routine_min_action_delay_minutes: int = Field(ge=30, le=1440, strict=True)
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings,
         description="Subagent execution settings",
@@ -147,10 +148,22 @@ class AgentCreate(BaseModel):
         gt=0,
         description="Inactivity period before automatic Session archive",
     )
-    routine_check_interval_minutes: int = Field(default=30, ge=1, le=1440, strict=True)
+    routine_check_interval_minutes: int = Field(
+        default=180, ge=30, le=1440, strict=True
+    )
+    routine_min_action_delay_minutes: int = Field(
+        default=30, ge=30, le=1440, strict=True
+    )
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
+
+    @model_validator(mode="after")
+    def validate_routine_cadence(self) -> Self:
+        """Validate the complete cadence for repository creation."""
+        if self.routine_min_action_delay_minutes > self.routine_check_interval_minutes:
+            raise ValueError("Minimum Routine action delay must not exceed tick.")
+        return self
 
 
 class AgentUpdate(TypedDict, total=False):
@@ -191,7 +204,8 @@ class AgentUpdate(TypedDict, total=False):
         int,
         Field(gt=0, description="Inactivity period before automatic Session archive"),
     ]
-    routine_check_interval_minutes: Annotated[int, Field(ge=1, le=1440, strict=True)]
+    routine_check_interval_minutes: Annotated[int, Field(ge=30, le=1440, strict=True)]
+    routine_min_action_delay_minutes: Annotated[int, Field(ge=30, le=1440, strict=True)]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")
     ]

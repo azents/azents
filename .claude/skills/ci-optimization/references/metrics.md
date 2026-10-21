@@ -24,6 +24,12 @@ attempts; reject artifacts created outside the selected attempt or with differen
 head SHA. General pytest artifact names carry attempt; the E2E planner/duration gate
 retains its current artifact contract. Missing results after setup failure are not
 successful tests. Preserve failed workflow metadata and missing-evidence classification.
+Require the GitHub API SHA256 digest for every selected artifact and retain the exact
+`artifact-ID.zip`. Collection authenticates ZIP bytes before extraction; replay
+compares archive-derived file hashes with the manifest and extracted evidence. Missing
+archives/digests or a rewritten local manifest cannot substitute for this proof.
+Keep historical raw files; recollect available immutable artifacts or report an
+unverified gap rather than adding a compatibility acceptance path.
 
 `run.json` uses `gh run view --attempt N --json databaseId,attempt,status,conclusion,
 headSha,headBranch,event,workflowName,createdAt,jobs`. Job names and steps are

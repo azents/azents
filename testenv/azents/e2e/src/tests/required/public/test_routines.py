@@ -26,7 +26,6 @@ from azentspublicclient.models.routine_detail_response import RoutineDetailRespo
 from azentspublicclient.models.routine_list_response import RoutineListResponse
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.session_context_response import SessionContextResponse
-from docker.models.containers import Container
 from pydantic import StrictBool, StrictInt, StrictStr, TypeAdapter
 
 from support import routine_model_fixture as model
@@ -91,8 +90,15 @@ class _Turn(ExtensionObservation):
     usage: _Usage | None
 
 
+class _NotificationFile(ExtensionObservation):
+    uri: StrictStr
+    name: StrictStr
+    size: StrictInt
+
+
 class _Notification(ExtensionObservation):
     content: StrictStr
+    attachments: list[_NotificationFile]
 
 
 class _ModelEvidence(ExtensionObservation):
@@ -201,6 +207,8 @@ def prepare_routine_session(
         handle=setup.workspace_handle,
         agent_update_request=AgentUpdateRequest(
             selectable_model_options=single_candidate_model_options(selection),
+            routine_check_interval_minutes=30,
+            routine_min_action_delay_minutes=30,
         ),
         _headers=headers,
     )
@@ -297,13 +305,18 @@ def run_routine_journey(
     assert all(detail(item.slug).execution is None for item in definitions)
 
     def dispatch(now: str) -> None:
-        response = requests.post(
-            f"{azents_admin_server_url}/scheduler/v1/routines/dispatch",
-            json={"now": now},
-            timeout=30,
-        )
-        response.raise_for_status()
-        assert response.json()["enqueued"] == 1
+        barrier = openai_proxy_url + model.JUDGMENT_BARRIER_PATH
+        requests.post(barrier, timeout=10).raise_for_status()
+        try:
+            response = requests.post(
+                f"{azents_admin_server_url}/scheduler/v1/routines/dispatch",
+                json={"now": now},
+                timeout=30,
+            )
+            response.raise_for_status()
+            assert response.json()["enqueued"] == 1
+        finally:
+            requests.post(barrier + "/release", timeout=10).raise_for_status()
 
     def context() -> SessionContextResponse:
         response = requests.get(
@@ -368,12 +381,32 @@ def run_routine_journey(
             return None
         return snapshots if _live_idle(**common) else None
 
-    snapshots = wait_until(
-        completed,
-        timeout=120,
-        interval=0.5,
-        message="Independent Routine records and continuation did not finish",
-    )
+    try:
+        snapshots = wait_until(
+            completed,
+            timeout=120,
+            interval=0.5,
+            message="Independent Routine records and continuation did not finish",
+        )
+    except TimeoutError:
+        _write_evidence(
+            setup.session_id,
+            "completion-timeout",
+            {
+                "snapshots": [
+                    detail(item.slug).model_dump(mode="json") for item in definitions
+                ],
+                "idle": _live_idle(**common),
+                "tool_results": [
+                    ToolResultObservation.model_validate(item.payload).model_dump(
+                        mode="json"
+                    )
+                    for item in _history(**common).items
+                    if item.kind == "client_tool_result"
+                ],
+            },
+        )
+        raise
     assert snapshots is not None
     by_title = {item.routine.content.title: item for item in snapshots}
     alpha, beta = by_title["ROUTINE_E2E Alpha"], by_title["ROUTINE_E2E Beta"]
@@ -388,6 +421,17 @@ def run_routine_journey(
         channel.delivery_status if channel is not None else "delivered"
     )
     history = _history(**common).items
+    if channel is None:
+        notifications = [
+            _Notification.model_validate(item.payload)
+            for item in history
+            if item.kind == "routine_notification"
+        ]
+        assert len(notifications) == 1
+        assert len(notifications[0].attachments) == 1
+        attached = notifications[0].attachments[0]
+        assert attached.name == "routine-e2e-proof.txt"
+        assert attached.uri.startswith("exchange://") and attached.size > 0
     judgments = [
         _Judgment.model_validate(item.payload)
         for item in history
@@ -657,11 +701,11 @@ def test_joint_tick_uses_canonical_context_and_independent_work_results(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_admin_server_url: str,
-    azents_engine_worker_container: Container,
+    ordinary_model_stream_worker: object,
     openai_proxy_url: str,
 ) -> None:
     """Tool-created work crosses Scheduler, inbox, Worker and real Runtime paths."""
-    del azents_engine_worker_container
+    del ordinary_model_stream_worker
     run_routine_journey(
         public_api_client,
         admin_api_client,

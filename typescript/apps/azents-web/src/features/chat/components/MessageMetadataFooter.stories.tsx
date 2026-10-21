@@ -1,5 +1,5 @@
 import { Group, Paper, rem } from "@mantine/core";
-import { expect, fireEvent, userEvent, within } from "storybook/test";
+import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   MessageMetadataFooter,
@@ -23,6 +23,7 @@ const unresolvedProfile = {
 
 const meta = {
   component: MessageMetadataFooter,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(520)}>
@@ -57,14 +58,17 @@ export const UnresolvedModel: Story = {
     await fireEvent.click(
       canvas.getByRole("button", { name: /open inference details/i }),
     );
-    const popover = canvasElement.ownerDocument.querySelector<HTMLElement>(
-      "[data-message-metadata-popover]",
-    );
-    if (popover === null) {
-      throw new Error("Expected model metadata popover");
-    }
+    const popover = await waitFor(() => {
+      const element = canvasElement.ownerDocument.querySelector<HTMLElement>(
+        "[data-message-metadata-popover]",
+      );
+      if (element === null) {
+        throw new Error("Expected model metadata popover");
+      }
+      return element;
+    });
     const details = within(popover);
-    await expect(details.getByText("Quality")).toBeVisible();
+    await waitFor(() => expect(details.getByText("Quality")).toBeVisible());
     await expect(details.getByText("high")).toBeVisible();
     await expect(details.queryByText("—")).not.toBeInTheDocument();
   },
@@ -105,7 +109,7 @@ export const ResolvedModel: Story = {
     });
     await fireEvent.click(trigger);
     const page = within(canvasElement.ownerDocument.body);
-    await expect(page.getByText("GPT 5.5")).toBeVisible();
+    await waitFor(() => expect(page.getByText("GPT 5.5")).toBeVisible());
     await expect(page.getByText("high")).toBeVisible();
     await expect(page.queryByText("Model label")).not.toBeInTheDocument();
     await expect(page.queryByText("Actual model")).not.toBeInTheDocument();
@@ -119,17 +123,24 @@ export const ResolvedModel: Story = {
     }
     await expect(popover).toBeVisible();
     const popoverStyle = getComputedStyle(popover);
+    const probe = canvasElement.ownerDocument.createElement("div");
+    probe.style.backgroundColor = "var(--mantine-color-gray-9)";
+    probe.style.borderRadius = "var(--mantine-radius-md)";
+    probe.style.padding = `${rem(5)} ${rem(10)}`;
+    canvasElement.append(probe);
+    const expectedStyle = getComputedStyle(probe);
     await expect({
       backgroundColor: popoverStyle.backgroundColor,
       borderRadius: popoverStyle.borderRadius,
       boxShadow: popoverStyle.boxShadow,
       padding: popoverStyle.padding,
     }).toEqual({
-      backgroundColor: "var(--mantine-color-dark-7)",
-      borderRadius: "var(--mantine-radius-md)",
+      backgroundColor: expectedStyle.backgroundColor,
+      borderRadius: expectedStyle.borderRadius,
       boxShadow: "none",
-      padding: `${rem(5)} ${rem(10)}`,
+      padding: expectedStyle.padding,
     });
+    probe.remove();
     await expect(
       getComputedStyle(within(popover).getByText("GPT 5.5")).fontSize,
     ).toBe("14px");

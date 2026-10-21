@@ -21,11 +21,15 @@ Choose by the output obligation, not merely a requested time or interval:
   into a mandatory-output Scheduled Task.
 - A one-off investigation does not automatically create a Routine.
 
-Explain the supported timing limits: source checking uses the Agent's configured
-Routine checking interval (30 minutes by default, configurable from 1 to 1,440
-minutes), with regular discovery capped at 30 minutes. This checking cadence and
-the separate Session-wide 30-minute minimum action interval determine eligibility,
-not an exact execution time. Ordinary Session work can delay judgment at its FIFO boundary.
+Explain the supported timing limits: the Agent's Routine tick defaults to 180
+minutes and its separate minimum action delay defaults to 30 minutes. Both are
+configurable whole-minute settings satisfying `30 <= minimum delay <= tick <= 1440`.
+Supplying a minimum delay raises the tick when needed; lowering the delay does not
+lower the tick. Tick-only updates below the stored delay are rejected.
+Checking eligibility uses the last-check checkpoint and the separate last-action
+reference. Regular discovery is capped at 30 minutes, not an exact execution time.
+Ordinary Session work can delay judgment at its FIFO boundary. Neither setting
+guarantees investigations or notifications at that frequency.
 Do not promise arbitrary per-Routine schedules or exact hourly execution.
 
 ## Manage definitions
@@ -66,8 +70,8 @@ Do not promise arbitrary per-Routine schedules or exact hourly execution.
    be achieved, record an honest failed objective and useful future hint. Do not
    claim success because a command was attempted or a prerequisite was missing.
 4. Call `record_routine_result` separately for each completed occurrence. Supply
-   `work.objective_outcome` (`finished` or `failed`), concise `result`, required
-   `next_hint`, and the independently chosen notification fields.
+   top-level `objective_outcome` (`finished` or `failed`), concise `result`,
+   required `next_hint`, `notify`, `message`, and `files`. Do not nest under `work`.
 5. Let ordinary incomplete-work continuation carry remaining occurrences. Do not
    create another persistent Session, timer, judgment loop, or duplicate Routine
    to keep an admitted occurrence running.
@@ -75,9 +79,13 @@ Do not promise arbitrary per-Routine schedules or exact hourly execution.
 ## Choose notification independently
 
 - Prefer `notify=false` when nothing requires the user's attention, and set
-  `message=null`. Routine execution does not imply a notification.
+  `message=null` and `files=null`. Routine execution does not imply a notification.
 - Use `notify=true` only when the user needs to know, with a nonblank `message`.
   Keep objective outcome, saved result, future hint, and notification distinct.
+- Attach files in the same result call using `files` with absolute Runtime paths
+  or authorized `exchange://` URIs; use null when there are no files. File
+  preparation failure leaves the occurrence incomplete. Files follow the same
+  current Primary or Session chat destination as the message.
 - Let the result tool use the current Session Primary at delivery time, or Session
   chat only when no Primary exists. Do not supply or reconstruct a destination.
 - Do not use `channel_action.finish` or a Scheduled Task terminal tool to complete

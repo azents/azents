@@ -722,6 +722,7 @@ def _default_agent() -> Agent:
         tool_search_enabled=True,
         auto_archive_ttl_days=30,
         routine_check_interval_minutes=30,
+        routine_min_action_delay_minutes=30,
         created_at=now,
         updated_at=now,
     )

@@ -1,6 +1,7 @@
 "use client";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import {
   type AgentFocusedSidebarUser,
@@ -65,9 +66,14 @@ export interface AgentFocusedShellViewProps {
 }
 export function useAgentFocusedShellController({
   handle,
-  agent,
+  agent: initialAgent,
   children,
 }: AgentFocusedShellProps): AgentFocusedShellViewProps {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

@@ -1,4 +1,5 @@
 .shell {
+  touch-action: pinch-zoom;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -7,6 +8,7 @@
 }
 
 .desktopLayout {
+  touch-action: pinch-zoom;
   position: relative;
   display: grid;
   flex: 1;

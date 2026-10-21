@@ -8,6 +8,7 @@ from fastapi import Depends
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import (
     AgentProjectCatalogEntry,
@@ -42,6 +43,7 @@ class AgentProjectCatalogOperationsRepository:
     ) -> list[AgentProjectCatalogEntry]:
         """Commit all normalized candidate paths as one catalog identity group."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             return [
                 await self.catalog_repository.upsert_entry(
                     session, agent_id=agent_id, path=path
@@ -73,6 +75,7 @@ class AgentProjectCatalogOperationsRepository:
     ) -> list[AgentProjectCatalogEntry]:
         """Commit detached status evidence as one complete mutation group."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             return [
                 await self.catalog_repository.update_status(
                     session,

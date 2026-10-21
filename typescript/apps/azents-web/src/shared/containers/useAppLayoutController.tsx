@@ -10,6 +10,7 @@ export interface AppLayoutViewProps {
   authStatus: AppLayoutProps["authStatus"];
   children: AppLayoutProps["children"];
   isAgentDetailRoute: boolean;
+  isChatRoute: boolean;
   headerHeight: 0 | 60;
   withBorder: boolean;
 }
@@ -22,10 +23,20 @@ export function useAppLayoutController({
     pathname,
   );
   const headerHeight = isAgentDetailRoute ? 0 : 60;
+  const isChatRoute = /^\/w\/[^/]+\/agents\/[^/]+\/sessions\/[^/]+\/?$/.test(
+    pathname,
+  );
 
   // Show header bottom border on sidebar pages (workspace, account settings)
   const withBorder =
     (pathname.startsWith("/w/") && !isAgentDetailRoute) ||
     pathname.startsWith("/account");
-  return { authStatus, children, isAgentDetailRoute, headerHeight, withBorder };
+  return {
+    authStatus,
+    children,
+    isAgentDetailRoute,
+    isChatRoute,
+    headerHeight,
+    withBorder,
+  };
 }

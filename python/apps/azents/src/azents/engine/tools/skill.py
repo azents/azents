@@ -614,14 +614,10 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         return render_skill_items(managed)
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Return load_skill when either Skill projection contains items."""
+        """Expose load_skill independently of current Skill inventory."""
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
-        state = await self._active_state_for_context(context)
-        managed = await self._managed_items(context.run_id, context.workspace_id)
-        filesystem_skills_allowed = await self._filesystem_skills_allowed()
-        if (not filesystem_skills_allowed or not state.active.items) and not managed:
-            return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
+        await self._active_state_for_context(context)
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[

@@ -17,6 +17,7 @@ from azents.core.action_execution_data import ActionExecutionCreate
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     ActionExecutionStatus,
+    AgentLifecycleStatus,
     AgentProjectCatalogStatus,
     AgentSessionRunState,
     AgentSessionStatus,
@@ -54,6 +55,7 @@ from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import (
+    ReadWriteSession,
     WriteSession,
     create_read_only_session_manager,
     create_read_write_session_manager,
@@ -585,7 +587,8 @@ class TestSessionWorkspaceProjectService:
         """Final Project authorization reads scoped Agent, Session, and membership."""
         calls: list[str] = []
         transaction = AsyncMock(spec=AsyncSession)
-        session_manager = _SessionManager(transaction)
+        transaction.scalar.return_value = AgentLifecycleStatus.ACTIVE
+        session_manager = _SessionManager(ReadWriteSession(transaction))
         agent_repository = AsyncMock(spec=AgentRepository)
         session_repository = AsyncMock(spec=AgentSessionRepository)
         membership_repository = AsyncMock(spec=WorkspaceUserRepository)
@@ -1710,10 +1713,10 @@ class TestSessionWorkspaceProjectService:
 
 
 @pytest.mark.asyncio
-async def test_bound_project_management_survives_held_ancestor_mutation_locks(
+async def test_bound_project_reads_survive_held_ancestor_mutation_locks(
     rdb_engine: AsyncEngine, latest_db_schema: None
 ) -> None:
-    """PENDING creation binds; later BOUND registration and reads avoid locks."""
+    """BOUND reads avoid locks; user registration runs after the parent fence."""
     writes = create_read_write_session_manager(rdb_engine)
     reads = create_read_only_session_manager(rdb_engine)
     slug = f"project-lag-{uuid4().hex}"
@@ -1791,16 +1794,6 @@ async def test_bound_project_management_survives_held_ancestor_mutation_locks(
             assert bound.binding_state is SessionWorkingFolderBindingState.BOUND
         task = asyncio.create_task(holder())
         await asyncio.wait_for(held.wait(), timeout=5)
-        registered = await asyncio.wait_for(
-            operations.register_existing_project(
-                context=context,
-                user_id=user_id,
-                path="/workspace/agent/registered",
-                target=target,
-            ),
-            timeout=5,
-        )
-        assert isinstance(registered, Success)
         listed = await asyncio.wait_for(
             operations.list_accessible_projects(
                 context=context, user_id=user_id, target=target
@@ -1810,9 +1803,17 @@ async def test_bound_project_management_survives_held_ancestor_mutation_locks(
         assert isinstance(listed, Success)
         assert {project.path for project in listed.value} == {
             "/workspace/agent/initial",
-            "/workspace/agent/registered",
         }
         assert not release.is_set()
+        release.set()
+        await task
+        registered = await operations.register_existing_project(
+            context=context,
+            user_id=user_id,
+            path="/workspace/agent/registered",
+            target=target,
+        )
+        assert isinstance(registered, Success)
     finally:
         release.set()
         if task is not None:

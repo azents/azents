@@ -6,7 +6,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
-from scripts.ci.evidence import artifacts_for_run, file_hashes
+from scripts.ci.evidence import archive_file_hashes, artifacts_for_run, file_hashes
 from scripts.ci.workflow_report import decode_run
 
 
@@ -55,6 +55,7 @@ def collect(repository: str, run_id: int, attempt: int, output: Path) -> None:
                 stdout=stream,
                 check=True,
             )
+        archive_file_hashes(archive, artifact)
         destination = root / artifact.name
         destination.mkdir()
         with zipfile.ZipFile(archive) as zipped:

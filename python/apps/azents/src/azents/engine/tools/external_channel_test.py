@@ -272,6 +272,32 @@ def _channel_action_mode_enum(schema: dict[str, object]) -> list[object]:
 
 
 @pytest.mark.asyncio
+async def test_channel_tools_remain_visible_without_bindings_or_runtime_storage() -> (
+    None
+):
+    """Empty channel state does not hide tools or grant Runtime file access."""
+    service = _ActionService([])
+    toolkit = _toolkit(service)
+    state = await toolkit.update_context(_turn_context())
+
+    assert state.status is ToolkitStatus.ENABLED
+    assert [tool.spec.name for tool in state.tools] == [
+        "channel_action",
+        "download_external_file",
+    ]
+    service.snapshots = [_snapshot()]
+    active_state = await toolkit.update_context(_turn_context())
+    assert [tool.spec for tool in state.tools] == [
+        tool.spec for tool in active_state.tools
+    ]
+    with pytest.raises(FunctionToolError, match="Runtime file storage is unavailable"):
+        await state.tools[1].handler(
+            json.dumps({"file": "opaque-locator", "path": "/workspace/report.txt"})
+        )
+    assert service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_channel_action_uses_durable_client_call_identity() -> None:
     """The unprefixed tool commits the exact provider call ID and returns failure."""
     service = _ActionService([_snapshot()])
@@ -279,7 +305,10 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     state = await toolkit.update_context(_turn_context())
 
     assert state.status is ToolkitStatus.ENABLED
-    assert [tool.spec.name for tool in state.tools] == ["channel_action"]
+    assert [tool.spec.name for tool in state.tools] == [
+        "channel_action",
+        "download_external_file",
+    ]
     with client_tool_execution_context(call_id="call-42", name="channel_action"):
         output = await state.tools[0].handler(
             json.dumps(

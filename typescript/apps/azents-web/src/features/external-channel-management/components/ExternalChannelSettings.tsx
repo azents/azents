@@ -1323,13 +1323,13 @@ export function ExternalChannelSettingsView({
                       value="all_messages"
                       label={t("responseMode.all_messages.label")}
                       description={t("responseMode.all_messages.description")}
-                      disabled={defaultResponseModeSaving}
+                      disabled={actionsBusy || defaultResponseModeSaving}
                     />
                     <Radio
                       value="mention_only"
                       label={t("responseMode.mention_only.label")}
                       description={t("responseMode.mention_only.description")}
-                      disabled={defaultResponseModeSaving}
+                      disabled={actionsBusy || defaultResponseModeSaving}
                     />
                   </Stack>
                 </Radio.Group>
@@ -1348,6 +1348,7 @@ export function ExternalChannelSettingsView({
                     loading={defaultResponseModeSaving}
                     data-testid="save-external-default-response-mode"
                     disabled={
+                      actionsBusy ||
                       defaultResponseModeSaving ||
                       defaultResponseModeDraft === defaultResponseMode
                     }

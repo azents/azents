@@ -58,12 +58,27 @@ export const agentFormSchema = z
     max_turns: z.number().int().positive().nullable().optional(),
     auto_archive_ttl_days: z.number().int().positive(),
     routine_check_interval_minutes: z
-      .union([z.number().int().min(1).max(1440), z.literal("")])
-      .refine((value) => value !== "", "Enter a whole number from 1 to 1440"),
+      .union([z.number().int().min(30).max(1440), z.literal("")])
+      .refine((value) => value !== "", "Enter a whole number from 30 to 1440"),
+    routine_min_action_delay_minutes: z
+      .union([z.number().int().min(30).max(1440), z.literal("")])
+      .refine((value) => value !== "", "Enter a whole number from 30 to 1440"),
     subagent_max_subagents: z.number().int().min(0),
     subagent_max_depth: z.number().int().min(0),
   })
   .superRefine((values, ctx) => {
+    if (
+      typeof values.routine_min_action_delay_minutes === "number" &&
+      typeof values.routine_check_interval_minutes === "number" &&
+      values.routine_min_action_delay_minutes >
+        values.routine_check_interval_minutes
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["routine_min_action_delay_minutes"],
+        message: "Minimum delay must not exceed tick.",
+      });
+    }
     const labels = new Set<string>();
     for (const [index, option] of values.selectable_model_options.entries()) {
       const label = option.label.trim();

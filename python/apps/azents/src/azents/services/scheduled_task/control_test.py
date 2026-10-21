@@ -3,13 +3,17 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
-from azents.core.enums import ExternalChannelResourceType, ScheduledTaskScheduleType
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    ExternalChannelResourceType,
+    ScheduledTaskScheduleType,
+)
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.scheduled_task_control import (
     ScheduledTaskControlLocator,
@@ -77,6 +81,7 @@ class _ControlSession(AsyncSession):
     def __init__(self, calls: list[str]) -> None:
         super().__init__()
         self.calls = calls
+        self.scalar = AsyncMock(return_value=AgentLifecycleStatus.ACTIVE)
 
     async def commit(self) -> None:
         """Record a committed provider mutation."""

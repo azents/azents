@@ -7,6 +7,7 @@
 import { AppShell } from "@mantine/core";
 
 import { AppBar } from "@/shared/components/AppBar";
+import { ScrollContainedViewport } from "@/shared/components/ScrollContainedViewport";
 import { AccountLocaleSync } from "@/shared/providers/account-locale-sync";
 import { SidebarProvider } from "@/shared/providers/sidebar";
 import { useAppLayoutController } from "../containers/useAppLayoutController";
@@ -26,6 +27,7 @@ export function AppLayoutView({
   authStatus,
   children,
   isAgentDetailRoute,
+  isChatRoute,
   headerHeight,
   withBorder,
 }: AppLayoutViewProps): React.ReactElement {
@@ -38,7 +40,13 @@ export function AppLayoutView({
             <AppBar authStatus={authStatus} />
           </AppShell.Header>
         )}
-        <AppShell.Main>{children}</AppShell.Main>
+        <AppShell.Main>
+          {isChatRoute ? (
+            <ScrollContainedViewport>{children}</ScrollContainedViewport>
+          ) : (
+            children
+          )}
+        </AppShell.Main>
       </AppShell>
     </SidebarProvider>
   );

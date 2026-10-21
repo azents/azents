@@ -17,6 +17,7 @@ Name | Type | Description | Notes
 **model_parameters** | [**ModelParameters**](ModelParameters.md) |  | 
 **system_prompt** | **str** |  | 
 **enabled** | **bool** |  | 
+**deletion_status** | [**AgentDeletionStatus**](AgentDeletionStatus.md) |  | 
 **type** | [**AgentType**](AgentType.md) |  | 
 **runtime_profile_id** | **str** |  | 
 **runtime_profile_selection_version** | **int** |  | 
@@ -39,6 +40,7 @@ Name | Type | Description | Notes
 **max_turns** | **int** |  | 
 **auto_archive_ttl_days** | **int** | Inactivity period before automatic Session archive | 
 **routine_check_interval_minutes** | **int** | Routine checking interval in minutes | 
+**routine_min_action_delay_minutes** | **int** | Minimum Routine action delay in minutes | 
 **subagent_settings** | [**SubagentSettings**](SubagentSettings.md) |  | 
 **avatar** | [**UploadedImage**](UploadedImage.md) |  | [optional] 
 **created_at** | **datetime** |  | 

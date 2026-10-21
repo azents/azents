@@ -162,6 +162,8 @@ export function AgentForm({
 }: AgentFormViewProps): React.ReactElement {
   const agentFormId = useId();
   const isEdit = formState.type === "EDIT";
+  const readOnly =
+    formState.type === "EDIT" && formState.agent.deletion_status !== null;
   const backPath = cancelHref ?? `/w/${handle}/agents`;
   const enabledProviderOptions = providerOptions.filter(
     (option) => !option.disabled,
@@ -200,6 +202,9 @@ export function AgentForm({
   }
 
   const handleSubmit = form.onSubmit((values) => {
+    if (readOnly) {
+      return;
+    }
     onSubmitAttempted();
     if (
       hasInvalidImageGenerationSelections(
@@ -260,317 +265,365 @@ export function AgentForm({
 
       <Stack gap="md">
         <form id={agentFormId} onSubmit={handleSubmit}>
-          <Stack gap="md">
-            {showProfile && (
-              <TextInput
-                label={t("nameLabel")}
-                placeholder={t("namePlaceholder")}
-                required
-                key={form.key("name")}
-                {...form.getInputProps("name")}
-              />
-            )}
+          <fieldset
+            disabled={readOnly}
+            style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
+          >
+            <Stack gap="md">
+              {showProfile && (
+                <TextInput
+                  label={t("nameLabel")}
+                  placeholder={t("namePlaceholder")}
+                  required
+                  key={form.key("name")}
+                  {...form.getInputProps("name")}
+                />
+              )}
 
-            {showProfile && (
-              <Textarea
-                label={t("descriptionLabel")}
-                placeholder={t("descriptionPlaceholder")}
-                key={form.key("description")}
-                {...form.getInputProps("description")}
-              />
-            )}
+              {showProfile && (
+                <Textarea
+                  label={t("descriptionLabel")}
+                  placeholder={t("descriptionPlaceholder")}
+                  key={form.key("description")}
+                  {...form.getInputProps("description")}
+                />
+              )}
 
-            {showProfile && !isEdit && (
-              <Alert color="blue" title={t("runtimeFreeDefaultTitle")}>
-                {t("runtimeFreeDefaultDescription")}
-              </Alert>
-            )}
-
-            {showProfile && !isEdit && (
-              <Select
-                label={t("runtimeProfileLabel")}
-                description={t("runtimeProfileDescription")}
-                placeholder={
-                  runtimeProfilesLoading
-                    ? t("runtimeProfileLoading")
-                    : t("runtimeProfilePlaceholder")
-                }
-                data={runtimeProfileOptions}
-                clearable
-                searchable
-                disabled={runtimeProfilesLoading}
-                value={form.values.runtime_profile_id}
-                onChange={(value) =>
-                  form.setFieldValue("runtime_profile_id", value)
-                }
-                error={form.errors.runtime_profile_id}
-              />
-            )}
-
-            {showProfile &&
-              !isEdit &&
-              selectedRuntimeProfile !== null &&
-              !selectedRuntimeProfile.available && (
-                <Alert color="red" title={t("runtimeProfileUnavailableTitle")}>
-                  {t("runtimeProfileUnavailableDescription", {
-                    reason: t(
-                      `runtimeProfileAvailabilityReasons.${runtimeProfileAvailabilityReason(
-                        selectedRuntimeProfile.availability_reason_code,
-                      )}`,
-                    ),
-                  })}
-                  {selectedRuntimeProfile.availability_reason_code !== null && (
-                    <Text size="xs" c="dimmed" ff="monospace" mt="xs">
-                      {selectedRuntimeProfile.availability_reason_code}
-                    </Text>
-                  )}
+              {showProfile && !isEdit && (
+                <Alert color="blue" title={t("runtimeFreeDefaultTitle")}>
+                  {t("runtimeFreeDefaultDescription")}
                 </Alert>
               )}
 
-            {showModel &&
-              renderModelOptionsEditor({
-                handle,
-                title: t("selectableModelOptions.title"),
-                description: t("selectableModelOptions.description"),
-                options: form.values.selectable_model_options,
-                mainModelLabel: form.values.main_model_label,
-                lightweightModelLabel: form.values.lightweight_model_label,
-                defaultReasoningEffortControl:
-                  selectedModelSupportsReasoning ? (
-                    <Select
-                      label={t("defaultReasoningEffortLabel")}
-                      data={reasoningEffortOptions}
-                      allowDeselect={false}
-                      value={form.values.reasoning_effort ?? null}
-                      onChange={(value) => {
-                        const nextValue =
-                          selectedModelEffortLevels.find(
-                            (effort) => effort === value,
-                          ) ?? null;
-                        form.setFieldValue("reasoning_effort", nextValue);
-                      }}
-                      error={form.errors.reasoning_effort}
-                    />
-                  ) : null,
-                providerOptions,
-                canEdit: true,
-                showValidationErrors: hasSubmitAttempted,
-                onSyncCatalog,
-                imageGenerationCatalogStates,
-                canSyncImageCatalog,
-                onSyncImageCatalog,
-                onChangeOptions: (options) =>
-                  form.setFieldValue("selectable_model_options", options),
-                onChangeMainModelLabel: (label) =>
-                  form.setFieldValue("main_model_label", label),
-                onChangeLightweightModelLabel: (label) =>
-                  form.setFieldValue("lightweight_model_label", label),
-              })}
-
-            {showProfile && (
-              <Textarea
-                label={t("systemPromptLabel")}
-                placeholder={t("systemPromptPlaceholder")}
-                minRows={5}
-                autosize
-                key={form.key("system_prompt")}
-                {...form.getInputProps("system_prompt")}
-              />
-            )}
-
-            {showProfile && (
-              <NumberInput
-                label={t("autoArchiveTtlDaysLabel")}
-                description={t("autoArchiveTtlDaysDescription")}
-                min={1}
-                step={1}
-                allowDecimal={false}
-                allowNegative={false}
-                value={form.values.auto_archive_ttl_days}
-                onChange={(value) => {
-                  form.setFieldValue(
-                    "auto_archive_ttl_days",
-                    typeof value === "number" ? value : 1,
-                  );
-                }}
-                error={form.errors.auto_archive_ttl_days}
-              />
-            )}
-
-            {showProfile && (
-              <NumberInput
-                label={t("routineCheckIntervalLabel")}
-                description={t("routineCheckIntervalDescription")}
-                min={1}
-                max={1440}
-                step={1}
-                allowDecimal={false}
-                allowNegative={false}
-                clampBehavior="none"
-                value={form.values.routine_check_interval_minutes}
-                onChange={(value) => {
-                  form.setFieldValue(
-                    "routine_check_interval_minutes",
-                    typeof value === "number" ? value : "",
-                  );
-                }}
-                error={form.errors.routine_check_interval_minutes}
-              />
-            )}
-
-            {showModel && (
-              <NumberInput
-                label={t("maxTurnsLabel")}
-                description={t("maxTurnsDescription")}
-                placeholder={t("maxTurnsPlaceholder")}
-                min={1}
-                step={1}
-                allowDecimal={false}
-                allowNegative={false}
-                value={form.values.max_turns ?? ""}
-                onChange={(value) => {
-                  form.setFieldValue(
-                    "max_turns",
-                    typeof value === "number" ? value : null,
-                  );
-                }}
-                error={form.errors.max_turns}
-              />
-            )}
-
-            {showSubagents && (
-              <>
-                <Divider
-                  label={t("subagentsSectionLabel")}
-                  labelPosition="left"
-                />
-                <NumberInput
-                  label={t("subagentMaxSubagentsLabel")}
-                  description={t("subagentMaxSubagentsDescription")}
-                  min={0}
-                  step={1}
-                  allowDecimal={false}
-                  allowNegative={false}
-                  value={form.values.subagent_max_subagents}
-                  onChange={(value) => {
-                    form.setFieldValue(
-                      "subagent_max_subagents",
-                      typeof value === "number" ? value : 0,
-                    );
-                  }}
-                  error={form.errors.subagent_max_subagents}
-                />
-                <NumberInput
-                  label={t("subagentMaxDepthLabel")}
-                  description={t("subagentMaxDepthDescription")}
-                  min={0}
-                  step={1}
-                  allowDecimal={false}
-                  allowNegative={false}
-                  value={form.values.subagent_max_depth}
-                  onChange={(value) => {
-                    form.setFieldValue(
-                      "subagent_max_depth",
-                      typeof value === "number" ? value : 0,
-                    );
-                  }}
-                  error={form.errors.subagent_max_depth}
-                />
-              </>
-            )}
-
-            {showProfile && (
-              <Radio.Group
-                label={t("typeLabel")}
-                key={form.key("type")}
-                {...form.getInputProps("type")}
-              >
-                <Stack gap="xs" mt="xs">
-                  <Radio
-                    value="public"
-                    label={t("typePublic")}
-                    description={t("typePublicDescription")}
-                  />
-                  <Radio
-                    value="private"
-                    label={t("typePrivate")}
-                    description={t("typePrivateDescription")}
-                  />
-                </Stack>
-              </Radio.Group>
-            )}
-
-            {showTerminalSettings && (
-              <Switch
-                label={t("terminalEnabledLabel")}
-                description={t("terminalEnabledDescription")}
-                checked={form.values.terminal_enabled ?? true}
-                onChange={(e) =>
-                  form.setFieldValue(
-                    "terminal_enabled",
-                    e.currentTarget.checked,
-                  )
-                }
-              />
-            )}
-
-            {showTerminalSettings && formState.type === "EDIT" ? (
-              <Group gap="xs">
-                <Badge
-                  color={
-                    formState.agent.effective_terminal_enabled ? "green" : "red"
+              {showProfile && !isEdit && (
+                <Select
+                  label={t("runtimeProfileLabel")}
+                  description={t("runtimeProfileDescription")}
+                  placeholder={
+                    runtimeProfilesLoading
+                      ? t("runtimeProfileLoading")
+                      : t("runtimeProfilePlaceholder")
                   }
-                  variant="outline"
-                >
-                  {formState.agent.effective_terminal_enabled
-                    ? t("terminalCurrentEffectiveEnabled")
-                    : t("terminalCurrentEffectiveDisabled")}
-                </Badge>
-                {formState.agent.terminal_denied_scope !== null ? (
-                  <Badge color="red" variant="light">
-                    {t("terminalDeniedScopeLabel", {
-                      scope: t(
-                        `terminalDeniedScope.${formState.agent.terminal_denied_scope}`,
+                  data={runtimeProfileOptions}
+                  clearable
+                  searchable
+                  disabled={runtimeProfilesLoading}
+                  value={form.values.runtime_profile_id}
+                  onChange={(value) =>
+                    form.setFieldValue("runtime_profile_id", value)
+                  }
+                  error={form.errors.runtime_profile_id}
+                />
+              )}
+
+              {showProfile &&
+                !isEdit &&
+                selectedRuntimeProfile !== null &&
+                !selectedRuntimeProfile.available && (
+                  <Alert
+                    color="red"
+                    title={t("runtimeProfileUnavailableTitle")}
+                  >
+                    {t("runtimeProfileUnavailableDescription", {
+                      reason: t(
+                        `runtimeProfileAvailabilityReasons.${runtimeProfileAvailabilityReason(
+                          selectedRuntimeProfile.availability_reason_code,
+                        )}`,
                       ),
                     })}
+                    {selectedRuntimeProfile.availability_reason_code !==
+                      null && (
+                      <Text size="xs" c="dimmed" ff="monospace" mt="xs">
+                        {selectedRuntimeProfile.availability_reason_code}
+                      </Text>
+                    )}
+                  </Alert>
+                )}
+
+              {showModel &&
+                renderModelOptionsEditor({
+                  handle,
+                  title: t("selectableModelOptions.title"),
+                  description: t("selectableModelOptions.description"),
+                  options: form.values.selectable_model_options,
+                  mainModelLabel: form.values.main_model_label,
+                  lightweightModelLabel: form.values.lightweight_model_label,
+                  defaultReasoningEffortControl:
+                    selectedModelSupportsReasoning ? (
+                      <Select
+                        label={t("defaultReasoningEffortLabel")}
+                        data={reasoningEffortOptions}
+                        allowDeselect={false}
+                        value={form.values.reasoning_effort ?? null}
+                        onChange={(value) => {
+                          const nextValue =
+                            selectedModelEffortLevels.find(
+                              (effort) => effort === value,
+                            ) ?? null;
+                          form.setFieldValue("reasoning_effort", nextValue);
+                        }}
+                        error={form.errors.reasoning_effort}
+                      />
+                    ) : null,
+                  providerOptions,
+                  canEdit: true,
+                  showValidationErrors: hasSubmitAttempted,
+                  onSyncCatalog,
+                  imageGenerationCatalogStates,
+                  canSyncImageCatalog,
+                  onSyncImageCatalog,
+                  onChangeOptions: (options) =>
+                    form.setFieldValue("selectable_model_options", options),
+                  onChangeMainModelLabel: (label) =>
+                    form.setFieldValue("main_model_label", label),
+                  onChangeLightweightModelLabel: (label) =>
+                    form.setFieldValue("lightweight_model_label", label),
+                })}
+
+              {showProfile && (
+                <Textarea
+                  label={t("systemPromptLabel")}
+                  placeholder={t("systemPromptPlaceholder")}
+                  minRows={5}
+                  autosize
+                  key={form.key("system_prompt")}
+                  {...form.getInputProps("system_prompt")}
+                />
+              )}
+
+              {showProfile && (
+                <NumberInput
+                  label={t("autoArchiveTtlDaysLabel")}
+                  description={t("autoArchiveTtlDaysDescription")}
+                  min={1}
+                  step={1}
+                  allowDecimal={false}
+                  allowNegative={false}
+                  value={form.values.auto_archive_ttl_days}
+                  onChange={(value) => {
+                    form.setFieldValue(
+                      "auto_archive_ttl_days",
+                      typeof value === "number" ? value : 1,
+                    );
+                  }}
+                  error={form.errors.auto_archive_ttl_days}
+                />
+              )}
+
+              {showProfile && (
+                <NumberInput
+                  label={t("routineCheckIntervalLabel")}
+                  description={t("routineCheckIntervalDescription")}
+                  min={30}
+                  max={1440}
+                  step={1}
+                  allowDecimal={false}
+                  allowNegative={false}
+                  clampBehavior="none"
+                  value={form.values.routine_check_interval_minutes}
+                  onChange={(value) => {
+                    form.setFieldValue(
+                      "routine_check_interval_minutes",
+                      typeof value === "number" ? value : "",
+                    );
+                  }}
+                  error={form.errors.routine_check_interval_minutes}
+                />
+              )}
+
+              {showProfile && (
+                <NumberInput
+                  label={t("routineMinActionDelayLabel")}
+                  description={t("routineMinActionDelayDescription")}
+                  min={30}
+                  max={1440}
+                  step={1}
+                  allowDecimal={false}
+                  allowNegative={false}
+                  clampBehavior="none"
+                  value={form.values.routine_min_action_delay_minutes}
+                  onChange={(value) => {
+                    form.setValues((values) => ({
+                      ...values,
+                      routine_min_action_delay_minutes:
+                        typeof value === "number" ? value : "",
+                      routine_check_interval_minutes:
+                        typeof value === "number" &&
+                        Number.isInteger(value) &&
+                        value >= 30 &&
+                        value <= 1440 &&
+                        typeof values.routine_check_interval_minutes ===
+                          "number"
+                          ? Math.max(
+                              values.routine_check_interval_minutes,
+                              value,
+                            )
+                          : values.routine_check_interval_minutes,
+                    }));
+                  }}
+                  error={form.errors.routine_min_action_delay_minutes}
+                />
+              )}
+
+              {showModel && (
+                <NumberInput
+                  label={t("maxTurnsLabel")}
+                  description={t("maxTurnsDescription")}
+                  placeholder={t("maxTurnsPlaceholder")}
+                  min={1}
+                  step={1}
+                  allowDecimal={false}
+                  allowNegative={false}
+                  value={form.values.max_turns ?? ""}
+                  onChange={(value) => {
+                    form.setFieldValue(
+                      "max_turns",
+                      typeof value === "number" ? value : null,
+                    );
+                  }}
+                  error={form.errors.max_turns}
+                />
+              )}
+
+              {showSubagents && (
+                <>
+                  <Divider
+                    label={t("subagentsSectionLabel")}
+                    labelPosition="left"
+                  />
+                  <NumberInput
+                    label={t("subagentMaxSubagentsLabel")}
+                    description={t("subagentMaxSubagentsDescription")}
+                    min={0}
+                    step={1}
+                    allowDecimal={false}
+                    allowNegative={false}
+                    value={form.values.subagent_max_subagents}
+                    onChange={(value) => {
+                      form.setFieldValue(
+                        "subagent_max_subagents",
+                        typeof value === "number" ? value : 0,
+                      );
+                    }}
+                    error={form.errors.subagent_max_subagents}
+                  />
+                  <NumberInput
+                    label={t("subagentMaxDepthLabel")}
+                    description={t("subagentMaxDepthDescription")}
+                    min={0}
+                    step={1}
+                    allowDecimal={false}
+                    allowNegative={false}
+                    value={form.values.subagent_max_depth}
+                    onChange={(value) => {
+                      form.setFieldValue(
+                        "subagent_max_depth",
+                        typeof value === "number" ? value : 0,
+                      );
+                    }}
+                    error={form.errors.subagent_max_depth}
+                  />
+                </>
+              )}
+
+              {showProfile && (
+                <Radio.Group
+                  label={t("typeLabel")}
+                  key={form.key("type")}
+                  {...form.getInputProps("type")}
+                >
+                  <Stack gap="xs" mt="xs">
+                    <Radio
+                      value="public"
+                      label={t("typePublic")}
+                      description={t("typePublicDescription")}
+                    />
+                    <Radio
+                      value="private"
+                      label={t("typePrivate")}
+                      description={t("typePrivateDescription")}
+                    />
+                  </Stack>
+                </Radio.Group>
+              )}
+
+              {showTerminalSettings && (
+                <Switch
+                  label={t("terminalEnabledLabel")}
+                  description={t("terminalEnabledDescription")}
+                  checked={form.values.terminal_enabled ?? true}
+                  onChange={(e) =>
+                    form.setFieldValue(
+                      "terminal_enabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                />
+              )}
+
+              {showTerminalSettings && formState.type === "EDIT" ? (
+                <Group gap="xs">
+                  <Badge
+                    color={
+                      formState.agent.effective_terminal_enabled
+                        ? "green"
+                        : "red"
+                    }
+                    variant="outline"
+                  >
+                    {formState.agent.effective_terminal_enabled
+                      ? t("terminalCurrentEffectiveEnabled")
+                      : t("terminalCurrentEffectiveDisabled")}
                   </Badge>
-                ) : null}
-              </Group>
-            ) : null}
+                  {formState.agent.terminal_denied_scope !== null ? (
+                    <Badge color="red" variant="light">
+                      {t("terminalDeniedScopeLabel", {
+                        scope: t(
+                          `terminalDeniedScope.${formState.agent.terminal_denied_scope}`,
+                        ),
+                      })}
+                    </Badge>
+                  ) : null}
+                </Group>
+              ) : null}
 
-            {showCapabilities && (
-              <Switch
-                label={t("memoryEnabledLabel")}
-                description={t("memoryEnabledDescription")}
-                checked={form.values.memory_enabled ?? true}
-                onChange={(e) =>
-                  form.setFieldValue("memory_enabled", e.currentTarget.checked)
-                }
-              />
-            )}
+              {showCapabilities && (
+                <Switch
+                  label={t("memoryEnabledLabel")}
+                  description={t("memoryEnabledDescription")}
+                  checked={form.values.memory_enabled ?? true}
+                  onChange={(e) =>
+                    form.setFieldValue(
+                      "memory_enabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                />
+              )}
 
-            {showCapabilities && (
-              <Switch
-                label={t("toolSearchEnabledLabel")}
-                description={t("toolSearchEnabledDescription")}
-                checked={form.values.tool_search_enabled}
-                onChange={(e) =>
-                  form.setFieldValue(
-                    "tool_search_enabled",
-                    e.currentTarget.checked,
-                  )
-                }
-              />
-            )}
+              {showCapabilities && (
+                <Switch
+                  label={t("toolSearchEnabledLabel")}
+                  description={t("toolSearchEnabledDescription")}
+                  checked={form.values.tool_search_enabled}
+                  onChange={(e) =>
+                    form.setFieldValue(
+                      "tool_search_enabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                />
+              )}
 
-            {showProfile && (
-              <Switch
-                label={t("enabledLabel")}
-                key={form.key("enabled")}
-                {...form.getInputProps("enabled", { type: "checkbox" })}
-              />
-            )}
-          </Stack>
+              {showProfile && (
+                <Switch
+                  label={t("enabledLabel")}
+                  key={form.key("enabled")}
+                  {...form.getInputProps("enabled", { type: "checkbox" })}
+                />
+              )}
+            </Stack>
+          </fieldset>
         </form>
 
         {includeToolkitSection &&
@@ -585,6 +638,7 @@ export function AgentForm({
 
         {showAdmins && isEdit && (
           <AgentAdminSection
+            readOnly={readOnly}
             adminListState={adminListState}
             members={members}
             onAddAdmin={onAddAdmin}
@@ -604,6 +658,7 @@ export function AgentForm({
             <Button
               type="submit"
               form={agentFormId}
+              disabled={readOnly}
               loading={mutationState.type === "SUBMITTING"}
             >
               {isEdit ? t("save") : t("create")}

@@ -3,6 +3,7 @@
 /** Agent settings hub page entry. */
 
 import { rem } from "@mantine/core";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { trpc } from "@/trpc/client";
 import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
@@ -21,12 +22,18 @@ interface AgentSettingsHubContainerOutput extends AgentSettingsHubContainerProps
 function useAgentSettingsHubContainer(
   props: AgentSettingsHubContainerProps,
 ): AgentSettingsHubContainerOutput {
+  const { agent = props.agent } = useAgentLifecycle({
+    handle: props.handle,
+    agentId: props.agent.id,
+    initialAgent: props.agent,
+  });
   const policyQuery = trpc.agent.getAutomaticSessionProjects.useQuery({
     handle: props.handle,
     agentId: props.agent.id,
   });
   return {
     ...props,
+    agent,
     automaticProjectsCount:
       policyQuery.data && policyQuery.data.project_paths.length > 0
         ? policyQuery.data.project_paths.length

@@ -1,7 +1,7 @@
 ---
 title: "Agent Domain Spec"
 created: 2026-04-20
-updated: 2026-10-19
+updated: 2026-10-20
 tags: [backend, engine]
 spec_type: domain
 domain: agent
@@ -154,8 +154,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-19
-spec_version: 98
+last_verified_at: 2026-10-20
+spec_version: 99
 ---
 
 # Agent Domain Spec
@@ -175,18 +175,25 @@ Session or Agent settings operates on the same Agent-owned service.
 
 `agents` row has following core fields.
 
-Agent profile settings include `routine_check_interval_minutes`, a required
-whole-minute value from 1 to 1440 with default 30 for existing and new Agents.
-It is persisted and returned through the existing authorized Agent create/read/
-partial-update path. Omitted updates preserve it; explicit null and invalid
-values are rejected. The Routine source scan and fenced admission use this
-Agent-owned value; see the [Routine spec](routine.md) for unchanged discovery
-latency, minimum action delay and judgment semantics.
+Agent profile settings include `routine_check_interval_minutes` (tick) and
+`routine_min_action_delay_minutes`. Both are strict whole-minute integers with
+`30 <= minimum action delay <= tick <= 1440`. New Agents default to tick 180
+and minimum delay 30. Existing Agents transfer their old tick to minimum delay
+with a 30-minute floor, then set tick to the greater of that delay and 180.
+Both values use the existing authorized create/read/partial-update path.
+Omitted fields are retained, except that supplying minimum delay automatically
+raises tick to `max(supplied or stored tick, supplied delay)`. Lowering delay does
+not lower tick. Tick-only updates below stored delay, invalid create pairs, null,
+fractional and boolean values are rejected. Partial cadence updates serialize on
+the current Agent mutation fence before normalization and merged-pair validation,
+and a database CHECK enforces the same invariant. The form raises tick on valid
+delay edits. See the [Routine spec](routine.md) for their separate references
+and unchanged discovery, judgment and notification semantics.
 
 | Field | Meaning |
 |---|---|
 | `workspace_id` | owning Workspace. restrictive parent FK prevents Workspace deletion from bypassing Agent lifecycle |
-| `lifecycle_status` | `active` or `decommissioning`; decommissioning fences new session and runtime activity |
+| `lifecycle_status` | `active` or `decommissioning`; decommissioning fences user-originated Agent-owned mutations and new work while preserving authorized inspection and native cleanup |
 | `name`, `description` | display name and description |
 | `selectable_model_options` | ordered JSONB array of selectable semantic labels. Each option has a unique label, label-scoped subagent policy, and one to five ordered physical candidates; each candidate owns a resolved `AgentModelSelection` snapshot and model-scoped runtime settings |
 | `main_model_label` | selected label from `selectable_model_options` for normal model turns |
@@ -679,6 +686,12 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ### 2.6 Agent decommission
 
+Cleanup participants, attempt fencing, current completion evidence, and the
+column-scoped PostgreSQL dependency catalog are specified in
+[Agent deletion ownership](agent-deletion.md). That registry is the shared source for
+execution ordering and final verification; the finalizer has no independent manual
+model-deletion or lifecycle-root list.
+
 `DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}` is an asynchronous decommission
 request, not immediate row deletion. An Agent administrator or Workspace owner can request it only
 when the archived-session retention policy is finite. The operation atomically marks the Agent
@@ -686,12 +699,35 @@ when the archived-session retention policy is finite. The operation atomically m
 `{ job_id, status, created_at }`. Unlimited (`null`) retention returns `409 Conflict` before any
 state mutation.
 
+Authorized Agent list/detail responses expose required nullable `deletion_status`:
+null for active Agents, `deleting` for normal progress, and `deletion_error` for
+unresolved failure evidence or a missing required job. Job diagnostics and internal
+identifiers stay private. Claims and ordinary waits preserve an unresolved error;
+only exact fenced recovery or verified root completion clears it.
+
+Both deletion states present read-only controls across Agent settings and owned
+resources, Session controls, uploads, Terminal and Browser, with localized badges in
+lists and desktop/mobile headers. Navigation and permitted inspection remain usable.
+The owning write transaction rechecks the canonical Agent row after authorization and
+returns safe HTTP 409 `agent_decommissioning` if deletion won; UI state is not authority.
+Final upload/OAuth attachment rechecks this boundary after external I/O. Native cleanup,
+safety Stop and shared Workspace/provider authorities remain independent. Repeated
+authorized DELETE returns the same job; no manual retry/cancel/force-delete control is
+introduced. Foreground refresh preserves known deletion evidence until actual removal,
+after which list results omit the Agent and detail returns 404.
+
 Decommissioning fences new session creation/recovery, input/action admission, archived-session
 restore, runtime actions, and stuck-run recovery. The coordinator retires eligible roots through the
 normal session lifecycle, waits for retention purge to own permanent Session deletion, then requires
 current-generation Runtime terminal-delete acknowledgement before finalization. The completed job
 remains a content-free tombstone; no public immediate-delete or request-specific purge-deadline
 path exists.
+
+Runtime recreation operation items retain the Runtime ID as immutable historical target
+evidence, not a foreign-key ownership claim on the live Runtime row. Terminal Runtime
+deletion and Agent finalization preserve those items, operation counters, and other
+Agents' targets. A recreation worker encountering an already deleted Runtime completes
+the item as failed with `runtime_not_found`, without dispatching Runtime work.
 
 Scheduler claim, phase/retry updates, root retirement, direct-root cleanup
 preparation and finalization finish in complete repository-owned database
@@ -868,6 +904,10 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-20** (spec_version 99) — Separated configurable Routine minimum
+  action delay from tick, enforced the paired invariant, and transferred old
+  tick choices to minimum delay with new tick at least three hours. Saving
+  minimum delay raises tick automatically when needed without lowering it.
 - **2026-10-19** (spec_version 98) — Added the Agent-owned Routine checking
   interval to profile settings and existing create/read/partial-update contracts,
   preserving the 30-minute default and independent minimum action delay.

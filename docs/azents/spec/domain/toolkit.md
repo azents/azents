@@ -134,7 +134,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-19
+last_verified_at: 2026-10-20
 spec_version: 151
 ---
 
@@ -637,6 +637,11 @@ while Memory explicitly does not support transfer or import.
 
 ### Managed Skill VFS
 
+`load_skill` remains available when the current filesystem and managed Skill
+inventories are empty. Prompt inventory and invocation still enforce the current
+Runtime capability and exact active filesystem or Run VFS projection; exposing
+the loader does not grant access to an unprojected Skill.
+
 The global `azents` source includes the `browser` Skill and its focused
 open/observe, actions/human-help and captures/files references. The three fixed
 `browser_open`, `browser_observe` and `browser_act` tools bind trusted current
@@ -748,7 +753,8 @@ warnings. It does not derive live Provider health or granted access from an
 enabled setting. A catalog uses the current server-owned Toolkit definitions;
 selecting a Provider opens the existing shared creation form. Details show only
 allowlisted configuration and connection metadata, keeping Slug and technical
-identifiers out of the card overview. Editing, toggling and confirmed deletion
+identifiers out of the card overview. Cards expose Delete directly and reuse
+the named-toolkit confirmation from details. Editing, toggling and confirmed deletion
 retain the existing Workspace management APIs and authority, never an Agent-only
 management scope.
 
@@ -766,12 +772,12 @@ For a saved Agent, the Agent response's requester-relative `toolkit_management_a
 
 Connected cards show service icon, Name, Type, short description, ownership and text readiness (`ready`, `authorization_required`, or `disabled`). Details separate technical identifiers, allowlisted Provider configuration and OAuth scope/expiration from the compact list. Configured features are not claimed to be external granted permissions. Raw config, credentials and absent account identities are never invented or dumped. Server resource URLs display only HTTP(S) origin, excluding credential-bearing paths as well as userinfo/query/fragment material. Deletion failures remain visible in the active confirmation dialog with retry/cancel actions. Toolkit icons use a common frontend type-keyed component, existing Tabler marks and bundled local SVGs; icons do not define Provider availability or require third-party runtime requests. Ownership-correct actions remain separate:
 
-- A Workspace-shared item can be detached from details. When an OAuth Toolkit requires authorization, a Workspace Owner/Manager can connect or reconnect directly from its Agent card or details; other Workspace object edits, disablement, and deletion remain in the Workspace Toolkit screens. Authorized managers receive a Workspace-management link; Agent administrators without Workspace write authority do not receive shared-object mutation actions.
+- A Workspace-shared item can be detached from its card or details after confirmation that the shared Toolkit and credentials remain in the Workspace. When an OAuth Toolkit requires authorization, a Workspace Owner/Manager can connect or reconnect directly from its Agent card or details; other Workspace object edits, disablement, and deletion remain in the Workspace Toolkit screens. Authorized managers receive a Workspace-management link; Agent administrators without Workspace write authority do not receive shared-object mutation actions.
 - An Agent-only item can be created, edited, connection-tested, enabled or disabled, OAuth-connected or disconnected, and deleted through nested Agent routes. When OAuth authorization is required, the card starts connect or reconnect directly; other authorization warnings open its editor. Deletion is confirmed as removal from that Agent with stored credentials deleted.
 - The reusable Toolkit form is embedded under either the Workspace shared manager or a saved exact Agent, with their existing distinct routes and authority. Unsaved validation and connection-test errors remain in that form; closing it creates no ToolkitConfig.
 - Requesters without the flag retain the legacy shared attachment section. They receive no Agent-only item, ownership/readiness detail, or Agent-only management action. Chat has no Toolkit management surface.
 
-The catalog, form and details share a responsive dialog while the parent Agent form remains mounted. Agent-only edit/toggle/delete actions are available from details. An acknowledged write remains committed even when a subsequent management-query refresh fails; a read failure does not reclassify the form as unsaved. Saved OAuth-incomplete items retain authorization-required readiness. This readiness is based on persisted state, not live provider health.
+The catalog, form and details share a responsive dialog while the parent Agent form remains mounted. Agent-only deletion is available from cards and details; edit/toggle remain in details. Successful detach and delete close the removed Toolkit's editor and confirmation before refreshing reads, rather than leaving unavailable details open. Pending removal cannot be dismissed or submitted twice; failed removal keeps confirmation open for retry or cancellation. An acknowledged write remains committed even when a subsequent management-query refresh fails; a read failure does not reclassify the form as unsaved. Saved OAuth-incomplete items retain authorization-required readiness. This readiness is based on persisted state, not live provider health.
 
 The Agent-only form uses the existing provider-specific config, credential, test, GitHub, and MCP OAuth controls. The callback return target is the owning Agent's capabilities Toolkit section. The callback's opener notification contains only its fixed event type and success boolean; credentials, tokens, codes, and state plaintext are never rendered or posted.
 The Agent card reserves an OAuth popup before requesting an authorization URL, verifies callback origin and popup source, and invalidates the Agent management projection on callback success. Failure leaves readiness unchanged and displays an error. The existing ownership-specific OAuth endpoints and backend permission checks remain authoritative.
@@ -1762,16 +1768,18 @@ state remains separate and never becomes the Channel Work source of truth.
 ## Scheduled Toolkit
 
 Scheduled Toolkit is a root-only, automatically connected Toolkit with no
-Workspace ToolkitConfig. Its management tools are always available in eligible
+Workspace ToolkitConfig. All four tools are always available in eligible
 root Runs:
 
 - `add_scheduled_task`
 - `list_scheduled_tasks`
 - `delete_scheduled_task`
+- `submit_scheduled_task_result`
 
-`submit_scheduled_task_result` is added only when the current AgentRun has an
-exact valid started Scheduled Task cycle. The terminal tool commits the canonical
-Session result and returns a terminal Tool result so execution ends without
+`submit_scheduled_task_result` validates the current Run's cycle and execution
+authority when invoked, independently of its unconditional visibility. Dynamic
+cycle guidance still requires an exact valid started cycle. The terminal tool
+commits the canonical Session result and returns a terminal Tool result so execution ends without
 another model turn.
 
 Scheduled occurrence state uses Session-scoped Toolkit State with namespace

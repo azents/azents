@@ -61,6 +61,7 @@ async def test_provider_cleanup_does_not_block_committed_agent_decommission(
         workspace_id=existing.workspace_id,
         status=AgentDecommissionStatus.PENDING,
         attempt_count=0,
+        failure_boundary_key=None,
         created_at=now,
         updated_at=now,
     )

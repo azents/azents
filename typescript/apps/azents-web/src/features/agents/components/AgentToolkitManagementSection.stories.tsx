@@ -1,9 +1,12 @@
 import { rem, Text } from "@mantine/core";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { useState } from "react";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { githubUserAuthorizationFixture } from "@/shared/toolkits/components/github-user-story-fixtures";
 import { GitHubUserAuthorization } from "@/shared/toolkits/components/GitHubUserAuthorization";
+import { removedToolkitEditor } from "../agentToolkitManagementState";
 import { ManagedAgentToolkitSectionView } from "./ManagedAgentToolkitSection";
+import type { AgentToolkitEditorState } from "../types";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -52,6 +55,7 @@ const meta = {
     mutationState: { type: "IDLE" },
     deleteTarget: null,
     pending: false,
+    readOnly: false,
     attachPending: false,
     attachPendingId: null,
     setupPending: false,
@@ -70,7 +74,6 @@ const meta = {
     onEdit: () => {},
     onCloseEditor: () => {},
     onAttach: () => {},
-    onDetach: () => {},
     onToggle: () => {},
     onRequestDelete: () => {},
     onCancelDelete: () => {},
@@ -82,6 +85,164 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Ready = {} satisfies Story;
+
+const sharedItem: AgentToolkitManagementItemResponse = {
+  ...item,
+  ownership_scope: "workspace_shared",
+  agent_toolkit_id: "attachment-1",
+  readiness: "ready",
+  toolkit: { ...item.toolkit, name: "Shared MCP" },
+};
+
+function RemovalFixture({
+  shared,
+  details = false,
+}: {
+  shared: boolean;
+  details?: boolean;
+}): React.ReactElement {
+  const target = shared ? sharedItem : item;
+  const [items, setItems] = useState([target]);
+  const [editor, setEditor] = useState<AgentToolkitEditorState>(
+    details
+      ? { type: "DETAIL", toolkitConfigId: target.toolkit.id }
+      : { type: "CLOSED" },
+  );
+  const [deleteTarget, setDeleteTarget] =
+    useState<AgentToolkitManagementItemResponse | null>(null);
+  return (
+    <ManagedAgentToolkitSectionView
+      {...meta.args}
+      state={{
+        type: "READY",
+        items,
+        toolkitTypes: [],
+        availableShared: [],
+      }}
+      editor={editor}
+      deleteTarget={deleteTarget}
+      onDetails={(toolkitConfigId) =>
+        setEditor({ type: "DETAIL", toolkitConfigId })
+      }
+      onRequestDelete={setDeleteTarget}
+      onCancelDelete={() => setDeleteTarget(null)}
+      onCloseEditor={() => setEditor({ type: "CLOSED" })}
+      onConfirmDelete={() => {
+        setEditor((current) => removedToolkitEditor(current, editor));
+        setDeleteTarget(null);
+        setItems([]);
+      }}
+    />
+  );
+}
+
+async function checkRemoval(
+  canvasElement: HTMLElement,
+  shared: boolean,
+  details: boolean,
+): Promise<void> {
+  const page = within(canvasElement.ownerDocument.body);
+  const name = shared ? "Shared MCP" : "Private MCP";
+  const action = shared ? "Detach" : "Delete";
+  const title = shared
+    ? "Remove toolkit from this agent"
+    : "Delete agent-only toolkit";
+  const scope = details
+    ? within(await page.findByRole("dialog", { name: "View details" }))
+    : within(page.getByRole("article", { name }));
+  await userEvent.click(scope.getByRole("button", { name: action }));
+  let dialog = within(await page.findByRole("dialog", { name: title }));
+  if (shared) {
+    await waitFor(async () => {
+      await expect(
+        dialog.getByText(/shared toolkit and its credentials will remain/),
+      ).toBeVisible();
+    });
+  }
+  await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  await waitFor(async () => {
+    await expect(
+      page.queryByRole("dialog", { name: title }),
+    ).not.toBeInTheDocument();
+  });
+  await expect(page.getByRole("article", { name })).toBeInTheDocument();
+  const retryScope = details
+    ? within(await page.findByRole("dialog", { name: "View details" }))
+    : within(page.getByRole("article", { name }));
+  await userEvent.click(retryScope.getByRole("button", { name: action }));
+  dialog = within(await page.findByRole("dialog", { name: title }));
+  await userEvent.click(
+    dialog.getByRole("button", {
+      name: shared ? "Detach" : "Delete toolkit",
+    }),
+  );
+  await waitFor(async () => {
+    await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
+    await expect(page.queryByRole("article", { name })).not.toBeInTheDocument();
+  });
+  await expect(
+    page.queryByText(/This toolkit is no longer available/),
+  ).not.toBeInTheDocument();
+}
+
+export const DeleteFromList = {
+  tags: ["ci-contract"],
+  render: () => <RemovalFixture shared={false} />,
+  play: async ({ canvasElement }) => {
+    await checkRemoval(canvasElement, false, false);
+  },
+} satisfies Story;
+
+export const DetachFromList = {
+  tags: ["ci-contract"],
+  render: () => <RemovalFixture shared />,
+  play: async ({ canvasElement }) => {
+    await checkRemoval(canvasElement, true, false);
+  },
+} satisfies Story;
+
+export const RemovedDetailsClose = {
+  tags: ["ci-contract"],
+  render: () => <RemovalFixture shared details />,
+  play: async ({ canvasElement }) => {
+    await checkRemoval(canvasElement, true, true);
+  },
+} satisfies Story;
+
+export const DeletedDetailsClose = {
+  tags: ["ci-contract"],
+  render: () => <RemovalFixture shared={false} details />,
+  play: async ({ canvasElement }) => {
+    await checkRemoval(canvasElement, false, true);
+  },
+} satisfies Story;
+
+export const RemovalPending = {
+  tags: ["ci-contract"],
+  args: {
+    deleteTarget: sharedItem,
+    pending: true,
+    deletePending: true,
+    onCancelDelete: fn(),
+    onConfirmDelete: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const dialog = within(
+      await page.findByRole("dialog", {
+        name: "Remove toolkit from this agent",
+      }),
+    );
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Detach" })).toBeDisabled();
+    await expect(
+      dialog.queryByRole("button", { name: "Close" }),
+    ).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await expect(args.onCancelDelete).not.toHaveBeenCalled();
+    await expect(args.onConfirmDelete).not.toHaveBeenCalled();
+  },
+} satisfies Story;
 
 const userItem: AgentToolkitManagementItemResponse = {
   ...item,
@@ -237,6 +398,7 @@ export const DeleteConfirmation = {
 } satisfies Story;
 
 export const DeleteFailure = {
+  tags: ["ci-contract"],
   args: {
     editor: { type: "DETAIL", toolkitConfigId: "toolkit-1" },
     deleteTarget: item,

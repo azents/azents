@@ -1,5 +1,6 @@
 import { Box } from "@mantine/core";
-import { ProjectPanel } from "./ProjectPanel";
+import { fn } from "storybook/test";
+import { ProjectPanelView } from "./ProjectPanel";
 import type { WorkspaceProjectPanelState } from "../types";
 import type { ProjectDirectoryPickerState } from "./WorkspaceDirectoryPickerModal";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -35,7 +36,8 @@ const readyProjectState: WorkspaceProjectPanelState = {
 };
 
 const meta = {
-  component: ProjectPanel,
+  component: ProjectPanelView,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <Box h="100dvh" maw="40rem" p="md">
@@ -59,14 +61,20 @@ const meta = {
     onSetProjectRegistrationStartingRef: noop,
     onSubmitProjectRegistration: noop,
     onDeleteProject: noop,
+    deleteProjectId: null,
+    setDeleteProjectId: fn(),
+    handleConfirmDeleteProject: fn(),
   },
-} satisfies Meta<typeof ProjectPanel>;
+} satisfies Meta<typeof ProjectPanelView>;
 
 export default meta;
 
 type Story = StoryObj<typeof meta>;
 
 export const Ready = {} satisfies Story;
+export const ConfirmDeletion = {
+  args: { deleteProjectId: "project-1" },
+} satisfies Story;
 
 export const Loading = {
   args: {

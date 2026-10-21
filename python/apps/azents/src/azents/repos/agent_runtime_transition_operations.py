@@ -17,6 +17,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeCreate
 from azents.repos.agent_runtime_add.data import (
@@ -117,6 +118,7 @@ class AgentRuntimeTransitionOperationRepository:
                     code="agent_not_found",
                     message="Agent was not found.",
                 )
+            await require_active_agent(session, agent_id=request.agent_id)
             existing_receipt = (
                 await self.add_receipt_repository.get_by_agent_idempotency_key(
                     session,

@@ -5,33 +5,17 @@
 import { Alert, Text } from "@mantine/core";
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useEffect } from "react";
-import { isWindowMessageTarget } from "@/shared/lib/window-message-target";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useGitHubAppInstallResultController } from "../containers/useGitHubResultControllers";
 
-interface GitHubAppInstallResultProps {
-  installationId: string;
-}
+export const GitHubAppInstallResult = createReactContainer(
+  "GitHubAppInstallResult",
+  useGitHubAppInstallResultController,
+  GitHubAppInstallResultView,
+);
 
-export function GitHubAppInstallResult({
-  installationId,
-}: GitHubAppInstallResultProps): React.ReactElement {
+export function GitHubAppInstallResultView(): React.ReactElement {
   const t = useTranslations("oauth");
-
-  useEffect(() => {
-    const opener: unknown = window.opener;
-    if (isWindowMessageTarget(opener)) {
-      opener.postMessage(
-        {
-          type: "azents-github-app-installed",
-          installation_id: installationId,
-        },
-        window.location.origin,
-      );
-      const timer = setTimeout(() => window.close(), 1500);
-      return () => clearTimeout(timer);
-    }
-    return () => {};
-  }, [installationId]);
 
   return (
     <Alert icon={<IconCheck size={24} />} color="green" variant="light">

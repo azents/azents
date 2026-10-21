@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import { parseScheduledTaskDraft, toLocalDateTimeInput } from "../schemas";
 import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
@@ -80,13 +81,18 @@ function taskDraft(task: ScheduledTaskResponse): ScheduledTaskDraft {
 
 export function useScheduledTasksContainer({
   handle,
-  agent,
+  agent: initialAgent,
   sessionId,
   session,
   activationRevision,
   initialTaskId,
   openInitialTaskForEdit,
 }: ScheduledTasksContainerProps): ScheduledTasksContainerOutput {
+  const { agent = initialAgent, readOnly } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const utils = trpc.useUtils();
   const onUpdateTitle = useAgentSessionTitleUpdater(agent.id, sessionId);
   const [selectedTaskIdOverride, setSelectedTaskId] = useState<string | null>(
@@ -316,16 +322,19 @@ export function useScheduledTasksContainer({
     onUpdateTitle,
     state,
     detail,
-    form: effectiveForm,
+    form: readOnly ? { type: "CLOSED" } : effectiveForm,
     selectedTaskId,
-    cancelTarget,
-    mutationBusy,
+    cancelTarget: readOnly ? null : cancelTarget,
+    mutationBusy: mutationBusy || readOnly,
     actionError,
     onSelectTask: (taskId) => {
       setActionError(null);
       setSelectedTaskId(taskId);
     },
     onOpenCreate: () => {
+      if (readOnly) {
+        return;
+      }
       setActionError(null);
       setForm({
         type: "CREATE",
@@ -338,6 +347,9 @@ export function useScheduledTasksContainer({
       });
     },
     onOpenEdit: (task) => {
+      if (readOnly) {
+        return;
+      }
       setActionError(null);
       setForm({
         type: "EDIT",
@@ -358,7 +370,7 @@ export function useScheduledTasksContainer({
       );
     },
     onSave: () => {
-      if (form.type === "CLOSED") {
+      if (readOnly || form.type === "CLOSED") {
         return;
       }
       setActionError(null);
@@ -390,7 +402,7 @@ export function useScheduledTasksContainer({
     },
     onCloseCancel: () => setCancelTarget(null),
     onConfirmCancel: () => {
-      if (cancelTarget === null) {
+      if (readOnly || cancelTarget === null) {
         return;
       }
       setActionError(null);

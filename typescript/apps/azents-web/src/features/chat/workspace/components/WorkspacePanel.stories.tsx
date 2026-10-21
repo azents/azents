@@ -565,6 +565,7 @@ const meta = {
   ],
   args: {
     metricsState: { type: "LOADING" },
+    readOnly: false,
     activeTab: "workspace",
     restartConfirmOpen: false,
     resetConfirmOpen: false,

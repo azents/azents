@@ -1,4 +1,5 @@
 import { Box, rem } from "@mantine/core";
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { RuntimeTerminalPanel } from "./RuntimeTerminalPanel";
 import type { RuntimeTerminalContainerOutput } from "../types";
@@ -7,6 +8,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const noop = (): void => {};
 
 const base: RuntimeTerminalContainerOutput = {
+  readOnly: false,
   projection: {
     state: "ready",
     reason_code: null,
@@ -60,6 +62,33 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const DeletingStopped: Story = {
+  tags: ["ci-contract"],
+  args: {
+    terminal: {
+      ...base,
+      readOnly: true,
+      presentation: "focused",
+      projection: {
+        state: "stopped",
+        can_start_runtime: true,
+        reason_code: null,
+        denied_scope: null,
+        can_open_or_attach: false,
+        terminal: null,
+      },
+      connection: { type: "error" },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: "Start Runtime" }),
+    ).toBeDisabled();
+    await expect(canvas.getByRole("button", { name: "Retry" })).toBeDisabled();
+  },
+};
 
 export const Collapsed: Story = {};
 

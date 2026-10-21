@@ -13,6 +13,7 @@ import type {
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const agent: AgentResponse = {
+  deletion_status: null,
   id: "agent_01",
   name: "Release Operator",
   description: "Coordinates release checklists and CI follow-up.",
@@ -47,6 +48,7 @@ const agent: AgentResponse = {
   max_turns: null,
   auto_archive_ttl_days: 30,
   routine_check_interval_minutes: 30,
+  routine_min_action_delay_minutes: 30,
   subagent_settings: { max_subagents: 3, max_depth: 1 },
   created_at: "2026-06-25T08:00:00Z",
   updated_at: "2026-06-25T08:00:00Z",

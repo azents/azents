@@ -64,6 +64,7 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.external_channel.work import terminate_binding_with_plans
 from azents.repos.external_channel.work_state import (
     CHANNEL_WORK_STATE_NAME_PREFIX,
@@ -3719,6 +3720,7 @@ class ExternalChannelRepository:
         authority = snapshot.one_or_none()
         if authority is None:
             return None
+        await require_active_agent(session, agent_id=authority.agent_id)
         await self.acquire_principal_agent_authorization_fence(
             session,
             agent_id=authority.agent_id,
@@ -3804,6 +3806,14 @@ class ExternalChannelRepository:
         removed_at: datetime.datetime,
     ) -> ExternalChannelBlock | None:
         """Remove one active block while retaining its policy history."""
+        agent_id = await session.read_session.scalar(
+            sa.select(RDBExternalChannelBlock.agent_id).where(
+                RDBExternalChannelBlock.id == block_id
+            )
+        )
+        if agent_id is None:
+            return None
+        await require_active_agent(session, agent_id=agent_id)
         rdb = await session.write_session.scalar(
             sa.update(RDBExternalChannelBlock)
             .where(RDBExternalChannelBlock.id == block_id)

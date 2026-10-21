@@ -122,6 +122,7 @@ const meta = {
   parameters: { layout: "fullscreen" },
   args: {
     rows: [],
+    readOnly: false,
     onCancel,
     onRetry,
     onDismiss,

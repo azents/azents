@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback } from "react";
 import { trpc } from "@/trpc/client";
 interface AgentDangerSectionProps {
+  readOnly: boolean;
   handle: string;
   agentId: string;
 }
 
 export interface AgentDangerSectionViewProps {
+  readOnly: boolean;
   t: ReturnType<typeof useTranslations<"workspace.agents">>;
   tDanger: ReturnType<typeof useTranslations<"workspace.agents.detail.danger">>;
   opened: boolean;
@@ -19,6 +21,7 @@ export interface AgentDangerSectionViewProps {
   handleDelete: () => void;
 }
 export function useAgentDangerSectionController({
+  readOnly,
   handle,
   agentId,
 }: AgentDangerSectionProps): AgentDangerSectionViewProps {
@@ -38,5 +41,14 @@ export function useAgentDangerSectionController({
   const handleDelete = useCallback(() => {
     deleteMutation.mutate({ handle, agentId });
   }, [deleteMutation, handle, agentId]);
-  return { t, tDanger, opened, open, close, deleteMutation, handleDelete };
+  return {
+    readOnly,
+    t,
+    tDanger,
+    opened,
+    open,
+    close,
+    deleteMutation,
+    handleDelete,
+  };
 }

@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ class Artifact:
     created: datetime
     head_sha: str
     run_id: int
+    digest: str
 
 
 @dataclass(frozen=True)
@@ -138,12 +140,19 @@ def artifacts_for_run(raw: object, run: Run) -> tuple[Artifact, ...]:
             ):
                 raise ValueError(f"Unavailable or different-attempt artifact: {name}")
             workflow = object_value(item["workflow_run"])
+            digest = item.get("digest")
+            if (
+                not isinstance(digest, str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+            ):
+                raise ValueError("Artifact SHA256 digest is missing or invalid")
             artifact = Artifact(
                 integer(item["id"]),
                 name,
                 created,
                 text(workflow["head_sha"]),
                 integer(workflow["id"]),
+                digest,
             )
             if artifact.head_sha != run.head_sha or artifact.run_id != run.run_id:
                 raise ValueError("Artifact workflow identity mismatch")
@@ -166,6 +175,39 @@ def file_hashes(root: Path) -> dict[str, str]:
     return hashes
 
 
+def archive_file_hashes(archive: Path, artifact: Artifact) -> dict[str, str]:
+    """Authenticate the saved ZIP before interpreting any of its entries."""
+    with archive.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    if f"sha256:{digest}" != artifact.digest:
+        raise ValueError("Artifact archive SHA256 mismatch")
+    hashes: dict[str, str] = {}
+    seen: set[str] = set()
+    with zipfile.ZipFile(archive) as zipped:
+        for item in zipped.infolist():
+            name = item.filename
+            path = Path(name)
+            if (
+                not name
+                or path.is_absolute()
+                or ".." in path.parts
+                or "\\" in name
+                or (item.external_attr >> 16) & 0o170000 == 0o120000
+                or path.as_posix() in seen
+            ):
+                raise ValueError("Unsafe or duplicate artifact archive path")
+            seen.add(path.as_posix())
+            if not item.is_dir():
+                with zipped.open(item) as stream:
+                    content_digest = hashlib.sha256()
+                    while chunk := stream.read(262144):
+                        content_digest.update(chunk)
+                    hashes[f"{artifact.name}/{path.as_posix()}"] = (
+                        content_digest.hexdigest()
+                    )
+    return hashes
+
+
 def verify_collection(root: Path, run: Run) -> set[str]:
     """Verify stored provenance and bytes before any acceptance calculation."""
     manifest = decode_collection(json.loads((root / "collection.json").read_text()))
@@ -182,6 +224,13 @@ def verify_collection(root: Path, run: Run) -> set[str]:
     expected = {a.name for a in artifacts}
     if manifest.artifact_names != expected:
         raise ValueError("Collection inventory mismatch")
+    archive_hashes: dict[str, str] = {}
+    for artifact in artifacts:
+        archive_hashes.update(
+            archive_file_hashes(root / f"artifact-{artifact.artifact_id}.zip", artifact)
+        )
+    if manifest.file_hashes != archive_hashes:
+        raise ValueError("Extracted evidence differs from authenticated archives")
     if manifest.file_hashes != file_hashes(root / "artifacts"):
         raise ValueError("Collected artifact bytes changed")
     found = {p.name for p in (root / "artifacts").iterdir() if p.is_dir()}

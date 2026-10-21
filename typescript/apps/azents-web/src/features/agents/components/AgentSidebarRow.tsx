@@ -10,6 +10,7 @@ import { Badge, Box, Group, NavLink, Text } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
+import { AgentDeletionBadge } from "@/shared/agent-session/AgentDeletionStatus";
 import styles from "./AgentSidebarRow.module.css";
 import type { AgentResponse } from "@azents/public-client";
 
@@ -53,7 +54,8 @@ export function AgentSidebarRow({
                 >
                   {agent.name}
                 </Text>
-                {!agent.enabled && (
+                <AgentDeletionBadge status={agent.deletion_status} />
+                {agent.deletion_status === null && !agent.enabled && (
                   <Badge size="xs" variant="default">
                     {t("disabled")}
                   </Badge>

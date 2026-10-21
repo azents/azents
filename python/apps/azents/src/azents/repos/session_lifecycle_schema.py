@@ -54,7 +54,25 @@ class PostgreSQLSessionLifecycleGraphRepository:
                             AS source_table,
                         target_namespace.nspname || '.' || target_relation.relname
                             AS target_table,
-                        constraint_catalog.confdeltype AS delete_action
+                        constraint_catalog.confdeltype AS delete_action,
+                        ARRAY(
+                            SELECT attribute.attname
+                            FROM unnest(constraint_catalog.conkey)
+                                WITH ORDINALITY AS key(attnum, position)
+                            JOIN pg_attribute AS attribute
+                                ON attribute.attrelid = constraint_catalog.conrelid
+                               AND attribute.attnum = key.attnum
+                            ORDER BY key.position
+                        ) AS source_columns,
+                        ARRAY(
+                            SELECT attribute.attname
+                            FROM unnest(constraint_catalog.confkey)
+                                WITH ORDINALITY AS key(attnum, position)
+                            JOIN pg_attribute AS attribute
+                                ON attribute.attrelid = constraint_catalog.confrelid
+                               AND attribute.attnum = key.attnum
+                            ORDER BY key.position
+                        ) AS target_columns
                     FROM pg_constraint AS constraint_catalog
                     JOIN pg_class AS source_relation
                         ON source_relation.oid = constraint_catalog.conrelid
@@ -131,6 +149,8 @@ class PostgreSQLSessionLifecycleGraphRepository:
                     constraint_name=row["constraint_name"],
                     source_table=row["source_table"],
                     target_table=row["target_table"],
+                    source_columns=tuple(row["source_columns"]),
+                    target_columns=tuple(row["target_columns"]),
                     delete_action=delete_action,
                     triggers=tuple(
                         triggers_by_constraint.get(row["constraint_name"], ())

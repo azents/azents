@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { trpc } from "@/trpc/client";
 import { projectAgentSessionDirectoryQueryState } from "../agent-session-directory-state";
 import type { AgentSessionDirectoryQueryState } from "../agent-session-directory-state";
@@ -51,8 +52,13 @@ function parsePage(value: string | null): number {
 
 export function useAgentSessionDirectoryContainer({
   handle,
-  agent,
+  agent: initialAgent,
 }: AgentSessionDirectoryContainerProps): AgentSessionDirectoryContainerOutput {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const router = useRouter();
   const searchParams = useSearchParams();
   const utils = trpc.useUtils();

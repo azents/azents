@@ -20,7 +20,6 @@ from azents.core.mailbox_data import (
     TurnActionMailboxPayload,
 )
 from azents.core.routine import (
-    ROUTINE_MIN_ACTION_DELAY,
     RoutineScope,
     RoutineUnavailable,
 )
@@ -147,7 +146,11 @@ class RoutineJudgmentInboxRepository:
             admission = None
             if (
                 next_state.queued_judgment_id is None
-                and _delay_passes(next_state, now=now)
+                and _delay_passes(
+                    next_state,
+                    now=now,
+                    minimum_minutes=agent.routine_min_action_delay_minutes,
+                )
                 and await self._candidates(session, scope=scope, state=next_state)
             ):
                 action = RoutineJudgmentAction(judgment_id=uuid7().hex)
@@ -224,9 +227,16 @@ class RoutineJudgmentInboxRepository:
             record = await self.states.get_check(session, scope=scope)
             if record is None or record.state.queued_judgment_id != action.judgment_id:
                 raise RoutineUnavailable("Routine inbox action is no longer pending.")
+            agent = await session.read_session.get(RDBAgent, scope.agent_id)
+            if agent is None:
+                raise RoutineUnavailable("Routine Agent is not active or authorized.")
             candidates = (
                 await self._candidates(session, scope=scope, state=record.state)
-                if _delay_passes(record.state, now=now)
+                if _delay_passes(
+                    record.state,
+                    now=now,
+                    minimum_minutes=agent.routine_min_action_delay_minutes,
+                )
                 else ()
             )
             await self.actions.mark_running(
@@ -307,6 +317,9 @@ class RoutineJudgmentInboxRepository:
                 )
             }
             admitted: list[RoutineExecutionState] = []
+            agent = await session.read_session.get(RDBAgent, scope.agent_id)
+            if agent is None:
+                raise RoutineUnavailable("Routine Agent is not active or authorized.")
             for candidate in captured.candidates:
                 if (
                     candidate.routine_id not in selected
@@ -317,7 +330,11 @@ class RoutineJudgmentInboxRepository:
                     session, scope=scope, routine_id=candidate.routine_id
                 )
                 if (
-                    not _delay_passes(check.state, now=now)
+                    not _delay_passes(
+                        check.state,
+                        now=now,
+                        minimum_minutes=agent.routine_min_action_delay_minutes,
+                    )
                     or previous is not None
                     and previous.state.incomplete
                 ):
@@ -533,8 +550,10 @@ def _require_aware(now: datetime.datetime) -> None:
         raise ValueError("Routine checking time must be timezone-aware.")
 
 
-def _delay_passes(state: RoutineCheckState, *, now: datetime.datetime) -> bool:
+def _delay_passes(
+    state: RoutineCheckState, *, now: datetime.datetime, minimum_minutes: int
+) -> bool:
     return (
         state.last_action_at is None
-        or now - state.last_action_at >= ROUTINE_MIN_ACTION_DELAY
+        or now - state.last_action_at >= datetime.timedelta(minutes=minimum_minutes)
     )

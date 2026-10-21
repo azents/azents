@@ -67,7 +67,13 @@ export const agentCreateInputSchema = z
     routine_check_interval_minutes: z
       .number()
       .int()
-      .min(1)
+      .min(30)
+      .max(1440)
+      .optional(),
+    routine_min_action_delay_minutes: z
+      .number()
+      .int()
+      .min(30)
       .max(1440)
       .optional(),
     description: z.string().optional(),
@@ -99,7 +105,13 @@ export const agentUpdateInputSchema = z
     routine_check_interval_minutes: z
       .number()
       .int()
-      .min(1)
+      .min(30)
+      .max(1440)
+      .optional(),
+    routine_min_action_delay_minutes: z
+      .number()
+      .int()
+      .min(30)
       .max(1440)
       .optional(),
     description: z.string().nullable().optional(),

@@ -1012,6 +1012,7 @@ export const ChatInput = memo(function ChatInput({
         )}
         <Paper
           withBorder
+          data-chat-composer-card
           radius={rem(12)}
           px="xs"
           py={rem(6)}
@@ -1034,10 +1035,14 @@ export const ChatInput = memo(function ChatInput({
                 goal={goal}
                 isMobile={isMobile}
                 todo={todo}
-                onClearGoal={onClearGoal}
-                onUpdateGoal={onUpdateGoal}
-                onPauseGoal={onPauseGoal}
-                onResumeGoal={onResumeGoal}
+                {...(inputDisabled
+                  ? {}
+                  : {
+                      onClearGoal,
+                      onUpdateGoal,
+                      onPauseGoal,
+                      onResumeGoal,
+                    })}
               />
             )}
             {selectedAction !== null && !editingMessageId && !inputDisabled && (

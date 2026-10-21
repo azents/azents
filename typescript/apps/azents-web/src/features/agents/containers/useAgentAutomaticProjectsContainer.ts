@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAgentLifecycle } from "@/shared/agent-session/useAgentLifecycle";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { trpc } from "@/trpc/client";
 import {
@@ -73,8 +74,13 @@ function statusForPath(
 
 export function useAgentAutomaticProjectsContainer({
   handle,
-  agent,
+  agent: initialAgent,
 }: AgentAutomaticProjectsContainerProps): AgentAutomaticProjectsContainerOutput {
+  const { agent = initialAgent } = useAgentLifecycle({
+    handle,
+    agentId: initialAgent.id,
+    initialAgent,
+  });
   const utils = trpc.useUtils();
   const policyQuery = trpc.agent.getAutomaticSessionProjects.useQuery({
     handle,

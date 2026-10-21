@@ -1129,12 +1129,8 @@ class TestSessionTitleHelpers:
         @asynccontextmanager
         async def session_manager() -> AsyncIterator[WriteSession]:
             session = RecordingSession()
-            try:
-                yield ReadWriteSession(session)
-            except Exception:
-                raise
-            else:
-                await session.commit()
+            yield ReadWriteSession(session)
+            await session.commit()
 
         class RecordingThreadTitleService(_ThreadTitleService):
             async def project_generated_title(
@@ -1515,6 +1511,7 @@ class _AgentRepository(AgentRepository):
             external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
             auto_archive_ttl_days=30,
             routine_check_interval_minutes=30,
+            routine_min_action_delay_minutes=30,
             enabled=True,
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
             type=AgentType.PUBLIC,

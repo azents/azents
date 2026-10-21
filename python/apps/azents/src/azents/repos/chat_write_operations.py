@@ -52,6 +52,7 @@ from azents.repos.active_profile_admission import (
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
@@ -371,6 +372,7 @@ class ChatWriteOperationsRepository:
             command_id=command_id,
         )
 
+    @retry_hierarchy_operation
     async def create_idempotent_failed_run_retry(
         self,
         *,
@@ -527,7 +529,7 @@ class ChatWriteOperationsRepository:
                 session,
                 root_session_id=observed.id,
             )
-            locked = await self._lock_and_reauthorize_session(
+            locked = await self._read_and_authorize_session(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -644,11 +646,7 @@ class ChatWriteOperationsRepository:
         ):
             raise ValueError("Requester does not have session access")
         agent = await self.agent_repository.get_by_id(session, agent_id)
-        if (
-            agent is None
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            or agent.workspace_id != observed.workspace_id
-        ):
+        if agent is None or agent.workspace_id != observed.workspace_id:
             raise ValueError("AgentSession is not active")
         root = await self.agent_session_repository.get_root_session_agent_by_session_id(
             session, session_id
@@ -673,6 +671,10 @@ class ChatWriteOperationsRepository:
         user_id: str,
     ) -> AgentSession:
         """Lock one writable root Session and reauthorize its requester."""
+        await self._read_and_authorize_session(
+            session, agent_id=agent_id, session_id=session_id, user_id=user_id
+        )
+        await require_active_agent(session, agent_id=agent_id)
         locked = await self.agent_session_repository.lock_by_id(
             session,
             session_id,

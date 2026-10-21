@@ -19,6 +19,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
 
@@ -158,6 +159,7 @@ class GoalStateStore:
     ) -> GoalState:
         """Clear Goal state in a completed transaction."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             handle = self._make_handle(session, agent_id, session_id)
             if handle is None:
                 return GoalState()
@@ -178,6 +180,7 @@ class GoalStateStore:
     ) -> GoalObjectiveUpdate:
         """Update an existing Goal objective in a completed transaction."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             handle = self._make_handle(session, agent_id, session_id)
             if handle is None:
                 return GoalObjectiveUpdate(updated=GoalState(), changed=False)
@@ -210,6 +213,7 @@ class GoalStateStore:
     ) -> GoalControlStatusUpdate:
         """Apply a user-controlled pause or resume in a completed transaction."""
         async with self.session_manager() as session:
+            await require_active_agent(session, agent_id=agent_id)
             handle = self._make_handle(session, agent_id, session_id)
             if handle is None:
                 raise GoalInvalidStatusTransitionError

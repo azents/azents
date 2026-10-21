@@ -7,6 +7,7 @@ import type { RuntimeWebServiceResponse } from "@azents/public-client";
 type RuntimeWebServicesProps = RuntimeWebServicesContainerOutput;
 
 export interface RuntimeWebServicesViewProps {
+  readOnly: boolean;
   state: RuntimeWebServicesProps["state"];
   action: RuntimeWebServicesProps["action"];
   mutationError: RuntimeWebServicesProps["mutationError"];
@@ -44,6 +45,7 @@ export interface RuntimeWebServicesViewProps {
   submitServiceAction3: (service: RuntimeWebServiceResponse) => void;
 }
 export function useRuntimeWebServicesController({
+  readOnly,
   state,
   action,
   mutationError,
@@ -116,6 +118,7 @@ export function useRuntimeWebServicesController({
     onDelete(service);
   }
   return {
+    readOnly,
     state,
     action,
     mutationError,

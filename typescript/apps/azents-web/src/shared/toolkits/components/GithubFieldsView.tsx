@@ -16,8 +16,11 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { getString, getStringArray } from "@/shared/lib/unknown-value";
 import { isGitHubUserMode } from "../github-user-oauth-state";
+import type {
+  GithubFieldCallbacks,
+  GithubFormFields,
+} from "../provider-form-fields";
 import type { GithubInstallationState, InstallationTarget } from "../types";
 import type {
   GitHubAvailabilityState,
@@ -25,9 +28,8 @@ import type {
 } from "../types";
 import type { GitHubPlatformAuthorizationStateResponse } from "@azents/public-client";
 
-export interface GithubFieldsViewProps {
-  config: Record<string, unknown>;
-  credentials: Record<string, unknown> | null;
+export interface GithubFieldsViewProps extends GithubFieldCallbacks {
+  fields: GithubFormFields;
   hasCredentials: boolean;
   savedUserRegistration: boolean;
   authorizationState: GitHubPlatformAuthorizationStateResponse | null;
@@ -38,8 +40,7 @@ export interface GithubFieldsViewProps {
   runtimeAcknowledged: boolean;
   canTest: boolean;
   onRetryAvailability: () => void;
-  onConfigChange: (config: Record<string, unknown>) => void;
-  onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
+  onTargetsChange: (targets: InstallationTarget[]) => void;
   onConnectInstallations: () => void;
   onInstallApp: () => void;
   onTest: () => void;
@@ -69,21 +70,15 @@ export function GithubFieldsView(
   props: GithubFieldsViewProps,
 ): React.ReactElement {
   const t = useTranslations("workspace.toolkits.github");
-  const auth = getString(props.config.github_auth_type) || "pat";
+  const { auth, credentials } = props.fields;
   const userMode = isGitHubUserMode(auth);
   const unavailable =
     props.availability.type === "READY" &&
     props.availability.availability.platform === "absent";
   const platformSaved =
     auth === "github_app_platform" || auth === "github_app_platform_user";
-  function setCred(key: string, value: unknown): void {
-    props.onCredentialsChange({ ...props.credentials, [key]: value });
-  }
-  function setConfig(key: string, value: unknown): void {
-    props.onConfigChange({ ...props.config, [key]: value });
-  }
   function setTargets(targets: InstallationTarget[]): void {
-    setCred("installations", targets);
+    props.onTargetsChange(targets);
   }
   function updateTarget(
     index: number,
@@ -150,15 +145,7 @@ export function GithubFieldsView(
             label: t(option.labelKey),
           }))}
         value={auth}
-        onChange={(value) => {
-          const next = value ?? "pat";
-          props.onConfigChange({
-            ...props.config,
-            github_auth_type: next,
-            auth_type: "bearer",
-          });
-          props.onCredentialsChange({ type: next });
-        }}
+        onChange={props.onAuthChange}
       />
       {unavailable && platformSaved && (
         <Text size="sm">
@@ -176,8 +163,10 @@ export function GithubFieldsView(
           placeholder={
             props.hasCredentials ? t("credentialsEditPlaceholder") : void 0
           }
-          value={getString(props.credentials?.token)}
-          onChange={(event) => setCred("token", event.currentTarget.value)}
+          value={credentials.token}
+          onChange={(event) =>
+            props.onCredentialFieldChange("token", event.currentTarget.value)
+          }
         />
       )}
       {(auth === "github_app" || auth === "github_app_user") && (
@@ -190,8 +179,10 @@ export function GithubFieldsView(
                 ? t("credentialsEditPlaceholder")
                 : "123456"
             }
-            value={getString(props.credentials?.app_id)}
-            onChange={(event) => setCred("app_id", event.currentTarget.value)}
+            value={credentials.app_id}
+            onChange={(event) =>
+              props.onCredentialFieldChange("app_id", event.currentTarget.value)
+            }
           />
           <Textarea
             label={t("privateKeyLabel")}
@@ -205,9 +196,12 @@ export function GithubFieldsView(
             autosize
             minRows={3}
             maxRows={8}
-            value={getString(props.credentials?.private_key)}
+            value={credentials.private_key}
             onChange={(event) =>
-              setCred("private_key", event.currentTarget.value)
+              props.onCredentialFieldChange(
+                "private_key",
+                event.currentTarget.value,
+              )
             }
             styles={{ input: { fontFamily: "var(--font-geist-mono)" } }}
           />
@@ -223,9 +217,12 @@ export function GithubFieldsView(
                 ? t("credentialsEditPlaceholder")
                 : void 0
             }
-            value={getString(props.credentials?.client_id)}
+            value={credentials.client_id}
             onChange={(event) =>
-              setCred("client_id", event.currentTarget.value)
+              props.onCredentialFieldChange(
+                "client_id",
+                event.currentTarget.value,
+              )
             }
           />
           <PasswordInput
@@ -236,9 +233,12 @@ export function GithubFieldsView(
                 ? t("credentialsEditPlaceholder")
                 : void 0
             }
-            value={getString(props.credentials?.client_secret)}
+            value={credentials.client_secret}
             onChange={(event) =>
-              setCred("client_secret", event.currentTarget.value)
+              props.onCredentialFieldChange(
+                "client_secret",
+                event.currentTarget.value,
+              )
             }
           />
           {props.savedUserRegistration && (
@@ -424,12 +424,8 @@ export function GithubFieldsView(
         label={t("toolsetsLabel")}
         description={t("toolsetsDescription")}
         data={toolsets}
-        value={
-          Array.isArray(props.config.toolsets)
-            ? getStringArray(props.config.toolsets)
-            : ["repos", "issues", "pull_requests", "users"]
-        }
-        onChange={(value) => setConfig("toolsets", value)}
+        value={props.fields.toolsets}
+        onChange={props.onToolsetsChange}
       />
       <Alert
         color="orange"
@@ -456,14 +452,13 @@ export function GithubFieldsView(
                 ? "userRuntimeDescription"
                 : "runtimeEnvironmentToggleDescription",
             )}
-            checked={Boolean(props.config.inject_runtime_environment)}
+            checked={props.fields.injectRuntimeEnvironment}
             disabled={
               !props.runtimeAcknowledged &&
-              !props.config.inject_runtime_environment
+              !props.fields.injectRuntimeEnvironment
             }
             onChange={(event) =>
-              setConfig(
-                "inject_runtime_environment",
+              props.onInjectRuntimeEnvironmentChange(
                 event.currentTarget.checked,
               )
             }

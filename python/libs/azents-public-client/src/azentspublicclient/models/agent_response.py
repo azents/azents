@@ -21,6 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentspublicclient.models.agent_deletion_status import AgentDeletionStatus
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
@@ -45,6 +46,7 @@ class AgentResponse(BaseModel):
     model_parameters: Optional[ModelParameters]
     system_prompt: Optional[StrictStr]
     enabled: StrictBool
+    deletion_status: Optional[AgentDeletionStatus]
     type: AgentType
     runtime_profile_id: Optional[StrictStr]
     runtime_profile_selection_version: StrictInt
@@ -66,13 +68,14 @@ class AgentResponse(BaseModel):
     tool_search_enabled: StrictBool
     max_turns: Optional[StrictInt]
     auto_archive_ttl_days: StrictInt = Field(description="Inactivity period before automatic Session archive")
-    routine_check_interval_minutes: Annotated[int, Field(le=1440, strict=True, ge=1)] = Field(description="Routine checking interval in minutes")
+    routine_check_interval_minutes: Annotated[int, Field(le=1440, strict=True, ge=30)] = Field(description="Routine checking interval in minutes")
+    routine_min_action_delay_minutes: Annotated[int, Field(le=1440, strict=True, ge=30)] = Field(description="Minimum Routine action delay in minutes")
     subagent_settings: SubagentSettings
     avatar: Optional[UploadedImage] = None
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "toolkit_management_available", "terminal_enabled", "browser_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "routine_check_interval_minutes", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "deletion_status", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "toolkit_management_available", "terminal_enabled", "browser_enabled", "infrastructure_terminal_enabled", "workspace_terminal_enabled", "effective_terminal_enabled", "terminal_denied_scope", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "routine_check_interval_minutes", "routine_min_action_delay_minutes", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     @field_validator('runtime_profile_configuration_status')
     def runtime_profile_configuration_status_validate_enum(cls, value):
@@ -178,6 +181,11 @@ class AgentResponse(BaseModel):
         if self.system_prompt is None and "system_prompt" in self.model_fields_set:
             _dict['system_prompt'] = None
 
+        # set to None if deletion_status (nullable) is None
+        # and model_fields_set contains the field
+        if self.deletion_status is None and "deletion_status" in self.model_fields_set:
+            _dict['deletion_status'] = None
+
         # set to None if runtime_profile_id (nullable) is None
         # and model_fields_set contains the field
         if self.runtime_profile_id is None and "runtime_profile_id" in self.model_fields_set:
@@ -238,6 +246,7 @@ class AgentResponse(BaseModel):
             "model_parameters": ModelParameters.from_dict(obj["model_parameters"]) if obj.get("model_parameters") is not None else None,
             "system_prompt": obj.get("system_prompt"),
             "enabled": obj.get("enabled"),
+            "deletion_status": obj.get("deletion_status"),
             "type": obj.get("type"),
             "runtime_profile_id": obj.get("runtime_profile_id"),
             "runtime_profile_selection_version": obj.get("runtime_profile_selection_version"),
@@ -260,6 +269,7 @@ class AgentResponse(BaseModel):
             "max_turns": obj.get("max_turns"),
             "auto_archive_ttl_days": obj.get("auto_archive_ttl_days"),
             "routine_check_interval_minutes": obj.get("routine_check_interval_minutes"),
+            "routine_min_action_delay_minutes": obj.get("routine_min_action_delay_minutes"),
             "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None,
             "avatar": UploadedImage.from_dict(obj["avatar"]) if obj.get("avatar") is not None else None,
             "created_at": obj.get("created_at"),

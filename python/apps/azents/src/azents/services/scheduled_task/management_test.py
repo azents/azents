@@ -57,6 +57,7 @@ class _Session(AsyncSession):
     def __init__(self) -> None:
         super().__init__()
         self.committed = False
+        self.scalar = AsyncMock(return_value=AgentLifecycleStatus.ACTIVE)
 
     async def commit(self) -> None:
         self.committed = True
@@ -490,7 +491,7 @@ async def test_requested_binding_is_locked_then_hidden_before_create() -> None:
         (
             AgentSessionStatus.ARCHIVED,
             AgentLifecycleStatus.ACTIVE,
-            ["session-lock"],
+            [],
         ),
         (
             AgentSessionStatus.ACTIVE,

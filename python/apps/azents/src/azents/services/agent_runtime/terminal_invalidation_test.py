@@ -10,6 +10,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
@@ -70,9 +71,9 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
         nonlocal committed_transactions
-        yield ReadWriteSession(
-            require_instance(MagicMock(spec=AsyncSession), AsyncSession)
-        )
+        raw = MagicMock(spec=AsyncSession)
+        raw.scalar.return_value = AgentLifecycleStatus.ACTIVE
+        yield ReadWriteSession(require_instance(raw, AsyncSession))
         committed_transactions += 1
 
     command = AgentRuntimeLifecycleCommand(
@@ -82,6 +83,7 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     )
     set_desired_state = AsyncMock(return_value=command)
     runtime_repository = MagicMock(spec=AgentRuntimeRepository)
+    runtime_repository.get_by_id.return_value = before
     runtime_repository.set_desired_state_if_configuration_current = set_desired_state
     typed_session_manager: SessionManager[WriteSession] = session_manager
     service.operations.session_manager = typed_session_manager

@@ -9,32 +9,27 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
 import { useLocale, useTranslations } from "next-intl";
+import { useMemo } from "react";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+  MessageMetadataVisibilityContext,
+  useMessageMetadataSurfaceController,
+  useMessageTimestampController,
+  useModelMetadataController,
+} from "../containers/useMessageMetadataController";
 import classes from "./MessageMetadataFooter.module.css";
+import type {
+  MessageMetadataSurfaceOutput,
+  MessageTimestampOutput,
+  ModelMetadataOutput,
+} from "../containers/useMessageMetadataController";
 import type {
   AppliedInferenceProfile,
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
-
-interface MessageMetadataVisibilityContextValue {
-  activeOverlay: "model" | "timestamp" | null;
-  isTouchPrimary: boolean;
-  visible: boolean;
-  setActiveOverlay: (overlay: "model" | "timestamp" | null) => void;
-  showForTouch: () => void;
-}
 
 type MessageInferenceProfile =
   RequestedInferenceProfile | AppliedInferenceProfile;
@@ -54,8 +49,6 @@ interface MessageMetadataFooterProps {
   profile?: MessageInferenceProfile | null;
 }
 
-const MessageMetadataVisibilityContext =
-  createContext<MessageMetadataVisibilityContextValue | null>(null);
 const FADE_DURATION_MS = 160;
 
 function formatRelativeTime(iso: string, t: ChatTranslator): string {
@@ -93,52 +86,25 @@ function formatFullDateTime(iso: string, locale: string): string {
   }).format(date);
 }
 
-function getNextRelativeTimeDelay(iso: string): number {
-  const createdAt = new Date(iso).getTime();
-  if (!Number.isFinite(createdAt)) {
-    return 60_000;
-  }
+const MessageTimestamp = createReactContainer(
+  "MessageTimestamp",
+  useMessageTimestampController,
+  MessageTimestampView,
+);
 
-  const diff = Math.max(0, Date.now() - createdAt);
-  return diff < 60_000 ? 60_000 - diff : 60_000 - (diff % 60_000);
-}
-
-function MessageTimestamp({
+export function MessageTimestampView({
   createdAt,
-}: {
-  createdAt: string;
-}): React.ReactElement {
+  isTouchPrimary,
+  opened,
+  handlePointerDown,
+}: MessageTimestampOutput): React.ReactElement {
   const locale = useLocale();
   const t = useTranslations("chat");
-  const visibility = useContext(MessageMetadataVisibilityContext);
-  const isTouchPrimary = visibility?.isTouchPrimary ?? false;
-  const [relativeTimeTick, setRelativeTimeTick] = useState(0);
   const relativeTime = formatRelativeTime(createdAt, t);
   const fullDateTime = useMemo(
     () => formatFullDateTime(createdAt, locale),
     [createdAt, locale],
   );
-
-  useEffect(() => {
-    const delay = getNextRelativeTimeDelay(createdAt);
-    const timer = setTimeout(
-      () => setRelativeTimeTick((current) => current + 1),
-      delay,
-    );
-    return () => clearTimeout(timer);
-  }, [createdAt, relativeTimeTick]);
-
-  function handlePointerDown(event: React.PointerEvent<HTMLElement>): void {
-    if (!isTouchPrimary || visibility === null) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    visibility.showForTouch();
-    visibility.setActiveOverlay(
-      visibility.activeOverlay === "timestamp" ? null : "timestamp",
-    );
-  }
 
   const timestamp = (
     <Text
@@ -161,7 +127,7 @@ function MessageTimestamp({
       <Tooltip
         label={fullDateTime}
         withArrow
-        opened={visibility?.activeOverlay === "timestamp" && visibility.visible}
+        opened={opened}
         transitionProps={{ transition: "fade", duration: FADE_DURATION_MS }}
       >
         {timestamp}
@@ -180,28 +146,27 @@ function MessageTimestamp({
   );
 }
 
-function ModelMetadata({
+function useModelMetadataWithProfile(props: {
+  profile: MessageInferenceProfile;
+}): ModelMetadataOutput & { profile: MessageInferenceProfile } {
+  return { ...props, ...useModelMetadataController() };
+}
+const ModelMetadata = createReactContainer(
+  "ModelMetadata",
+  useModelMetadataWithProfile,
+  ModelMetadataView,
+);
+
+export function ModelMetadataView({
   profile,
-}: {
+  opened,
+  setOpened,
+}: ModelMetadataOutput & {
   profile: MessageInferenceProfile;
 }): React.ReactElement {
   const t = useTranslations("chat.inferenceProvenance");
-  const visibility = useContext(MessageMetadataVisibilityContext);
-  const [desktopOpened, setDesktopOpened] = useState(false);
-  const isTouchPrimary = visibility?.isTouchPrimary ?? false;
-  const opened = isTouchPrimary
-    ? visibility?.activeOverlay === "model"
-    : desktopOpened;
   const actualModel = profileModelDisplayName(profile);
   const effort = profile.reasoning_effort ?? t("defaultEffort");
-
-  function setOpened(nextOpened: boolean): void {
-    if (isTouchPrimary && visibility !== null) {
-      visibility.setActiveOverlay(nextOpened ? "model" : null);
-      return;
-    }
-    setDesktopOpened(nextOpened);
-  }
 
   return (
     <Popover
@@ -269,75 +234,18 @@ function ModelMetadata({
   );
 }
 
-export function MessageMetadataSurface({
+export const MessageMetadataSurface = createReactContainer(
+  "MessageMetadataSurface",
+  useMessageMetadataSurfaceController,
+  MessageMetadataSurfaceView,
+);
+
+export function MessageMetadataSurfaceView({
   children,
-}: {
-  children: React.ReactNode;
-}): React.ReactElement {
-  const isTouchPrimary = useMediaQuery("(hover: none)");
-  const [activeOverlay, setActiveOverlay] = useState<
-    "model" | "timestamp" | null
-  >(null);
-  const [visible, setVisible] = useState(false);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (hideTimerRef.current) {
-        clearTimeout(hideTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (!isTouchPrimary || activeOverlay === null) {
-      return;
-    }
-
-    function dismissOverlay(event: PointerEvent): void {
-      if (
-        event.target instanceof Element &&
-        event.target.closest(
-          `[data-message-metadata-trigger="${activeOverlay}"], [data-message-metadata-popover]`,
-        )
-      ) {
-        return;
-      }
-      setActiveOverlay(null);
-    }
-
-    document.addEventListener("pointerdown", dismissOverlay, true);
-    return () =>
-      document.removeEventListener("pointerdown", dismissOverlay, true);
-  }, [activeOverlay, isTouchPrimary]);
-
-  const showForTouch = useCallback((): void => {
-    if (!isTouchPrimary) {
-      return;
-    }
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-    }
-    setVisible(true);
-    hideTimerRef.current = setTimeout(() => {
-      setActiveOverlay(null);
-      setVisible(false);
-      hideTimerRef.current = null;
-    }, 5000);
-  }, [isTouchPrimary]);
-
-  const value = useMemo(
-    () => ({
-      activeOverlay,
-      isTouchPrimary,
-      visible,
-      setActiveOverlay,
-      showForTouch,
-    }),
-    [activeOverlay, isTouchPrimary, showForTouch, visible],
-  );
-
+  value,
+  visible,
+  showForTouch,
+}: MessageMetadataSurfaceOutput): React.ReactElement {
   return (
     <MessageMetadataVisibilityContext.Provider value={value}>
       <Box

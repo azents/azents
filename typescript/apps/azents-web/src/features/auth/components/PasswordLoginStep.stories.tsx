@@ -7,6 +7,7 @@ const useOtherMethod = (): void => {};
 
 const meta = {
   component: PasswordLoginStep,
+  tags: ["ci-contract"],
 } satisfies Meta<typeof PasswordLoginStep>;
 
 export default meta;

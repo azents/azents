@@ -22,6 +22,7 @@ import type { AdminListState } from "../types";
 import type { AgentAdminResponse } from "@azents/public-client";
 
 interface AgentAdminSectionProps {
+  readOnly: boolean;
   adminListState: AdminListState;
   members: MemberItem[];
   onAddAdmin: (workspaceUserId: string) => void;
@@ -35,6 +36,7 @@ export function AgentAdminSection(
 }
 
 export function AgentAdminSectionView({
+  readOnly,
   adminListState,
   onRemoveAdmin,
   t,
@@ -63,7 +65,7 @@ export function AgentAdminSectionView({
                 color="red"
                 size="xs"
                 onClick={() => onRemoveAdmin(admin)}
-                disabled={adminListState.admins.length <= 1}
+                disabled={readOnly || adminListState.admins.length <= 1}
               >
                 {t("removeAdmin")}
               </Button>
@@ -79,6 +81,7 @@ export function AgentAdminSectionView({
           {/* Add Admin */}
           <Group gap="sm" mt="xs">
             <Select
+              disabled={readOnly}
               placeholder={t("adminAddPlaceholder")}
               data={availableMembers}
               value={selectedMemberId}
@@ -90,7 +93,7 @@ export function AgentAdminSectionView({
               size="sm"
               variant="light"
               onClick={handleAddAdmin}
-              disabled={!selectedMemberId}
+              disabled={readOnly || !selectedMemberId}
             >
               {t("addAdmin")}
             </Button>

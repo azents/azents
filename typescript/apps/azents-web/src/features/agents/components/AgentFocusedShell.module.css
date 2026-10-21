@@ -37,9 +37,7 @@
   }
 
   .backToWorkspaceButton {
-    min-height: calc(
-      var(--mantine-spacing-sm) + var(--mantine-spacing-md)
-    );
+    min-height: calc(var(--mantine-spacing-sm) + var(--mantine-spacing-md));
     padding-inline: var(--mantine-spacing-xs);
   }
 

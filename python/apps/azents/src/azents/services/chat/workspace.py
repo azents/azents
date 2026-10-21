@@ -1438,12 +1438,20 @@ class AgentWorkspaceFileService:
         user_id: str,
     ) -> Result[RuntimeOperationTarget, AgentWorkspaceError]:
         """Check Agent access permission and Runtime active state."""
-        access_result = await self._get_agent_for_user(agent_id, user_id=user_id)
+        access_result = await self.access_repository.admit_runtime_work(
+            agent_id, user_id=user_id
+        )
         match access_result:
             case Success(agent):
                 pass
             case Failure(error):
-                return Failure(error)
+                match error:
+                    case AgentWorkspaceAgentNotFound():
+                        return Failure(AgentNotFound())
+                    case AgentWorkspaceMembershipNotFound():
+                        return Failure(NotWorkspaceMember())
+                    case _:
+                        assert_never(error)
             case _:
                 assert_never(access_result)
 

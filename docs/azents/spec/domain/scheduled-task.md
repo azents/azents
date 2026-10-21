@@ -40,7 +40,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-10-07
+last_verified_at: 2026-10-20
 spec_version: 16
 ---
 
@@ -132,15 +132,18 @@ cancel-current-cycle controls.
 
 `ScheduledToolkit` is an unprefixed, root-only, automatically connected Toolkit.
 It is not configured through a Workspace Toolkit row. Every eligible root Run
-receives these management tools:
+receives all four tools independently of its current cycle binding:
 
 - `add_scheduled_task`
 - `list_scheduled_tasks`
 - `delete_scheduled_task`
+- `submit_scheduled_task_result`
 
-`submit_scheduled_task_result` is exposed only when the current Run is bound to a
-valid started Scheduled Task cycle. It accepts `finished` or `failed` and a
-non-empty result. A Scheduled-bound `channel_action` may report progress only with
+`submit_scheduled_task_result` accepts `finished` or `failed` and a non-empty
+result. Submission validates the current Run's cycle and execution authority;
+visibility does not grant permission to settle an unrelated or unbound cycle.
+Dynamic cycle guidance remains limited to the current Run's valid started cycle.
+A Scheduled-bound `channel_action` may report progress only with
 `continue`; terminal completion must use `submit_scheduled_task_result`.
 
 The Toolkit's active-cycle and continuity reads, Task creation, Task listing with

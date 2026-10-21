@@ -34,6 +34,7 @@ import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
 
 export interface ManagedToolkitCardProps {
+  readOnly: boolean;
   item: AgentToolkitManagementItemResponse;
   pending: boolean;
   canAuthorizeShared: boolean;
@@ -41,7 +42,6 @@ export interface ManagedToolkitCardProps {
   workspaceEditHref: string;
   onAuthorize: () => void;
   onDetails: () => void;
-  onDetach: () => void;
   onEdit: () => void;
   onToggle: () => void;
   onDelete: () => void;
@@ -103,6 +103,7 @@ function ToolkitBadges({
 }
 
 function AuthorizationAction({
+  readOnly,
   item,
   pending,
   authorizationPending,
@@ -113,6 +114,7 @@ function AuthorizationAction({
 }: ManagedToolkitCardProps): React.ReactElement | null {
   const t = useTranslations("workspace.agents.toolkitManagement");
   if (
+    readOnly ||
     item.readiness !== "authorization_required" ||
     (item.ownership_scope === "workspace_shared" && !canAuthorizeShared)
   ) {
@@ -165,6 +167,21 @@ export function ManagedToolkitCard(
             {t("catalog.details")}
           </Button>
           <AuthorizationAction {...props} />
+          <Button
+            variant="subtle"
+            color="red"
+            size="xs"
+            onClick={props.onDelete}
+            disabled={
+              props.readOnly || props.pending || props.authorizationPending
+            }
+          >
+            {t(
+              props.item.ownership_scope === "workspace_shared"
+                ? "detach"
+                : "delete",
+            )}
+          </Button>
         </>
       }
     />
@@ -226,8 +243,10 @@ export function ToolkitConnectionDetails(
             <Button
               variant="subtle"
               color="red"
-              disabled={props.pending || props.authorizationPending}
-              onClick={props.onDetach}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
+              onClick={props.onDelete}
             >
               {t("detach")}
             </Button>
@@ -236,14 +255,18 @@ export function ToolkitConnectionDetails(
           <>
             <Button
               variant="default"
-              disabled={props.pending || props.authorizationPending}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
               onClick={props.onEdit}
             >
               {t("edit")}
             </Button>
             <Button
               variant="default"
-              disabled={props.pending || props.authorizationPending}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
               onClick={props.onToggle}
             >
               {t(props.item.toolkit.enabled ? "disable" : "enable")}
@@ -251,7 +274,9 @@ export function ToolkitConnectionDetails(
             <Button
               variant="subtle"
               color="red"
-              disabled={props.pending || props.authorizationPending}
+              disabled={
+                props.readOnly || props.pending || props.authorizationPending
+              }
               onClick={props.onDelete}
             >
               {t("delete")}
@@ -335,21 +360,18 @@ export function ManagedAgentToolkitSectionView(
   ): ManagedToolkitCardProps {
     return {
       item,
+      readOnly: props.readOnly,
       pending: props.pending || props.setupPending,
       canAuthorizeShared: props.canAuthorizeShared,
       authorizationPending: props.authorizationPendingId === item.toolkit.id,
       workspaceEditHref: `/w/${props.handle}/toolkits/${item.toolkit.id}/edit`,
       onAuthorize: () => props.onAuthorize(item),
       onDetails: () => props.onDetails(item.toolkit.id),
-      onDetach: () => {
-        if (item.agent_toolkit_id) {
-          props.onDetach(item.agent_toolkit_id);
-        }
-      },
       onEdit: () => props.onEdit(item.toolkit.id),
       onToggle: () => props.onToggle(item),
       onDelete: () => props.onRequestDelete(item),
       userConnectionView:
+        !props.readOnly &&
         item.toolkit.toolkit_type === "github" &&
         projectGitHubUserMode(item.toolkit.config) &&
         (item.ownership_scope === "agent_only" || props.canAuthorizeShared) &&
@@ -398,7 +420,7 @@ export function ManagedAgentToolkitSectionView(
         <Button
           size="xs"
           leftSection={<IconPlus size={14} />}
-          disabled={state.type !== "READY"}
+          disabled={props.readOnly || state.type !== "READY"}
           onClick={props.onStartAdd}
         >
           {t("toolkitManagement.addToolkit")}
@@ -633,9 +655,17 @@ export function ManagedAgentToolkitSectionView(
         </Stack>
       </Modal>
       <Modal
-        opened={props.deleteTarget != null}
+        opened={!props.readOnly && props.deleteTarget != null}
         onClose={props.onCancelDelete}
-        title={t("toolkitManagement.deleteTitle")}
+        title={t(
+          props.deleteTarget?.ownership_scope === "workspace_shared"
+            ? "toolkitManagement.detachTitle"
+            : "toolkitManagement.deleteTitle",
+        )}
+        closeOnClickOutside={false}
+        closeOnEscape={!props.deletePending}
+        withCloseButton={!props.deletePending}
+        closeButtonProps={{ "aria-label": tWizard("close") }}
         centered
       >
         <Stack>
@@ -643,12 +673,19 @@ export function ManagedAgentToolkitSectionView(
             <Alert color="red">{props.mutationState.message}</Alert>
           )}
           <Text size="sm">
-            {t("toolkitManagement.deleteDescription", {
-              name: props.deleteTarget?.toolkit.name ?? "",
-            })}
+            {t(
+              props.deleteTarget?.ownership_scope === "workspace_shared"
+                ? "toolkitManagement.detachDescription"
+                : "toolkitManagement.deleteDescription",
+              { name: props.deleteTarget?.toolkit.name ?? "" },
+            )}
           </Text>
           <Group justify="flex-end">
-            <Button variant="default" onClick={props.onCancelDelete}>
+            <Button
+              variant="default"
+              onClick={props.onCancelDelete}
+              disabled={props.deletePending}
+            >
               {t("cancel")}
             </Button>
             <Button
@@ -656,7 +693,11 @@ export function ManagedAgentToolkitSectionView(
               loading={props.deletePending}
               onClick={props.onConfirmDelete}
             >
-              {t("toolkitManagement.deleteConfirm")}
+              {t(
+                props.deleteTarget?.ownership_scope === "workspace_shared"
+                  ? "toolkitManagement.detach"
+                  : "toolkitManagement.deleteConfirm",
+              )}
             </Button>
           </Group>
         </Stack>

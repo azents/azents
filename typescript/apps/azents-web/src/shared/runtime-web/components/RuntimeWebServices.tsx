@@ -62,6 +62,7 @@ export function RuntimeWebServices(
 }
 
 export function RuntimeWebServicesView({
+  readOnly,
   state,
   action,
   mutationError,
@@ -109,7 +110,7 @@ export function RuntimeWebServicesView({
   }
 
   const validPort = typeof port === "number" && port >= 1 && port <= 65_535;
-  const mutating = action !== null;
+  const mutating = action !== null || readOnly;
   const durationOptions = [
     { value: "3600", label: t("duration.oneHour") },
     { value: "21600", label: t("duration.sixHours") },
@@ -129,6 +130,7 @@ export function RuntimeWebServicesView({
           <Button
             leftSection={<IconWorld size={rem(16)} />}
             onClick={() => setCreateOpened(true)}
+            disabled={readOnly}
           >
             {t("panel.create")}
           </Button>

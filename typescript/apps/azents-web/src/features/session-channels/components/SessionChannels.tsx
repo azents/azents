@@ -315,7 +315,9 @@ function BindingPanel({
                 },
               ]}
               value={responseModeDraft}
-              disabled={!connected || archived || responseModeSaving}
+              disabled={
+                actionsBusy || !connected || archived || responseModeSaving
+              }
               onChange={(value) =>
                 onResponseModeChange(
                   binding,
@@ -422,6 +424,7 @@ export function SessionChannels(
 }
 
 export function SessionChannelsView({
+  agent,
   state,
   actionError,
   disconnectingId,
@@ -495,7 +498,9 @@ export function SessionChannelsView({
                     binding={binding}
                     archived={state.session.archived_at !== null}
                     busy={disconnectingId === binding.id}
-                    actionsBusy={disconnectingId !== null}
+                    actionsBusy={
+                      disconnectingId !== null || agent.deletion_status !== null
+                    }
                     responseModeDraft={
                       responseModeDrafts[binding.id] ?? binding.response_mode
                     }

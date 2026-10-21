@@ -8,7 +8,7 @@ from typing import Annotated, NoReturn, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from azents.core.agent_errors import NotFound
+from azents.core.agent_errors import InvalidRoutineCadence, NotFound
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.historical_memory_settings import (
     HistoricalMemorySettingsScope,
@@ -262,6 +262,7 @@ async def create_agent(
         max_turns=request_body.max_turns,
         auto_archive_ttl_days=request_body.auto_archive_ttl_days,
         routine_check_interval_minutes=request_body.routine_check_interval_minutes,
+        routine_min_action_delay_minutes=request_body.routine_min_action_delay_minutes,
         subagent_settings=request_body.subagent_settings,
     )
     result = await service.create(
@@ -418,6 +419,10 @@ def _build_agent_update_input(
         result["routine_check_interval_minutes"] = request_body[
             "routine_check_interval_minutes"
         ]
+    if "routine_min_action_delay_minutes" in request_body:
+        result["routine_min_action_delay_minutes"] = request_body[
+            "routine_min_action_delay_minutes"
+        ]
     if "subagent_settings" in request_body:
         result["subagent_settings"] = request_body["subagent_settings"]
 
@@ -461,6 +466,11 @@ async def update_agent(
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Not allowed to manage this agent.",
+                )
+            case InvalidRoutineCadence():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Minimum Routine action delay must not exceed tick.",
                 )
             case ModelRequired():
                 raise HTTPException(

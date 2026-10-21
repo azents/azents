@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import re
 from typing import NamedTuple
 from unittest.mock import AsyncMock
 
@@ -168,23 +169,29 @@ def _turn_context(
     )
 
 
-async def test_toolkit_exposes_management_tools_and_valid_cycle_terminal_tool() -> None:
-    """The terminal action is bound only to the current started cycle."""
-    management, *_ = _toolkit(active_cycle=None)
+async def test_toolkit_exposes_all_tools_independently_of_cycle_binding() -> None:
+    """Tool visibility is stable while cycle guidance remains Run-bound."""
+    management, management_operations, *_ = _toolkit(active_cycle=None)
     management_state = await management.update_context(_turn_context())
-    active, *_ = _toolkit(active_cycle=_cycle())
+    active, active_operations, *_ = _toolkit(active_cycle=_cycle())
     active_state = await active.update_context(_turn_context())
 
     assert [tool.spec.name for tool in management_state.tools] == [
         "add_scheduled_task",
         "list_scheduled_tasks",
         "delete_scheduled_task",
+        "submit_scheduled_task_result",
     ]
     assert [tool.spec.name for tool in active_state.tools] == [
         "add_scheduled_task",
         "list_scheduled_tasks",
         "delete_scheduled_task",
         "submit_scheduled_task_result",
+    ]
+    management_operations.active_cycle.assert_not_awaited()
+    active_operations.active_cycle.assert_not_awaited()
+    assert [tool.spec for tool in management_state.tools] == [
+        tool.spec for tool in active_state.tools
     ]
     assert await management.get_dynamic_prompt(_turn_context()) == ""
     assert "Active Scheduled Task Work Cycle" in await active.get_dynamic_prompt(
@@ -202,6 +209,43 @@ async def test_toolkit_exposes_management_tools_and_valid_cycle_terminal_tool() 
     )
     assert "absolute POSIX Runtime path" in submit_schema_json
     assert "exchange://" in submit_schema_json
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "The current AgentRun is not an active Scheduled Task cycle.",
+        "The current AgentRun has no matching started Scheduled Task cycle.",
+        "Scheduled terminal Session does not match owner",
+    ],
+)
+async def test_always_visible_terminal_tool_preserves_submission_rejection(
+    error: str,
+) -> None:
+    """Rejected execution authority cannot publish or terminate another cycle."""
+    toolkit, _, terminal_service, channel_service, _ = _toolkit(active_cycle=None)
+    publish_event = AsyncMock()
+    terminal_service.submit.side_effect = ValueError(error)
+    state = await toolkit.update_context(_turn_context(publish_event))
+    terminal_tool = next(
+        tool for tool in state.tools if tool.spec.name == "submit_scheduled_task_result"
+    )
+
+    with pytest.raises(FunctionToolError, match=re.escape(error)):
+        await terminal_tool.handler(
+            json.dumps({"status": "finished", "result": "Completed.", "files": None})
+        )
+
+    terminal_service.submit.assert_awaited_once_with(
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        run_id=_RUN_ID,
+        status="finished",
+        result="Completed.",
+    )
+    publish_event.assert_not_awaited()
+    channel_service.execute_terminal.assert_not_awaited()
 
 
 async def test_management_tools_derive_scope_and_project_execution_state() -> None:

@@ -6,12 +6,13 @@ from typing import Annotated
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
-from azents.core.enums import AgentLifecycleStatus, AgentType, WorkspaceUserRole
+from azents.core.enums import AgentType, WorkspaceUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.workspace_upload_authority.data import (
     WorkspaceUploadRequesterAccessDenied,
     WorkspaceUploadRequesterAgentUnavailable,
@@ -50,10 +51,7 @@ class WorkspaceUploadAuthorizationRepository:
         """Resolve upload authority in one completed database transaction."""
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
+            if agent is None:
                 return Failure(WorkspaceUploadRequesterAgentUnavailable())
 
             membership = await self.workspace_user_repository.get_by_workspace_and_user(
@@ -75,6 +73,7 @@ class WorkspaceUploadAuthorizationRepository:
             ):
                 return Failure(WorkspaceUploadRequesterAccessDenied())
 
+            await require_active_agent(session, agent_id=agent_id)
             return Success(
                 WorkspaceUploadRequesterAuthority(
                     agent=agent,

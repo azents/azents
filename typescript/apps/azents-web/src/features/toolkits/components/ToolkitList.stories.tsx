@@ -457,6 +457,40 @@ export const ManagementQa: Story = {
   },
 };
 
+export const DeleteFromList: Story = {
+  tags: ["ci-contract"],
+  parameters: { testViewport: { width: 390, height: 844 } },
+  render: () => <InteractiveFixture />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const card = within(canvas.getByRole("article", { name: "개발팀 GitHub" }));
+    await userEvent.click(card.getByRole("button", { name: "Delete" }));
+    let dialog = within(await page.findByRole("dialog", { name: "Delete" }));
+    await waitFor(async () => {
+      await expect(dialog.getByText("개발팀 GitHub")).toBeVisible();
+    });
+    await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+    await waitFor(async () => {
+      await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await expect(
+      canvas.getByRole("article", { name: "개발팀 GitHub" }),
+    ).toBeVisible();
+    await userEvent.click(card.getByRole("button", { name: "Delete" }));
+    dialog = within(await page.findByRole("dialog", { name: "Delete" }));
+    await userEvent.click(dialog.getByRole("button", { name: "Delete" }));
+    await waitFor(async () => {
+      await expect(page.queryByRole("dialog")).not.toBeInTheDocument();
+      await expect(
+        canvas.queryByRole("article", { name: "개발팀 GitHub" }),
+      ).not.toBeInTheDocument();
+    });
+    const root = canvasElement.ownerDocument.documentElement;
+    await expect(root.scrollWidth).toBeLessThanOrEqual(root.clientWidth);
+  },
+};
+
 export const PendingQa: Story = {
   ...PublicationPending,
   play: async ({ canvasElement, args }) => {

@@ -79,6 +79,7 @@ export function AgentDraftChat(
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
+        touchAction: "pinch-zoom",
       }}
     >
       <Box style={{ flexShrink: 0 }}>
@@ -105,7 +106,12 @@ export function AgentDraftChat(
         aria-label={t("startConversation")}
         flex={1}
         mih={0}
-        style={{ display: "flex", flexDirection: "column", overflowY: "auto" }}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          overflowY: "auto",
+          touchAction: "pan-y pinch-zoom",
+        }}
       >
         <Center px="md" py="lg" style={{ flex: "1 0 auto" }}>
           <Stack align="center" gap="sm">
@@ -189,12 +195,13 @@ export function AgentDraftChat(
             isStopPending={false}
             onStopRequest={onStopRequest}
             inputActions={[]}
+            inputDisabled={agent.deletion_status !== null}
             editSendDisabled={isWritePending || !canSendMessage}
           />
         </Box>
       </Box>
       <WorkspaceDirectoryPickerModal
-        opened={isProjectPickerOpen}
+        opened={isProjectPickerOpen && agent.deletion_status === null}
         state={projectPickerState}
         runtimeSettingsHref={`/w/${handle}/agents/${agent.id}/settings/runtime`}
         onClose={onCloseProjectPicker}

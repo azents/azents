@@ -245,6 +245,15 @@ export function ToolkitList(props: ToolkitListProps): ReactElement {
                       )}
                       <Button
                         variant="subtle"
+                        color="red"
+                        size="xs"
+                        disabled={blocked}
+                        onClick={() => props.onDelete(toolkit.id)}
+                      >
+                        {t("delete")}
+                      </Button>
+                      <Button
+                        variant="subtle"
                         size="xs"
                         rightSection={<IconArrowRight size="1em" />}
                         disabled={blocked}

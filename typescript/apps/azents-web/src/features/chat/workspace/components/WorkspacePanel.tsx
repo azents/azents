@@ -63,6 +63,7 @@ const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
 };
 
 export interface WorkspacePanelProps {
+  readOnly: boolean;
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   metricsState: RuntimeSystemMetricsOverviewState;
@@ -141,6 +142,7 @@ interface WorkspacePanelViewProps extends WorkspacePanelProps {
 }
 
 export function WorkspacePanel({
+  readOnly,
   t,
   state,
   projectState,
@@ -294,7 +296,15 @@ export function WorkspacePanel({
       return renderCapabilityView(state);
     }
 
-    const { actions, lifecycle, runtime } = state.server;
+    const { lifecycle, runtime } = state.server;
+    const actions = readOnly
+      ? {
+          ...state.server.actions,
+          start: null,
+          restart: null,
+          reset: null,
+        }
+      : state.server.actions;
     const canStartRuntime = actions.start !== null;
     const canStopRuntime = actions.stop !== null;
     const canRestartRuntime = actions.restart !== null;
@@ -674,6 +684,7 @@ export function WorkspacePanel({
                   />
                 ) : state.workspaceView === "info" ? (
                   <FileInfo
+                    readOnly={readOnly}
                     entry={state.selectedEntry}
                     stat={
                       state.inspectorState.type === "LOADED"
@@ -701,6 +712,7 @@ export function WorkspacePanel({
                   />
                 ) : (
                   <FileBrowserContainer
+                    readOnly={readOnly}
                     root={state.manifest.root}
                     cwd={state.manifest.cwd}
                     path={state.directory.path}
@@ -858,7 +870,7 @@ export function WorkspacePanel({
         </Tabs.Panel>
       </Tabs>
       <WorkspaceDirectoryPickerModal
-        opened={isProjectPickerOpen}
+        opened={isProjectPickerOpen && !readOnly}
         state={projectPickerState}
         onClose={onCloseProjectPicker}
         onOpenDirectory={onOpenProjectPickerDirectory}
@@ -870,7 +882,7 @@ export function WorkspacePanel({
       />
       <Modal
         centered
-        opened={restartConfirmOpen}
+        opened={restartConfirmOpen && !readOnly}
         title={t("restartConfirmTitle")}
         onClose={() => onCloseRestartConfirm()}
       >
@@ -887,7 +899,7 @@ export function WorkspacePanel({
       </Modal>
       <Modal
         centered
-        opened={resetConfirmOpen}
+        opened={resetConfirmOpen && !readOnly}
         title={t("resetRuntime")}
         onClose={() => onCloseResetConfirm()}
       >
@@ -909,7 +921,7 @@ export function WorkspacePanel({
       </Modal>
       <Modal
         centered
-        opened={registrationDialog.type === "OPEN"}
+        opened={registrationDialog.type === "OPEN" && !readOnly}
         title={t("registrationModalTitle")}
         onClose={onCloseProjectRegistration}
       >

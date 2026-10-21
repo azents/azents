@@ -36,6 +36,8 @@ def _foreign_key(
         constraint_name=constraint_name,
         source_table=source_table,
         target_table=target_table,
+        source_columns=("parent_id",),
+        target_columns=("id",),
         delete_action=delete_action,
         triggers=(),
     )
@@ -162,25 +164,18 @@ async def test_installed_catalog_reader_exposes_worktree_finalizer_boundary(
     }
 
 
-async def test_installed_catalog_restricts_agent_decommission_lifecycle_roots(
+async def test_installed_catalog_restricts_workspace_owned_lifecycle_roots(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
 ) -> None:
-    """Fresh migrated PostgreSQL protects Agent and Workspace lifecycle roots."""
+    """Workspace deletion cannot bypass its Agent, Session or Runtime owners."""
     foreign_keys = await PostgreSQLSessionLifecycleGraphRepository(
         create_read_only_session_manager(rdb_engine)
     ).read_foreign_keys()
     expected_constraints = {
         "agents_workspace_id_fkey",
         "agent_sessions_workspace_id_fkey",
-        "agent_sessions_agent_id_fkey",
         "agent_runtimes_workspace_id_fkey",
-        "agent_runtimes_agent_id_fkey",
-        "artifacts_agent_id_fkey",
-        "exchange_files_agent_id_fkey",
-        "model_files_agent_id_fkey",
-        "session_agent_contexts_agent_id_fkey",
-        "toolkit_states_agent_id_fkey",
     }
     lifecycle_root_foreign_keys = {
         foreign_key.constraint_name: foreign_key
