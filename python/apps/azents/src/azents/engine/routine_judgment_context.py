@@ -54,6 +54,7 @@ class RoutineJudgmentContext:
     model_target_label: str
     turn: TurnContext
     admit_dispatch: Callable[[], Awaitable[None]]
+    advance_after_quota: Callable[[], Awaitable["RoutineJudgmentContext | None"]]
 
 
 PrepareRoutineJudgmentContext = Callable[[], Awaitable[RoutineJudgmentContext]]

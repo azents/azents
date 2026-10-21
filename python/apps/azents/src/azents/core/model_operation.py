@@ -30,6 +30,7 @@ class ModelOperationKind(enum.StrEnum):
     COMPACTION = "compaction"
     TITLE = "title"
     HISTORICAL_MEMORY = "historical_memory"
+    ROUTINE_JUDGMENT = "routine_judgment"
 
 
 class ModelOperationCandidateRole(enum.StrEnum):
