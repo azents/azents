@@ -100,16 +100,16 @@ def test_google_same_context_partial_review_and_metadata_preservation(
                 )
             )
         ).click()
-    _assert_visible_text(browser_driver, "1. Choose tasks")
+    _assert_visible_text(browser_driver, "1. Choose services and access")
     assert not any(
         item.is_selected()
         for item in browser_driver.find_elements(
             By.CSS_SELECTOR,
-            'section[aria-labelledby="google-select-heading"] input[type="checkbox"]',
+            'section[aria-labelledby="google-select-heading"] input[role="switch"]',
         )
     )
-    check(browser_driver, "Read calendars and events")
-    check(browser_driver, "Read Gmail")
+    check(browser_driver, "Calendar")
+    check(browser_driver, "Gmail")
     original_window = browser_driver.current_window_handle
     _click_button(browser_driver, "Continue to Google")
     _assert_visible_text(browser_driver, "2. Review account and permissions")
@@ -138,12 +138,8 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     save = browser_driver.find_element(
         By.XPATH, '//button[normalize-space()="Save Google Toolkit"]'
     )
-    assert not save.is_enabled()
+    assert save.is_enabled()
     _fill_text_input(browser_driver, "Toolkit name", "Google browser connection")
-    check(
-        browser_driver,
-        "I have reviewed these screening limits and the ownership of this connection.",
-    )
     _click_button(browser_driver, "Save Google Toolkit")
     _assert_visible_text(browser_driver, "Google browser connection")
     if agent_id is None:
@@ -172,10 +168,6 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     _fill_text_input(browser_driver, "Tool request timeout (seconds)", "12")
     _click_button(browser_driver, "Authorize replacement connection")
     _assert_visible_text(browser_driver, "2. Review account and permissions")
-    check(
-        browser_driver,
-        "I have reviewed these screening limits and the ownership of this connection.",
-    )
     _click_button(browser_driver, "Replace saved connection")
     _assert_visible_text(browser_driver, "Connection saved")
     _fill_text_input(browser_driver, "Name", "Renamed after reconnect")
@@ -212,7 +204,8 @@ def test_google_same_context_partial_review_and_metadata_preservation(
         "" if agent_id is None else "/agents/" + agent_id
     )
     assert saved_status(base, workspace.token, saved.id).status == "connected"
-    assert (
-        "synthetic-access-" not in browser_driver.page_source
-        and "synthetic-renewal-" not in browser_driver.page_source
-    )
+    if any(
+        marker in browser_driver.page_source
+        for marker in ("synthetic-access-", "synthetic-renewal-")
+    ):
+        raise AssertionError("Google credentials leaked into the rendered document.")

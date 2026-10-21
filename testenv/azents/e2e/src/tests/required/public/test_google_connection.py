@@ -98,10 +98,8 @@ def prepare_operator(admin: azentsadminclient.ApiClient) -> None:
         )
     )
     assert configured.status == "configured_unverified"
-    assert (
-        configured.preview_verified is False
-        and configured.service_access_verified is False
-    )
+    assert configured.service_access_verified is False
+    assert configured.picker_status == "not_configured"
     assert CLIENT_SECRET not in configured.to_json()
 
 
@@ -149,7 +147,17 @@ def connect(
             token,
             "POST",
             path,
-            {"tasks": ["calendar_read", "calendar_edit", "gmail_read"], "timeout": 30},
+            {
+                "services": ["calendar", "gmail"],
+                "oauth_request_scopes": [
+                    "openid",
+                    "email",
+                    "https://www.googleapis.com/auth/calendar.events.readonly",
+                    "https://www.googleapis.com/auth/calendar.events",
+                    "https://www.googleapis.com/auth/gmail.readonly",
+                ],
+                "timeout": 30,
+            },
         ).text
     )
     assert prepared is not None
@@ -166,12 +174,12 @@ def connect(
         or reviewed.identity.email == "replacement-account@example.invalid"
     )
     assert "access_token" not in reviewed.model_dump_json()
-    assert (
-        next(
-            item for item in reviewed.tasks if item.task.value == "calendar_edit"
-        ).status
-        == "not_granted"
+    calendar = next(
+        item for item in reviewed.accesses if item.service.value == "calendar"
     )
+    assert "calendar_create_event" not in [
+        tool.value for tool in calendar.permitted_tools
+    ]
     return reviewed
 
 
@@ -183,9 +191,13 @@ def final_settings(slug: str) -> dict[str, object]:
         "prompt": None,
         "enabled": True,
         "always_expose_tools": True,
-        "tasks": ["calendar_read"],
+        "services": ["calendar"],
+        "oauth_request_scopes": [
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/calendar.events.readonly",
+        ],
         "timeout": 30,
-        "security_risk_acknowledged": True,
     }
 
 
@@ -262,7 +274,7 @@ def test_google_review_publication_reconnect_and_exact_outcome(
         json={
             "settings": {
                 **final_settings("google_product"),
-                "security_risk_acknowledged": False,
+                "services": ["drive"],
             }
         },
         timeout=10,
@@ -295,9 +307,13 @@ def test_google_review_publication_reconnect_and_exact_outcome(
             "/google/attempts/" + replacement.attempt_id + "/reconnect-confirm",
             {
                 "settings": {
-                    "tasks": ["calendar_read"],
+                    "services": ["calendar"],
+                    "oauth_request_scopes": [
+                        "openid",
+                        "email",
+                        "https://www.googleapis.com/auth/calendar.events.readonly",
+                    ],
                     "timeout": 12,
-                    "security_risk_acknowledged": True,
                 }
             },
         ).text
@@ -356,10 +372,7 @@ def test_google_verified_partial_grant_reaches_worker_and_blocks_write(
     )
     base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
     review = connect(fixture, base, workspace.token)
-    worker_settings = {
-        **final_settings("google_product"),
-        "tasks": ["calendar_read", "calendar_edit"],
-    }
+    worker_settings = final_settings("google_product")
     published = GooglePublishedOutput.from_json(
         response(
             base,
@@ -371,14 +384,19 @@ def test_google_verified_partial_grant_reaches_worker_and_blocks_write(
     )
     assert published is not None
     current = saved_status(base, workspace.token, published.toolkit_id)
-    edit = next(item for item in current.tasks if item.task.value == "calendar_edit")
-    assert edit.status == "not_granted"
+    calendar = next(
+        item for item in current.accesses if item.service.value == "calendar"
+    )
+    assert "calendar_list_events" in [tool.value for tool in calendar.permitted_tools]
+    assert "calendar_create_event" not in [
+        tool.value for tool in calendar.permitted_tools
+    ]
     saved = ToolkitV1Api(public_api_client).toolkit_v1_get_toolkit_config(
         handle=workspace.handle,
         toolkit_config_id=published.toolkit_id,
         _headers=headers,
     )
-    assert "calendar_edit" in saved.config["tasks"]
+    assert saved.config["services"] == ["calendar"]
     ToolkitV1Api(public_api_client).toolkit_v1_attach_toolkit_to_agent(
         handle=workspace.handle,
         agent_id=agent.id,
@@ -443,6 +461,7 @@ def test_google_verified_partial_grant_reaches_worker_and_blocks_write(
         "calendar.list_events" in state.calls
         and "calendar.create_event" not in state.calls
     )
+    assert state.effects == []
     assert CLIENT_SECRET not in json.dumps(
         [item.model_dump(mode="json") for item in results]
     )
