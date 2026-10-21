@@ -1,5 +1,6 @@
 "use client";
 import {
+  Accordion,
   Alert,
   Badge,
   Button,
@@ -15,6 +16,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
+import { GoogleApplicationSetupGuide } from "./GoogleApplicationSetupGuide";
 import type { GoogleApplicationCardProps } from "../containers/useGoogleApplicationCardContainer";
 
 export function GoogleApplicationCard({
@@ -43,7 +45,9 @@ export function GoogleApplicationCard({
     <Paper withBorder p="lg" radius="md">
       <Stack gap="md">
         <Group justify="space-between">
-          <Title order={4}>Google service authorization</Title>
+          <Title order={3} size="h4">
+            Google service authorization
+          </Title>
           <Badge
             color={
               detail.status === "configured_unverified" ? "blue" : "yellow"
@@ -61,6 +65,21 @@ export function GoogleApplicationCard({
           for Calendar, Drive and Gmail. The configured application is not proof
           of Preview eligibility or live service access.
         </Text>
+        <Accordion
+          variant="contained"
+          defaultValue={
+            detail.status === "configured_unverified" ? null : "setup"
+          }
+        >
+          <Accordion.Item value="setup">
+            <Accordion.Control>
+              How to set up the Google application
+            </Accordion.Control>
+            <Accordion.Panel>
+              <GoogleApplicationSetupGuide />
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion>
         <Alert color="yellow">
           Changing the client ID makes grants issued for the previous client
           ineligible and requires explicit reconnection. Rotating the secret for

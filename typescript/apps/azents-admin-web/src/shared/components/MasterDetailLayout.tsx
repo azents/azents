@@ -6,7 +6,7 @@
  * Desktop: two-column CSS Grid with independently scrolling panels.
  * Mobile: master panel with the detail rendered in a full-screen Drawer.
  */
-import { Box, Drawer, Paper } from "@mantine/core";
+import { Box, Drawer } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 
 interface MasterDetailLayoutProps {
@@ -25,7 +25,7 @@ export function MasterDetailLayout({
   detail,
   detailOpen,
   onDetailClose,
-  columns = "1fr 1fr",
+  columns = "minmax(0, 1fr) minmax(0, 1fr)",
   style,
 }: MasterDetailLayoutProps): React.ReactElement {
   // Mantine's md breakpoint is 62em. Default to desktop during SSR to avoid
@@ -38,37 +38,45 @@ export function MasterDetailLayout({
         style={{
           display: "grid",
           gridTemplateColumns: columns,
-          gap: "var(--mantine-spacing-md)",
           height: "100%",
+          minWidth: 0,
           ...style,
         }}
       >
-        <Paper
-          withBorder
-          style={{ overflow: "auto", minHeight: 0, height: "100%" }}
+        <Box
+          style={{
+            overflow: "auto",
+            minWidth: 0,
+            minHeight: 0,
+            height: "100%",
+            borderRight: "1px solid var(--mantine-color-default-border)",
+          }}
         >
           {master}
-        </Paper>
-        <Paper
-          withBorder
-          style={{ overflow: "auto", minHeight: 0, height: "100%" }}
+        </Box>
+        <Box
+          style={{
+            overflow: "auto",
+            minWidth: 0,
+            minHeight: 0,
+            height: "100%",
+          }}
         >
           {detail}
-        </Paper>
+        </Box>
       </Box>
     );
   }
 
   return (
     <Box style={{ height: "100%", ...style }}>
-      <Paper withBorder style={{ overflow: "auto", height: "100%" }}>
-        {master}
-      </Paper>
+      <Box style={{ overflow: "auto", height: "100%" }}>{master}</Box>
       <Drawer
         opened={detailOpen}
         onClose={onDetailClose}
         position="bottom"
         size="100%"
+        title="Details"
         withCloseButton
       >
         {detail}

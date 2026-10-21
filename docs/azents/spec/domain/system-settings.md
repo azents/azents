@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-15
+updated: 2026-10-21
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -30,6 +30,12 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - typescript/apps/azents-admin-web/src/app/system-settings/**
   - typescript/apps/azents-admin-web/src/features/system-settings/**
+  - typescript/apps/azents-admin-web/src/app/client-layout.tsx
+  - typescript/apps/azents-admin-web/src/shared/AdminShellContainer.tsx
+  - typescript/apps/azents-admin-web/src/shared/components/AdminShell.tsx
+  - typescript/apps/azents-admin-web/src/shared/components/MasterDetailLayout.tsx
+  - typescript/apps/azents-admin-web/src/shared/containers/useAdminShellContainer.ts
+  - typescript/apps/azents-admin-web/src/shared/lib/admin-navigation.ts
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
   - infra/charts/azents/templates/server/apiserver-deployment.yaml.tpl
   - infra/charts/azents/templates/server/adminserver-deployment.yaml.tpl
@@ -63,7 +69,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle/compacted-event-retention
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-15
+last_verified_at: 2026-10-21
 spec_version: 10
 ---
 
@@ -111,6 +117,10 @@ state, environment-owned read-only fields, explicit secret replacement/clear
 actions and the deployment callback. A conflict or uncertain save requires
 reloading current settings before retry; reload discards the draft. Local
 configuration is not presented as verified Preview eligibility or service access.
+An expandable setup guide opens by default for incomplete or missing configuration.
+It explains Preview access, Cloud project and service enablement, consent setup,
+Web application client creation, exact callback registration, credential entry,
+and the separate Toolkit account-connection flow, with official Google links.
 See [Google Connection](google-connection.md) for the exact management, execution
 and candidate/publication contracts.
 
@@ -265,10 +275,49 @@ identity bindings.
 detail, patch, candidate validation/confirmation/cancellation, current-effective health check, and
 metadata-only audit list are exposed beneath `/system-setting/v1`.
 
-Admin Web exposes System Settings in authenticated Admin navigation. It renders inventory and Platform
-GitHub App detail, field source and fallback state, explicit secret actions, candidate validation and
-health state, aggregate binding impact, and confirmation choices. It never renders secret plaintext,
-effective generations, or resource identifiers from impact analysis.
+Admin Web exposes System Settings in authenticated Admin navigation. The workspace
+shows one purpose-based section at a time: Google, GitHub, Account linking (Slack
+and Discord), File transfers, Memory, or Audit log. These destinations are links
+in the shared Admin navigation's Settings group, not a second sidebar inside the
+settings workspace. The Next-managed `section` query parameter preserves the
+selection across reload and browser history; missing or unknown values select
+Google. Header, active link and content read the same query state. The workspace
+is mounted by the persistent `/system-settings` route layout, so query navigation
+does not recreate its state owners. Section subtrees remain mounted, preserving
+in-progress drafts without saving them. Each section retains independent save controls.
+
+Platform GitHub App detail, field source and fallback state, explicit secret
+actions, candidate validation and health, aggregate binding impact, and
+confirmation choices appear only in the GitHub section. GitHub loading and
+failure states do not replace the other settings sections. Its effective status
+is explicitly labeled as GitHub App status, not instance-wide settings health.
+The Audit log section renders the existing metadata-only settings events. The
+workspace never renders stored secret plaintext, effective generations, or
+resource identifiers from impact analysis.
+
+### Shared Admin application layout
+
+All authenticated Admin destinations use one shared shell. Its navigation groups
+are People & access (Workspaces, Users, Workspace members, Email verifications,
+Signup links), Platform (Model catalog, Runtime providers, Retention), Settings
+(the six settings sections above), and Diagnostics (Debug). Existing route paths,
+configured public base-path handling, Refine resources, authentication and
+feature operations are preserved. Nested workspace detail routes retain the
+Workspaces location. Active links match route-segment boundaries rather than
+unrelated string prefixes.
+
+Desktop has one sidebar; mobile exposes the same destinations in a modal
+navigation drawer with Escape, focus handling and close-on-navigation. Resizing
+to desktop closes an open mobile navigation drawer. The shared header shows
+the current group and destination on desktop, the destination on mobile, and
+retains light/dark/system theme controls. Sign out remains in the navigation.
+
+The shell fits the dynamic viewport height. Its bounded content surface scrolls
+long forms without adding an outer document scroll. Master-detail screens use
+connected, independently scrolling panes on desktop and the existing full-screen
+detail drawer on mobile, now with an accessible Details title. Login and initial
+administrator bootstrap remain standalone forms with unchanged behavior, a
+bounded card and dynamic-viewport-safe minimum height.
 
 ### Helm and process delivery
 

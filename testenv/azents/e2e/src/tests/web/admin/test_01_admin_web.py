@@ -314,7 +314,7 @@ def test_admin_system_settings_page_renders_redacted_platform_fields(
     azents_admin_web_url: str,
     system_bootstrap_evidence: SystemBootstrapEvidence,
 ) -> None:
-    """Admin Web exposes System Settings without rendering secret plaintext."""
+    """The shared navigation exposes focused settings with redacted secrets."""
     _login_admin_web(
         browser_driver,
         base_url=azents_admin_web_url,
@@ -322,37 +322,87 @@ def test_admin_system_settings_page_renders_redacted_platform_fields(
         password=_BOOTSTRAP_PASSWORD,
     )
     _wait(browser_driver).until(
-        ec.element_to_be_clickable((By.LINK_TEXT, "System Settings"))
+        ec.element_to_be_clickable((By.LINK_TEXT, "GitHub"))
     ).click()
-    _wait(browser_driver).until(ec.url_contains("/system-settings"))
+    _wait(browser_driver).until(ec.url_contains("/system-settings?section=github"))
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (By.XPATH, "//header//*[normalize-space()='GitHub']")
+        )
+    )
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "nav[aria-label='Admin navigation'] "
+                "a[aria-current='page'][href$='?section=github']",
+            )
+        )
+    )
     for text in (
-        "System Settings",
         "Platform GitHub App",
         "App ID",
         "Client ID",
         "Private key replacement",
         "Client secret replacement",
         "Effective health",
-        "Audit events",
     ):
         _wait(browser_driver).until(
             ec.visibility_of_element_located(
-                (By.XPATH, f"//*[contains(normalize-space(), '{text}')]")
+                (
+                    By.XPATH,
+                    f"//section[@aria-label='GitHub']//*[normalize-space()='{text}']",
+                )
             )
         )
 
     private_key_input = browser_driver.find_element(
         By.XPATH,
+        "//section[@aria-label='GitHub']"
         "//label[contains(normalize-space(), 'Private key replacement')]"
         "/following::input[1]",
     )
     client_secret_input = browser_driver.find_element(
         By.XPATH,
+        "//section[@aria-label='GitHub']"
         "//label[contains(normalize-space(), 'Client secret replacement')]"
         "/following::input[1]",
     )
     assert private_key_input.get_attribute("value") == ""
     assert client_secret_input.get_attribute("value") == ""
+    client_id_locator = (
+        "//section[@aria-label='GitHub']"
+        "//label[normalize-space()='Client ID']/following::input[1]"
+    )
+    browser_driver.find_element(By.XPATH, client_id_locator).send_keys(
+        "draft-client-not-saved"
+    )
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable((By.LINK_TEXT, "Audit log"))
+    ).click()
+    _wait(browser_driver).until(ec.url_contains("/system-settings?section=audit"))
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (By.XPATH, "//header//*[normalize-space()='Audit log']")
+        )
+    )
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.XPATH,
+                "//section[@aria-label='Audit log']"
+                "//*[normalize-space()='Audit events']",
+            )
+        )
+    )
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable((By.LINK_TEXT, "GitHub"))
+    ).click()
+    _wait(browser_driver).until(ec.url_contains("/system-settings?section=github"))
+    restored_client_id = _wait(browser_driver).until(
+        ec.element_to_be_clickable((By.XPATH, client_id_locator))
+    )
+    assert restored_client_id.get_attribute("value") == "draft-client-not-saved"
     assert "effective_generation" not in browser_driver.page_source
 
 

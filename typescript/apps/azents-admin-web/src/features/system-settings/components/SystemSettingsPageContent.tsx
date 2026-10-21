@@ -17,7 +17,6 @@ import {
   Table,
   Text,
   TextInput,
-  Title,
 } from "@mantine/core";
 import {
   IconAlertTriangle,
@@ -26,10 +25,10 @@ import {
   IconFile,
   IconHeartbeat,
   IconRefresh,
-  IconSettings,
   IconX,
 } from "@tabler/icons-react";
 import { GoogleApplicationCardContainer } from "../GoogleApplicationCardContainer";
+import { SystemSettingsLayoutContainer } from "../SystemSettingsLayoutContainer";
 import { ExternalAccountOAuthCards } from "./ExternalAccountOAuthCards";
 import { HistoricalMemoryExecutionCard } from "./HistoricalMemoryExecutionCard";
 import type { SystemSettingsPageContentProps } from "../containers/useSystemSettingsPageContainer";
@@ -453,15 +452,8 @@ function AuditTable({
   );
 }
 
-export function SystemSettingsPageContent({
-  externalFilesState,
-  externalFilesDraft,
-  externalFilesSaving,
-  externalFilesDraftDirty,
-  externalFilesSaveDisabled,
-  externalFilesMutationError,
+function GitHubSettingsSection({
   state,
-  auditState,
   draft,
   confirmationAction,
   confirmationActions,
@@ -473,9 +465,6 @@ export function SystemSettingsPageContent({
   checkingHealth,
   saveDisabled,
   mutationError,
-  onOutboundMaxFileMiBChange,
-  onOutboundMaxActionMiBChange,
-  onSaveExternalFiles,
   onAppIdChange,
   onClientIdChange,
   onPrivateKeyChange,
@@ -498,7 +487,7 @@ export function SystemSettingsPageContent({
   }
   if (state.type === "ERROR") {
     return (
-      <Alert color="red" title="Unable to load System Settings">
+      <Alert color="red" title="Unable to load GitHub settings">
         {state.message}
       </Alert>
     );
@@ -511,18 +500,11 @@ export function SystemSettingsPageContent({
   const clientSecretField = findField(detail, "client_secret");
 
   return (
-    <Stack gap="lg" p="md" maw="72rem">
-      <Group justify="space-between" align="flex-start">
-        <Stack gap={4}>
-          <Group gap="sm">
-            <IconSettings size={24} />
-            <Title order={2}>System Settings</Title>
-          </Group>
-          <Text c="dimmed">
-            Manage instance-wide operational configuration with redacted secret
-            state and deployment-environment ownership.
-          </Text>
-        </Stack>
+    <Stack gap="lg">
+      <Group justify="space-between">
+        <Text size="sm" fw={600}>
+          GitHub App status
+        </Text>
         <Badge size="lg" color={effectiveStatusColor(detail.effective_status)}>
           {titleCase(detail.effective_status)}
         </Badge>
@@ -532,7 +514,7 @@ export function SystemSettingsPageContent({
         <Alert
           color="red"
           icon={<IconAlertTriangle size={16} />}
-          title="System Settings operation failed"
+          title="GitHub settings operation failed"
         >
           {mutationError}
         </Alert>
@@ -544,23 +526,6 @@ export function SystemSettingsPageContent({
           identity. Users must reconnect affected toolkits in Main Web.
         </Alert>
       )}
-
-      <ExternalChannelFilesCard
-        externalFilesState={externalFilesState}
-        externalFilesDraft={externalFilesDraft}
-        externalFilesSaving={externalFilesSaving}
-        externalFilesDraftDirty={externalFilesDraftDirty}
-        externalFilesSaveDisabled={externalFilesSaveDisabled}
-        externalFilesMutationError={externalFilesMutationError}
-        onOutboundMaxFileMiBChange={onOutboundMaxFileMiBChange}
-        onOutboundMaxActionMiBChange={onOutboundMaxActionMiBChange}
-        onSaveExternalFiles={onSaveExternalFiles}
-      />
-
-      <ExternalAccountOAuthCards />
-      <GoogleApplicationCardContainer />
-
-      <HistoricalMemoryExecutionCard />
 
       <Paper withBorder p="lg" radius="md">
         <Stack gap="lg">
@@ -755,19 +720,40 @@ export function SystemSettingsPageContent({
           </Stack>
         </Paper>
       )}
-
-      <Paper withBorder p="lg" radius="md">
-        <Stack gap="md">
-          <Text fw={700}>Audit events</Text>
-          {auditState.type === "LOADING" && <Loader size="sm" />}
-          {auditState.type === "ERROR" && (
-            <Alert color="red">{auditState.message}</Alert>
-          )}
-          {auditState.type === "LOADED" && (
-            <AuditTable events={auditState.events} total={auditState.total} />
-          )}
-        </Stack>
-      </Paper>
     </Stack>
+  );
+}
+
+export function SystemSettingsPageContent(
+  props: SystemSettingsPageContentProps,
+): React.ReactElement {
+  const { auditState } = props;
+  return (
+    <SystemSettingsLayoutContainer
+      sections={{
+        google: <GoogleApplicationCardContainer />,
+        github: <GitHubSettingsSection {...props} />,
+        accounts: <ExternalAccountOAuthCards />,
+        files: <ExternalChannelFilesCard {...props} />,
+        memory: <HistoricalMemoryExecutionCard />,
+        audit: (
+          <Paper withBorder p="lg" radius="md">
+            <Stack gap="md">
+              <Text fw={700}>Audit events</Text>
+              {auditState.type === "LOADING" && <Loader size="sm" />}
+              {auditState.type === "ERROR" && (
+                <Alert color="red">{auditState.message}</Alert>
+              )}
+              {auditState.type === "LOADED" && (
+                <AuditTable
+                  events={auditState.events}
+                  total={auditState.total}
+                />
+              )}
+            </Stack>
+          </Paper>
+        ),
+      }}
+    />
   );
 }
