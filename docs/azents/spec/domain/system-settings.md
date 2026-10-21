@@ -30,6 +30,12 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - typescript/apps/azents-admin-web/src/app/system-settings/**
   - typescript/apps/azents-admin-web/src/features/system-settings/**
+  - typescript/apps/azents-admin-web/src/app/client-layout.tsx
+  - typescript/apps/azents-admin-web/src/shared/AdminShellContainer.tsx
+  - typescript/apps/azents-admin-web/src/shared/components/AdminShell.tsx
+  - typescript/apps/azents-admin-web/src/shared/components/MasterDetailLayout.tsx
+  - typescript/apps/azents-admin-web/src/shared/containers/useAdminShellContainer.ts
+  - typescript/apps/azents-admin-web/src/shared/lib/admin-navigation.ts
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
   - infra/charts/azents/templates/server/apiserver-deployment.yaml.tpl
   - infra/charts/azents/templates/server/adminserver-deployment.yaml.tpl
@@ -271,8 +277,9 @@ metadata-only audit list are exposed beneath `/system-setting/v1`.
 
 Admin Web exposes System Settings in authenticated Admin navigation. The workspace
 shows one purpose-based section at a time: Google, GitHub, Account linking (Slack
-and Discord), File transfers, Memory, or Audit log. Desktop uses a section menu;
-mobile uses a labeled section selector. URL fragments preserve the selected
+and Discord), File transfers, Memory, or Audit log. These destinations are links
+in the shared Admin navigation's Settings group, not a second sidebar inside the
+settings workspace. URL fragments preserve the selected
 section across reload and browser history; missing or unknown fragments select
 Google. Section subtrees remain mounted while navigating, preserving in-progress
 drafts without saving them. Each section retains its independent save controls.
@@ -285,6 +292,30 @@ is explicitly labeled as GitHub App status, not instance-wide settings health.
 The Audit log section renders the existing metadata-only settings events. The
 workspace never renders stored secret plaintext, effective generations, or
 resource identifiers from impact analysis.
+
+### Shared Admin application layout
+
+All authenticated Admin destinations use one shared shell. Its navigation groups
+are People & access (Workspaces, Users, Workspace members, Email verifications,
+Signup links), Platform (Model catalog, Runtime providers, Retention), Settings
+(the six settings sections above), and Diagnostics (Debug). Existing route paths,
+configured public base-path handling, Refine resources, authentication and
+feature operations are preserved. Nested workspace detail routes retain the
+Workspaces location. Active links match route-segment boundaries rather than
+unrelated string prefixes.
+
+Desktop has one sidebar; mobile exposes the same destinations in a modal
+navigation drawer with Escape, focus handling and close-on-navigation. Resizing
+to desktop closes an open mobile navigation drawer. The shared header shows
+the current group and destination on desktop, the destination on mobile, and
+retains light/dark/system theme controls. Sign out remains in the navigation.
+
+The shell fits the dynamic viewport height. Its bounded content surface scrolls
+long forms without adding an outer document scroll. Master-detail screens use
+connected, independently scrolling panes on desktop and the existing full-screen
+detail drawer on mobile, now with an accessible Details title. Login and initial
+administrator bootstrap remain standalone forms with unchanged behavior, a
+bounded card and dynamic-viewport-safe minimum height.
 
 ### Helm and process delivery
 

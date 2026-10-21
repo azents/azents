@@ -8,13 +8,14 @@ import { MantineProvider } from "@mantine/core";
 import { createElement, isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
-import { googleApplicationDraft } from "./google-application-state.ts";
 import {
+  adminNavigation,
   SETTINGS_SECTIONS,
   settingsSectionFromHash,
-} from "./settings-navigation.ts";
+} from "../../shared/lib/admin-navigation.ts";
+import { googleApplicationDraft } from "./google-application-state.ts";
 import type { GoogleApplicationDetail } from "@azents/admin-client";
-import type { ReactElement } from "react";
+import type { ComponentProps, ReactElement } from "react";
 
 const require = createRequire(import.meta.url);
 
@@ -71,9 +72,48 @@ const Layout = loadComponent(
   "./components/SystemSettingsLayout.tsx",
   "SystemSettingsLayout",
   {
-    "../settings-navigation": { SETTINGS_SECTIONS },
+    "@/shared/lib/admin-navigation": { SETTINGS_SECTIONS },
   },
 );
+
+void test("the shared Admin shell renders all destinations and settings in a single navigation", () => {
+  const Shell = loadComponent(
+    "../../shared/components/AdminShell.tsx",
+    "AdminShell",
+    {
+      "next/link": (props: ComponentProps<"a">): ReactElement =>
+        createElement("a", props),
+    },
+  );
+  const navigation = adminNavigation(
+    "https://example.invalid/admin",
+    "/admin/system-settings",
+    "#google",
+  );
+  const html = render(Shell, {
+    ...navigation,
+    children: Layout({
+      sections: { google: Card(cardProps()) },
+      activeSection: "google",
+    }),
+    homeHref: "/admin/",
+    opened: false,
+    onToggleNavigation: (): void => {},
+    onCloseNavigation: (): void => {},
+    user: null,
+    preference: "light",
+    mode: "light",
+    onPreferenceChange: (): void => {},
+    onLogout: (): void => {},
+  });
+  assert.equal((html.match(/aria-label="Admin navigation"/g) ?? []).length, 1);
+  assert.equal((html.match(/aria-current="page"/g) ?? []).length, 1);
+  for (const item of navigation.groups.flatMap((group) => group.items)) {
+    assert.ok(html.includes(`href="${item.href}"`));
+  }
+  assert.match(html, /aria-label="Color scheme"/);
+  assert.match(html, /Save application settings/);
+});
 
 const detail: GoogleApplicationDetail = {
   status: "not_configured",
@@ -209,10 +249,7 @@ void test("settings layout exposes one section while retaining every draft subtr
     const html = render(Layout, {
       sections,
       activeSection: section.value,
-      onSectionChange: (): void => {},
     });
-    assert.match(html, /Settings section/);
-    assert.ok(html.includes(`aria-current="page"`));
     const hidden = html.match(/<section[^>]*style="display:none"/g) ?? [];
     assert.equal(hidden.length, SETTINGS_SECTIONS.length - 1);
     for (const { value } of SETTINGS_SECTIONS) {
@@ -237,7 +274,6 @@ void test("GitHub failure stays within its section and does not replace the sett
           Layout({
             ...props,
             activeSection: "google",
-            onSectionChange: (): void => {},
           }),
       },
       "./ExternalAccountOAuthCards": {

@@ -45,7 +45,9 @@ export function GoogleApplicationCard({
     <Paper withBorder p="lg" radius="md">
       <Stack gap="md">
         <Group justify="space-between">
-          <Title order={4}>Google service authorization</Title>
+          <Title order={3} size="h4">
+            Google service authorization
+          </Title>
           <Badge
             color={
               detail.status === "configured_unverified" ? "blue" : "yellow"

@@ -35,9 +35,9 @@ export function LoginPageView({
   };
 
   return (
-    <Container size="sm" h="100vh">
-      <Center h="100%">
-        <Paper shadow="md" p="xl" w="100%">
+    <Container size="xs" mih="100dvh" py="xl">
+      <Center mih="calc(100dvh - var(--mantine-spacing-xl) * 2)">
+        <Paper withBorder radius="md" p={{ base: "lg", sm: "xl" }} w="100%">
           <form onSubmit={handleSubmit}>
             <Stack gap="md">
               <Stack align="center" gap="xs">
