@@ -60,6 +60,7 @@ export function GoogleApplicationSetupGuide(): React.ReactElement {
               </Text>
               <Code
                 block
+                style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
               >{`https://www.googleapis.com/auth/calendar.events.readonly
 https://www.googleapis.com/auth/calendar.calendarlist.readonly
 https://www.googleapis.com/auth/calendar.events.freebusy
