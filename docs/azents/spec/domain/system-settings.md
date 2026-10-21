@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-21
+updated: 2026-10-22
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -69,7 +69,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle/compacted-event-retention
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-21
+last_verified_at: 2026-10-22
 spec_version: 10
 ---
 
@@ -102,7 +102,9 @@ Settings authority.
 `GET|PATCH /system-setting/v1/sections/google-oauth` provides redacted fields,
 callback, preparation status and optimistic `expected_version`; secrets use
 explicit replace/clear actions. Direct activation validates local configuration,
-not live client/Preview/service health. Invalid configuration reports a safe
+not live client/service health. Optional Picker browser API key and numeric
+project/app ID have independent readiness; their absence does not hide ordinary
+Google tools. Invalid configuration reports a safe
 operator-preparation error.
 
 Google grants retain client binding, never operator-secret copies. Same-client
@@ -116,11 +118,13 @@ Admin System Settings exposes a Google application card with redacted preparatio
 state, environment-owned read-only fields, explicit secret replacement/clear
 actions and the deployment callback. A conflict or uncertain save requires
 reloading current settings before retry; reload discards the draft. Local
-configuration is not presented as verified Preview eligibility or service access.
+configuration is not presented as verified service access.
 An expandable setup guide opens by default for incomplete or missing configuration.
-It explains Preview access, Cloud project and service enablement, consent setup,
+It explains Cloud project and Workspace API enablement, consent setup,
 Web application client creation, exact callback registration, credential entry,
-and the separate Toolkit account-connection flow, with official Google links.
+the separate Toolkit account-connection flow, Google verification and restricted-scope
+obligations, and optional browser-restricted Picker configuration, with official
+Google links.
 See [Google Connection](google-connection.md) for the exact management, execution
 and candidate/publication contracts.
 

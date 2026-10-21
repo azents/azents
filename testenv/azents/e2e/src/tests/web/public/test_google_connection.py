@@ -3,20 +3,31 @@
 import azentsadminclient
 import azentspublicclient
 import pytest
+from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
+from azentsadminclient.models.google_application_patch_request import (
+    GoogleApplicationPatchRequest,
+)
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.google_connect_output import GoogleConnectOutput
+from azentspublicclient.models.google_published_output import GooglePublishedOutput
+from azentspublicclient.models.google_review import GoogleReview
 from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 
+from support.google_provider_fake import SCOPE
 from support.google_provider_fixture import GoogleProviderFixture
 from support.utils import single_candidate_model_options
 from tests.required.public.test_google_connection import (
+    authorize,
+    final_settings,
     fixture_ready,
     prepare_operator,
+    response,
     saved_status,
     scenario,
 )
@@ -209,3 +220,123 @@ def test_google_same_context_partial_review_and_metadata_preservation(
         for marker in ("synthetic-access-", "synthetic-renewal-")
     ):
         raise AssertionError("Google credentials leaked into the rendered document.")
+
+
+def test_google_picker_browser_lifetime(
+    browser_driver: WebDriver,
+    azents_main_web_url: str,
+    azents_public_server_url: str,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    google_provider_fixture: GoogleProviderFixture | None,
+) -> None:
+    """Exercise deployed UI/API/SDK-loader integration against a synthetic peer."""
+    fixture = fixture_ready(google_provider_fixture)
+    scenario(fixture, "full")
+    prepare_operator(admin_api_client)
+    operator_api = SystemSettingsV1Api(admin_api_client)
+    operator = operator_api.system_settings_v1_get_google_oauth_setting()
+    operator_api.system_settings_v1_patch_google_oauth_setting(
+        GoogleApplicationPatchRequest(
+            expected_version=operator.admin_version,
+            picker_api_key="synthetic-browser-key",
+            picker_app_id="123456789",
+        )
+    )
+    workspace = _create_workspace(
+        public_api_client=public_api_client,
+        admin_api_client=admin_api_client,
+        server_url=azents_public_server_url,
+        with_runtime_profile=False,
+    )
+    base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
+    scopes = ["openid", "email", SCOPE + "drive.file"]
+    prepared = GoogleConnectOutput.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            "/google/connect",
+            {"services": ["drive"], "oauth_request_scopes": scopes, "timeout": 30},
+        ).text
+    )
+    assert prepared is not None
+    callback = authorize(fixture, prepared.authorization_url)
+    review = GoogleReview.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            "/google/exchange",
+            {"code": callback.code, "state": callback.state},
+        ).text
+    )
+    assert review is not None
+    published = GooglePublishedOutput.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            "/google/attempts/" + review.attempt_id + "/confirm",
+            {
+                "settings": {
+                    **final_settings("google_picker"),
+                    "services": ["drive"],
+                    "oauth_request_scopes": scopes,
+                }
+            },
+        ).text
+    )
+    assert published is not None
+    before = saved_status(base, workspace.token, published.toolkit_id)
+    _login_main_web(browser_driver, base_url=azents_main_web_url, email=workspace.email)
+    browser_driver.get(
+        f"{azents_main_web_url}/w/{workspace.handle}/toolkits/{published.toolkit_id}/edit"
+    )
+    _assert_visible_text(browser_driver, "Saved Google account")
+    _click_button(browser_driver, "Choose Drive files with Google")
+    _click_button(browser_driver, "Synthetic Picker select")
+    _assert_visible_text(
+        browser_driver,
+        "1 file selected in Google. Google controls eligibility; "
+        "this is not a local access list.",
+    )
+    assert not browser_driver.find_elements(
+        By.CSS_SELECTOR, '[aria-label="Synthetic Google Picker"]'
+    )
+    _click_button(browser_driver, "Choose Drive files with Google")
+    _click_button(browser_driver, "Synthetic Picker cancel")
+    _assert_visible_text(
+        browser_driver, "File selection closed without retaining a selection."
+    )
+    _click_button(browser_driver, "Choose Drive files with Google")
+    _wait(browser_driver).until(
+        ec.presence_of_element_located(
+            (By.CSS_SELECTOR, '[aria-label="Synthetic Google Picker"]')
+        )
+    )
+    browser_driver.get(f"{azents_main_web_url}/w/{workspace.handle}/toolkits")
+    _assert_visible_text(browser_driver, "Google product fixture")
+    assert not browser_driver.find_elements(
+        By.CSS_SELECTOR, '[aria-label="Synthetic Google Picker"]'
+    )
+    after = saved_status(base, workspace.token, published.toolkit_id)
+    assert before == after
+    persisted = browser_driver.execute_script(
+        "return JSON.stringify([Object.entries(localStorage), "
+        "Object.entries(sessionStorage)]);"
+    )
+    assert isinstance(persisted, str)
+    if any(
+        marker in persisted
+        for marker in (
+            "synthetic-access-",
+            "synthetic-renewal-",
+            "app-file",
+        )
+    ):
+        raise AssertionError(
+            "Picker credentials or selection entered persistent storage."
+        )
+    if "synthetic-access-" in browser_driver.page_source:
+        raise AssertionError("Picker credential leaked into the rendered document.")
