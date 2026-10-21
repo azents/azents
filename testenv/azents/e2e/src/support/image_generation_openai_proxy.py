@@ -3231,7 +3231,16 @@ class _Handler(BaseHTTPRequestHandler):
                     request,
                     call_id="call_google_product_read",
                     name="google_product__calendar_list_events",
-                    arguments={},
+                    arguments={
+                        "calendar_id": "primary",
+                        "page_token": None,
+                        "page_size": 10,
+                        "time_min": None,
+                        "time_max": None,
+                        "query": None,
+                        "expand_recurring": False,
+                        "event_types": [],
+                    },
                 )
             elif not request_has_tool_output(request, "call_google_product_write"):
                 self._write_function_call_response(
