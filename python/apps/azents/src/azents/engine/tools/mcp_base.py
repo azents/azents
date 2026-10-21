@@ -41,6 +41,7 @@ from azents.core.engine_tool_state import (
     McpToolSnapshotState,
 )
 from azents.core.mcp_transport import call_tool as mcp_call_tool
+from azents.core.mcp_transport import discovery_rate_limit_delay
 from azents.core.mcp_transport import list_tools as mcp_list_tools
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
@@ -833,7 +834,16 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 and _authorization_is_401(authorization, exc)
             ):
                 await authorization.on_authentication_failure()
-            if _is_http_auth_error(exc) or _authorization_is_401(authorization, exc):
+            if discovery_rate_limit_delay(exc) is not None:
+                logger.warning(
+                    "MCP discovery remains rate limited",
+                    extra={"server_url": redact_sensitive_text(config.server_url)},
+                    exc_info=sanitized_exception_info(
+                        exc, message="MCP server rate limited discovery."
+                    ),
+                )
+                self._bg_error = "MCP server rate limited discovery. Retry later."
+            elif _is_http_auth_error(exc) or _authorization_is_401(authorization, exc):
                 logger.warning(
                     "MCP server auth failed",
                     extra={"server_url": config.server_url},

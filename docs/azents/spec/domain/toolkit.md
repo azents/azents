@@ -135,7 +135,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-22
-spec_version: 151
+spec_version: 152
 ---
 
 # Toolkit
@@ -1084,6 +1084,8 @@ MCP-backed toolkits must keep `list_tools` discovery off the normal run preparat
 - `update_context()` reads the latest successful session-bound Toolkit State snapshot and returns immediately.
 - If no successful snapshot exists, the toolkit exposes no MCP tools.
 - Background refresh lists tools, sorts them deterministically, builds a complete serializable snapshot, then atomically replaces the stored snapshot.
+- Discovery retries HTTP 429 and MCP `Too many requests` failures up to three times with 1s/2s/4s backoff when no numeric `Retry-After` is provided. Numeric delays up to 60s are honored; invalid or longer delays stop the attempt rather than retrying early. Nested groups are retryable only when every leaf is throttling. This read-only retry boundary does not replay tool execution.
+- Exhausted discovery throttling retains an actionable internal error and a sanitized warning with traceback; unrelated connection failures remain errors and cancellation propagates.
 - Refresh failure keeps the previous successful snapshot unchanged. If there is no previous snapshot, no tools are exposed.
 - Loading, retry, setup, and status pseudo-tools are not model-visible MCP availability controls.
 - MCP loading/error text is not injected into Toolkit prompts.
