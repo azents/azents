@@ -2,7 +2,7 @@
 
 /** Chat UI in shared copy button. */
 
-import { ActionIcon, CopyButton, Tooltip } from "@mantine/core";
+import { ActionIcon, CopyButton, rem, Tooltip } from "@mantine/core";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 
 interface ChatCopyButtonProps {
@@ -45,9 +45,9 @@ export function ChatCopyButton({
             onClick={copy}
           >
             {copied ? (
-              <IconCheck size={iconSize} />
+              <IconCheck size={rem(iconSize)} />
             ) : (
-              <IconCopy size={iconSize} />
+              <IconCopy size={rem(iconSize)} />
             )}
           </ActionIcon>
         </Tooltip>

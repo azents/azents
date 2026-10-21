@@ -2332,6 +2332,8 @@ class RunExecutor:
                     retry_model_refresh_required = (
                         command_handler is None and isinstance(exc, ModelCallError)
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
                     await self.live_event_projector.discard_failed_attempt(
                         snapshot.session_id,
@@ -3131,6 +3133,8 @@ class RunExecutor:
             for target_session_id in route.target_session_ids:
                 try:
                     await dispatch_event(target_session_id, event)
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     logger.exception(
                         "Failed to publish committed SessionAgent tree change",

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { settingsSectionFromValue } from "../../shared/lib/admin-navigation.ts";
 import {
   HookHarness,
   invoke,
@@ -65,6 +66,46 @@ function setup(impact: unknown): {
   );
   return { harness, detail, confirmations };
 }
+
+void test("section-only query navigation preserves the unsaved parent settings draft", () => {
+  const { harness } = setup(null);
+  let section = "github";
+  const layout = new HookHarness();
+  const githubSubtree = { editor: "same mounted draft owner" };
+  layout.load(
+    new URL(
+      "./containers/useSystemSettingsLayoutContainer.ts",
+      import.meta.url,
+    ),
+    "useSystemSettingsLayoutContainer",
+    {
+      "next/navigation": {
+        useSearchParams: () => new URLSearchParams({ section }),
+      },
+      "@/shared/lib/admin-navigation": { settingsSectionFromValue },
+    },
+  );
+  harness.render();
+  harness.flushEffects();
+  const initial = harness.render();
+  invoke(initial.onClientIdChange, "draft-client-not-saved");
+  for (const destination of ["github", "audit", "github"]) {
+    section = destination;
+    const renderedLayout = layout.render({
+      sections: { github: githubSubtree },
+    });
+    assert.equal(renderedLayout.activeSection, destination);
+    assert.equal(record(renderedLayout.sections).github, githubSubtree);
+    const current = harness.render();
+    assert.equal(
+      record(current.draft).clientId,
+      "draft-client-not-saved",
+      section,
+    );
+    assert.equal(record(current.draft).clientSecret, "");
+    assert.equal(record(current.draft).privateKey, "");
+  }
+});
 
 void test("actual settings container projects the producer impact once for view and confirmation", () => {
   const wire = {

@@ -150,6 +150,10 @@ export function useAgentFocusedShellController({
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
       void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSession.invalidate({
+        agentId: agent.id,
+        sessionId: variables.sessionId,
+      });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
         const draftPath =

@@ -4,6 +4,7 @@ import {
   Box,
   Group,
   Loader,
+  rem,
   Stack,
   Text,
   TextInput,
@@ -41,11 +42,10 @@ export function AgentSidebarSectionView({
   t,
   workspaceBase,
   agentsBase,
-  agentsQuery,
+  state,
   activeAgentId,
   query,
   setQuery,
-  sidebarAgents,
 }: AgentSidebarSectionViewProps): React.ReactElement {
   return (
     <Stack gap={4}>
@@ -55,7 +55,7 @@ export function AgentSidebarSectionView({
           fw={600}
           c="dimmed"
           tt="uppercase"
-          style={{ letterSpacing: 0.5 }}
+          style={{ letterSpacing: rem(0.5) }}
         >
           {t("agentsSectionTitle")}
         </Text>
@@ -80,24 +80,24 @@ export function AgentSidebarSectionView({
         />
       </Box>
       <Box>
-        {agentsQuery.isLoading ? (
+        {state.type === "LOADING" ? (
           <Box ta="center" py="md">
             <Loader size="sm" />
           </Box>
-        ) : sidebarAgents.visible.length === 0 ? (
+        ) : state.visible.length === 0 ? (
           <Text size="xs" c="dimmed" ta="center" py="md">
             {query ? t("noMatches") : t("empty")}
           </Text>
         ) : (
           <AgentSidebarRowList
-            agents={sidebarAgents.visible}
+            agents={state.visible}
             agentsBase={agentsBase}
             activeAgentId={activeAgentId}
             onNavigate={onNavigate}
           />
         )}
       </Box>
-      {sidebarAgents.totalCount > sidebarAgents.visible.length && (
+      {state.type === "READY" && state.totalCount > state.visible.length && (
         <UnstyledButton
           component={Link}
           href={workspaceBase}
@@ -107,15 +107,15 @@ export function AgentSidebarSectionView({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
-            fontSize: 12,
+            gap: rem(8),
+            fontSize: rem(12),
             color: "var(--mantine-color-dimmed)",
             borderRadius: "var(--mantine-radius-sm)",
           }}
         >
           <IconLayoutGrid size={13} />
           <Text size="xs" c="dimmed">
-            {t("viewAllAgents", { count: sidebarAgents.totalCount })}
+            {t("viewAllAgents", { count: state.totalCount })}
           </Text>
         </UnstyledButton>
       )}

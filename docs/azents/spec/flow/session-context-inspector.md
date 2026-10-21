@@ -5,7 +5,7 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-10-19
+last_verified_at: 2026-10-22
 spec_version: 30
 code_paths:
   - python/apps/azents/src/azents/core/chat_data.py
@@ -30,6 +30,9 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/TokenUsageIndicator.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/shared/session-context/SessionContextView.tsx
+  - typescript/apps/azents-web/src/shared/session-context/containers/session-context-usage.ts
+  - typescript/apps/azents-web/src/shared/session-context/containers/session-context-usage.test.mts
+  - typescript/apps/azents-web/src/shared/session-context/SessionContextView.stories.tsx
 ---
 
 # Session Context Inspector
@@ -114,6 +117,12 @@ Ultrafast from the immutable applied profile as processing-speed intent, not a v
 tier; absent provenance stays unavailable.
 
 Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. New markers also carry an immutable allowlisted snapshot of the exact Session inference state and applied candidate route: requested target label, raw nullable reasoning effort, operation kind, candidate ordinal and `primary | fallback` role, provider/integration/model identity, public model display name, effective context window, and effective automatic-compaction threshold. The popup renders this durable snapshot after terminal cleanup and reload. Historical markers without the snapshot or route remain valid; a matching active live Run may temporarily provide its applied profile, otherwise provenance and effective limits render as unavailable. Readers never substitute the current Session, Agent default, current candidate chain, or Composer selection.
+
+The inspector boundary projects the six consumed token counters into explicit
+nullable numeric fields before presentation. Missing, null and non-number values
+remain unavailable; existing numeric acceptance and formatting are unchanged.
+Unknown usage extensions and raw event diagnostic JSON remain opaque and are not
+rewritten by this projection.
 
 ## Latest System Prompt
 

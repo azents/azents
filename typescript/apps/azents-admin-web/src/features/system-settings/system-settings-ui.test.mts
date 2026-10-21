@@ -243,6 +243,69 @@ void test("settings navigation accepts known query values and safely defaults un
   assert.equal(settingsSectionFromValue("unknown"), "google");
 });
 
+void test("GitHub labels and internal metadata stay at the component boundary", () => {
+  const Page = loadComponent(
+    "./components/SystemSettingsPageContent.tsx",
+    "SystemSettingsPageContent",
+    {
+      "../GoogleApplicationCardContainer": {
+        GoogleApplicationCardContainer: (): ReactElement =>
+          createElement("p", {}, "Google"),
+      },
+      "../SystemSettingsLayoutContainer": {
+        SystemSettingsLayoutContainer: (props: {
+          sections: unknown;
+        }): ReactElement => Layout({ ...props, activeSection: "github" }),
+      },
+      "./ExternalAccountOAuthCards": {
+        ExternalAccountOAuthCards: (): ReactElement =>
+          createElement("p", {}, "Accounts"),
+      },
+      "./HistoricalMemoryExecutionCard": {
+        HistoricalMemoryExecutionCard: (): ReactElement =>
+          createElement("p", {}, "Memory"),
+      },
+    },
+  );
+  const html = render(Page, {
+    state: {
+      type: "LOADED",
+      detail: {
+        admin_version: 1,
+        effective_generation: 12,
+        effective_status: "not_configured",
+        fields: [],
+        candidate: null,
+        health: null,
+        binding_impact: null,
+      },
+    },
+    draft: {
+      appId: "",
+      clientId: "draft-client-not-saved",
+      privateKey: "",
+      clientSecret: "",
+      clearPrivateKey: false,
+      clearClientSecret: false,
+    },
+    auditState: { type: "LOADED", events: [], total: 0 },
+    externalFilesState: { type: "LOADING" },
+    externalFilesDraft: { outboundMaxFileMiB: "", outboundMaxActionMiB: "" },
+  });
+  for (const label of [
+    "Platform GitHub App",
+    "App ID",
+    "Client ID",
+    "Private key replacement",
+    "Client secret replacement",
+    "Effective health",
+  ]) {
+    assert.ok(html.includes(label), label);
+  }
+  assert.match(html, /value="draft-client-not-saved"/);
+  assert.ok(!html.includes("effective_generation"));
+});
+
 void test("settings layout exposes one section while retaining every draft subtree", () => {
   const sections = Object.fromEntries(
     SETTINGS_SECTIONS.map(({ value }) => [

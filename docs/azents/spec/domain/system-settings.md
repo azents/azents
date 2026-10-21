@@ -35,6 +35,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/shared/components/AdminShell.tsx
   - typescript/apps/azents-admin-web/src/shared/components/MasterDetailLayout.tsx
   - typescript/apps/azents-admin-web/src/shared/containers/useAdminShellContainer.ts
+  - typescript/apps/azents-admin-web/src/shared/containers/useMasterDetailLayoutContainer.ts
   - typescript/apps/azents-admin-web/src/shared/lib/admin-navigation.ts
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
   - infra/charts/azents/templates/server/apiserver-deployment.yaml.tpl
@@ -289,6 +290,10 @@ Google. Header, active link and content read the same query state. The workspace
 is mounted by the persistent `/system-settings` route layout, so query navigation
 does not recreate its state owners. Section subtrees remain mounted, preserving
 in-progress drafts without saving them. Each section retains independent save controls.
+Component rendering and native controller tests own section labels, draft retention
+across query-only navigation and internal-metadata presentation. Browser E2E retains
+the authenticated settings route and redacted credential fields; persisted retention
+policy and dual-Web authentication journeys remain assembled-product checks.
 
 Platform GitHub App detail, field source and fallback state, explicit secret
 actions, candidate validation and health, aggregate binding impact, and

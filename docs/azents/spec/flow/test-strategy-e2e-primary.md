@@ -61,7 +61,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-20
+last_verified_at: 2026-10-22
 spec_version: 87
 ---
 
@@ -114,6 +114,11 @@ lifecycle/scope/attachment and owner/member persistence flows remain in E2E,
 along with Runtime Web navigation and service lifecycle evidence. Component
 interaction passes do not establish accessibility conformance; accessibility
 diagnostics remain separate evidence.
+
+Admin System Settings follows the same ownership split: native component/controller
+tests cover label presentation and unsaved drafts during query-only section changes.
+The representative authenticated settings/redaction boundary, cross-Web authentication
+and persisted retention-policy updates remain browser E2E responsibilities.
 
 ## Login Browser Readiness
 

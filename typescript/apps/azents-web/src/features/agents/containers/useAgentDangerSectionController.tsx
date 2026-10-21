@@ -17,7 +17,10 @@ export interface AgentDangerSectionViewProps {
   opened: boolean;
   open: () => void;
   close: () => void;
-  deleteMutation: ReturnType<typeof trpc.agent.remove.useMutation>;
+  deleteMutation: Pick<
+    ReturnType<typeof trpc.agent.remove.useMutation>,
+    "isPending"
+  >;
   handleDelete: () => void;
 }
 export function useAgentDangerSectionController({
@@ -34,6 +37,7 @@ export function useAgentDangerSectionController({
   const deleteMutation = trpc.agent.remove.useMutation({
     onSuccess: () => {
       void utils.agent.list.invalidate({ handle });
+      void utils.agent.get.invalidate({ handle, agentId });
       router.push(`/w/${handle}/agents`);
     },
   });

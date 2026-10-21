@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Stack, Text, Title } from "@mantine/core";
+import { Button, rem, Stack, Text, Title } from "@mantine/core";
 import { IconLock } from "@tabler/icons-react";
 import Link from "next/link";
 /**
@@ -24,7 +24,7 @@ export function LoginRequiredView({
   return (
     <FormPageLayout>
       <Stack gap="lg" align="center">
-        <IconLock size={48} stroke={1.5} style={{ opacity: 0.3 }} />
+        <IconLock size={rem(48)} stroke={1.5} style={{ opacity: 0.3 }} />
 
         <Stack gap="xs" align="center">
           <Title order={2}>{t("loginRequired.headline")}</Title>

@@ -96,14 +96,22 @@ export function useAgentSessionDirectoryContainer({
     replaceDirectoryQuery(status, totalPages);
   }, [directoryQuery.data, page, replaceDirectoryQuery, status, totalPages]);
 
-  const refreshSessionReads = useCallback((): void => {
-    void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-    void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
-  }, [
-    agent.id,
-    utils.chat.getAgentSessionSidebar,
-    utils.chat.listAgentSessions,
-  ]);
+  const refreshSessionReads = useCallback(
+    (sessionId: string): void => {
+      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSession.invalidate({
+        agentId: agent.id,
+        sessionId,
+      });
+    },
+    [
+      agent.id,
+      utils.chat.getAgentSession,
+      utils.chat.getAgentSessionSidebar,
+      utils.chat.listAgentSessions,
+    ],
+  );
 
   const updateTitleMutation = trpc.chat.updateAgentSessionTitle.useMutation();
   const updatePinMutation = trpc.chat.updateAgentSessionPin.useMutation();
@@ -135,18 +143,9 @@ export function useAgentSessionDirectoryContainer({
         sessionId,
         title,
       });
-      refreshSessionReads();
-      void utils.chat.getAgentSession.invalidate({
-        agentId: agent.id,
-        sessionId,
-      });
+      refreshSessionReads(sessionId);
     },
-    [
-      agent.id,
-      refreshSessionReads,
-      updateTitleMutation,
-      utils.chat.getAgentSession,
-    ],
+    [agent.id, refreshSessionReads, updateTitleMutation],
   );
 
   const onArchiveSession = useCallback(
@@ -154,7 +153,7 @@ export function useAgentSessionDirectoryContainer({
       archiveSessionMutation.reset();
       archiveSessionMutation.mutate(
         { agentId: agent.id, sessionId },
-        { onSuccess: refreshSessionReads },
+        { onSuccess: (): void => refreshSessionReads(sessionId) },
       );
     },
     [agent.id, archiveSessionMutation, refreshSessionReads],
@@ -165,7 +164,7 @@ export function useAgentSessionDirectoryContainer({
       updatePinMutation.reset();
       updatePinMutation.mutate(
         { agentId: agent.id, sessionId, pinned },
-        { onSuccess: refreshSessionReads },
+        { onSuccess: (): void => refreshSessionReads(sessionId) },
       );
     },
     [agent.id, refreshSessionReads, updatePinMutation],
@@ -176,7 +175,7 @@ export function useAgentSessionDirectoryContainer({
       restoreSessionMutation.reset();
       restoreSessionMutation.mutate(
         { agentId: agent.id, sessionId },
-        { onSuccess: refreshSessionReads },
+        { onSuccess: (): void => refreshSessionReads(sessionId) },
       );
     },
     [agent.id, refreshSessionReads, restoreSessionMutation],
