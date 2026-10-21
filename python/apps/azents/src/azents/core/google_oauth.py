@@ -231,14 +231,6 @@ class GoogleConnection:
 
 
 @dataclasses.dataclass(frozen=True)
-class GoogleAuthorization:
-    """Call-local current admission; do not expose credentials in tool metadata."""
-
-    access_token: str = dataclasses.field(repr=False)
-    connection_id: str
-
-
-@dataclasses.dataclass(frozen=True)
 class GoogleSavedConnection:
     """Management-only current state; never return credentials directly."""
 

@@ -25,13 +25,6 @@ class GoogleTask(enum.StrEnum):
     GMAIL_MODIFY = "gmail_modify"
 
 
-GOOGLE_MCP_ENDPOINTS: dict[GoogleService, str] = {
-    GoogleService.CALENDAR: "https://calendarmcp.googleapis.com/mcp/v1",
-    GoogleService.DRIVE: "https://drivemcp.googleapis.com/mcp/v1",
-    GoogleService.GMAIL: "https://gmailmcp.googleapis.com/mcp/v1",
-}
-
-
 def _scope(name: str) -> str:
     return f"https://www.googleapis.com/auth/{name}"
 

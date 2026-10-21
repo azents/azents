@@ -2,19 +2,27 @@
 
 import dataclasses
 import datetime
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import Depends
 from pydantic import ValidationError
 
 from azents.core.google_oauth import (
-    GoogleAuthorization,
     GoogleConnectionStatus,
     GoogleOAuthError,
 )
-from azents.core.google_policy import GoogleService, permitted_tools
-from azents.core.google_runtime import GoogleExecutionState
+from azents.core.google_policy import selected_services
+from azents.core.google_runtime import (
+    GoogleExecutionState,
+    GoogleOperationAuthorization,
+)
 from azents.core.google_system_setting import GoogleApplicationUnavailable
+from azents.core.google_workspace_policy import (
+    GoogleWorkspaceOperation,
+    eligible_operations,
+    operation_permitted,
+)
 from azents.core.personal_toolkit_runtime import PersonalToolkitExecutionTarget
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.repos.google_oauth.runtime import GoogleRuntimeRepository
@@ -24,7 +32,7 @@ from azents.services.google_oauth.provider import GoogleOAuthProvider
 
 @dataclasses.dataclass(frozen=True)
 class GoogleRuntimeService:
-    """Admit current exact raw tools, not cached account-level token authority."""
+    """Admit current direct operations against exact server-owned grant snapshots."""
 
     repository: Annotated[GoogleRuntimeRepository, Depends()]
     application: Annotated[GoogleApplicationService, Depends()]
@@ -33,7 +41,7 @@ class GoogleRuntimeService:
     def for_personal(
         self, target: PersonalToolkitExecutionTarget
     ) -> "GoogleRuntimeService":
-        """Retain common current grant/client/task logic under exact personal scope."""
+        """Retain current grant/client/service checks under exact personal scope."""
         return dataclasses.replace(
             self, repository=self.repository.for_personal(target)
         )
@@ -109,98 +117,105 @@ class GoogleRuntimeService:
             )
         return latest
 
-    async def permitted_tools(
-        self,
-        owner: SessionExecutionOwner,
-        toolkit_id: str,
-        service: GoogleService,
-    ) -> frozenset[str]:
-        """Reload scope/selection evidence without synchronous provider I/O."""
-        current = await self._state(owner, toolkit_id)
-        return permitted_tools(
-            tuple(current.config.tasks),
-            current.connection.candidate.tokens.granted_scopes,
-            service,
-        )
-
-    async def discovery_authorization(
-        self,
-        owner: SessionExecutionOwner,
-        toolkit_id: str,
-        service: GoogleService,
-    ) -> GoogleAuthorization:
-        """Discovery may renew but admits no unknown tool or unselected service."""
-        current = await self._renew(owner, await self._state(owner, toolkit_id))
-        if not permitted_tools(
-            tuple(current.config.tasks),
-            current.connection.candidate.tokens.granted_scopes,
-            service,
-        ):
-            raise GoogleOAuthError(
-                "capability_unavailable", "No selected Google capability is permitted."
-            )
-        return GoogleAuthorization(
-            current.connection.candidate.tokens.access_token, current.connection.id
-        )
-
-    async def authentication_failed(
-        self,
-        owner: SessionExecutionOwner,
-        toolkit_id: str,
-        admitted: GoogleAuthorization,
+    @staticmethod
+    def _require_operation(
+        current: GoogleExecutionState,
+        operation: GoogleWorkspaceOperation,
+        auxiliary: tuple[GoogleWorkspaceOperation, ...],
     ) -> None:
-        """A proved 401 affects only the still-matching admitted credential."""
-        try:
-            current = await self._state(owner, toolkit_id)
-        except GoogleOAuthError as error:
-            if error.code not in {
-                "stale",
-                "reconnect_required",
-                "client_changed",
-                "operator_setup_required",
-                "authorization_unavailable",
-            }:
-                raise
-            return
-        if (
-            current.connection.id != admitted.connection_id
-            or current.connection.candidate.tokens.access_token != admitted.access_token
-        ):
-            return
-        await self.repository.finalize_refresh(
-            owner,
-            snapshot=current,
-            refreshed=None,
-            rejected=True,
-        )
-
-    async def authorize_tool(
-        self,
-        owner: SessionExecutionOwner,
-        toolkit_id: str,
-        service: GoogleService,
-        raw_name: str,
-    ) -> GoogleAuthorization:
-        """Current exact task/scope admission is repeated after any token renewal."""
-        current = await self._state(owner, toolkit_id)
-        if raw_name not in permitted_tools(
-            tuple(current.config.tasks),
+        # During the nondeployable delivery stack only service membership is
+        # derived from the existing saved config. Direct action authority never
+        # intersects the old selected-task policy. Phase 3 replaces this ingress.
+        if not operation_permitted(
+            operation,
+            selected_services(tuple(current.config.tasks)),
             current.connection.candidate.tokens.granted_scopes,
-            service,
+            auxiliary,
         ):
             raise GoogleOAuthError(
                 "capability_unavailable",
-                "This Google task is not currently selected and permitted.",
+                "This Google operation is not currently enabled and permitted.",
             )
-        current = await self._renew(owner, current)
-        if raw_name not in permitted_tools(
-            tuple(current.config.tasks),
+
+    async def direct_operations(
+        self,
+        owner: SessionExecutionOwner,
+        toolkit_id: str,
+    ) -> frozenset[GoogleWorkspaceOperation]:
+        """Projection reloads current state but never performs provider I/O."""
+        current = await self._state(owner, toolkit_id)
+        return eligible_operations(
+            selected_services(tuple(current.config.tasks)),
             current.connection.candidate.tokens.granted_scopes,
-            service,
+        )
+
+    async def authorize_operation(
+        self,
+        owner: SessionExecutionOwner,
+        toolkit_id: str,
+        operation: GoogleWorkspaceOperation,
+        auxiliary_operations: tuple[GoogleWorkspaceOperation, ...]
+        | Callable[[str | None], tuple[GoogleWorkspaceOperation, ...]],
+    ) -> GoogleOperationAuthorization:
+        """Renew only after admitting all argument-dependent prerequisites."""
+        current = await self._state(owner, toolkit_id)
+
+        def auxiliary(
+            state: GoogleExecutionState,
+        ) -> tuple[GoogleWorkspaceOperation, ...]:
+            if isinstance(auxiliary_operations, tuple):
+                return auxiliary_operations
+            return auxiliary_operations(state.connection.candidate.identity.email)
+
+        self._require_operation(current, operation, auxiliary(current))
+        await self._renew(owner, current)
+        # Even a valid access token needs a fresh post-await owner/config check.
+        current = await self._state(owner, toolkit_id)
+        resolved_auxiliary = auxiliary(current)
+        self._require_operation(current, operation, resolved_auxiliary)
+        if current.connection.candidate.tokens.expires_at <= datetime.datetime.now(
+            datetime.UTC
         ):
             raise GoogleOAuthError(
-                "capability_unavailable", "Google permission changed before execution."
+                "renewal_unavailable", "Google authorization expired."
             )
-        return GoogleAuthorization(
-            current.connection.candidate.tokens.access_token, current.connection.id
+        return GoogleOperationAuthorization(
+            owner,
+            operation,
+            resolved_auxiliary,
+            current,
+        )
+
+    async def recheck_operation(self, admitted: GoogleOperationAuthorization) -> None:
+        """Before each effect/publication, reject stale authority without renewal."""
+        old = admitted.snapshot
+        current = await self._state(admitted.owner, old.connection.toolkit_id)
+        self._require_operation(
+            current, admitted.operation, admitted.auxiliary_operations
+        )
+        if (
+            current.revision != old.revision
+            or current.config != old.config
+            or current.connection.id != old.connection.id
+            or current.connection.encrypted_payload != old.connection.encrypted_payload
+            or current.connection.updated_at != old.connection.updated_at
+            or current.registration != old.registration
+            or current.connection.candidate.tokens.expires_at
+            <= datetime.datetime.now(datetime.UTC)
+        ):
+            raise GoogleOAuthError(
+                "stale",
+                "Google authorization changed. The operation was not replayed.",
+            )
+
+    async def direct_authentication_failed(
+        self,
+        admitted: GoogleOperationAuthorization,
+    ) -> None:
+        """Exact original snapshot defeats a late 401 after config/reconnect changes."""
+        await self.repository.finalize_refresh(
+            admitted.owner,
+            snapshot=admitted.snapshot,
+            refreshed=None,
+            rejected=True,
         )

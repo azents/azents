@@ -17,8 +17,9 @@ tags: [google, toolkit, oauth, migration, security, engine, frontend, testenv]
 - Implementation baseline: `81a3503318fac347f687f416f7ac231315e5c5cd`.
 - Authority: [Requirements](../requirements/google-261021-direct-workspace-tools.md)
   and [ADR-D1 through ADR-D4](../adr/google-261021-direct-workspace-tools.md).
-- Complete draft for authority/feasibility review and requester Design approval.
-  No implementation, live-account verification, migration or deployment is claimed.
+- Approved Design revision 1; the exact authority set and requester confirmation
+  are recorded under Design Approval. Live-account verification, migration and
+  deployment are not claimed.
 
 ## 1. Outcome and Boundaries
 

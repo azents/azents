@@ -1,9 +1,10 @@
 """Worker dependency injection."""
 
+import dataclasses
 import datetime
 import os
-from collections.abc import AsyncIterator
-from typing import Annotated
+from collections.abc import AsyncIterator, Mapping
+from typing import Annotated, Any
 from uuid import uuid4
 
 from azcommon.infra.s3.service import S3Service
@@ -26,20 +27,32 @@ from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_appctx, get_config, get_credential_cipher
 from azents.core.redis import create_redis_client
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.core.tools import ToolkitProvider
 from azents.engine.run.commands import COMMAND_REGISTRY, CommandHandler
 from azents.engine.run.retry_policy import (
     FailedRunRetryPolicy,
     get_failed_run_retry_policy,
 )
-from azents.engine.tools.builtin import BuiltinToolkitProvider
+from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeRunnerFileStorage
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
+    get_toolkit_registry,
     get_vfs_projection_service,
     get_vfs_read_router,
 )
 from azents.engine.tools.dynamic_worktree import DynamicWorktreeToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
+from azents.engine.tools.google import GoogleToolkitProvider
+from azents.engine.tools.google_files import GoogleFileBridge
 from azents.engine.tools.import_file import ImportFileStagingConfiguration
+from azents.engine.tools.import_resolver import (
+    ArtifactImportResolver,
+    AzentsImportResolver,
+    ExchangeImportResolver,
+    ImportFileResolver,
+    ImportFileResolverRegistry,
+)
 from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationClient as EngineRuntimeRunnerOperationClient,
 )
@@ -94,7 +107,10 @@ from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryService,
 )
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferService
-from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTransferService
+from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimeTarget,
+    ServerToRuntimeTransferService,
+)
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.artifact import ArtifactService
 from azents.services.chat.live_events import (
@@ -121,6 +137,7 @@ from azents.services.external_channel.file_transfer import (
     get_slack_file_client,
 )
 from azents.services.external_channel.slack_events import SlackConversationClient
+from azents.services.google_workspace.runtime_files import GoogleRuntimeFileReader
 from azents.services.historical_memory.context_snapshot import (
     MemoryContextSnapshotService,
 )
@@ -363,12 +380,16 @@ class _WorkerTransferServices:
         self,
         *,
         server_to_runtime: ServerToRuntimeTransferService,
+        runtime_to_server: RuntimeToServerTransferService,
+        object_resolver: RuntimeTransferObjectResolver,
         runtime_image_read: RuntimeImageReadService,
         present_file_publication: PresentFilePublicationService,
         provider_delivery: RuntimeToProviderDeliveryService,
         import_staging: ImportFileStagingConfiguration,
     ) -> None:
         self.server_to_runtime = server_to_runtime
+        self.runtime_to_server = runtime_to_server
+        self.object_resolver = object_resolver
         self.runtime_image_read = runtime_image_read
         self.present_file_publication = present_file_publication
         self.provider_delivery = provider_delivery
@@ -422,6 +443,8 @@ def create_worker_transfer_services(
     )
     return _WorkerTransferServices(
         server_to_runtime=server_to_runtime,
+        runtime_to_server=runtime_to_server,
+        object_resolver=resolver,
         runtime_image_read=RuntimeImageReadService(
             transfer_service=runtime_to_server,
             resolver=resolver,
@@ -449,6 +472,85 @@ def create_worker_transfer_services(
             deadline_after=_TRANSFER_DEADLINE,
         ),
     )
+
+
+def get_worker_toolkit_registry(
+    registry: Annotated[
+        Mapping[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
+    ],
+    builtin: Annotated[BuiltinToolkitProvider, Depends(get_builtin_toolkit_provider)],
+    config: Annotated[Config, Depends(get_config)],
+    s3: Annotated[S3Service, Depends(get_s3_service)],
+    coordinator: Annotated[
+        GrpcRuntimeTransferCoordinatorClient | None,
+        Depends(get_worker_runtime_transfer_coordinator_client),
+    ],
+) -> dict[str, ToolkitProvider[Any]]:
+    """Attach Worker-only canonical file consumers without a VFS DI cycle."""
+    provider = registry["google"]
+    if not isinstance(provider, GoogleToolkitProvider):
+        raise TypeError("Google provider composition is invalid.")
+    transfer = create_worker_transfer_services(
+        config=config,
+        coordinator=coordinator,
+        s3_service=s3,
+        exchange_file_service=builtin.exchange_file_service,
+        model_file_service=builtin.model_file_service,
+    )
+    bucket = config.workspace_s3.bucket
+    if not bucket:
+        raise ValueError("Google file transfer requires a workspace S3 bucket.")
+
+    def files(authority: SessionResourceAuthority) -> GoogleFileBridge:
+        storage = RuntimeRunnerFileStorage(
+            runner_operations=builtin.runner_operations,
+            agent_runtime_service=builtin.agent_runtime_service,
+            runtime_agent_id=authority.agent_id,
+            owner_session_id=authority.session_id,
+        )
+
+        async def target() -> ServerToRuntimeTarget:
+            current = await builtin.agent_runtime_service.resolve_operation_target(
+                authority.agent_id,
+                wait_timeout_seconds=60,
+                poll_interval_seconds=0.25,
+                expected_authority=None,
+                start_if_stopped=True,
+            )
+            return ServerToRuntimeTarget(
+                runtime_id=current.id,
+                desired_generation=current.desired_generation,
+            )
+
+        resolvers: dict[str, ImportFileResolver] = {
+            "exchange": ExchangeImportResolver(
+                builtin.exchange_file_service, authority
+            ),
+            "artifact": ArtifactImportResolver(builtin.artifact_service, authority),
+        }
+        if builtin.vfs_projection_service is not None:
+            resolvers["azents"] = AzentsImportResolver(
+                builtin.vfs_projection_service, authority
+            )
+        return GoogleFileBridge(
+            resolver=ImportFileResolverRegistry(resolvers),
+            runtime=GoogleRuntimeFileReader(
+                storage=storage,
+                transfers=transfer.runtime_to_server,
+                objects=transfer.object_resolver,
+                s3=s3,
+                resolve_target=target,
+                authority=authority,
+                maximum_bytes=config.general_file_maximum_bytes,
+            ),
+            s3=s3,
+            bucket=bucket,
+            artifacts=builtin.artifact_service,
+            authority=authority,
+            maximum_bytes=config.general_file_maximum_bytes,
+        )
+
+    return {**registry, "google": dataclasses.replace(provider, files=files)}
 
 
 def create_worker_external_channel_inbound_staging_configuration(

@@ -54,6 +54,9 @@ class ProviderState(BaseModel):
     exchanges: int
     refreshes: int
     calls: list[str]
+    effects: list[str]
+    downloads: int
+    uploaded_bytes: int
 
 
 class Callback(NamedTuple):
