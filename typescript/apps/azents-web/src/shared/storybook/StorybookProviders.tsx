@@ -1,8 +1,8 @@
 "use client";
 
 import { ColorSchemeScript } from "@mantine/core";
+import { useColorScheme } from "@mantine/hooks";
 import { NextIntlClientProvider } from "next-intl";
-import { useEffect, useState } from "react";
 import messages from "@/i18n/en-US-messages";
 import { ColorModeProvider } from "@/shared/providers/color-mode";
 import { LocaleProvider } from "@/shared/providers/locale";
@@ -10,50 +10,20 @@ import { AppMantineProvider } from "@/shared/providers/mantine";
 import type { ColorModePreference } from "@/shared/lib/color-mode";
 import type { ReactElement, ReactNode } from "react";
 
-type ResolvedColorScheme = "light" | "dark";
-
 interface StorybookProvidersProps {
   children: ReactNode;
   colorScheme: ColorModePreference;
-}
-
-function getSystemColorScheme(): ResolvedColorScheme {
-  if (typeof window === "undefined") {
-    return "light";
-  }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
-function resolveColorScheme(
-  preference: ColorModePreference,
-): ResolvedColorScheme {
-  return preference === "system" ? getSystemColorScheme() : preference;
 }
 
 export function StorybookProviders({
   children,
   colorScheme,
 }: StorybookProvidersProps): ReactElement {
-  const [resolvedColorScheme, setResolvedColorScheme] =
-    useState<ResolvedColorScheme>(() => resolveColorScheme(colorScheme));
-
-  useEffect(() => {
-    if (colorScheme !== "system") {
-      setResolvedColorScheme(colorScheme);
-      return;
-    }
-
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const syncColorScheme = (): void => {
-      setResolvedColorScheme(getSystemColorScheme());
-    };
-
-    syncColorScheme();
-    mediaQuery.addEventListener("change", syncColorScheme);
-    return () => mediaQuery.removeEventListener("change", syncColorScheme);
-  }, [colorScheme]);
+  const systemColorScheme = useColorScheme("light", {
+    getInitialValueInEffect: false,
+  });
+  const resolvedColorScheme =
+    colorScheme === "system" ? systemColorScheme : colorScheme;
 
   return (
     <div className="storybook-root">

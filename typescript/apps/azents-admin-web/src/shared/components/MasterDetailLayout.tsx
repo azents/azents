@@ -7,9 +7,11 @@
  * Mobile: master panel with the detail rendered in a full-screen Drawer.
  */
 import { Box, Drawer } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
+import { useMasterDetailLayoutContainer } from "../containers/useMasterDetailLayoutContainer";
+import { createReactContainer } from "../lib/createReactContainer";
+import type { MasterDetailLayoutOutput } from "../containers/useMasterDetailLayoutContainer";
 
-interface MasterDetailLayoutProps {
+export interface MasterDetailLayoutProps {
   master: React.ReactNode;
   detail: React.ReactNode;
   detailOpen: boolean;
@@ -20,18 +22,21 @@ interface MasterDetailLayoutProps {
   style?: React.CSSProperties;
 }
 
-export function MasterDetailLayout({
+export const MasterDetailLayout = createReactContainer(
+  "MasterDetailLayout",
+  useMasterDetailLayoutContainer,
+  MasterDetailLayoutView,
+);
+
+export function MasterDetailLayoutView({
   master,
   detail,
   detailOpen,
   onDetailClose,
   columns = "minmax(0, 1fr) minmax(0, 1fr)",
   style,
-}: MasterDetailLayoutProps): React.ReactElement {
-  // Mantine's md breakpoint is 62em. Default to desktop during SSR to avoid
-  // shifting an already-wide layout after hydration.
-  const isDesktop = useMediaQuery("(min-width: 62em)", true);
-
+  isDesktop,
+}: MasterDetailLayoutOutput): React.ReactElement {
   if (isDesktop) {
     return (
       <Box

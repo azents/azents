@@ -9,6 +9,9 @@ interface AgentSidebarSectionProps {
   onNavigate?: () => void;
 }
 const MAX_SIDEBAR_ROWS = 8;
+export type AgentSidebarState =
+  | { type: "LOADING" }
+  | { type: "READY"; visible: AgentResponse[]; totalCount: number };
 function resolveActive(
   pathname: string,
   basePath: string,
@@ -32,11 +35,10 @@ export interface AgentSidebarSectionViewProps {
   t: ReturnType<typeof useTranslations<"workspace.sidebar">>;
   workspaceBase: string;
   agentsBase: string;
-  agentsQuery: ReturnType<typeof trpc.agent.list.useQuery>;
+  state: AgentSidebarState;
   activeAgentId: string | null;
   query: string;
   setQuery: React.Dispatch<React.SetStateAction<string>>;
-  sidebarAgents: { visible: AgentResponse[]; totalCount: number };
 }
 export function useAgentSidebarSectionController({
   handle,
@@ -98,10 +100,11 @@ export function useAgentSidebarSectionController({
     t,
     workspaceBase,
     agentsBase,
-    agentsQuery,
+    state: agentsQuery.isLoading
+      ? { type: "LOADING" }
+      : { type: "READY", ...sidebarAgents },
     activeAgentId,
     query,
     setQuery,
-    sidebarAgents,
   };
 }
