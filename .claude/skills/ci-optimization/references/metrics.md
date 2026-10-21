@@ -35,6 +35,9 @@ boundaries (JUnit testcase time, pytest phase/fixture and image timing numbers,
 lane duration files). Do not replace invalid values with zero or silently discard
 them. The optional omitted JUnit testcase time remains distinct from an invalid
 supplied measurement.
+Keep native producer versions stable across repeated CI attempts. Reporter
+escaping changes are not permission to double-unescape identities or weaken
+testcase-multiset comparison; preserve the mismatch and correct the producer.
 
 `run.json` uses `gh run view --attempt N --json databaseId,attempt,status,conclusion,
 headSha,headBranch,event,workflowName,createdAt,jobs`. Job names and steps are
