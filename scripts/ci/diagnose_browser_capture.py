@@ -1,5 +1,6 @@
 """Temporary content-free SDK phase instrumentation, not acceptance evidence."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -7,6 +8,19 @@ from pathlib import Path
 def main() -> None:
     bundle = Path(sys.argv[1])
     source = bundle.read_text()
+    if os.environ.get("AZ_CAPTURE_SURFACE_DEADLINE_ZERO") == "1":
+        old = (
+            'process.env.PLAYWRIGHT_LEGACY_SCREENSHOT ? "" : '
+            '"--enable-features=CDPScreenshotNewSurface",'
+        )
+        new = (
+            'process.env.PLAYWRIGHT_LEGACY_SCREENSHOT ? "" : '
+            '"--enable-features=CDPScreenshotNewSurface,'
+            'InitialWebUISurfaceSync:deadline_in_frames/0",'
+        )
+        if source.count(old) != 1:
+            raise RuntimeError("Pinned Chromium feature argument mismatch")
+        source = source.replace(old, new)
     helper = """
 function azCaptureTrace(stage, elapsed) {
   if (!process.env.AZ_CAPTURE_TRACE) return;
