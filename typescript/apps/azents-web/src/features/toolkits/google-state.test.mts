@@ -167,10 +167,10 @@ void test("consent offers supported service permissions without local action sel
     ).sort(),
   );
   assert.ok(
-    googleScopesForServices(["gmail"]).includes("https://mail.google.com/"),
+    new Set(googleScopesForServices(["gmail"])).has("https://mail.google.com/"),
   );
   assert.ok(
-    googleScopesForServices(["calendar"]).includes(
+    new Set(googleScopesForServices(["calendar"])).has(
       "https://www.googleapis.com/auth/calendar.events",
     ),
   );
