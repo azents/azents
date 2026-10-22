@@ -319,7 +319,7 @@ def plan(request: Request) -> Text | Call:
             return Call(
                 "call_routine_e2e_hold",
                 "exec_command",
-                {"command": HOLD_COMMAND, "yield_time_ms": 30000},
+                {"command": HOLD_COMMAND, "yield_time_ms": 10000},
             )
         return Text("resp_routine_e2e_held", HOLD_DONE)
     if request.kind == "setup":
@@ -411,7 +411,7 @@ def plan(request: Request) -> Text | Call:
                     "> /tmp/routine-e2e-proof.txt; "
                     "cat /tmp/routine-e2e-proof.txt"
                 ),
-                "yield_time_ms": 30000,
+                "yield_time_ms": 10000,
             },
         )
     result_id = f"call_routine_e2e_result_{execution}"
