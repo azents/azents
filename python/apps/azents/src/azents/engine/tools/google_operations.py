@@ -586,14 +586,16 @@ GOOGLE_TOOLS = (
         Op.CALENDAR_CREATE_EVENT,
         cm.CalendarCreateInput,
         calendar.create_event,
-        "Create an event with timezone/recurrence, attendees and optional "
-        "conference request.",
+        "Create an event with timezone/recurrence, attendees, guest privileges "
+        "(modify, invite others, see other guests) and optional conference request. "
+        "Null guest privileges use Google's defaults.",
     ),
     _simple(
         Op.CALENDAR_UPDATE_EVENT,
         cm.CalendarPatchInput,
         calendar.patch_event,
-        "Patch supplied event fields; omitted fields are unchanged.",
+        "Patch supplied event fields, including guest privileges to modify, invite "
+        "others or see other guests; omitted fields are unchanged.",
     ),
     _simple(
         Op.CALENDAR_DELETE_EVENT,
