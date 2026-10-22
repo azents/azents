@@ -7,7 +7,20 @@ const meta = {
   title: "Chat/Human Message Body",
   component: ChatHumanMessageBody,
   tags: ["ci-contract"],
-  args: { children: "Human message with a theme-owned readable foreground." },
+  args: {
+    children: <span data-message-text>Human message with white text.</span>,
+  },
+  decorators: [
+    (Story) => (
+      <>
+        <Story />
+        <span
+          data-white-reference
+          style={{ color: "var(--mantine-color-white)" }}
+        />
+      </>
+    ),
+  ],
   parameters: { a11y: { test: "error" } },
 } satisfies Meta<typeof ChatHumanMessageBody>;
 export default meta;
@@ -18,10 +31,15 @@ export const Light: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(async () => {
       const bubble = canvasElement.querySelector(".mantine-Paper-root");
-      await expect(bubble).not.toBeNull();
-      if (bubble != null) {
-        await expectReadableContrast(bubble);
+      const text = canvasElement.querySelector("[data-message-text]");
+      const reference = canvasElement.querySelector("[data-white-reference]");
+      if (bubble == null || text == null || reference == null) {
+        throw new Error("Missing human message contrast fixture");
       }
+      const white = getComputedStyle(reference).color;
+      await expect(getComputedStyle(bubble).color).toBe(white);
+      await expect(getComputedStyle(text).color).toBe(white);
+      await expectReadableContrast(text, bubble);
     });
   },
 };
