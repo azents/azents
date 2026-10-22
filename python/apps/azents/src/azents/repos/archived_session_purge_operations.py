@@ -179,6 +179,9 @@ class ArchivedSessionPurgeOperations:
             active = active or await self.routine_participant.has_started_work(
                 session, session_ids=session_ids
             )
+            active = active or await self.scheduled_participant.has_started_work(
+                session, session_ids=session_ids
+            )
             scheduled_lifecycle = self.transition_operations
             preserve_started_work = (
                 active

@@ -1,7 +1,7 @@
 """Scheduled Task persistence operations for owning lifecycle transitions."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import sqlalchemy as sa
 
@@ -25,6 +25,7 @@ from azents.core.mailbox_data import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
@@ -48,6 +49,7 @@ class ScheduledTaskLifecycleCleanup:
 
     deleted_task_count: int
     deleted_admitted_cycle_count: int
+    deleted_started_cycle_count: int
     deleted_trigger_count: int
     preserved_started_cycle_count: int
     cleanup_plans: tuple[ProviderEffectPlan, ...]
@@ -111,6 +113,7 @@ class ScheduledTaskLifecycleRepository:
         )
         return ScheduledTaskLifecycleCleanup(
             deleted_task_count=cleanup.deleted_task_count,
+            deleted_started_cycle_count=0,
             deleted_admitted_cycle_count=(
                 cleanup.deleted_admitted_cycle_count
                 + remaining_cleanup.deleted_admitted_cycle_count
@@ -153,6 +156,7 @@ class ScheduledTaskLifecycleRepository:
         )
         return ScheduledTaskLifecycleCleanup(
             deleted_task_count=cleanup.deleted_task_count,
+            deleted_started_cycle_count=0,
             deleted_admitted_cycle_count=(
                 cleanup.deleted_admitted_cycle_count
                 + remaining_cleanup.deleted_admitted_cycle_count
@@ -216,6 +220,41 @@ class ScheduledTaskLifecycleRepository:
             ):
                 return False
             active_session_ids.add(run.session_id)
+        pending_idle_runs = (
+            await session.read_session.scalars(
+                sa.select(RDBAgentRun)
+                .join(
+                    RDBConversation,
+                    RDBConversation.pending_idle_continuation_run_id == RDBAgentRun.id,
+                )
+                .where(
+                    RDBConversation.session_id.in_(session_ids),
+                    RDBConversation.session_id == RDBAgentRun.session_id,
+                    RDBAgentRun.status == AgentRunStatus.COMPLETED,
+                    RDBAgentRun.scheduled_task_cycle_id.is_not(None),
+                )
+            )
+        ).all()
+        for run in pending_idle_runs:
+            agent_id = await session.read_session.scalar(
+                sa.select(RDBAgentSession.agent_id).where(
+                    RDBAgentSession.id == run.session_id
+                )
+            )
+            if agent_id is None or run.scheduled_task_cycle_id is None:
+                continue
+            cycle = await self._cycle(
+                session,
+                agent_id=agent_id,
+                session_id=run.session_id,
+                cycle_id=run.scheduled_task_cycle_id,
+            )
+            if (
+                cycle is not None
+                and cycle.phase == "started"
+                and cycle.current_run_id == run.id
+            ):
+                active_session_ids.add(run.session_id)
         scheduled_mailbox_session_ids: set[str] = set()
         mailbox_items = list(
             (
@@ -283,18 +322,82 @@ class ScheduledTaskLifecycleRepository:
             raise RuntimeError("Restored Scheduled Task authority was recreated.")
         return verification
 
+    async def has_preservable_started_work(
+        self,
+        session: ReadSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> bool:
+        """Preserve active hosts and successful hosts awaiting continuation."""
+        rows = (
+            await session.read_session.scalars(
+                sa.select(RDBToolkitState).where(
+                    RDBToolkitState.session_id.in_(session_ids),
+                    RDBToolkitState.toolkit_namespace == _NAMESPACE,
+                    RDBToolkitState.state_name.startswith(_STATE_NAME_PREFIX),
+                )
+            )
+        ).all()
+        for row in rows:
+            cycle = ScheduledTaskCycleState.model_validate(row.state_json)
+            if cycle.phase == "started" and await self._has_preservable_host(
+                session, cycle=cycle
+            ):
+                return True
+        return False
+
+    @staticmethod
+    async def _has_preservable_host(
+        session: ReadSession, *, cycle: ScheduledTaskCycleState
+    ) -> bool:
+        if cycle.current_run_id is None:
+            return False
+        run = await session.read_session.get(RDBAgentRun, cycle.current_run_id)
+        if run is None:
+            return False
+        if (
+            run.session_id != cycle.session_id
+            or run.scheduled_task_cycle_id != cycle.cycle_id
+        ):
+            raise RuntimeError("Scheduled Task cycle host identity is inconsistent.")
+        if run.status in {
+            AgentRunStatus.PENDING,
+            AgentRunStatus.RUNNING,
+        }:
+            return True
+        if run.status is not AgentRunStatus.COMPLETED:
+            return False
+        conversation = await session.read_session.get(RDBConversation, cycle.session_id)
+        if (
+            conversation is not None
+            and conversation.pending_idle_continuation_run_id == run.id
+        ):
+            return True
+        return bool(
+            await session.read_session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        RDBMailboxItem.session_id == cycle.session_id,
+                        RDBMailboxItem.kind
+                        == MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
+                        RDBMailboxItem.payload["cycle_id"].astext == cycle.cycle_id,
+                    )
+                )
+            )
+        )
+
     async def require_purge_ready(
         self,
         session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> ScheduledTaskLifecycleVerification:
-        """Reject permanent purge while a preserved started cycle remains."""
+        """Reject purge while a started cycle can still finish or continue."""
         verification = await self.verify_session_tree(
             session,
             session_ids=session_ids,
         )
-        if verification.started_cycle_count:
+        if await self.has_preservable_started_work(session, session_ids=session_ids):
             raise RuntimeError(
                 "Scheduled Task started cycles remain active for the Session tree."
             )
@@ -306,11 +409,38 @@ class ScheduledTaskLifecycleRepository:
         *,
         session_ids: Sequence[str],
     ) -> ScheduledTaskLifecycleCleanup:
-        """Delete residual Task and admitted-cycle state before finalization."""
+        """Remove residual authority and cycles whose hosts cannot continue."""
         await self.require_purge_ready(session, session_ids=session_ids)
-        return await self.terminate_session_tree(
+        cleanup = await self.terminate_session_tree(
             session,
             session_ids=session_ids,
+        )
+        rows = (
+            await session.write_session.scalars(
+                sa.select(RDBToolkitState)
+                .where(
+                    RDBToolkitState.session_id.in_(session_ids),
+                    RDBToolkitState.toolkit_namespace == _NAMESPACE,
+                    RDBToolkitState.state_name.startswith(_STATE_NAME_PREFIX),
+                )
+                .order_by(RDBToolkitState.id)
+                .with_for_update()
+            )
+        ).all()
+        deleted_started = 0
+        for row in rows:
+            cycle = ScheduledTaskCycleState.model_validate(row.state_json)
+            if cycle.phase != "started":
+                continue
+            if await self._has_preservable_host(session, cycle=cycle):
+                raise RuntimeError("Scheduled Task cycle became active during purge.")
+            await session.write_session.delete(row)
+            deleted_started += 1
+        await session.write_session.flush()
+        return replace(
+            cleanup,
+            deleted_started_cycle_count=deleted_started,
+            preserved_started_cycle_count=0,
         )
 
     async def verify_session_tree(
@@ -420,6 +550,7 @@ class ScheduledTaskLifecycleRepository:
         return ScheduledTaskLifecycleCleanup(
             deleted_task_count=deleted_task_count,
             deleted_admitted_cycle_count=deleted_admitted_cycle_count,
+            deleted_started_cycle_count=0,
             deleted_trigger_count=deleted_trigger_count,
             preserved_started_cycle_count=0,
             cleanup_plans=(),
@@ -527,6 +658,7 @@ class ScheduledTaskLifecycleRepository:
         return ScheduledTaskLifecycleCleanup(
             deleted_task_count=0,
             deleted_admitted_cycle_count=deleted_cycle_count,
+            deleted_started_cycle_count=0,
             deleted_trigger_count=deleted_trigger_count,
             preserved_started_cycle_count=preserved_started_cycle_count,
             cleanup_plans=tuple(cleanup_plans),
