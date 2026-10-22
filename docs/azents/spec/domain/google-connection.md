@@ -50,9 +50,13 @@ paths, authorization headers or arbitrary request bodies.
 ## Service Selection and Actual Access
 
 Canonical configuration contains `services`, `oauth_request_scopes` and `timeout`.
-Managers choose local service switches independently of OAuth request intent.
-Requested scopes guide a new consent request; only actual returned scopes grant
-capabilities. A local switch can enable or disable a service without reconnecting,
+Managers choose local service switches. Main Web automatically derives the supported
+scope set for enabled services when starting explicit connect/reconnect, including
+read and write alternatives. Users select permissions at Google consent; supported
+tools are determined automatically from actual returned scopes. Main Web has no
+per-permission request editor or mutable scope-selection state. Saved grants and
+already-reviewed attempts are not broadened by this request construction.
+A local switch can enable or disable a service without reconnecting,
 adding authorization, changing the connected account or revoking remote effects.
 An empty enabled-service set is valid for a saved connection.
 
@@ -83,8 +87,8 @@ privileges. Candidate identities, callback purposes and target Toolkit ownership
 are exact; another Workspace, User or Agent cannot resume or replace them.
 
 Main Web uses the common staged Wizard for Workspace-shared, Agent-owned and
-personal Toolkits. Managers choose services, optionally inspect request scopes,
-authorize, review the connected identity and actual full/partial/none/unknown
+personal Toolkits. Managers choose services, authorize at Google, review the
+connected identity and actual full/partial/none/unknown
 access, and explicitly publish. Plain Toolkit creation cannot bypass this flow.
 Saved metadata edits omit provider configuration and preserve independently saved
 service/timeout settings. Reconnect replaces authorization, not unrelated metadata.

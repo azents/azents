@@ -16,11 +16,7 @@ import {
 } from "react";
 import { trpc } from "@/trpc/client";
 import { revealGitHubWizardHeading } from "../github-wizard-progression";
-import {
-  googleDefaultScopes,
-  googleRequestOptions,
-  googleScopesForServices,
-} from "../google-access";
+import { googleScopesForServices } from "../google-access";
 import {
   deserializeGoogleResume,
   GOOGLE_RESUME_KEY,
@@ -105,7 +101,6 @@ export function useGoogleSetupContainer(
   });
   const [flow, setFlow] = useState<GoogleFlowState>({ type: "SELECT" });
   const [services, setServices] = useState<GoogleService[]>([]);
-  const [requestScopes, setRequestScopes] = useState<string[]>([]);
   const [timeout, setTimeoutValue] = useState(30);
   const [metadata, setMetadata] = useState<GoogleMetadata>({
     name: "",
@@ -196,7 +191,6 @@ export function useGoogleSetupContainer(
   };
   const acceptReview = (review: GoogleReview): void => {
     setServices(review.services);
-    setRequestScopes(review.oauth_request_scopes);
     setTimeoutValue(review.timeout);
     setFlow({ type: "REVIEW", review });
   };
@@ -247,7 +241,6 @@ export function useGoogleSetupContainer(
     }
     initializedSaved.current = true;
     setServices(statusQuery.data.services);
-    setRequestScopes(statusQuery.data.oauth_request_scopes);
     setTimeoutValue(statusQuery.data.timeout);
   }, [statusQuery.data]);
   useEffect(() => {
@@ -322,7 +315,7 @@ export function useGoogleSetupContainer(
     try {
       const desired = {
         services,
-        oauth_request_scopes: googleScopesForServices(services, requestScopes),
+        oauth_request_scopes: googleScopesForServices(services),
         timeout,
       };
       const result =
@@ -375,7 +368,9 @@ export function useGoogleSetupContainer(
     try {
       const settings = {
         services,
-        oauth_request_scopes: googleScopesForServices(services, requestScopes),
+        oauth_request_scopes: review.oauth_request_scopes.filter((scope) =>
+          googleScopesForServices(services).includes(scope),
+        ),
         timeout,
       };
       const outcome =
@@ -618,7 +613,6 @@ export function useGoogleSetupContainer(
     saved,
     flow,
     services,
-    requestScopes,
     timeout,
     metadata,
     publishingAllowed:
@@ -644,30 +638,7 @@ export function useGoogleSetupContainer(
           ? Array.from(new Set([...current, service]))
           : current.filter((item) => item !== service),
       );
-      if (
-        selected &&
-        !requestScopes.some((scope) =>
-          googleRequestOptions.some(
-            (option) => option.service === service && option.scope === scope,
-          ),
-        )
-      ) {
-        setRequestScopes((current) => [
-          ...current,
-          ...googleDefaultScopes(service),
-        ]);
-      }
     },
-    onRequestScopesChange: (service, scopes) =>
-      setRequestScopes((current) => [
-        ...current.filter(
-          (scope) =>
-            !googleRequestOptions.some(
-              (option) => option.service === service && option.scope === scope,
-            ),
-        ),
-        ...scopes,
-      ]),
     onSaveServices: saveServices,
     onTimeoutChange: setTimeoutValue,
     onMetadataChange: (patch) =>

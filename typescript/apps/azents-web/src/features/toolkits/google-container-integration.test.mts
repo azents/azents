@@ -46,12 +46,8 @@ const review = {
   attempt_id: "old",
   reconnect_toolkit_id: null,
   services: ["calendar"],
-  oauth_request_scopes: [
-    "openid",
-    "email",
-    ...googleAccess.googleDefaultScopes("calendar"),
-  ],
-  granted_scopes: googleAccess.googleDefaultScopes("calendar"),
+  oauth_request_scopes: googleAccess.googleScopesForServices(["calendar"]),
+  granted_scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"],
   drive_access: {
     whole_content_read: false,
     whole_content_write: false,
@@ -460,11 +456,7 @@ for (const agentOwned of [false, true]) {
     const confirmedConfig = {
       ...oldConfig,
       services: ["calendar"],
-      oauth_request_scopes: [
-        "openid",
-        "email",
-        ...googleAccess.googleDefaultScopes("calendar"),
-      ],
+      oauth_request_scopes: googleAccess.googleScopesForServices(["calendar"]),
       timeout: 12,
     };
     toolkit = { ...toolkit, config: confirmedConfig };
@@ -499,6 +491,8 @@ function setupHarness(
     status: () => unknown;
     save: (input: unknown) => Promise<unknown>;
   } | null,
+  authorizeRequest?: ((input: unknown) => PromiseLike<unknown>) | null,
+  confirmRequest?: (input: unknown) => PromiseLike<unknown>,
 ): HookHarness {
   const harness = new HookHarness();
   const google: Record<string, unknown> = {
@@ -528,6 +522,20 @@ function setupHarness(
   google.cancel = {
     useMutation: () => ({ ...noMutation(), mutateAsync: cancelRequest }),
   };
+  if (authorizeRequest != null) {
+    for (const name of ["connect", "reconnect"]) {
+      google[name] = {
+        useMutation: () => ({ ...noMutation(), mutateAsync: authorizeRequest }),
+      };
+    }
+  }
+  if (confirmRequest != null) {
+    for (const name of ["confirm", "reconnectConfirm"]) {
+      google[name] = {
+        useMutation: () => ({ ...noMutation(), mutateAsync: confirmRequest }),
+      };
+    }
+  }
   if (management != null) {
     google.services = {
       useMutation: () => ({ ...noMutation(), mutateAsync: management.save }),
@@ -695,28 +703,117 @@ void test("saved service switches allow all-off without replacing scope intent o
   assert.equal(output.servicesDirty, false);
 });
 
-void test("enabling Drive defaults to whole-file reads while writing remains an explicit request", () => {
+for (const ownership of ["workspace", "agent", "user"]) {
+  void test(`${ownership} consent requests permissions automatically for the enabled services`, async () => {
+    const dispatched = deferred<unknown>();
+    const h = setupHarness(
+      new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY),
+      () => Promise.reject(new Error("Unexpected cancellation.")),
+      () => Promise.resolve(review),
+      () => {},
+      null,
+      (input) => {
+        dispatched.resolve(input);
+        return Promise.reject(
+          new Error("Synthetic stop before Google navigation."),
+        );
+      },
+    );
+    let output = h.render({
+      handle: "team",
+      ...(ownership === "agent" ? { agentId: "agent" } : {}),
+      ...(ownership === "user" ? { owner: "user" } : {}),
+    });
+    h.flushEffects();
+    invoke(output.onServiceChange, "drive", true);
+    output = h.render();
+    invoke(output.onServiceChange, "gmail", true);
+    output = h.render();
+    invoke(output.onServiceChange, "gmail", false);
+    output = h.render();
+    invoke(output.onAuthorize);
+    const input = object(await dispatched.promise);
+    assert.deepEqual(JSON.parse(JSON.stringify(object(input.desired))), {
+      services: ["drive"],
+      oauth_request_scopes: googleAccess.googleScopesForServices(["drive"]),
+      timeout: 30,
+    });
+    assert.equal(input.owner ?? null, ownership === "user" ? "user" : null);
+    assert.equal(input.agentId ?? null, ownership === "agent" ? "agent" : null);
+  });
+}
+
+void test("explicit reconnect offers supported permissions without changing saved grant evidence", async () => {
+  const dispatched = deferred<unknown>();
+  const saved = {
+    ...review,
+    toolkit_id: "saved",
+    revision: 7,
+    status: "connected",
+    connection_id: "same-grant",
+  };
   const h = setupHarness(
     new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY),
     () => Promise.reject(new Error("Unexpected cancellation.")),
     () => Promise.resolve(review),
     () => {},
+    {
+      status: () => saved,
+      save: () => Promise.reject(new Error("Unexpected service save.")),
+    },
+    (input) => {
+      dispatched.resolve(input);
+      return Promise.reject(
+        new Error("Synthetic stop before Google navigation."),
+      );
+    },
+  );
+  const output = h.render();
+  invoke(output.onAuthorize);
+  const input = object(await dispatched.promise);
+  assert.equal(input.toolkitId, "saved");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(object(input.desired).oauth_request_scopes)),
+    googleAccess.googleScopesForServices(["calendar"]),
+  );
+  assert.deepEqual(saved.granted_scopes, review.granted_scopes);
+  assert.equal(saved.connection_id, "same-grant");
+});
+
+void test("publication preserves an already-reviewed narrow request and its actual partial grant", async () => {
+  const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+  store.value = context();
+  const reviewed = deferred<unknown>();
+  const dispatched = deferred<unknown>();
+  const narrow = {
+    ...review,
+    oauth_request_scopes: [
+      "email",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
+      "openid",
+    ],
+  };
+  const h = setupHarness(
+    store,
+    () => Promise.reject(new Error("Unexpected cancellation.")),
+    () => reviewed.promise,
+    () => {},
     null,
+    null,
+    (input) => {
+      dispatched.resolve(input);
+      return Promise.reject(new Error("Synthetic unconfirmed publication."));
+    },
   );
-  let output = h.render();
-  invoke(output.onServiceChange, "drive", true);
-  output = h.render();
-  assert.equal(JSON.stringify(output.services), JSON.stringify(["drive"]));
-  assert.equal(
-    JSON.stringify(output.requestScopes),
-    JSON.stringify(["https://www.googleapis.com/auth/drive.readonly"]),
+  reviewed.resolve(narrow);
+  await reviewed.promise;
+  const output = h.render();
+  h.flushEffects();
+  invoke(output.onPublish);
+  const settings = object(object(await dispatched.promise).settings);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(settings.oauth_request_scopes)),
+    narrow.oauth_request_scopes,
   );
-  invoke(output.onRequestScopesChange, "drive", [
-    "https://www.googleapis.com/auth/drive",
-  ]);
-  output = h.render();
-  assert.equal(
-    JSON.stringify(output.requestScopes),
-    JSON.stringify(["https://www.googleapis.com/auth/drive"]),
-  );
+  assert.deepEqual(narrow.granted_scopes, review.granted_scopes);
 });

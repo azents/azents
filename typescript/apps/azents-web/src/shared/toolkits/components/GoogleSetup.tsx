@@ -9,7 +9,6 @@ import {
   Divider,
   Group,
   Loader,
-  MultiSelect,
   NumberInput,
   Stack,
   Switch,
@@ -19,7 +18,6 @@ import {
   Title,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { googleRequestOptions } from "../google-access";
 import { googleServiceSchema } from "../google-schemas";
 import { ToolkitDisconnectConfirmation } from "./ToolkitDisconnectConfirmation";
 import type { GoogleSetupProps } from "../google-types";
@@ -311,32 +309,6 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                     </Button>
                   </>
                 )}
-                <Text fw={500}>{t("requestAccess")}</Text>
-                <Text size="sm" c="dimmed">
-                  {t("requestAccessDescription")}
-                </Text>
-                {props.services.map((service) => (
-                  <MultiSelect
-                    key={service}
-                    label={t(`services.${service}`)}
-                    data={googleRequestOptions
-                      .filter((option) => option.service === service)
-                      .map((option) => ({
-                        value: option.scope,
-                        label: t(`requests.${option.key}`),
-                      }))}
-                    value={props.requestScopes.filter((scope) =>
-                      googleRequestOptions.some(
-                        (option) =>
-                          option.service === service && option.scope === scope,
-                      ),
-                    )}
-                    disabled={!selecting || busy}
-                    onChange={(scopes) =>
-                      props.onRequestScopesChange(service, scopes)
-                    }
-                  />
-                ))}
                 <NumberInput
                   label={t("timeout")}
                   value={props.timeout}

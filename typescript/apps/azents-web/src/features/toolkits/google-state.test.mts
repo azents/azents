@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  googleDefaultScopes,
-  googleScopesForServices,
-} from "../../shared/toolkits/google-access.ts";
+import { googleScopesForServices } from "../../shared/toolkits/google-access.ts";
 import {
   decodeGoogleResume,
   deserializeGoogleResume,
@@ -120,7 +117,7 @@ void test("Google service and request contracts preserve explicit reconnect inte
   assert.equal(
     googleDesiredSchema.safeParse({
       services: ["drive"],
-      oauth_request_scopes: googleDefaultScopes("drive"),
+      oauth_request_scopes: googleScopesForServices(["drive"]),
       timeout: 30,
     }).success,
     true,
@@ -149,24 +146,33 @@ void test("Google service and request contracts preserve explicit reconnect inte
     }).success,
     true,
   );
-  assert.deepEqual(googleDefaultScopes("drive"), [
+});
+void test("consent offers supported service permissions without local action selection", () => {
+  assert.deepEqual(googleScopesForServices(["drive"]), [
+    "email",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.metadata",
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "openid",
   ]);
   assert.deepEqual(
-    googleScopesForServices(
-      ["drive"],
-      [
-        "https://www.googleapis.com/auth/drive.readonly",
-        "https://www.googleapis.com/auth/drive.file",
-        ...googleDefaultScopes("gmail"),
-      ],
+    googleScopesForServices(["drive", "gmail", "drive"]),
+    Array.from(
+      new Set([
+        ...googleScopesForServices(["drive"]),
+        ...googleScopesForServices(["gmail"]),
+      ]),
+    ).sort(),
+  );
+  assert.ok(
+    new Set(googleScopesForServices(["gmail"])).has("https://mail.google.com/"),
+  );
+  assert.ok(
+    new Set(googleScopesForServices(["calendar"])).has(
+      "https://www.googleapis.com/auth/calendar.events",
     ),
-    [
-      "email",
-      "https://www.googleapis.com/auth/drive.file",
-      "https://www.googleapis.com/auth/drive.readonly",
-      "openid",
-    ],
   );
 });
 void test("publication requires a renewable reviewed service with actual usable evidence", () => {
