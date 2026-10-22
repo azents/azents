@@ -86,7 +86,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory
 last_verified_at: 2026-10-22
-spec_version: 25
+spec_version: 26
 ---
 
 # Memory
@@ -431,6 +431,11 @@ replacing description/content/type or creating an entry. Delete remains exact
 scope/name deletion with an explicit missing-entry error. Team execution rejects
 User mutation; User execution binds its associated User.
 
+Memory write guidance routes personal information about the User in individual
+Sessions to User-scoped Memory, and shared knowledge and context to Agent-scoped
+Memory. In Team Sessions, it directs team knowledge and information about team
+members to Agent-scoped Memory.
+
 Saved Memory and Session-summary lookup use generic VFS tools. Dedicated
 `list_memories`, `get_memory`, and `search_memories` remain removed.
 
@@ -560,6 +565,7 @@ Old-code rollback after destructive removal of obsolete schema is not promised.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-22 | 26 | Replace personal-information write restrictions with explicit individual and Team Session Memory scope guidance |
 | 2026-10-22 | 25 | Search and read tool-mediated conversation, Scheduled reports and Routine notifications; add ordinary-tool exclusion and aggregate multipart reply delivery |
 | 2026-10-07 | 23 | Replace integration drafts/manifests and Scheduler-local hosts with summary-only common Worker executions, explicit file submission, retained audit and scope-only current results |
 | 2026-10-06 | 22 | Added Saved cursor paging and integrated Historical overview, one-level session details, automatic scroll pagination and full-width header description |
