@@ -224,12 +224,12 @@ export const theme = createTheme({
       }),
     }),
     Paper: Paper.extend({
-      styles: (theme, props) => ({
+      styles: (_theme, props) => ({
         root:
           props.variant === "message"
             ? {
-                backgroundColor: "var(--mantine-color-blue-6)",
-                color: filledForeground(theme, "blue.6"),
+                backgroundColor: "var(--mantine-color-blue-8)",
+                color: "var(--mantine-color-white)",
               }
             : {},
       }),
