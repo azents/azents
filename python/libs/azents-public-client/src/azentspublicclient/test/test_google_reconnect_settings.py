@@ -38,6 +38,9 @@ class TestGoogleReconnectSettings(unittest.TestCase):
                 services = [
                     'calendar'
                     ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
                 oauth_request_scopes = [
                     ''
                     ],
@@ -47,6 +50,9 @@ class TestGoogleReconnectSettings(unittest.TestCase):
             return GoogleReconnectSettings(
                 services = [
                     'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
                     ],
                 oauth_request_scopes = [
                     ''

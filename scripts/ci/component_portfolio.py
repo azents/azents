@@ -6,6 +6,7 @@ STORIES = {
     "src/shared/toolkits/components/GoogleSetup.stories.tsx": (
         "Explicit Selection",
         "Selected Services",
+        "Editable Presets",
         "Partial Grant Review",
         "Personal Review",
         "Unknown Grant",

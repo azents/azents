@@ -17,7 +17,7 @@
   "operatorDescription": "Ask a system administrator to configure the Google OAuth application. Application secrets are not entered here.",
   "preparationUnverified": "The application is configured locally. Live Google service access has not been verified.",
   "selectServices": "1. Choose services",
-  "selectDescription": "Choose permissions on the Google consent screen. Tools are determined automatically from the permissions you grant.",
+  "selectDescription": "Choose the tool groups you want for each service. OAuth requests the permissions those tools need; you can adjust any preset.",
   "timeout": "Tool request timeout (seconds)",
   "authorize": "Continue to Google",
   "authorizeAgain": "Authorize replacement connection",
@@ -29,7 +29,7 @@
   "agentOwnership": "This connection belongs only to this Agent. Runs use this saved account, not a participant's account.",
   "sharedOwnership": "Workspace-shared connection: authorized users and Agents may act using this saved account.",
   "personalOwnership": "This connection belongs to your account. Only your personal Sessions with allowed Agents can use it.",
-  "actualPermissions": "Tools are determined automatically from the permissions returned by Google for enabled services.",
+  "actualPermissions": "Only selected tools supported by the permissions Google returned will be enabled.",
   "missingRenewal": "No renewable credential was returned. This candidate cannot be saved; start a new explicit authorization.",
   "includeService": "Keep this service enabled",
   "name": "Toolkit name",
@@ -108,5 +108,33 @@
   "pickerSelected": "{count, plural, one {# file selected in Google} other {# files selected in Google}}. Google controls eligibility; this is not a local access list.",
   "pickerCancelled": "File selection closed without retaining a selection.",
   "pickerFailed": "Google file selection is unavailable. Reload the connection and check administrator preparation before trying again.",
-  "pickerExpired": "The temporary file-selection credential expired. Open the chooser again for a new credential."
+  "pickerExpired": "The temporary file-selection credential expired. Open the chooser again for a new credential.",
+  "groups": {
+    "gmail_read": "Read mail and attachments",
+    "gmail_labels": "Manage labels",
+    "gmail_drafts": "Create and manage drafts",
+    "gmail_send": "Send, reply and forward mail",
+    "gmail_organize": "Organize, trash and restore mail",
+    "gmail_filters": "Manage filters and apply to existing mail",
+    "calendar_read": "Read calendars and events",
+    "calendar_availability": "Check availability and suggest times",
+    "calendar_events": "Create, edit and respond to events",
+    "calendar_status": "Manage focus time and out-of-office events",
+    "calendar_create": "Create calendars",
+    "drive_read": "Read and export Drive files",
+    "drive_files": "Create and change Drive files",
+    "drive_sharing": "Manage sharing and access",
+    "drive_ownership": "Transfer file ownership"
+  },
+  "presets": {
+    "read_only": "Read only",
+    "assistant": "Everyday assistant",
+    "full": "All tools",
+    "clear": "Clear selection"
+  },
+  "presetsTitle": "Choose a preset or customize tool groups",
+  "groupResult": "{available} of {total} tools available",
+  "groupUnavailable": "Some tools lack the permissions returned by Google. They will not be enabled.",
+  "groupTools": "Inspect {count} tools",
+  "finalGroupsTitle": "Final tool groups"
 }

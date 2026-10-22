@@ -33,13 +33,14 @@ from azents.core.google_oauth import (
     google_manager_for_owner,
 )
 from azents.core.google_picker import GooglePickerState
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
 from azents.core.google_system_setting import (
     GoogleApplicationRegistration,
     GoogleApplicationUnavailable,
     GooglePickerApplication,
     resolve_google_registration,
 )
+from azents.core.google_tool_groups import group_operations
 from azents.core.google_workspace_policy import (
     GOOGLE_PICKER_SCOPE,
     eligible_model_operations,
@@ -381,6 +382,7 @@ class GoogleOAuthRepository:
             else candidate.tokens.granted_scopes,
             status=None if connection is None else connection.status,
             services=config.services,
+            tool_groups=config.tool_groups,
             oauth_request_scopes=config.oauth_request_scopes,
             timeout=config.timeout,
         )
@@ -490,6 +492,7 @@ class GoogleOAuthRepository:
                 toolkit_id=toolkit_id,
                 revision=revision,
                 services=target.services,
+                tool_groups=target.tool_groups,
                 oauth_request_scopes=target.oauth_request_scopes,
                 timeout=target.timeout,
                 connection=connection,
@@ -502,6 +505,7 @@ class GoogleOAuthRepository:
         toolkit_id: str,
         expected_revision: int,
         services: tuple[GoogleService, ...],
+        tool_groups: tuple[GoogleToolGroup, ...],
     ) -> None:
         """Save only local switches while preserving credential and request intent."""
         async with self.session_manager() as session:
@@ -513,7 +517,10 @@ class GoogleOAuthRepository:
                 )
             config = GoogleToolkitConfig.model_validate(toolkit.config)
             toolkit.config = config.model_copy(
-                update={"services": tuple(sorted(set(services)))}
+                update={
+                    "services": tuple(sorted(set(services))),
+                    "tool_groups": tuple(sorted(set(tool_groups))),
+                }
             ).model_dump(mode="json")
             toolkit.revision += 1
 
@@ -795,6 +802,7 @@ class GoogleOAuthRepository:
                 self._bound(setup, registration)
                 if (
                     not settings.services
+                    or not set(settings.tool_groups) <= set(setup.tool_groups)
                     or not set(settings.services) <= set(setup.services)
                     or not set(settings.oauth_request_scopes)
                     <= set(setup.oauth_request_scopes)
@@ -807,8 +815,11 @@ class GoogleOAuthRepository:
                 if (
                     candidate.tokens.expires_at <= datetime.datetime.now(datetime.UTC)
                     or candidate.tokens.refresh_token is None
-                ) or not eligible_model_operations(
-                    settings.services, candidate.tokens.granted_scopes
+                ) or not (
+                    eligible_model_operations(
+                        settings.services, candidate.tokens.granted_scopes
+                    )
+                    & group_operations(settings.tool_groups)
                 ):
                     raise GoogleOAuthError(
                         "no_usable_capability",
@@ -816,6 +827,7 @@ class GoogleOAuthRepository:
                     )
                 config = GoogleToolkitConfig(
                     services=settings.services,
+                    tool_groups=settings.tool_groups,
                     oauth_request_scopes=settings.oauth_request_scopes,
                     timeout=settings.timeout,
                 ).model_dump(mode="json")

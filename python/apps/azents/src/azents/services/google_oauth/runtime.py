@@ -17,6 +17,7 @@ from azents.core.google_runtime import (
     GoogleOperationAuthorization,
 )
 from azents.core.google_system_setting import GoogleApplicationUnavailable
+from azents.core.google_tool_groups import group_operations
 from azents.core.google_workspace_policy import (
     GoogleWorkspaceOperation,
     eligible_model_operations,
@@ -122,7 +123,9 @@ class GoogleRuntimeService:
         operation: GoogleWorkspaceOperation,
         auxiliary: tuple[GoogleWorkspaceOperation, ...],
     ) -> None:
-        if not operation_permitted(
+        if operation not in group_operations(
+            current.config.tool_groups
+        ) or not operation_permitted(
             operation,
             current.config.services,
             current.connection.candidate.tokens.granted_scopes,
@@ -143,7 +146,7 @@ class GoogleRuntimeService:
         return eligible_model_operations(
             current.config.services,
             current.connection.candidate.tokens.granted_scopes,
-        )
+        ) & group_operations(current.config.tool_groups)
 
     async def authorize_operation(
         self,

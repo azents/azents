@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
+from azents.core.google_tool_groups import group_operations
 from azents.core.google_workspace_policy import (
     GOOGLE_WORKSPACE_OPERATIONS,
     GoogleWorkspaceOperation,
@@ -26,9 +27,11 @@ class GoogleServiceAccess(BaseModel):
 def service_accesses(
     services: tuple[GoogleService, ...],
     actual_scopes: tuple[str, ...] | None,
+    tool_groups: tuple[GoogleToolGroup, ...],
 ) -> tuple[GoogleServiceAccess, ...]:
     """Project all supported services without treating requested scopes as grants."""
-    allowed = eligible_operations(services, actual_scopes)
+    selected = group_operations(tool_groups)
+    allowed = eligible_operations(services, actual_scopes) & selected
     result: list[GoogleServiceAccess] = []
     for service in GoogleService:
         # Sender verification is an argument-dependent prerequisite, not a
@@ -38,6 +41,7 @@ def service_accesses(
             for policy in GOOGLE_WORKSPACE_OPERATIONS.values()
             if policy.service is service
             and policy.operation is not GoogleWorkspaceOperation.GMAIL_GET_SEND_AS
+            and policy.operation in selected
         )
         permitted = known & allowed
         status: Literal["disabled", "permitted", "partial", "not_granted", "unknown"]

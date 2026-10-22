@@ -7,7 +7,7 @@ from typing import assert_never
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
 from azents.core.google_workspace_policy import (
     GoogleWorkspaceConfig,
     GoogleWorkspaceConnectInput,
@@ -221,6 +221,7 @@ class GoogleSavedConnection:
     toolkit_id: str
     revision: int
     services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
     oauth_request_scopes: tuple[str, ...]
     timeout: float
     connection: GoogleConnection | None = dataclasses.field(repr=False)

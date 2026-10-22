@@ -15,6 +15,7 @@ from azents.core.google_oauth import (
     GooglePersonalSubject,
     GoogleReconnectSettings,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.personal_toolkit import PersonalToolkitAccessMutation
 from azents.core.toolkit_ownership import (
     PersonalToolkitAccessMode,
@@ -263,6 +264,7 @@ async def test_personal_reconnect_preserves_allowance_and_current_settings(
         services=_settings().services,
         oauth_request_scopes=_settings().oauth_request_scopes,
         timeout=12.0,
+        tool_groups=groups_for_services(_settings().services),
     )
     changed = await h.shared.repo.confirm(
         h.subject,
@@ -326,6 +328,7 @@ async def test_personal_disconnect_and_cancel_defeat_stale_publication(
                 services=_settings().services,
                 oauth_request_scopes=_settings().oauth_request_scopes,
                 timeout=12.0,
+                tool_groups=groups_for_services(_settings().services),
             ),
         )
     saved = await h.shared.repo.saved(h.subject, published.toolkit_id)

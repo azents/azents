@@ -45,6 +45,7 @@ import {
   googleFinalSettingsSchema,
   googleReconnectSettingsSchema,
   googleServiceSchema,
+  googleToolGroupSchema,
 } from "@/shared/toolkits/google-schemas";
 import { toolkitScopedInput } from "@/shared/toolkits/toolkit-owner-scope";
 import { mapExpectedError } from "../api-error";
@@ -79,6 +80,7 @@ export const googleRouter = router({
         ...savedFields,
         expectedRevision: z.number().int().nonnegative(),
         services: z.array(googleServiceSchema),
+        toolGroups: z.array(googleToolGroupSchema),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -86,6 +88,7 @@ export const googleRouter = router({
       const body = {
         expected_revision: input.expectedRevision,
         services: input.services,
+        tool_groups: input.toolGroups,
       };
       const { data } = await request(() =>
         "owner" in input

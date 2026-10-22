@@ -17,6 +17,7 @@ from azents.core.config import Config
 from azents.core.google_oauth import GoogleOAuthError, GoogleSetup
 from azents.core.google_policy import GoogleService
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GOOGLE_PICKER_SCOPE
 from azents.services.google_oauth.provider import (
     GoogleOAuthProvider,
@@ -39,6 +40,7 @@ def _setup() -> GoogleSetup:
         ),
         timeout=30.0,
         target=None,
+        tool_groups=groups_for_services((GoogleService.CALENDAR,)),
     )
 
 

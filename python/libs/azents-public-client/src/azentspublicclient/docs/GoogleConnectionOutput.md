@@ -12,6 +12,7 @@ Name | Type | Description | Notes
 **status** | **str** |  | 
 **identity** | [**GoogleIdentity**](GoogleIdentity.md) |  | 
 **services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
 **oauth_request_scopes** | **List[str]** |  | 
 **granted_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 

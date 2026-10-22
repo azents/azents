@@ -6,10 +6,16 @@ import datetime
 import pytest
 
 from azents.core.google_oauth import GoogleOAuthError
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
+from azents.core.google_tool_groups import group_request_scopes, groups_for_services
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.tools import GoogleToolkitConfig
 from azents.services.google_oauth.runtime_test import _harness
+from azents.services.google_workspace.gmail import compose_prerequisites
+from azents.services.google_workspace.gmail_models import (
+    GmailCompose,
+    GmailDraftContext,
+)
 
 
 async def test_broad_actual_grant_admits_write_under_readonly_request_intent() -> None:
@@ -20,6 +26,7 @@ async def test_broad_actual_grant_admits_write_under_readonly_request_intent() -
             services=(GoogleService.GMAIL,),
             oauth_request_scopes=("https://www.googleapis.com/auth/gmail.readonly",),
             timeout=h.current.config.timeout,
+            tool_groups=groups_for_services((GoogleService.GMAIL,)),
         ),
         connection=dataclasses.replace(
             h.current.connection,
@@ -44,6 +51,129 @@ async def test_broad_actual_grant_admits_write_under_readonly_request_intent() -
         h.owner, "toolkit", Op.GMAIL_SEND_MESSAGE, ()
     )
     assert receipt.snapshot == current
+    h.provider.refresh.assert_not_awaited()
+
+
+async def test_unselected_write_is_denied_despite_broad_actual_grant() -> None:
+    h = _harness(expired=False)
+    current = dataclasses.replace(
+        h.current,
+        config=h.current.config.model_copy(
+            update={"tool_groups": (GoogleToolGroup.CALENDAR_READ,)}
+        ),
+        connection=dataclasses.replace(
+            h.current.connection,
+            candidate=h.current.connection.candidate.model_copy(
+                update={
+                    "tokens": h.current.connection.candidate.tokens.model_copy(
+                        update={
+                            "granted_scopes": (
+                                "https://www.googleapis.com/auth/calendar",
+                            )
+                        }
+                    )
+                }
+            ),
+        ),
+    )
+    h.repo.load.return_value = current
+    assert Op.CALENDAR_GET_EVENT in await h.service.direct_operations(
+        h.owner, "toolkit"
+    )
+    assert Op.CALENDAR_CREATE_EVENT not in await h.service.direct_operations(
+        h.owner, "toolkit"
+    )
+    with pytest.raises(GoogleOAuthError) as error:
+        await h.service.authorize_operation(
+            h.owner, "toolkit", Op.CALENDAR_CREATE_EVENT, ()
+        )
+    assert error.value.code == "capability_unavailable"
+    h.provider.refresh.assert_not_awaited()
+
+
+async def test_group_narrowing_blocks_a_previously_admitted_operation() -> None:
+    h = _harness(expired=False)
+    admitted = await h.service.authorize_operation(
+        h.owner, "toolkit", Op.CALENDAR_GET_EVENT, ()
+    )
+    h.repo.load.return_value = dataclasses.replace(
+        h.current,
+        config=h.current.config.model_copy(update={"tool_groups": ()}),
+    )
+    with pytest.raises(GoogleOAuthError) as error:
+        await h.service.recheck_operation(admitted)
+    assert error.value.code == "capability_unavailable"
+
+
+@pytest.mark.parametrize(
+    "group", [GoogleToolGroup.GMAIL_DRAFTS, GoogleToolGroup.GMAIL_SEND]
+)
+@pytest.mark.parametrize("variant", ["ordinary", "alias", "reply", "forward"])
+async def test_selected_compose_groups_admit_supported_argument_prerequisites(
+    group: GoogleToolGroup, variant: str
+) -> None:
+    h = _harness(expired=False)
+    scopes = group_request_scopes((group,))
+    current = dataclasses.replace(
+        h.current,
+        config=GoogleToolkitConfig(
+            services=(GoogleService.GMAIL,),
+            tool_groups=(group,),
+            oauth_request_scopes=scopes,
+            timeout=30,
+        ),
+        connection=dataclasses.replace(
+            h.current.connection,
+            candidate=h.current.connection.candidate.model_copy(
+                update={
+                    "tokens": h.current.connection.candidate.tokens.model_copy(
+                        update={"granted_scopes": scopes}
+                    )
+                }
+            ),
+        ),
+    )
+    h.repo.load.return_value = current
+    message = GmailCompose.model_validate(
+        {
+            "sender": {"email": "alias@example.com", "display_name": None}
+            if variant == "alias"
+            else None,
+            "to": [{"email": "recipient@example.com", "display_name": None}],
+            "cc": [],
+            "bcc": [],
+            "reply_to": [],
+            "subject": "Subject",
+            "text": "Body",
+            "html": None,
+            "body_file": None,
+            "body_file_format": None,
+            "attachments": [],
+        }
+    )
+    context = (
+        GmailDraftContext(
+            mode=variant,
+            source_message_id="source",
+            reply_all=False,
+            quote_original=True,
+            reuse_source_attachments=True,
+        )
+        if variant in ("reply", "forward")
+        else None
+    )
+    operation = (
+        Op.GMAIL_CREATE_DRAFT
+        if group is GoogleToolGroup.GMAIL_DRAFTS
+        else Op.GMAIL_SEND_MESSAGE
+    )
+    admitted = await h.service.authorize_operation(
+        h.owner,
+        "toolkit",
+        operation,
+        lambda email: compose_prerequisites(message, context, email),
+    )
+    assert admitted.operation is operation
     h.provider.refresh.assert_not_awaited()
 
 

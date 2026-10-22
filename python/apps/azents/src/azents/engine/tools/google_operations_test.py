@@ -12,6 +12,7 @@ from azcommon.result import Success
 
 from azents.core.google_policy import GoogleService
 from azents.core.google_runtime import GoogleExecutionState
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.tools import GoogleToolkitConfig
 from azents.engine.run.types import FunctionToolError, FunctionToolResult
@@ -107,6 +108,7 @@ def _workspace_toolkit(
             services=(service,),
             oauth_request_scopes=("https://www.googleapis.com/auth/" + scope,),
             timeout=h.current.config.timeout,
+            tool_groups=groups_for_services((service,)),
         ),
         connection=dataclasses.replace(
             h.current.connection,

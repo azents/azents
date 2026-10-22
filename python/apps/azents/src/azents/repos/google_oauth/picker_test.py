@@ -20,6 +20,7 @@ from azents.core.google_system_setting import (
     GoogleApplicationConfig,
     GooglePickerApplication,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GOOGLE_PICKER_SCOPE
 from azents.core.system_setting import ResolvedSystemSetting, SystemSettingFieldSource
 from azents.rdb.models.google_oauth import RDBGoogleConnection
@@ -52,6 +53,9 @@ async def _harness(manager: SessionManager[WriteSession]) -> PickerHarness:
             **h.setup.model_dump(),
             "services": (GoogleService.DRIVE,),
             "oauth_request_scopes": (GOOGLE_PICKER_SCOPE,),
+            "tool_groups": [
+                item.value for item in groups_for_services((GoogleService.DRIVE,))
+            ],
         }
     )
     h = h._replace(setup=setup)
@@ -103,6 +107,7 @@ async def _harness(manager: SessionManager[WriteSession]) -> PickerHarness:
         update={
             "services": setup.services,
             "oauth_request_scopes": setup.oauth_request_scopes,
+            "tool_groups": groups_for_services(setup.services),
         }
     )
     published = await h.repo.confirm(
@@ -211,6 +216,7 @@ async def test_real_service_rechecks_switch_after_provider_io_outside_transactio
             toolkit_id=snapshot.toolkit_id,
             expected_revision=snapshot.revision,
             services=(),
+            tool_groups=groups_for_services(("calendar", "drive", "gmail")),
         )
         return GoogleTokenResponse.model_validate(
             {
@@ -275,6 +281,7 @@ async def test_older_rotation_cannot_invalidate_or_overwrite_reconnected_grant(
             services=h.setup.services,
             oauth_request_scopes=h.setup.oauth_request_scopes,
             timeout=h.setup.timeout,
+            tool_groups=groups_for_services(h.setup.services),
         ),
     )
     with pytest.raises(GoogleOAuthError) as error:

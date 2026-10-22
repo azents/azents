@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from azents.core.google_policy import GoogleService
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import (
     GOOGLE_WORKSPACE_OPERATIONS,
     IDENTITY_SCOPES,
@@ -78,6 +79,7 @@ def test_broad_actual_grant_authorizes_new_work_despite_narrow_request_intent() 
         services=(GoogleService.GMAIL,),
         oauth_request_scopes=(_s("gmail.readonly"),),
         timeout=30,
+        tool_groups=groups_for_services((GoogleService.GMAIL,)),
     )
     actual = (_s("gmail.modify"),)
     allowed = eligible_operations(config.services, actual)
@@ -246,6 +248,7 @@ def test_saved_all_off_config_retains_canonical_request_intent() -> None:
         services=(),
         oauth_request_scopes=(_s("drive.file"), "openid", _s("drive.file")),
         timeout=20,
+        tool_groups=groups_for_services(()),
     )
     assert config.services == ()
     assert config.oauth_request_scopes == tuple(
@@ -260,6 +263,9 @@ def test_request_services_and_scopes_are_canonical_not_task_groups() -> None:
         services=(GoogleService.GMAIL, GoogleService.CALENDAR, GoogleService.GMAIL),
         oauth_request_scopes=(_s("gmail.send"),),
         timeout=20,
+        tool_groups=groups_for_services(
+            (GoogleService.GMAIL, GoogleService.CALENDAR, GoogleService.GMAIL)
+        ),
     )
     assert config.services == (GoogleService.CALENDAR, GoogleService.GMAIL)
 
@@ -277,20 +283,34 @@ def test_consent_request_rejects_unselected_services_or_unsupported_scopes(
 ) -> None:
     with pytest.raises(ValidationError):
         GoogleWorkspaceConnectInput(
-            services=services, oauth_request_scopes=scopes, timeout=30
+            services=services,
+            oauth_request_scopes=scopes,
+            timeout=30,
+            tool_groups=groups_for_services(services),
         )
 
 
 @pytest.mark.parametrize("timeout", [0, -1, 301, float("inf"), float("nan")])
 def test_config_timeout_is_bounded(timeout: float) -> None:
     with pytest.raises(ValidationError):
-        GoogleWorkspaceConfig(services=(), oauth_request_scopes=(), timeout=timeout)
+        GoogleWorkspaceConfig(
+            services=(),
+            oauth_request_scopes=(),
+            timeout=timeout,
+            tool_groups=groups_for_services(()),
+        )
 
 
 def test_new_config_rejects_unknown_fields_at_ingress() -> None:
     with pytest.raises(ValidationError):
         GoogleWorkspaceConfig.model_validate(
-            {"services": [], "oauth_request_scopes": [], "timeout": 30, "granted": True}
+            {
+                "services": [],
+                "oauth_request_scopes": [],
+                "timeout": 30,
+                "granted": True,
+                "tool_groups": [item.value for item in groups_for_services([])],
+            }
         )
 
 
@@ -298,5 +318,10 @@ def test_new_config_rejects_unknown_fields_at_ingress() -> None:
 def test_new_config_rejects_wrong_timeout_types(timeout: object) -> None:
     with pytest.raises(ValidationError):
         GoogleWorkspaceConfig.model_validate(
-            {"services": [], "oauth_request_scopes": [], "timeout": timeout}
+            {
+                "services": [],
+                "oauth_request_scopes": [],
+                "timeout": timeout,
+                "tool_groups": [item.value for item in groups_for_services([])],
+            }
         )

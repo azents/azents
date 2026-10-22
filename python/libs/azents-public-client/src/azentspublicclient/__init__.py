@@ -327,6 +327,7 @@ __all__ = [
     "GoogleDriveAccess",
     "GoogleExchangeRequest",
     "GoogleFinalSettings",
+    "GoogleGroupDefinition",
     "GoogleIdentity",
     "GooglePickerTokenInput",
     "GooglePickerTokenOutput",
@@ -338,6 +339,7 @@ __all__ = [
     "GoogleService",
     "GoogleServiceAccess",
     "GoogleServicesUpdateInput",
+    "GoogleToolGroup",
     "GoogleWorkspaceOperation",
     "HTTPValidationError",
     "HealthStatus",
@@ -1020,6 +1022,7 @@ from azentspublicclient.models.google_connection_output import GoogleConnectionO
 from azentspublicclient.models.google_drive_access import GoogleDriveAccess as GoogleDriveAccess
 from azentspublicclient.models.google_exchange_request import GoogleExchangeRequest as GoogleExchangeRequest
 from azentspublicclient.models.google_final_settings import GoogleFinalSettings as GoogleFinalSettings
+from azentspublicclient.models.google_group_definition import GoogleGroupDefinition as GoogleGroupDefinition
 from azentspublicclient.models.google_identity import GoogleIdentity as GoogleIdentity
 from azentspublicclient.models.google_picker_token_input import GooglePickerTokenInput as GooglePickerTokenInput
 from azentspublicclient.models.google_picker_token_output import GooglePickerTokenOutput as GooglePickerTokenOutput
@@ -1031,6 +1034,7 @@ from azentspublicclient.models.google_review import GoogleReview as GoogleReview
 from azentspublicclient.models.google_service import GoogleService as GoogleService
 from azentspublicclient.models.google_service_access import GoogleServiceAccess as GoogleServiceAccess
 from azentspublicclient.models.google_services_update_input import GoogleServicesUpdateInput as GoogleServicesUpdateInput
+from azentspublicclient.models.google_tool_group import GoogleToolGroup as GoogleToolGroup
 from azentspublicclient.models.google_workspace_operation import GoogleWorkspaceOperation as GoogleWorkspaceOperation
 from azentspublicclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus

@@ -7,7 +7,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
 
 _SCOPE_PREFIX = "https://www.googleapis.com/auth/"
 _FULL_MAIL = "https://mail.google.com/"
@@ -71,10 +71,11 @@ REQUEST_SCOPE_SERVICES = MappingProxyType(
 
 
 class GoogleWorkspaceConfig(BaseModel):
-    """Saved local switches and future OAuth intent, never an action ceiling."""
+    """Saved local switches, selected capabilities and future OAuth request intent."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
     services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
     oauth_request_scopes: tuple[str, ...]
     timeout: float = Field(gt=0, le=300, allow_inf_nan=False, strict=True)
 
@@ -83,6 +84,13 @@ class GoogleWorkspaceConfig(BaseModel):
     def canonical_services(
         cls, value: tuple[GoogleService, ...]
     ) -> tuple[GoogleService, ...]:
+        return tuple(sorted(set(value)))
+
+    @field_validator("tool_groups")
+    @classmethod
+    def canonical_groups(
+        cls, value: tuple[GoogleToolGroup, ...]
+    ) -> tuple[GoogleToolGroup, ...]:
         return tuple(sorted(set(value)))
 
     @field_validator("oauth_request_scopes")
@@ -103,6 +111,11 @@ class GoogleWorkspaceConnectInput(GoogleWorkspaceConfig):
     def validate_request(self) -> Self:
         if not self.services:
             raise ValueError("Select at least one Google service.")
+        if not self.tool_groups or any(
+            group.value.split("_", maxsplit=1)[0] not in self.services
+            for group in self.tool_groups
+        ):
+            raise ValueError("Select tool groups belonging to enabled Google services.")
         if any(
             REQUEST_SCOPE_SERVICES[scope] not in self.services
             for scope in self.oauth_request_scopes

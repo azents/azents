@@ -17,7 +17,7 @@
   "operatorDescription": "시스템 관리자에게 Google OAuth 앱 설정을 요청하세요. 이 화면에서는 앱 비밀값을 입력하지 않습니다.",
   "preparationUnverified": "앱이 로컬에 설정되어 있습니다. 실제 Google 서비스 접근은 아직 검증되지 않았습니다.",
   "selectServices": "1. 서비스 선택",
-  "selectDescription": "권한은 Google 동의 화면에서 선택하세요. 허용한 권한에 따라 도구가 자동으로 정해집니다.",
+  "selectDescription": "서비스별로 사용할 도구그룹을 선택하세요. 해당 도구에 필요한 권한으로 OAuth를 요청하며, preset 적용 후에도 세부 선택을 바꿀 수 있습니다.",
   "timeout": "도구 요청 제한 시간(초)",
   "authorize": "Google에서 동의하기",
   "authorizeAgain": "교체할 연결에 동의하기",
@@ -29,7 +29,7 @@
   "agentOwnership": "이 연결은 이 Agent만 소유합니다. 실행에는 대화 참여자의 계정이 아닌 저장된 계정이 사용됩니다.",
   "sharedOwnership": "Workspace 공유 연결입니다. 권한이 있는 사용자와 Agent가 이 계정으로 작업할 수 있습니다.",
   "personalOwnership": "내 계정이 소유하는 연결입니다. 허용한 Agent와의 내 개인 Session에서만 사용할 수 있습니다.",
-  "actualPermissions": "켜진 서비스에서 사용할 도구는 Google이 실제 허용한 권한에 따라 자동으로 정해집니다.",
+  "actualPermissions": "선택한 도구 중 Google이 실제 허용한 권한으로 사용할 수 있는 도구만 활성화됩니다.",
   "missingRenewal": "갱신 가능한 인증 정보가 반환되지 않았습니다. 이 후보는 저장할 수 없으며 새 동의 절차를 직접 시작해야 합니다.",
   "includeService": "이 서비스를 켠 상태로 저장",
   "name": "Toolkit 이름",
@@ -108,5 +108,33 @@
   "pickerSelected": "Google에서 파일 {count}개를 선택했습니다. 접근 자격은 Google이 관리하며 로컬 허용 목록으로 저장하지 않습니다.",
   "pickerCancelled": "선택 결과를 보관하지 않고 파일 선택을 닫았습니다.",
   "pickerFailed": "Google 파일 선택을 사용할 수 없습니다. 연결 상태를 새로고침하고 관리자 설정을 확인한 뒤 다시 시도하세요.",
-  "pickerExpired": "파일 선택용 임시 인증 정보가 만료되었습니다. 선택 창을 다시 열어 새 인증 정보를 받으세요."
+  "pickerExpired": "파일 선택용 임시 인증 정보가 만료되었습니다. 선택 창을 다시 열어 새 인증 정보를 받으세요.",
+  "groups": {
+    "gmail_read": "메일·첨부파일 조회",
+    "gmail_labels": "라벨 관리",
+    "gmail_drafts": "초안 작성·관리",
+    "gmail_send": "메일 발송·답장·전달",
+    "gmail_organize": "메일 정리·휴지통 이동·복원",
+    "gmail_filters": "필터 관리·기존 메일에 적용",
+    "calendar_read": "캘린더·일정 조회",
+    "calendar_availability": "빈 시간 조회·추천",
+    "calendar_events": "일정 생성·수정·참석 응답",
+    "calendar_status": "집중 시간·부재 일정 관리",
+    "calendar_create": "캘린더 생성",
+    "drive_read": "Drive 파일 읽기·내보내기",
+    "drive_files": "Drive 파일 생성·변경",
+    "drive_sharing": "파일 공유·접근 관리",
+    "drive_ownership": "파일 소유권 이전"
+  },
+  "presets": {
+    "read_only": "조회 전용",
+    "assistant": "일상 업무 보조",
+    "full": "모든 도구",
+    "clear": "선택 해제"
+  },
+  "presetsTitle": "preset을 적용하거나 도구그룹을 직접 선택하세요",
+  "groupResult": "도구 {total}개 중 {available}개 사용 가능",
+  "groupUnavailable": "Google이 허용한 권한이 부족한 도구는 활성화되지 않습니다.",
+  "groupTools": "포함된 도구 {count}개 보기",
+  "finalGroupsTitle": "최종 도구그룹"
 }
