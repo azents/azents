@@ -27,6 +27,12 @@ class WaitStateReader(Protocol):
         """Return one detached wait observation."""
         ...
 
+    async def process_revision(
+        self, session_id: str, runtime_id: str, runner_generation: int
+    ) -> int:
+        """Read the latest durably delivered lifecycle observation."""
+        ...
+
 
 @dataclasses.dataclass(frozen=True)
 class AgentWaitService:
@@ -34,6 +40,14 @@ class AgentWaitService:
 
     repository: Annotated[AgentWaitReadRepository, Depends(AgentWaitReadRepository)]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
+
+    async def process_revision(
+        self, session_id: str, runtime_id: str, runner_generation: int
+    ) -> int:
+        """Recover observation position outside any Runtime operation."""
+        return await self.repository.process_revision(
+            session_id, runtime_id, runner_generation
+        )
 
     async def observe(self, session_id: str) -> WaitObservation:
         """Observe mailbox effects only outside the descendant database snapshot."""

@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, toolkit, external-channel, memory]
 code_paths:
+  - python/apps/azents/src/azents/engine/tools/wait.py
+  - python/apps/azents/src/azents/services/agent_wait.py
   - python/apps/azents/src/azents/core/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
@@ -193,8 +195,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/packages/azents-session-core/src/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-19
-spec_version: 221
+last_verified_at: 2026-10-22
+spec_version: 222
 ---
 
 # Agent Execution Loop
@@ -1091,9 +1093,14 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   Assigning more work to an already-active target is allowed at capacity; activating an idle target
   is rejected when the root tree already has `subagent_settings.max_subagents` active children.
 - `wait` accepts only optional `timeout_seconds` from 0 through 900 seconds and observes any mailbox
-  activity for the current SessionAgent plus activity across its entire descendant subtree. It
-  prioritizes mailbox activity over no-descendant/all-idle/timeout outcomes and never consumes
-  mailbox items, repairs terminal delivery, or acknowledges terminal results itself.
+  activity for the current SessionAgent, descendant activity, and ordinary Runner-owned shell
+  lifecycle completion. Fire-and-forget commands are excluded. Worker races a cancellable,
+  non-consuming `process.observe` long-poll against mailbox signals and descendant reconciliation.
+  It prioritizes mailbox activity over shell completion/no-work/timeout outcomes. Cancelling
+  observation does not stop execution or delay mailbox handling behind remote cancellation.
+  A shell-completion result records the Runtime/generation/revision in generic tool metadata;
+  later waits recover that committed position. Waiting never consumes mailbox items or shell
+  output, repairs descendant delivery, or acknowledges descendant terminal results itself.
 - `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
   resolved target's current run while holding the root-tree and target-session locks.
 

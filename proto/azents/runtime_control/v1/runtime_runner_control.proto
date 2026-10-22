@@ -350,6 +350,7 @@ message RunnerOperationRequest {
     GitRemoveDiscoveredWorktreeOperationPayload git_remove_discovered_worktree = 43;
     FileReadTextOperationPayload file_read_text = 44;
     BrowserOperationPayload browser = 45;
+    ProcessObserveOperationPayload process_observe = 46;
   }
 }
 
@@ -417,6 +418,23 @@ message ProcessStartOperationPayload {
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
   map<string, string> env = 5;
+  bool fire_and_forget = 7;
+}
+
+message ProcessObserveOperationPayload {
+  uint64 after_revision = 1;
+  uint32 timeout_ms = 2;
+}
+
+message ProcessCompletion {
+  string process_id = 1;
+  string status = 2;
+}
+
+message ProcessObserveFinalSuccess {
+  uint64 revision = 1;
+  uint32 running_count = 2;
+  repeated ProcessCompletion completed = 3;
 }
 
 message ProcessWriteOperationPayload {
@@ -583,6 +601,7 @@ message RunnerOperationFinalSuccessPayload {
     GitDiscoverManagedWorktreesFinalSuccess git_discover_managed_worktrees = 21;
     GitRemoveDiscoveredWorktreeFinalSuccess git_remove_discovered_worktree = 22;
     FileReadTextFinalSuccess file_read_text = 23;
+    ProcessObserveFinalSuccess process_observe = 25;
     BrowserFinalSuccess browser = 24;
   }
 }

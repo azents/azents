@@ -375,6 +375,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
     assert operation.owner_session_id == "session-1"
     assert operation.payload == {
         "command": "python -m http.server",
+        "fire_and_forget": False,
         "workdir": "/workspace/agent",
         "yield_time_ms": 1000,
         "max_output_bytes": 4096,

@@ -1348,8 +1348,13 @@ def _copy_operation_payload(
     if operation_type == "file.stat":
         message.file_stat.path = _str_payload(payload, "path")
         return
+    if operation_type == "process.observe":
+        message.process_observe.after_revision = _int_payload(payload, "after_revision")
+        message.process_observe.timeout_ms = _int_payload(payload, "timeout_ms")
+        return
     if operation_type == "process.start":
         message.process_start.command = _str_payload(payload, "command")
+        message.process_start.fire_and_forget = payload.get("fire_and_forget") is True
         workdir = _optional_str_payload(payload, "workdir")
         if workdir is not None:
             message.process_start.workdir = workdir

@@ -92,6 +92,7 @@ _CAPABILITIES = (
     "file.grep",
     "file.stat",
     "process.start",
+    "process.observe",
     "process.write",
     "file.delete",
     "file.mkdir",

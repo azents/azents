@@ -67,6 +67,7 @@ from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, AgentRunPatch, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_wait_read import AgentWaitReadRepository
 from azents.repos.compaction_operation import CompactionOperationRepository
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_operation_completion import (
@@ -254,6 +255,60 @@ def test_validate_event_payload_accepts_action_message() -> None:
 
 class TestEventExecutionRepositories:
     """Event execution repository tests."""
+
+    async def test_shell_wait_checkpoint_uses_only_committed_current_identity(
+        self, rdb_session: WriteSession
+    ) -> None:
+        workspace_id, agent_id, _ = await _create_agent_runtime(
+            rdb_session, handle="shell-wait-checkpoint"
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        for generation, runtime_id, status, reverted, revision in (
+            (2, "runtime-1", "completed", False, 7),
+            (2, "runtime-1", "completed", False, 9),
+            (3, "runtime-1", "completed", False, 99),
+            (2, "runtime-2", "completed", False, 99),
+            (2, "runtime-1", "failed", False, 99),
+            (2, "runtime-1", "completed", True, 99),
+        ):
+            event = RDBEvent(
+                session_id=event_session.id,
+                kind=EventKind.CLIENT_TOOL_RESULT,
+                payload={
+                    "name": "wait",
+                    "status": status,
+                    "metadata": {
+                        "shell_wait_runtime_id": runtime_id,
+                        "shell_wait_generation": generation,
+                        "shell_wait_revision": revision,
+                    },
+                },
+                reverted=reverted,
+            )
+            event.compacted_at = datetime.datetime.now(datetime.UTC)
+            rdb_session.write_session.add(event)
+        await rdb_session.write_session.flush()
+
+        @asynccontextmanager
+        async def scope() -> AsyncIterator[WriteSession]:
+            yield rdb_session
+
+        repository = AgentWaitReadRepository(
+            session_manager=scope,
+            agent_session_repository=AgentSessionRepository(),
+            agent_run_repository=AgentRunRepository(),
+        )
+        assert await repository.process_revision(event_session.id, "runtime-1", 2) == 9
+        assert await repository.process_revision(event_session.id, "runtime-1", 4) == 0
 
     async def test_user_message_default_effort_round_trip(
         self,

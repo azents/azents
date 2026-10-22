@@ -115,8 +115,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-19
-spec_version: 107
+last_verified_at: 2026-10-22
+spec_version: 108
 ---
 
 # Agent Runtime Control
@@ -1238,7 +1238,24 @@ Runner owns runtime exec process handles, stdin writers, stdout/stderr drains, u
 
 A Control stream disconnect fences the previous Runner generation, cancels its active operation tasks, and terminates its managed exec processes before reconnecting. Managed exec processes run in dedicated operating-system process groups. Cleanup signals the complete process group, escalates from termination to kill, drains or cancels process tasks within bounded deadlines, and must never wait indefinitely before the Runner opens its next Control stream. Cleanup emits structured process count, duration, timeout, process id, and process-group diagnostics without logging commands, credentials, or Runtime Control tokens.
 
-Process output is continuously drained into bounded Runner-owned buffers. Tool calls drain unread buffers into one model-visible client tool result and preserve structured process metadata. Callers observe process completion through process events or later `write_stdin` polling. Runtime Control has no fire-and-forget Background operation envelope, receipt, completion claim, or completion-input path. `RunnerOperationRequest` protobuf field 7 is reserved and must not be reused.
+Process output is continuously drained into bounded Runner-owned buffers. Tool calls drain unread buffers into one model-visible client tool result and preserve structured process metadata. Shell start/write yield windows are limited to 10000 ms at model and Runner ingress. Completion observation and output collection are separate.
+
+`process.observe` is an explicit owner-Session/generation-scoped long-poll with an
+`after_revision` and timeout of 0-900000 ms. It replies over the existing operation
+transport when a new retained terminal lifecycle notice exists, no eligible commands
+remain, or the timeout expires. It checks state before registering its event wait,
+does not hold process interaction locks, and never drains output or consumes exited
+processes. Runner process-exit tasks and terminal cleanup advance the lifecycle
+revision and wake observers. Notices follow existing process/tombstone retention;
+consumed processes need no additional notice. Explicit `fire_and_forget` on process
+start excludes a command from all shared observation eligibility and wake-ups.
+
+Observation cancellation cancels only the observation operation, never managed
+process exit tasks. Worker stores the returned revision only in a completed `wait`
+tool result; a lost/uncommitted reply can be observed again. A generation replacement
+uses a new observation identity. Runtime Control has no unsolicited Background
+completion-input path, automatic Run source, or second output buffer.
+`RunnerOperationRequest` protobuf field 7 remains reserved and must not be reused.
 
 Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`. Callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Coordination Store operation metadata must live at least until the operation deadline plus a buffer so timeout/final folding can complete; it must not expire earlier merely because the default operation TTL is shorter than the requested deadline. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
 

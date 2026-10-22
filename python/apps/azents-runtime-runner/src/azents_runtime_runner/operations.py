@@ -32,6 +32,10 @@ from azents_runtime_control.browser_contract import (
 from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
 )
+from azents_runtime_control.process_observation import (
+    ProcessCompletion,
+    ProcessObservation,
+)
 from azents_runtime_control.runner import (
     JsonValue,
     RunnerOperationEnvelope,
@@ -226,6 +230,7 @@ class _ManagedProcess:
     stderr: _ProcessOutputBuffer
     created_at: float
     last_accessed_at: float
+    fire_and_forget: bool
     exited_at: float | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     wait_task: asyncio.Task[int] | None = None
@@ -241,6 +246,14 @@ class _MissingProcessRecord:
     status: Literal["consumed", "missing", "terminated", "expired"]
     reason: str
     recorded_at: float
+
+
+@dataclass(frozen=True)
+class _ProcessNotice:
+    owner_session_id: str
+    generation: int
+    revision: int
+    completion: ProcessCompletion
 
 
 @dataclass(frozen=True)
@@ -287,6 +300,9 @@ class RunnerOperations:
         self.workspace = workspace
         self._processes: dict[str, _ManagedProcess] = {}
         self._missing_processes: dict[str, _MissingProcessRecord] = {}
+        self._process_notices: dict[str, _ProcessNotice] = {}
+        self._process_revision = 0
+        self._process_changed = asyncio.Event()
         self._process_max_unread_bytes = max(process_max_unread_bytes, 1)
         self._process_idle_timeout_seconds = max(process_idle_timeout_seconds, 1.0)
         self._process_max_lifetime_seconds = max(process_max_lifetime_seconds, 1.0)
@@ -368,6 +384,8 @@ class RunnerOperations:
                     await self._file_bulk_move(operation, request)
                 case payloads.ProcessStartPayload():
                     await self._process_start(operation, request)
+                case payloads.ProcessObservePayload():
+                    await self._process_observe(operation, request)
                 case payloads.ProcessWritePayload():
                     await self._process_write(operation, request)
                 case payloads.ProcessTerminateSessionPayload():
@@ -1854,7 +1872,12 @@ class RunnerOperations:
         except RuntimeError as exc:
             await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
             return
-        record = self._register_process(operation, process, owner_session_id)
+        record = self._register_process(
+            operation,
+            process,
+            owner_session_id,
+            fire_and_forget=request.fire_and_forget,
+        )
         async with record.lock:
             await self._wait_for_exit_or_yield(
                 record,
@@ -1963,6 +1986,8 @@ class RunnerOperations:
         operation: RunnerOperationEnvelope,
         process: ExecutionProcess,
         owner_session_id: str,
+        *,
+        fire_and_forget: bool,
     ) -> _ManagedProcess:
         process_id = f"proc-{uuid.uuid4().hex}"
         now = time.monotonic()
@@ -1979,8 +2004,12 @@ class RunnerOperations:
             ),
             created_at=now,
             last_accessed_at=now,
+            fire_and_forget=fire_and_forget,
         )
         record.wait_task = asyncio.create_task(process.wait())
+        record.wait_task.add_done_callback(
+            lambda task: self._process_finished(record, task)
+        )
         record.drain_tasks = (
             asyncio.create_task(
                 self._drain_process_stream(record, "stdout", process.stdout)
@@ -1991,6 +2020,83 @@ class RunnerOperations:
         )
         self._processes[process_id] = record
         return record
+
+    def _process_finished(
+        self, record: _ManagedProcess, task: asyncio.Task[int]
+    ) -> None:
+        if not task.cancelled() and task.exception() is None:
+            if record.process_id in self._processes:
+                self._notice_process(record, "exited")
+
+    def _notice_process(
+        self,
+        record: _ManagedProcess,
+        status: Literal["exited", "terminated", "expired"],
+    ) -> None:
+        if record.fire_and_forget:
+            return
+        previous = self._process_notices.get(record.process_id)
+        if previous is not None and previous.completion.status == status:
+            return
+        self._process_revision += 1
+        self._process_notices[record.process_id] = _ProcessNotice(
+            owner_session_id=record.owner_session_id,
+            generation=record.generation,
+            revision=self._process_revision,
+            completion=ProcessCompletion(process_id=record.process_id, status=status),
+        )
+        self._process_changed.set()
+
+    async def _process_observe(
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.ProcessObservePayload,
+    ) -> None:
+        if not operation.owner_session_id:
+            await self._final_error(
+                operation, "INVALID_PAYLOAD", "owner_session_id is required"
+            )
+            return
+        deadline = time.monotonic() + request.timeout_ms / 1000
+        while True:
+            # Clear before the synchronous snapshot; no exit can be lost between
+            # inspecting state and registering the Event waiter.
+            self._process_changed.clear()
+            running_count = 0
+            for record in tuple(self._processes.values()):
+                if (
+                    record.owner_session_id != operation.owner_session_id
+                    or record.generation != operation.runner_generation
+                    or record.fire_and_forget
+                ):
+                    continue
+                if _process_exited(record):
+                    self._notice_process(record, "exited")
+                else:
+                    running_count += 1
+            completed = [
+                notice.completion
+                for notice in self._process_notices.values()
+                if notice.owner_session_id == operation.owner_session_id
+                and notice.generation == operation.runner_generation
+                and notice.revision > request.after_revision
+            ]
+            remaining = deadline - time.monotonic()
+            if completed or running_count == 0 or remaining <= 0:
+                observation = ProcessObservation(
+                    revision=self._process_revision,
+                    running_count=running_count,
+                    completed=tuple(completed),
+                )
+                await self._final_success(
+                    operation,
+                    {"process_observation": observation.to_payload()},
+                )
+                return
+            try:
+                await asyncio.wait_for(self._process_changed.wait(), timeout=remaining)
+            except TimeoutError:
+                continue
 
     async def _drain_process_stream(
         self,
@@ -2106,6 +2212,8 @@ class RunnerOperations:
 
     async def _consume_exited_process(self, record: _ManagedProcess) -> None:
         self._processes.pop(record.process_id, None)
+        self._process_notices.pop(record.process_id, None)
+        self._process_changed.set()
         await self._wait_for_process_drains(record)
         self._record_missing(
             record.process_id,
@@ -2173,6 +2281,7 @@ class RunnerOperations:
 
     async def _expire_exited_unread_process(self, record: _ManagedProcess) -> None:
         self._processes.pop(record.process_id, None)
+        self._notice_process(record, "expired")
         await self._wait_for_process_drains(record)
         self._record_missing(
             record.process_id,
@@ -2189,6 +2298,7 @@ class RunnerOperations:
     ) -> None:
         started_at = time.monotonic()
         self._processes.pop(record.process_id, None)
+        self._notice_process(record, status)
         already_exited = _process_exited(record)
         termination = None
         if not already_exited:
@@ -2410,6 +2520,7 @@ class RunnerOperations:
             key=lambda item: self._missing_processes[item].recorded_at,
         )
         self._missing_processes.pop(oldest_process_id, None)
+        self._process_notices.pop(oldest_process_id, None)
 
     def _missing_process_payload(self, process_id: str) -> dict[str, JsonValue]:
         missing = self._missing_processes.get(process_id)

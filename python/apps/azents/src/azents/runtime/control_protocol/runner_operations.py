@@ -17,6 +17,7 @@ from azents_runtime_control.browser_contract import (
     decode_browser_result,
     encode_browser_command,
 )
+from azents_runtime_control.process_observation import ProcessObservation
 
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -1351,6 +1352,7 @@ class RuntimeRunnerOperationClient:
         runtime_id: str,
         runner_generation: int,
         command: str,
+        fire_and_forget: bool,
         workdir: str | None,
         yield_time_ms: int,
         max_output_bytes: int,
@@ -1362,6 +1364,7 @@ class RuntimeRunnerOperationClient:
         """Start a pipe-based process and wait for the operation snapshot."""
         payload: dict[str, JsonValue] = {
             "command": command,
+            "fire_and_forget": fire_and_forget,
             "yield_time_ms": yield_time_ms,
             "max_output_bytes": max_output_bytes,
         }
@@ -1389,6 +1392,41 @@ class RuntimeRunnerOperationClient:
             generation=runner_generation,
             deadline_at=deadline_at,
             process_output_callback=process_output_callback,
+        )
+
+    async def observe_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        after_revision: int,
+        timeout_ms: int,
+        deadline_at: datetime,
+    ) -> ProcessObservation:
+        """Wait for owner-scoped lifecycle change without draining output."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="process.observe",
+                owner_session_id=owner_session_id,
+                payload={"after_revision": after_revision, "timeout_ms": timeout_ms},
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        final = await self._read_until_final(
+            dispatch.reply_stream_id,
+            _ReplyFolder(after_cursor=None),
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+        return ProcessObservation.from_payload(
+            final.event.payload["process_observation"]
         )
 
     async def write_process_stdin(

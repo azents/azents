@@ -211,7 +211,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-22
-spec_version: 197
+spec_version: 198
 ---
 
 # Conversation & Events
@@ -1692,7 +1692,7 @@ remain as an unbounded raw tail or storage JSON dump.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
 - Child subagent sessions are human read-only: REST message/edit/command/failed-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
-- `wait` observes the current agent's pending mailbox and descendant activity without consuming input or advancing observation cursors; it never scans child transcript history for result content.
+- `wait` observes the current agent's pending mailbox, descendant activity, and ordinary shell lifecycle completion without consuming input or output. It never scans child transcript history for result content or advances descendant observation cursors. Shell observation positions are retained separately in completed tool-result metadata; fire-and-forget commands are excluded. See the Toolkit spec for the time-only wait contract.
 - Terminal child results enter the direct parent's mailbox exactly once through durable Run-level delivery markers and queue-only typed `agent_result` mailbox envelopes/items.
 - A child result becomes observed only when its validated `agent_result` is promoted into the direct parent's durable transcript; cursor advancement is monotonic and transactional with promotion.
 - Every mailbox producer records explicit scheduling intent. Only `wake_session` items mark or wake an idle session; `queue_only` items preserve FIFO delivery without blocking idle.

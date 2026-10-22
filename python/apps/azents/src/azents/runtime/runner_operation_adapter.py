@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import TypeVar
 
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
+from azents_runtime_control.process_observation import ProcessObservation
 
 from azents.engine.tools import runtime_io as engine_runtime_io
 from azents.engine.tools.runtime_io import (
@@ -104,6 +105,7 @@ class RuntimeRunnerOperationAdapter:
         runtime_id: str,
         runner_generation: int,
         command: str,
+        fire_and_forget: bool,
         workdir: str | None,
         yield_time_ms: int,
         max_output_bytes: int,
@@ -118,6 +120,7 @@ class RuntimeRunnerOperationAdapter:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 command=command,
+                fire_and_forget=fire_and_forget,
                 workdir=workdir,
                 yield_time_ms=yield_time_ms,
                 max_output_bytes=max_output_bytes,
@@ -130,6 +133,28 @@ class RuntimeRunnerOperationAdapter:
             )
         )
         return _process_result(result)
+
+    async def observe_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        after_revision: int,
+        timeout_ms: int,
+        deadline_at: datetime,
+    ) -> ProcessObservation:
+        """Observe lifecycle state through the current Runner generation."""
+        return await _translate_runtime_errors(
+            self.client.observe_processes(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                after_revision=after_revision,
+                timeout_ms=timeout_ms,
+                deadline_at=deadline_at,
+            )
+        )
 
     async def write_process_stdin(
         self,

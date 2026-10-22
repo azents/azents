@@ -102,6 +102,7 @@ def test_optional_null_retains_documented_defaults(supplied_null: bool) -> None:
         env={},
         yield_time_ms=1_000,
         max_output_bytes=64 * 1024,
+        fire_and_forget=False,
     )
     text = payloads.decode_operation_payload(
         "file.read_text",
