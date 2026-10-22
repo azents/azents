@@ -208,7 +208,7 @@ jobs:
           uv run ty check --error-on-warning
       - name: Pytest
         env:
-          AZ_CAPTURE_SURFACE_DEADLINE_ZERO: "1"
+          AZ_CAPTURE_NATIVE_ONCE: "1"
           AZ_CAPTURE_TRACE: ${{ matrix.project == 'python/apps/azents-runtime-runner' && format('{0}/ci-tests/capture-phases.jsonl', runner.temp) || '' }}
         run: |
           pytest_execution=()
