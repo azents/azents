@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
+from azents_runtime_control.process_observation import ProcessObservation
 
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
 type RuntimeProcessOutputCallback = Callable[
@@ -264,6 +265,7 @@ class RuntimeRunnerOperationClient(Protocol):
         runtime_id: str,
         runner_generation: int,
         command: str,
+        fire_and_forget: bool,
         workdir: str | None,
         yield_time_ms: int,
         max_output_bytes: int,
@@ -273,6 +275,19 @@ class RuntimeRunnerOperationClient(Protocol):
         process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Start process operation and return process snapshot."""
+        ...
+
+    async def observe_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        after_revision: int,
+        timeout_ms: int,
+        deadline_at: datetime,
+    ) -> ProcessObservation:
+        """Observe process lifecycle without consuming output."""
         ...
 
     async def write_process_stdin(

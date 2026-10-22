@@ -366,7 +366,7 @@ def test_held_ordinary_tool_and_selected_work_use_the_same_runtime_barrier() -> 
     assert isinstance(ordinary, fixture.Call)
     assert ordinary.arguments == {
         "command": fixture.HOLD_COMMAND,
-        "yield_time_ms": 30000,
+        "yield_time_ms": 10000,
     }
     finished = fixture.plan(_request(fixture.HOLD, completed=(ordinary.call_id,)))
     assert isinstance(finished, fixture.Text) and finished.text == fixture.HOLD_DONE

@@ -1918,6 +1918,7 @@ class RunnerOperationRequest(_message.Message):
     GIT_REMOVE_DISCOVERED_WORKTREE_FIELD_NUMBER: _builtins.int
     FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
     BROWSER_FIELD_NUMBER: _builtins.int
+    PROCESS_OBSERVE_FIELD_NUMBER: _builtins.int
     runtime_id: _builtins.str
     runner_generation: _builtins.int
     operation_type: _builtins.str
@@ -1988,6 +1989,8 @@ class RunnerOperationRequest(_message.Message):
     def file_read_text(self) -> Global___FileReadTextOperationPayload: ...
     @_builtins.property
     def browser(self) -> Global___BrowserOperationPayload: ...
+    @_builtins.property
+    def process_observe(self) -> Global___ProcessObserveOperationPayload: ...
     def __init__(
         self,
         *,
@@ -2028,6 +2031,7 @@ class RunnerOperationRequest(_message.Message):
         | None = ...,
         file_read_text: Global___FileReadTextOperationPayload | None = ...,
         browser: Global___BrowserOperationPayload | None = ...,
+        process_observe: Global___ProcessObserveOperationPayload | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_owner_session_id",
@@ -2084,6 +2088,8 @@ class RunnerOperationRequest(_message.Message):
         b"owner_session_id",
         "payload",
         b"payload",
+        "process_observe",
+        b"process_observe",
         "process_start",
         b"process_start",
         "process_terminate_session",
@@ -2153,6 +2159,8 @@ class RunnerOperationRequest(_message.Message):
         b"owner_session_id",
         "payload",
         b"payload",
+        "process_observe",
+        b"process_observe",
         "process_start",
         b"process_start",
         "process_terminate_session",
@@ -2200,6 +2208,7 @@ class RunnerOperationRequest(_message.Message):
         "git_remove_discovered_worktree",
         "file_read_text",
         "browser",
+        "process_observe",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
     @_typing.overload
@@ -2563,10 +2572,12 @@ class ProcessStartOperationPayload(_message.Message):
     YIELD_TIME_MS_FIELD_NUMBER: _builtins.int
     MAX_OUTPUT_BYTES_FIELD_NUMBER: _builtins.int
     ENV_FIELD_NUMBER: _builtins.int
+    FIRE_AND_FORGET_FIELD_NUMBER: _builtins.int
     command: _builtins.str
     workdir: _builtins.str
     yield_time_ms: _builtins.int
     max_output_bytes: _builtins.int
+    fire_and_forget: _builtins.bool
     @_builtins.property
     def env(self) -> _containers.ScalarMap[_builtins.str, _builtins.str]: ...
     def __init__(
@@ -2577,6 +2588,7 @@ class ProcessStartOperationPayload(_message.Message):
         yield_time_ms: _builtins.int = ...,
         max_output_bytes: _builtins.int = ...,
         env: _abc.Mapping[_builtins.str, _builtins.str] | None = ...,
+        fire_and_forget: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_workdir", b"_workdir", "workdir", b"workdir"
@@ -2589,6 +2601,8 @@ class ProcessStartOperationPayload(_message.Message):
         b"command",
         "env",
         b"env",
+        "fire_and_forget",
+        b"fire_and_forget",
         "max_output_bytes",
         b"max_output_bytes",
         "workdir",
@@ -2604,6 +2618,89 @@ class ProcessStartOperationPayload(_message.Message):
     ) -> _WhichOneofReturnType__workdir | None: ...
 
 Global___ProcessStartOperationPayload: _TypeAlias = ProcessStartOperationPayload
+
+@_typing.final
+class ProcessObserveOperationPayload(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    AFTER_REVISION_FIELD_NUMBER: _builtins.int
+    TIMEOUT_MS_FIELD_NUMBER: _builtins.int
+    after_revision: _builtins.int
+    timeout_ms: _builtins.int
+    def __init__(
+        self,
+        *,
+        after_revision: _builtins.int = ...,
+        timeout_ms: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "after_revision", b"after_revision", "timeout_ms", b"timeout_ms"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ProcessObserveOperationPayload: _TypeAlias = ProcessObserveOperationPayload
+
+@_typing.final
+class ProcessCompletion(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    PROCESS_ID_FIELD_NUMBER: _builtins.int
+    STATUS_FIELD_NUMBER: _builtins.int
+    process_id: _builtins.str
+    status: _builtins.str
+    def __init__(
+        self,
+        *,
+        process_id: _builtins.str = ...,
+        status: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "process_id", b"process_id", "status", b"status"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ProcessCompletion: _TypeAlias = ProcessCompletion
+
+@_typing.final
+class ProcessObserveFinalSuccess(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    REVISION_FIELD_NUMBER: _builtins.int
+    RUNNING_COUNT_FIELD_NUMBER: _builtins.int
+    COMPLETED_FIELD_NUMBER: _builtins.int
+    revision: _builtins.int
+    running_count: _builtins.int
+    @_builtins.property
+    def completed(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[Global___ProcessCompletion]: ...
+    def __init__(
+        self,
+        *,
+        revision: _builtins.int = ...,
+        running_count: _builtins.int = ...,
+        completed: _abc.Iterable[Global___ProcessCompletion] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "completed",
+        b"completed",
+        "revision",
+        b"revision",
+        "running_count",
+        b"running_count",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ProcessObserveFinalSuccess: _TypeAlias = ProcessObserveFinalSuccess
 
 @_typing.final
 class ProcessWriteOperationPayload(_message.Message):
@@ -3375,6 +3472,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     GIT_DISCOVER_MANAGED_WORKTREES_FIELD_NUMBER: _builtins.int
     GIT_REMOVE_DISCOVERED_WORKTREE_FIELD_NUMBER: _builtins.int
     FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
+    PROCESS_OBSERVE_FIELD_NUMBER: _builtins.int
     BROWSER_FIELD_NUMBER: _builtins.int
     @_builtins.property
     def bash(self) -> Global___BashFinalSuccess: ...
@@ -3427,6 +3525,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     @_builtins.property
     def file_read_text(self) -> Global___FileReadTextFinalSuccess: ...
     @_builtins.property
+    def process_observe(self) -> Global___ProcessObserveFinalSuccess: ...
+    @_builtins.property
     def browser(self) -> Global___BrowserFinalSuccess: ...
     def __init__(
         self,
@@ -3456,6 +3556,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         git_remove_discovered_worktree: Global___GitRemoveDiscoveredWorktreeFinalSuccess
         | None = ...,
         file_read_text: Global___FileReadTextFinalSuccess | None = ...,
+        process_observe: Global___ProcessObserveFinalSuccess | None = ...,
         browser: Global___BrowserFinalSuccess | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
@@ -3507,6 +3608,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"git_remove_worktree",
         "process",
         b"process",
+        "process_observe",
+        b"process_observe",
         "result",
         b"result",
     ]
@@ -3560,6 +3663,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"git_remove_worktree",
         "process",
         b"process",
+        "process_observe",
+        b"process_observe",
         "result",
         b"result",
     ]
@@ -3588,6 +3693,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         "git_discover_managed_worktrees",
         "git_remove_discovered_worktree",
         "file_read_text",
+        "process_observe",
         "browser",
     ]
     _WhichOneofArgType_result: _TypeAlias = _typing.Literal["result", b"result"]

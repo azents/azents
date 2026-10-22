@@ -22,8 +22,11 @@ that value into tool arguments, output, files or diagnostics.
    the Runner application interpreter is not used. If uv is missing, follow the
    existing Runtime user-space tool provisioning policy. Package downloads must
    respect Runtime network policy; unavailable dependencies stop this workflow.
-4. If still running, collect completion with `write_stdin`. Require exit code
-   zero and exactly one complete ciphertext line from stdout. Package messages
+4. If still running, use `wait` for interruptible completion waiting, then collect
+   output with `write_stdin` (`yield_time_ms=0` for immediate collection). Waiting
+   may return for user input or other work; check the process result and repeat
+   only if completion is still needed. Require exit code zero and exactly one
+   complete ciphertext line from stdout. Package messages
    or errors on stderr are not the ciphertext. Do not display the source value
    to diagnose errors.
 5. Call `browser_act` with `action="fill"`, the current identities/reference,

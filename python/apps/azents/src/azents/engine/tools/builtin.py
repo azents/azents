@@ -18,6 +18,7 @@ from textwrap import dedent
 from typing import List, NoReturn, Protocol
 
 from azcommon.types import JSONObject
+from azents_runtime_control.process_observation import ProcessObservation
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from azents.core.enums import (
@@ -95,6 +96,7 @@ from azents.engine.tools.mutable_storage import (
     RuntimeMutationToolProvider,
 )
 from azents.engine.tools.present_file import make_present_file_tool
+from azents.engine.tools.process_wait import ProcessWaitTarget
 from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.readable_storage import (
@@ -253,10 +255,10 @@ _RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS = 120
 _RUNTIME_PROCESS_TERMINATE_TIMEOUT_SECONDS = 10
 _MIN_PROCESS_YIELD_TIME_MS = 250
 _DEFAULT_PROCESS_YIELD_TIME_MS = 10_000
-_MAX_PROCESS_YIELD_TIME_MS = 30_000
+_MAX_PROCESS_YIELD_TIME_MS = 10_000
 _DEFAULT_PROCESS_WRITE_YIELD_TIME_MS = 250
 _DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 5_000
-_MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 300_000
+_MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 10_000
 _DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
 _MAX_PROCESS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 
@@ -272,6 +274,13 @@ class ExecCommandInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     command: str = Field(description="Shell command to execute")
+    fire_and_forget: bool = Field(
+        default=False,
+        description=(
+            "Exclude this process from wait eligibility and completion wake-ups. "
+            "Output remains readable."
+        ),
+    )
     workdir: str | None = Field(
         default=None,
         description="Working directory. Defaults to the Agent Workspace.",
@@ -282,7 +291,8 @@ class ExecCommandInput(BaseModel):
         le=_MAX_PROCESS_YIELD_TIME_MS,
         description=(
             "How long to wait for process output before yielding, in milliseconds. "
-            "Defaults to 10000 ms; accepted range is 250-30000 ms."
+            "Defaults to 10000 ms; accepted range is 250-10000 ms. "
+            "Use wait for longer interruptible waiting."
         ),
     )
     max_output_bytes: int = Field(
@@ -310,8 +320,8 @@ class WriteStdinInput(BaseModel):
         description=(
             "How long to wait for process output before yielding, in milliseconds. "
             "Zero returns currently buffered output immediately. Non-empty writes "
-            "default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms "
-            "and cap at 300000 ms."
+            "default to 250 ms; empty polls default to 5000 ms. Both cap at "
+            "10000 ms; use wait for longer interruptible waiting."
         ),
     )
     max_output_bytes: int = Field(
@@ -329,13 +339,6 @@ class WriteStdinInput(BaseModel):
         if data.get("chars", "") != "":
             return data
         return {**data, "yield_time_ms": _DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS}
-
-    @model_validator(mode="after")
-    def _validate_yield_time_range(self) -> "WriteStdinInput":
-        if self.chars != "" and self.yield_time_ms > _MAX_PROCESS_YIELD_TIME_MS:
-            msg = "non-empty write yield_time_ms must be at most 30000"
-            raise ValueError(msg)
-        return self
 
 
 # ---------------------------------------------------------------------------
@@ -1540,6 +1543,63 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Return independent completed Runtime description reads."""
         return self.repositories.runtime
 
+    async def process_wait_target(self) -> ProcessWaitTarget | None:
+        """Expose only an already-qualified Runtime for lifecycle observation."""
+        resolver = self.runtime_capability_resolver
+        if resolver is None or not resolver.project(
+            (RuntimeCapability.PROCESS_EXECUTION,)
+        ):
+            return None
+        try:
+            await resolver.require(RuntimeCapability.PROCESS_EXECUTION)
+        except RuntimeCapabilityDeniedError as exc:
+            raise FunctionToolError(
+                "Runtime capability is unavailable.",
+                metadata={
+                    "kind": "runtime_capability_denied",
+                    "capability": RuntimeCapability.PROCESS_EXECUTION.value,
+                    "reason_code": exc.reason_code,
+                },
+            ) from None
+        target = await self._resolve_projection_runtime_target()
+        if target is None:
+            return None
+        if resolver.snapshot.version != target.runtime_capability_version:
+            raise FunctionToolError(
+                "Runtime capability is unavailable.",
+                metadata={
+                    "kind": "runtime_capability_denied",
+                    "capability": RuntimeCapability.PROCESS_EXECUTION.value,
+                    "reason_code": "runtime_capability_stale",
+                },
+            )
+        return ProcessWaitTarget(
+            runtime_id=target.id,
+            runner_generation=target.runner_generation,
+            owner_session_id=self._runtime_session_id,
+        )
+
+    async def wait_processes(
+        self, target: ProcessWaitTarget, *, after_revision: int, timeout_ms: int
+    ) -> ProcessObservation:
+        """Long-poll lifecycle state without acquiring an output interaction."""
+        current = await self.process_wait_target()
+        if current != target:
+            raise RuntimeRunnerOperationGenerationError(
+                "Runtime process observation target changed before dispatch."
+            )
+        return await self.runner_operations.observe_processes(
+            runtime_id=target.runtime_id,
+            runner_generation=target.runner_generation,
+            owner_session_id=target.owner_session_id,
+            after_revision=after_revision,
+            timeout_ms=timeout_ms,
+            deadline_at=datetime.now(UTC)
+            + timedelta(
+                milliseconds=timeout_ms, seconds=_RUNTIME_OPERATION_RESULT_GRACE_SECONDS
+            ),
+        )
+
     async def _resolve_projection_runtime_target(
         self,
     ) -> RuntimeOperationTarget | None:
@@ -1623,8 +1683,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             "Use absolute filesystem paths inside the runtime workspace.",
             "Prefer dedicated file tools for workspace operations: use `read`, "
             "`write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as "
-            "appropriate. Use `exec_command` for command execution and "
-            "`write_stdin` to interact with a running process.",
+            "appropriate. Use `exec_command` for command execution. "
+            "Use `wait` for interruptible command-completion waiting. Use "
+            "`write_stdin` for stdin input or unread output collection "
+            "(yield_time_ms=0 for immediate collection). Commands marked "
+            "fire_and_forget do not affect wait.",
         ]
         if working_folder_path is None or workspace_root is None:
             scope_lines.extend(
@@ -1696,7 +1759,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
 
         The Agent Workspace persists across turns and is the default place for files you create or edit. `/tmp/` is temporary scratch space.
 
-        Prefer dedicated file tools for filesystem operations: use `read`, `write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as appropriate. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `write_stdin` with empty chars to poll a running process.
+        Prefer dedicated file tools for filesystem operations: use `read`, `write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as appropriate. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `wait` for interruptible command-completion waiting; use `write_stdin` for stdin input or unread output collection (yield_time_ms=0 for immediate collection). Commands marked fire_and_forget do not affect wait.
 
         Use the dynamic Runtime Workspace prompt for the current Agent Workspace path.""")  # noqa: E501
     config_model = ShellToolkitConfig
@@ -2466,6 +2529,7 @@ def make_exec_command_tool(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 command=args.command,
+                fire_and_forget=args.fire_and_forget,
                 workdir=workdir,
                 yield_time_ms=args.yield_time_ms,
                 max_output_bytes=args.max_output_bytes,
@@ -2499,8 +2563,10 @@ def make_exec_command_tool(
         description=(
             "Start a shell process in the Agent Runtime workspace. Returns output "
             "and exit_code when it exits within yield_time_ms; otherwise returns a "
-            "running process_id for write_stdin polling or input. yield_time_ms "
-            "defaults to 10000 ms and accepts 250-30000 ms."
+            "running process_id for write_stdin output collection or input. "
+            "yield_time_ms defaults to 10000 ms and accepts 250-10000 ms. "
+            "Use wait for longer interruptible waiting; fire_and_forget excludes "
+            "a command from shared waiting."
         ),
     )
     return dataclasses.replace(
@@ -2570,8 +2636,8 @@ def make_write_stdin_tool(
             "Write characters to a running exec_command process. Pass an empty "
             "chars string to poll for unread output without sending input. A zero "
             "yield returns currently buffered output immediately. Non-empty writes "
-            "default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms "
-            "and cap at 300000 ms."
+            "default to 250 ms; empty polls default to 5000 ms. Both cap at "
+            "10000 ms; use wait for longer interruptible waiting."
         ),
     )
     return dataclasses.replace(

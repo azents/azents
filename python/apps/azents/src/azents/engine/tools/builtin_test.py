@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
+from azents_runtime_control.process_observation import ProcessObservation
 from cryptography.fernet import Fernet
 
 from azents.core.crypto import CredentialCipher
@@ -701,6 +702,7 @@ class _FakeRunnerOperations:
         runtime_id: str,
         runner_generation: int,
         command: str,
+        fire_and_forget: bool,
         workdir: str | None,
         yield_time_ms: int,
         max_output_bytes: int,
@@ -713,6 +715,7 @@ class _FakeRunnerOperations:
         self.process_start_calls.append(
             {
                 "command": command,
+                "fire_and_forget": fire_and_forget,
                 "workdir": workdir,
                 "yield_time_ms": yield_time_ms,
                 "max_output_bytes": max_output_bytes,
@@ -724,6 +727,20 @@ class _FakeRunnerOperations:
         if self.process_unavailable_message is not None:
             raise RuntimeRunnerOperationUnavailable(self.process_unavailable_message)
         return self.next_process_start_result
+
+    async def observe_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        after_revision: int,
+        timeout_ms: int,
+        deadline_at: datetime,
+    ) -> ProcessObservation:
+        return ProcessObservation(
+            revision=after_revision, running_count=0, completed=()
+        )
 
     async def write_process_stdin(
         self,
@@ -3003,6 +3020,21 @@ class TestRuntimeToolkitDomainConfig:
     """ShellToolkitConfig domain fields are reflected in runtime operation/prompt."""
 
     @pytest.mark.asyncio
+    async def test_runtime_prompts_route_completion_waiting_to_wait(self) -> None:
+        toolkit = _make_toolkit()
+        context = _make_context()
+        await toolkit.update_context(context)
+        prompt = await toolkit.get_static_prompt(context)
+        provider_prompt = BuiltinToolkitProvider.system_prompt
+        for guidance in (prompt, provider_prompt):
+            assert "Use `wait` for interruptible command-completion waiting" in guidance
+            assert (
+                "`write_stdin` for stdin input or unread output collection" in guidance
+            )
+            assert "yield_time_ms=0 for immediate collection" in guidance
+            assert "fire_and_forget do not affect wait" in guidance
+
+    @pytest.mark.asyncio
     async def test_allowed_domains_in_prompt(self) -> None:
         """allowed_domains are included in prompt."""
         config = ShellToolkitConfig(allowed_domains=["example.com"])
@@ -3053,6 +3085,29 @@ class TestProcessToolHandler:
     """Test process tools pass operations to runtime runner."""
 
     @pytest.mark.asyncio
+    async def test_process_observation_rejects_stale_capability_before_dispatch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
+            return RuntimeCapabilitySnapshot(
+                state=AgentRuntimeCapability.MANAGED, version=3
+            )
+
+        resolver = RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.MANAGED,
+            version=1,
+            current_snapshot_provider=current_snapshot_provider,
+        )
+        toolkit = _make_toolkit(runtime_capability_resolver=resolver)
+        dispatch = AsyncMock()
+        monkeypatch.setattr(_runner_operations(toolkit), "observe_processes", dispatch)
+        await toolkit.update_context(_make_context())
+        with pytest.raises(FunctionToolError) as caught:
+            await toolkit.process_wait_target()
+        assert caught.value.metadata["reason_code"] == "runtime_capability_stale"
+        dispatch.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_exec_command_calls_runtime_runner_process_start(self) -> None:
         """exec_command starts a Runner-owned process and returns metadata."""
         toolkit = _make_toolkit()
@@ -3081,6 +3136,7 @@ class TestProcessToolHandler:
         assert runner_operations.process_start_calls == [
             {
                 "command": "echo hello",
+                "fire_and_forget": False,
                 "workdir": "/workspace/agent/.azents/sessions/session-1",
                 "yield_time_ms": 10000,
                 "max_output_bytes": 65536,
@@ -3269,7 +3325,7 @@ class TestProcessToolHandler:
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "write_stdin")
 
-        with pytest.raises(FunctionToolError, match="non-empty write yield_time_ms"):
+        with pytest.raises(FunctionToolError, match="less than or equal to 10000"):
             await tool.handler(
                 json.dumps(
                     {
@@ -3300,11 +3356,11 @@ class TestProcessToolHandler:
         write_yield = write_properties["yield_time_ms"]
         assert exec_yield["default"] == 10000
         assert exec_yield["minimum"] == 250
-        assert exec_yield["maximum"] == 30000
-        assert "accepted range is 250-30000 ms" in exec_yield["description"]
+        assert exec_yield["maximum"] == 10000
+        assert "accepted range is 250-10000 ms" in exec_yield["description"]
         assert write_yield["default"] == 250
         assert write_yield["minimum"] == 0
-        assert write_yield["maximum"] == 300000
+        assert write_yield["maximum"] == 10000
         assert (
             "Zero returns currently buffered output immediately"
             in write_yield["description"]

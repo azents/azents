@@ -118,8 +118,11 @@ async def test_unbound_turn_and_unloaded_snapshot_lifecycle_remain_explicit() ->
         ).server_url
         == ""
     )
-    toolkit = WaitToolkit(wait_service=create_autospec(AgentWaitService, instance=True))
-    assert "Use wait only" in await toolkit.get_static_prompt(context)
+    toolkit = WaitToolkit(
+        wait_service=create_autospec(AgentWaitService, instance=True),
+        process_source=None,
+    )
+    assert "Use wait while" in await toolkit.get_static_prompt(context)
     with pytest.raises(FunctionToolError, match="AgentSession is unavailable"):
         await toolkit._wait(0)
 

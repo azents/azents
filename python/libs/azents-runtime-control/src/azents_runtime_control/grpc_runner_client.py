@@ -23,6 +23,7 @@ from azents_runtime_control.grpc_tls import (
     GrpcClientTlsConfig,
     create_grpc_aio_channel,
 )
+from azents_runtime_control.process_observation import ProcessObservation
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
     runtime_runner_control_pb2,
@@ -1179,10 +1180,16 @@ def _operation_payload(
         return result
     if payload_kind == "file_stat":
         return {"path": operation.file_stat.path}
+    if payload_kind == "process_observe":
+        return {
+            "after_revision": operation.process_observe.after_revision,
+            "timeout_ms": operation.process_observe.timeout_ms,
+        }
     if payload_kind == "process_start":
         payload = operation.process_start
         result: dict[str, JsonValue] = {
             "command": payload.command,
+            "fire_and_forget": payload.fire_and_forget,
             "yield_time_ms": payload.yield_time_ms,
             "max_output_bytes": payload.max_output_bytes,
         }
@@ -1317,6 +1324,17 @@ def _copy_final_success(
 ) -> None:
     if "tasks" in payload or "action_state" in payload:
         message.browser.canonical_result = browser_result_to_wire(payload)
+        return
+    if "process_observation" in payload:
+        observation = ProcessObservation.from_payload(payload["process_observation"])
+        message.process_observe.revision = observation.revision
+        message.process_observe.running_count = observation.running_count
+        message.process_observe.completed.extend(
+            runtime_runner_control_pb2.ProcessCompletion(
+                process_id=item.process_id, status=item.status
+            )
+            for item in observation.completed
+        )
         return
     if "process_id" in payload or "status" in payload:
         process = message.process
@@ -1576,6 +1594,17 @@ def _final_success_payload(
         if message.file_stat.HasField("modified_at"):
             payload["modified_at"] = message.file_stat.modified_at
         return payload
+    if result_kind == "process_observe":
+        return {
+            "process_observation": {
+                "revision": message.process_observe.revision,
+                "running_count": message.process_observe.running_count,
+                "completed": [
+                    {"process_id": item.process_id, "status": item.status}
+                    for item in message.process_observe.completed
+                ],
+            }
+        }
     if result_kind == "process":
         payload: dict[str, JsonValue] = {
             "process_id": message.process.process_id,

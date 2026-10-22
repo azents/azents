@@ -16,6 +16,10 @@ import pytest
 from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
 )
+from azents_runtime_control.process_observation import (
+    ProcessCompletion,
+    ProcessObservation,
+)
 from azents_runtime_control.runner import (
     JsonValue,
     RunnerBodyChunk,
@@ -52,6 +56,227 @@ class _ClosedClient:
         del event
         self.attempts += 1
         raise RuntimeRunnerControlStreamClosed("stream closed")
+
+
+class _ObserveClient(_FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.observing = asyncio.Event()
+
+    async def append_runner_event(self, event: RunnerOperationEvent) -> None:
+        await super().append_runner_event(event)
+        if event.event_type == RuntimeRunnerEventType.ACCEPTED and event.payload == {
+            "operation_type": "process.observe"
+        }:
+            self.observing.set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_before_wait", [False, True])
+async def test_observe_completion_is_non_consuming_and_replayable(
+    tmp_path: Path, finish_before_wait: bool
+) -> None:
+    client = _ObserveClient()
+    operations = RunnerOperations(
+        browser_manager=None,
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+    try:
+        await operations.handle(
+            _operation(
+                operation_type="process.start",
+                payload={
+                    "command": "read line; printf done",
+                    "yield_time_ms": 0,
+                    "owner_session_id": "session-1",
+                },
+            )
+        )
+        process_id = client.events[-1].payload["process_id"]
+        assert isinstance(process_id, str)
+        record = operations._processes[process_id]
+        if finish_before_wait:
+            await record.process.write_stdin(b"go\n")
+            assert record.wait_task is not None
+            await asyncio.shield(record.wait_task)
+        observation = asyncio.create_task(
+            operations.handle(
+                _operation(
+                    operation_type="process.observe",
+                    payload={
+                        "owner_session_id": "session-1",
+                        "after_revision": 0,
+                        "timeout_ms": 30_000,
+                    },
+                )
+            )
+        )
+        await client.observing.wait()
+        if not finish_before_wait:
+            assert not observation.done()
+            await record.process.write_stdin(b"go\n")
+        await asyncio.wait_for(observation, timeout=3)
+        state = ProcessObservation.from_payload(
+            client.events[-1].payload["process_observation"]
+        )
+        assert state.running_count == 0
+        assert state.completed == (ProcessCompletion(process_id, "exited"),)
+        assert process_id in operations._processes
+
+        # A lost response can be replayed; only the caller's committed cursor
+        # acknowledges it, never the act of responding.
+        await operations.handle(
+            _operation(
+                operation_type="process.observe",
+                payload={
+                    "owner_session_id": "session-1",
+                    "after_revision": 0,
+                    "timeout_ms": 0,
+                },
+            )
+        )
+        replay = ProcessObservation.from_payload(
+            client.events[-1].payload["process_observation"]
+        )
+        assert replay == state
+        await operations.handle(
+            _operation(
+                operation_type="process.observe",
+                payload={
+                    "owner_session_id": "session-1",
+                    "after_revision": state.revision,
+                    "timeout_ms": 0,
+                },
+            )
+        )
+        acknowledged = ProcessObservation.from_payload(
+            client.events[-1].payload["process_observation"]
+        )
+        assert not acknowledged.completed
+
+        await operations.handle(
+            _operation(
+                operation_type="process.write",
+                payload={
+                    "owner_session_id": "session-1",
+                    "process_id": process_id,
+                    "stdin": "",
+                    "yield_time_ms": 0,
+                },
+            )
+        )
+        assert client.events[-1].payload["stdout"] == "done"
+        assert client.events[-1].payload["exit_code"] == 0
+    finally:
+        await operations.close()
+
+
+@pytest.mark.asyncio
+async def test_observe_excludes_detached_and_other_owner_processes(
+    tmp_path: Path,
+) -> None:
+    client = _ObserveClient()
+    operations = RunnerOperations(
+        browser_manager=None,
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+    try:
+        for owner, detached in (("session-1", True), ("session-2", False)):
+            await operations.handle(
+                _operation(
+                    operation_type="process.start",
+                    payload={
+                        "command": "read line",
+                        "yield_time_ms": 0,
+                        "owner_session_id": owner,
+                        "fire_and_forget": detached,
+                    },
+                )
+            )
+        await operations.handle(
+            _operation(
+                operation_type="process.observe",
+                payload={"owner_session_id": "session-1", "timeout_ms": 30_000},
+            )
+        )
+        state = ProcessObservation.from_payload(
+            client.events[-1].payload["process_observation"]
+        )
+        assert state.running_count == 0 and not state.completed
+        records = tuple(operations._processes.values())
+        for record in records:
+            await record.process.write_stdin(b"go\n")
+            assert record.wait_task is not None
+            await asyncio.shield(record.wait_task)
+        await operations.handle(
+            _operation(
+                operation_type="process.observe",
+                payload={"owner_session_id": "session-1", "timeout_ms": 30_000},
+            )
+        )
+        state = ProcessObservation.from_payload(
+            client.events[-1].payload["process_observation"]
+        )
+        assert state.running_count == 0 and not state.completed
+    finally:
+        await operations.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_observation_preserves_process_and_input(
+    tmp_path: Path,
+) -> None:
+    client = _ObserveClient()
+    operations = RunnerOperations(
+        browser_manager=None,
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+    try:
+        await operations.handle(
+            _operation(
+                operation_type="process.start",
+                payload={
+                    "command": "read line; printf kept",
+                    "yield_time_ms": 0,
+                    "owner_session_id": "session-1",
+                },
+            )
+        )
+        record = next(iter(operations._processes.values()))
+        observation = asyncio.create_task(
+            operations.handle(
+                _operation(
+                    operation_type="process.observe",
+                    payload={"owner_session_id": "session-1", "timeout_ms": 30_000},
+                )
+            )
+        )
+        await client.observing.wait()
+        observation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await observation
+        assert record.wait_task is not None and not record.wait_task.done()
+        # Observation never holds the interaction lock needed by stdin.
+        await operations.handle(
+            _operation(
+                operation_type="process.write",
+                payload={
+                    "process_id": record.process_id,
+                    "owner_session_id": "session-1",
+                    "stdin": "go\n",
+                    "yield_time_ms": 1000,
+                },
+            )
+        )
+        assert client.events[-1].payload["stdout"] == "kept"
+    finally:
+        await operations.close()
 
 
 @pytest.mark.asyncio

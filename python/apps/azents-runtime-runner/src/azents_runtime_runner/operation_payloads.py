@@ -122,6 +122,13 @@ class ProcessStartPayload:
     env: dict[str, str]
     yield_time_ms: int
     max_output_bytes: int
+    fire_and_forget: bool
+
+
+@dataclass(frozen=True)
+class ProcessObservePayload:
+    after_revision: int
+    timeout_ms: int
 
 
 @dataclass(frozen=True)
@@ -206,6 +213,7 @@ type OperationPayload = (
     | FileBulkDeletePayload
     | FileBulkMovePayload
     | ProcessStartPayload
+    | ProcessObservePayload
     | ProcessWritePayload
     | ProcessTerminateSessionPayload
     | GitListRefsPayload
@@ -333,6 +341,12 @@ class _Fields:
         if isinstance(value, bool):
             return value
         raise self.failure(key, f"{key} must be a boolean")
+
+    def bounded_wait(self, key: str, *, maximum: int, default: int) -> int:
+        value = self.non_negative_integer(key, default=default)
+        if value > maximum:
+            raise self.failure(key, f"{key} must be at most {maximum}")
+        return value
 
     def strings(self, key: str) -> list[str]:
         value = self.raw.get(key)
@@ -462,14 +476,20 @@ def decode_operation_payload(
                 fields.string("command"),
                 fields.optional_string("workdir"),
                 fields.environment(),
-                fields.non_negative_integer("yield_time_ms", default=1_000),
+                fields.bounded_wait("yield_time_ms", maximum=10_000, default=1_000),
                 fields.positive_integer("max_output_bytes", default=64 * 1024),
+                fields.boolean("fire_and_forget", default=False),
+            )
+        case "process.observe":
+            return ProcessObservePayload(
+                fields.non_negative_integer("after_revision", default=0),
+                fields.bounded_wait("timeout_ms", maximum=900_000, default=0),
             )
         case "process.write":
             return ProcessWritePayload(
                 fields.string("process_id"),
                 fields.string("stdin", required=False),
-                fields.non_negative_integer("yield_time_ms", default=1_000),
+                fields.bounded_wait("yield_time_ms", maximum=10_000, default=1_000),
                 fields.positive_integer("max_output_bytes", default=64 * 1024),
             )
         case "process.terminate_session":

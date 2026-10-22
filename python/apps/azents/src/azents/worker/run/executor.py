@@ -363,7 +363,15 @@ def _runtime_hook_provider_refs(
 def _refresh_runtime_peer_toolkits(toolkits: Sequence[ToolkitBinding]) -> None:
     """Attach the current managed peer snapshot to runtime shell toolkits."""
     peer_toolkits = [binding.toolkit for binding in toolkits]
+    process_source = next(
+        (toolkit for toolkit in peer_toolkits if isinstance(toolkit, RuntimeToolkit)),
+        None,
+    )
     for binding in toolkits:
+        if isinstance(binding.toolkit, WaitToolkit):
+            # Session lifecycle reconciliation can replace Runtime independently
+            # from the always-on wait instance.
+            binding.toolkit.process_source = process_source
         if isinstance(binding.toolkit, RuntimeToolkit):
             binding.toolkit.set_peer_toolkits(
                 [toolkit for toolkit in peer_toolkits if toolkit is not binding.toolkit]
@@ -1568,7 +1576,17 @@ class RunExecutor:
         )
         toolkits.append(
             ToolkitBinding(
-                WaitToolkit(wait_service=self.agent_wait_service),
+                WaitToolkit(
+                    wait_service=self.agent_wait_service,
+                    process_source=next(
+                        (
+                            binding.toolkit
+                            for binding in toolkits
+                            if isinstance(binding.toolkit, RuntimeToolkit)
+                        ),
+                        None,
+                    ),
+                ),
                 "wait",
                 "wait",
                 False,

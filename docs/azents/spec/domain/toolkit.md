@@ -6,6 +6,9 @@ spec_type: domain
 domain: toolkit
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/engine/tools/wait.py
+  - python/apps/azents/src/azents/engine/tools/process_wait.py
+  - python/apps/azents/src/azents/repos/agent_wait_read.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
@@ -135,7 +138,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-22
-spec_version: 152
+spec_version: 153
 ---
 
 # Toolkit
@@ -1249,14 +1252,14 @@ while generic tools can still read other authorized backends.
 - `read` file tool interprets both `offset` and `limit` as decoded text character counts. It reads fixed-size byte ranges from the Runtime and applies strict incremental decoding from the start of the file, so a storage boundary cannot split a multibyte character into a false decode failure. The decoder retains only the bounded requested text plus one continuation character. Invalid source bytes encountered while locating the offset or decoding that bounded range return an explicit encoding error; an unread suffix is not validated. Result range metadata and continuation offsets use the same character unit as the input schema.
 - `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
 - `glob` file tool accepts absolute path patterns and implements a shell-style pathname matching subset: `*`, `?`, character classes (`[...]`), recursive `**` matching zero or more path segments, and comma-separated brace alternatives such as `*.{jpg,png}`, including nested alternatives. Recursive patterns search below the non-glob prefix and may return matching directories as well as files, so `<agent-workspace>/.claude/skills/*` exposes directory entries and `/foo/bar/**/baz.{jpg,png}` matches both `/foo/bar/baz.jpg` and nested equivalents. Brace expansion is evaluated once per tool call and is limited to 256 alternatives. Brace sequences such as `{1..10}`, extglob, variable expansion, command substitution, shell quoting, backslash escaping, and tilde expansion are not supported. Patterns beginning with `~` fail explicitly instead of depending on the Runtime process home directory. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
-- Runtime tool prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `write_stdin` with empty `chars` to poll a running process. Runtime config prompts sort registered projects and domain lists deterministically and describe the preserved Agent Workspace, temporary work, and outbound connectivity without claiming Azents-owned infrastructure isolation or exposing sensitive path inventories.
+- Runtime tool prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `wait` for interruptible command-completion waiting; use `write_stdin` for stdin input and unread output collection (`yield_time_ms=0` for immediate collection). Commands explicitly marked `fire_and_forget` do not affect shared waiting. Runtime config prompts sort registered projects and domain lists deterministically and describe the preserved Agent Workspace, temporary work, and outbound connectivity without claiming Azents-owned infrastructure isolation or exposing sensitive path inventories.
 - Managed Runtime prompts tell Agents to use native `pixi search` with the
   Runner-provided Linux platform and `pixi global install` for missing user-space
   tools and not to use sudo or operating-system package managers. This guidance
   adds no ToolkitConfig, capability, Profile, API, inventory, or package-policy
   state.
-- `exec_command(command, workdir?, yield_time_ms?, max_output_bytes?)` starts a pipe-based Runner-owned process. If the process exits within the yield window, the tool result includes final output and exit code. If it is still running, the result includes collected output plus a process `process_id` for later interaction. `yield_time_ms` defaults to 10000 ms and accepts the 250-30000 ms range.
-- `write_stdin(process_id, chars = "", yield_time_ms?, max_output_bytes?)` writes to an existing process. Empty `chars` is the poll primitive and only drains unread output. `yield_time_ms=0` returns the currently buffered output immediately. Non-empty writes default to 250 ms and allow 0-30000 ms; empty polls default to 5000 ms and allow 0-300000 ms. Missing/expired/terminated process ids are returned as normal tool observations with structured metadata rather than assistant/system failures. Per [exec-260628/ADR](../../adr/exec-260628-exec-stop-termination.md), user stop requests TERM for all live exec processes owned by the stopped `AgentSession`; worker graceful shutdown/handover does not TERM runner-owned exec processes by itself.
+- `exec_command(command, workdir?, yield_time_ms?, max_output_bytes?, fire_and_forget = false)` starts a pipe-based Runner-owned process. If the process exits within the yield window, the tool result includes final output and exit code. If it is still running, the result includes collected output plus a process `process_id` for later interaction. `yield_time_ms` defaults to 10000 ms and accepts 250-10000 ms. Ordinary commands participate in shared `wait`; explicitly fire-and-forget commands do not keep waiting eligible or release it on completion. Starting a command does not force a wait call.
+- `write_stdin(process_id, chars = "", yield_time_ms?, max_output_bytes?)` writes to an existing process. Empty `chars` polls and drains unread output. `yield_time_ms=0` collects currently buffered output immediately. Non-empty writes default to 250 ms; empty polls default to 5000 ms; both accept 0-10000 ms. Use `wait` for longer interruptible waiting. These bounds apply to process-yield windows, not Runtime preparation/transport/drain latency. Missing/expired/terminated process ids remain normal observations with structured metadata. Per [exec-260628/ADR](../../adr/exec-260628-exec-stop-termination.md), user stop requests TERM for all live exec processes owned by the stopped `AgentSession`; worker graceful shutdown/handover does not TERM runner-owned exec processes by itself.
 - Runtime process tool results are text for model visibility plus generic `metadata` on the client tool result payload. Metadata includes process status, process id when present, exit code when exited, truncation facts, and missing reason when unavailable. The engine preserves this metadata generically and does not branch on exec-specific keys.
 - The legacy `bash` tool is no longer exposed as the model-visible runtime shell command tool. Existing file tools continue to use Runner file operations.
 
@@ -1463,16 +1466,31 @@ mailbox wake, and result delivery cannot cross the tree lifecycle boundary concu
 `interrupt_agent` likewise locks the root tree and target `AgentSession` before recording stop intent.
 
 `wait` has only optional `timeout_seconds`, defaulting to 30 and bounded from 0 through 900; unknown
-fields are rejected. It observes any mailbox activity and active descendant paths in the current
-SessionAgent subtree without consuming mailbox input. A mailbox update returns
+fields are rejected. It observes any mailbox activity, active descendant paths in the current
+SessionAgent subtree, and ordinary shell-process completion without consuming input or output.
+A mailbox update returns
 `{"outcome":"activity","reason":"new user input, agent or subagent message, scheduled continuation,
-external-channel request, or action"}`. An empty tree returns `{"outcome":"not_waitable",
-"reason":"no_descendants"}`, an entirely idle subtree returns `{"outcome":"not_waitable",
+external-channel request, or action"}`. When no ordinary shell work participates, an empty tree
+returns `{"outcome":"not_waitable","reason":"no_descendants"}`, an entirely idle subtree returns `{"outcome":"not_waitable",
 "reason":"all_descendants_idle"}`, and deadline expiry returns `{"outcome":"timed_out"}`. Active
 means a running Session, a pending/running Run, or pending `wake_session` input; queue-only input
 alone does not make a descendant active. `timeout_seconds = 0` performs one immediate observation.
-Waiting never repairs terminal delivery, consumes mailbox rows, or advances observation cursors; the
-next model boundary performs FIFO promotion.
+Waiting never repairs descendant terminal delivery, consumes mailbox rows, or advances descendant
+observation cursors; the next model boundary performs FIFO promotion.
+
+Shell-only work is eligible without descendants. A cancellable, non-consuming Runner
+`process.observe` long-poll returns new terminal lifecycle states promptly without waiting for
+other commands or stdout chunks. `wait` returns `outcome=activity`, `reason=shell_completion`,
+and a `completed` list of process identifiers/statuses. Output and exit-code collection remain
+with `write_stdin`. Fire-and-forget commands are excluded from eligibility and wake-ups.
+The completed tool result stores the Runtime ID, Runner generation, and lifecycle revision
+in generic metadata. Subsequent waits recover the latest committed revision from retained
+Session transcript events, including compacted events; returning a Runner response alone
+does not acknowledge it. New input takes precedence over simultaneous shell completion.
+Cancelling observation or timing out does not terminate shell processes, and remote
+cancellation cleanup does not hold mailbox handling. No automatic completion input or new Run
+is created. Missing Runtime projection means no participating shell work; a failed observation
+operation is surfaced as a tool error rather than being interpreted as no work.
 
 `interrupt_agent` records stop intent only for the named target session and returns its previous
 projected status; it does not close, delete, or recursively stop descendants. The toolkit emits

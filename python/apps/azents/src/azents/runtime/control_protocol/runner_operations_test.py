@@ -1108,6 +1108,41 @@ async def test_grep_files_returns_final_matches() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_observation_is_owner_scoped_and_non_consuming() -> None:
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.observe_processes(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            after_revision=12,
+            timeout_ms=30_000,
+            deadline_at=_now() + timedelta(seconds=40),
+        )
+    )
+    request = await harness.claim()
+    assert request.operation_type == "process.observe"
+    assert request.payload["owner_session_id"] == "session-1"
+    assert request.payload["payload"] == {"after_revision": 12, "timeout_ms": 30_000}
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "process_observation": {
+                "revision": 13,
+                "running_count": 1,
+                "completed": [{"process_id": "proc-1", "status": "exited"}],
+            }
+        },
+        final=True,
+    )
+    observation = await asyncio.wait_for(task, 2)
+    assert observation.revision == 13
+    assert observation.running_count == 1
+    assert observation.completed[0].process_id == "proc-1"
+
+
+@pytest.mark.asyncio
 async def test_start_process_dispatches_and_folds_protocol_events() -> None:
     """Process start protocol returns a folded process snapshot."""
     harness = await _make_harness()
@@ -1116,6 +1151,7 @@ async def test_start_process_dispatches_and_folds_protocol_events() -> None:
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
             command="python -m http.server",
+            fire_and_forget=False,
             workdir="/workspace/agent",
             yield_time_ms=1000,
             max_output_bytes=4096,
@@ -1128,6 +1164,7 @@ async def test_start_process_dispatches_and_folds_protocol_events() -> None:
     assert request.operation_type == "process.start"
     assert request.payload["payload"] == {
         "command": "python -m http.server",
+        "fire_and_forget": False,
         "workdir": "/workspace/agent",
         "yield_time_ms": 1000,
         "max_output_bytes": 4096,
