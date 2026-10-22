@@ -111,7 +111,7 @@ def test_google_same_context_partial_review_and_metadata_preservation(
                 )
             )
         ).click()
-    _assert_visible_text(browser_driver, "1. Choose services and access")
+    _assert_visible_text(browser_driver, "1. Choose services")
     assert not any(
         item.is_selected()
         for item in browser_driver.find_elements(

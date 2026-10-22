@@ -41,19 +41,22 @@ export function GoogleApplicationSetupGuide(): React.ReactElement {
           >
             consent setup instructions
           </Anchor>
-          . Add only the access requests you intend to offer, plus openid and
-          email for account identity. Publishing, restricted-scope verification
-          and account-policy eligibility remain separate Google requirements;
-          saving these settings does not verify them.
+          . Configure the supported scopes for the services you offer, plus
+          openid and email for account identity. Toolkit connection
+          automatically requests the supported read and write scopes for enabled
+          services; users choose which permissions to grant on Google&apos;s
+          consent screen. Publishing, restricted-scope verification and
+          account-policy eligibility remain separate Google requirements; saving
+          these settings does not verify them.
           <details>
             <summary>
               Examples of access requests and their consequences
             </summary>
             <Stack gap="xs" mt="xs">
               <Text size="sm">
-                Request choices construct consent, not an execution ceiling.
-                Actual returned scopes determine supported actions in each
-                enabled service.
+                Google consent is where users choose their permissions. Actual
+                returned scopes determine supported actions in each enabled
+                service.
               </Text>
               <Text size="sm" fw={600}>
                 Calendar
@@ -80,8 +83,8 @@ https://www.googleapis.com/auth/calendar.app.created`}</Code>
 https://www.googleapis.com/auth/drive.readonly
 https://www.googleapis.com/auth/drive.file`}</Code>
               <Text size="sm">
-                New Drive requests default to whole-Drive read access; writing
-                must be chosen explicitly. App-file access is read/write, not
+                Drive connection offers supported read and write permissions on
+                Google&apos;s consent screen. App-file access is read/write, not
                 read-only. Whole-Drive read plus app-file access permits whole
                 reads but only app-file writes; selecting a folder does not
                 authorize every descendant.
@@ -139,10 +142,10 @@ https://www.googleapis.com/auth/gmail.settings.basic`}</Code>
           </Text>
           Save Client ID and Client secret replacement below. Do not share the
           secret or paste a downloaded client JSON file. In Toolkit settings,
-          choose services and access requests, connect a Google account, review
-          actual permissions, then explicitly save. Later service switches save
-          locally without new consent. Changed access requests use ordinary
-          reconnection.
+          choose services, connect a Google account, choose permissions on
+          Google&apos;s consent screen, review actual access, then explicitly
+          save. Later service switches save locally without new consent. To
+          grant additional permissions, explicitly reconnect through Google.
         </List.Item>
       </List>
       <Text size="sm" c="dimmed">

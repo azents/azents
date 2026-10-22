@@ -2,7 +2,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import koreanMessages from "@/i18n/ko-KR-messages";
-import { googleDefaultScopes } from "../google-access";
+import { googleScopesForServices } from "../google-access";
 import { canPublishGoogleReview } from "../google-types";
 import { GoogleSetup } from "./GoogleSetup";
 import type { GoogleSetupProps } from "../google-types";
@@ -32,12 +32,7 @@ const review: GoogleReview = {
   ownership: "workspace_shared",
   reconnect_toolkit_id: null,
   services: ["calendar", "gmail"],
-  oauth_request_scopes: [
-    "openid",
-    "email",
-    ...googleDefaultScopes("calendar"),
-    ...googleDefaultScopes("gmail"),
-  ],
+  oauth_request_scopes: googleScopesForServices(["calendar", "gmail"]),
   granted_scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"],
   timeout: 30,
   accesses: [
@@ -98,7 +93,6 @@ const props: GoogleSetupProps = {
   saved: { type: "NEW" },
   flow: { type: "SELECT" },
   services: [],
-  requestScopes: [],
   timeout: 30,
   metadata: {
     name: "",
@@ -122,7 +116,6 @@ const props: GoogleSetupProps = {
   rootRef: { current: null },
   embedded: false,
   onServiceChange: fn(),
-  onRequestScopesChange: fn(),
   onSaveServices: fn(() => Promise.resolve()),
   onOpenPicker: fn(),
   onClosePicker: fn(),
@@ -161,24 +154,10 @@ export const ExplicitSelection: Story = {
   },
 };
 export const SelectedServices: Story = {
-  args: { services: ["drive"], requestScopes: googleDefaultScopes("drive") },
+  args: { services: ["drive"] },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await expect(
-      canvas.getByText(/Read and export files across Drive/),
-    ).toBeVisible();
-    canvas.getByRole("combobox", { name: "Drive" }).focus();
-    await userEvent.keyboard("{ArrowDown}");
-    await userEvent.click(
-      await within(document.body).findByRole("option", {
-        name: /Read and change files across Drive/,
-      }),
-    );
-    await expect(args.onRequestScopesChange).toHaveBeenCalledWith(
-      "drive",
-      expect.arrayContaining(["https://www.googleapis.com/auth/drive"]),
-    );
-    await userEvent.keyboard("{Escape}");
+    await expect(canvas.getByRole("switch", { name: "Drive" })).toBeChecked();
     await userEvent.click(
       canvas.getByRole("button", { name: "Continue to Google" }),
     );
@@ -208,7 +187,6 @@ export const PartialGrantReview: Story = {
   args: {
     flow: { type: "REVIEW", review },
     services: ["calendar", "gmail"],
-    requestScopes: review.oauth_request_scopes,
   },
   render: (args) => <ReviewFixture {...args} />,
   play: async ({ canvasElement, args }) => {
@@ -319,7 +297,6 @@ export const SavedReconnectRequired: Story = {
   args: {
     reconnect: true,
     services: saved.services,
-    requestScopes: saved.oauth_request_scopes,
     saved: {
       type: "READY",
       detail: { ...saved, status: "reconnect_required" },
@@ -398,10 +375,6 @@ export const MixedDriveGrant: Story = {
   args: {
     ...SavedReconnectRequired.args,
     services: ["drive"],
-    requestScopes: [
-      "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file",
-    ],
     saved: {
       type: "READY",
       detail: { ...saved, services: ["drive"], drive_access: mixedDrive },
@@ -476,7 +449,6 @@ export const FullGrantReview: Story = {
   args: {
     ...PartialGrantReview.args,
     services: ["calendar"],
-    requestScopes: googleDefaultScopes("calendar"),
     publishingAllowed: true,
     flow: {
       type: "REVIEW",
@@ -484,8 +456,8 @@ export const FullGrantReview: Story = {
         ...review,
         services: ["calendar"],
         grant_result: "full",
-        oauth_request_scopes: googleDefaultScopes("calendar"),
-        granted_scopes: googleDefaultScopes("calendar"),
+        oauth_request_scopes: googleScopesForServices(["calendar"]),
+        granted_scopes: googleScopesForServices(["calendar"]),
       },
     },
   },
@@ -504,13 +476,14 @@ export const BroaderScopeReceipt: Story = {
     ...PartialGrantReview.args,
     services: ["gmail"],
     publishingAllowed: true,
-    requestScopes: googleDefaultScopes("gmail"),
     flow: {
       type: "REVIEW",
       review: {
         ...review,
         services: ["gmail"],
-        oauth_request_scopes: googleDefaultScopes("gmail"),
+        oauth_request_scopes: [
+          "https://www.googleapis.com/auth/gmail.readonly",
+        ],
         granted_scopes: ["https://www.googleapis.com/auth/gmail.modify"],
         accesses: [
           {

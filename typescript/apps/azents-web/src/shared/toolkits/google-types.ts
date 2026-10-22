@@ -45,7 +45,6 @@ export interface GoogleSetupProps {
   saved: GoogleSavedState;
   flow: GoogleFlowState;
   services: GoogleService[];
-  requestScopes: string[];
   timeout: number;
   metadata: GoogleMetadata;
   publishingAllowed: boolean;
@@ -62,7 +61,6 @@ export interface GoogleSetupProps {
   rootRef: RefObject<HTMLDivElement | null>;
   embedded: boolean;
   onServiceChange: (service: GoogleService, selected: boolean) => void;
-  onRequestScopesChange: (service: GoogleService, scopes: string[]) => void;
   onSaveServices: () => Promise<void>;
   onOpenPicker: () => void;
   onClosePicker: () => void;
