@@ -115,7 +115,8 @@ async def test_sdk_sends_once_without_implicit_credential_refresh(
                 503: "provider_unavailable",
             }[status]
         )
-        assert "credential-content-canary" not in str(error.value)
+        assert error.value.provider_error is not None
+        assert error.value.provider_error.message == "credential-content-canary"
         assert "fixture-access" not in str(error.value)
     assert len(requests) == 1
     assert refreshed == 0
@@ -125,6 +126,70 @@ async def test_sdk_sends_once_without_implicit_credential_refresh(
     assert requests[0].headers["authorization"] == "Bearer fixture-access"
     assert requests[0].headers["accept-encoding"] == "identity"
     assert json.loads(requests[0].content) == {"raw": "dGVzdA"}
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [(403, "accessNotConfigured"), (403, "insufficientPermissions"), (404, "notFound")],
+)
+async def test_sdk_retains_original_provider_fields_without_request_dump(
+    status: int, reason: str
+) -> None:
+    requests: list[httpx.Request] = []
+    message = (
+        "Gmail API is disabled for project 123456789. Enable it at "
+        "https://console.developers.google.com/apis/api/gmail.googleapis.com/overview"
+        "?project=123456789 for owner@example.com; file=resource-42. "
+        "Token fixture-access and Bearer reflected-auth; refresh_token=refresh-secret"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return _response(
+            status,
+            json.dumps(
+                {
+                    "error": {
+                        "status": "PERMISSION_DENIED",
+                        "message": message,
+                        "errors": [{"reason": reason}],
+                        "details": [{"reason": "FUTURE_REASON"}],
+                        "private_debug": "never-return-this-field",
+                    }
+                }
+            ).encode(),
+            {"content-type": "application/json"},
+        )
+
+    with pytest.raises(GoogleSdkError) as caught:
+        await _sdk(handler).run(
+            before_request=lambda: None,
+            access_token="fixture-access",
+            limits=_limits(2048),
+            proxy_url=None,
+            operation=_send,
+        )
+    error = caught.value
+    assert error.status == status and error.dispatched
+    assert len(requests) == 1
+    assert error.provider_error is not None
+    assert error.provider_error.message == message
+    output = error.provider_error.describe(error.status)
+    for text in (
+        "HTTP " + str(status),
+        "PERMISSION_DENIED",
+        reason,
+        "FUTURE_REASON",
+        "project 123456789",
+        "?project=123456789",
+        "owner@example.com",
+        "resource-42",
+        "fixture-access",
+        "reflected-auth",
+        "refresh-secret",
+    ):
+        assert text in output
+    assert "never-return-this-field" not in output
 
 
 async def test_static_resources_build_without_network_or_ambient_credentials() -> None:

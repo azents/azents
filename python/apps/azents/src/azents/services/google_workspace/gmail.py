@@ -142,6 +142,9 @@ def batch_get_messages(
                 unconfirmed_action="get_message",
                 remaining_ids=identifiers[index:],
                 cause_code=error.code,
+                provider_error=error.provider_error
+                if isinstance(error, GoogleSdkError)
+                else None,
                 status=error.status if isinstance(error, GoogleSdkError) else None,
                 dispatched=bool(messages)
                 or isinstance(error, GoogleSdkError)
@@ -448,6 +451,7 @@ def _send_prepared(
             unconfirmed_action="verify_reply_thread",
             remaining_ids=(prepared.thread_id,),
             cause_code="reply_thread_mismatch",
+            provider_error=None,
             status=None,
             dispatched=True,
         )
@@ -724,6 +728,9 @@ def batch_modify_messages(
                 unconfirmed_action="batch_modify_messages",
                 remaining_ids=ids[index:],
                 cause_code=error.code,
+                provider_error=error.provider_error
+                if isinstance(error, GoogleSdkError)
+                else None,
                 status=error.status if isinstance(error, GoogleSdkError) else None,
                 dispatched=bool(completed)
                 or isinstance(error, GoogleSdkError)
@@ -862,6 +869,9 @@ def replace_filter(
             unconfirmed_action="delete_old_filter",
             remaining_ids=(value.filter_id,),
             cause_code=error.code,
+            provider_error=error.provider_error
+            if isinstance(error, GoogleSdkError)
+            else None,
             status=error.status if isinstance(error, GoogleSdkError) else None,
             dispatched=True,
         ) from None

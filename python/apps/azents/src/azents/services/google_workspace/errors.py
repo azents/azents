@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict
 
+from azents.services.google_workspace.provider_error import GoogleProviderError
 from azents.services.google_workspace.transport import GoogleSdkError
 
 
@@ -31,6 +32,7 @@ class GoogleWorkspacePartialError(GoogleSdkError):
         cause_code: str,
         status: int | None,
         dispatched: bool,
+        provider_error: GoogleProviderError | None,
     ) -> None:
         self.partial = GooglePartialOperation(
             completed=completed,
@@ -39,3 +41,4 @@ class GoogleWorkspacePartialError(GoogleSdkError):
             cause_code=cause_code,
         )
         super().__init__("partial_operation", dispatched=dispatched, status=status)
+        self.provider_error = provider_error

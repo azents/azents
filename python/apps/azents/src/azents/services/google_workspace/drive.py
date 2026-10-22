@@ -664,6 +664,9 @@ def create_permissions(
                     str(ordinal) for ordinal in range(index, len(value.grants))
                 ),
                 cause_code=error.code,
+                provider_error=error.provider_error
+                if isinstance(error, GoogleSdkError)
+                else None,
                 status=error.status if isinstance(error, GoogleSdkError) else None,
                 dispatched=bool(completed)
                 or isinstance(error, GoogleSdkError)

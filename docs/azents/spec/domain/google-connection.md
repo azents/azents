@@ -133,6 +133,15 @@ rejection marks only that grant reconnect-required. Resource ACL/policy and
 transient failures do not globally revoke the connection. Uncertain writes are
 never automatically replayed.
 
+Google HTTP failures retain their HTTP status, structured provider status/reasons
+and bounded original `error.message` in tool errors. Unknown reasons are retained;
+account/resource identifiers, API names and diagnostic console links are retained.
+Provider-owned diagnostic text is passed through without masking or substitution,
+including credential-like strings. SDK request/URI serialization, headers and
+arbitrary response fields are not copied. Malformed
+error envelopes retain the generic failure. Compound failures preserve both the
+confirmed-step receipt and the provider explanation without replaying any step.
+
 ## Typed Workspace Operations
 
 Calendar includes calendar discovery/creation, bounded event search/get, free-busy,
