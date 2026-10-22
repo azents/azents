@@ -47,7 +47,7 @@ from azents_runtime_control.runtime_stream_session import (
     BrowserStreamAuthority,
     WebSocketOpcode,
 )
-from playwright.async_api import Error, Page
+from patchright.async_api import Error, Page
 
 from azents_runtime_runner.browser import (
     BrowserFailure,

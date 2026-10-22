@@ -25,7 +25,7 @@ from azents_runtime_control.runtime_stream_session import (
     WebSocketOpcode,
 )
 from browser_test import _action
-from playwright.async_api import Error
+from patchright.async_api import Error
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_editables import BrowserEditableRegions

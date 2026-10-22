@@ -18,7 +18,7 @@ code_paths:
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_popups.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_input.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_stealth.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_display.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/operations.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/main.py
   - python/apps/azents-runtime-runner/pyproject.toml
@@ -62,7 +62,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-20
+last_verified_at: 2026-10-23
 spec_version: 1
 ---
 
@@ -104,23 +104,26 @@ Read-only presentation never starts or recreates a Runtime merely for inspection
 
 ## Browser Automation Markers
 
-Managed Session contexts use standard Playwright with the installed full
-Chromium's new headless mode rather than headless shell, retaining the existing
-sandbox/proxy policy. Launch removes the `--enable-automation` default
-when present and disables Blink's `AutomationControlled` feature. Before any
-site navigation, the Runner explicitly installs `playwright-stealth` scripts
-on the persistent context, including later pages, frames and popups. The native
-OS, language and GPU identity are retained instead of spoofing Windows defaults.
-The readiness probe derives the native User-Agent from that same browser; a
-native context override removes its HeadlessChrome token consistently from
-User-Agent, appVersion and request headers. Client-hint brands remain native to
-full Chromium, including GREASE entries, rather than synthesizing HTTP brands.
+Managed Session contexts use pinned Patchright with installed full Chromium in
+headed mode, retaining the existing sandbox/proxy policy. Patchright owns the
+driver defaults and reduced Runtime/Console instrumentation. The Runner uses the
+browser's native User-Agent, client hints, language and GPU identity rather than
+injecting fingerprint overrides. Product DOM observation and private field
+geometry/editing scripts remain separate browser functionality.
 
-This reduces explicit automation advertising; it is not an authorization change,
-CAPTCHA solver, proxy rotation, or guarantee of undetectability or site access.
-Playwright's CDP transport and internal domain calls remain. Scripts do not claim
-complete worker or high-entropy fingerprint coverage. Existing live contexts are
-not replaced; the policy is installed when a Session context is next created.
+On Linux without a supplied DISPLAY, the browser manager starts one owned Xvfb,
+waits for its bounded displayfd readiness record and passes that display only to
+its browser children. Xvfb has no TCP listener; native display selection and
+non-Linux hosts are not replaced. Failure disables browser availability rather
+than silently changing to headless or another driver. Manager cleanup closes
+contexts and the driver before terminating and reaping its owned display.
+Browser startup failure also releases the display. Independent Runner capabilities
+remain available when browser initialization fails.
+
+This is not an authorization change, CAPTCHA solver, proxy rotation, or guarantee
+of undetectability or site access. Chromium CDP remains in use. Automatic console
+collection is not part of the Browser command contract. Existing profile bytes
+remain in place; the launch policy applies to newly created native contexts.
 
 ## Authenticated Live Attachment
 
@@ -294,7 +297,15 @@ running against an already open context in the manager.
 
 Task capacity is admitted before native context allocation, and page capacity before new page allocation. Failed registration closes the newly allocated page. Closing a task's final page retires its live identity and reclaims task capacity while retaining the Session context/profile.
 
-The Runner application declares a locked Playwright dependency. Image provisioning installs matching Chromium through that environment into the product browser path. System pip/Agent-installed Playwright is not used as product availability evidence. Engine launch preserves the trusted Runner proxy route when configured and does not add a direct-network alternative.
+Each context retains one internal blank tab so headed Chromium remains alive
+after its final task tab closes. The blank tab is outside task/page projection
+and task quotas, has no site navigation, and closes with the context.
+
+The Runner application declares a locked Patchright dependency. Image provisioning
+installs matching Chromium through that environment into the product browser path
+and supplies Xvfb for displayless Linux execution. System pip/Agent-installed
+drivers are not product availability evidence. Engine launch preserves the trusted
+Runner proxy route when configured and does not add a direct-network alternative.
 
 Required Runner host tests also install the matching Chromium/native prerequisites before pytest in CI; the product image does not supply the separate host test environment.
 

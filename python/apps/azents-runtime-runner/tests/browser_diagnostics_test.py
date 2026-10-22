@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from playwright.async_api import Error, Page
+from patchright.async_api import Error, Page
 
 from azents_runtime_runner.browser import BrowserFailure, _Page
 from azents_runtime_runner.browser_viewer import BrowserFrameBudget, _LatestPage

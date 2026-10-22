@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from playwright.async_api import CDPSession, Error, Page
+from patchright.async_api import CDPSession, Error, Page
 
 
 @dataclass(frozen=True)
