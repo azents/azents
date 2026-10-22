@@ -10,6 +10,7 @@ from azcommon.result import Failure, Success
 
 from azents.core.enums import WorkspaceUserRole
 from azents.core.google_oauth import GoogleConnectionStatus
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import drive_access
 from azents.core.toolkit_ownership import PersonalToolkitAccessMode, ToolkitOwnerKind
 from azents.engine.tools.google import GoogleToolkitProvider
@@ -37,6 +38,7 @@ _CONFIG: dict[str, object] = {
     "services": [],
     "oauth_request_scopes": list(_SCOPES),
     "timeout": 30,
+    "tool_groups": [item.value for item in groups_for_services([])],
 }
 
 
@@ -124,6 +126,7 @@ async def test_generic_google_updates_preserve_policy_and_current_grant(
             drive_access=drive_access((), None),
             renewable=True,
             service_access_verified=False,
+            tool_groups=groups_for_services(()),
         )
     )
     personal = dataclasses.replace(h.service, common=common, google=google)

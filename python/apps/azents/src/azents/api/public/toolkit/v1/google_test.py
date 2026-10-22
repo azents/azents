@@ -16,6 +16,7 @@ from azents.core.google_oauth import (
     GooglePersonalSubject,
     GoogleSubject,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import drive_access
 from azents.core.toolkit_ownership import ToolkitOwnerKind, UserToolkitOwner
 from azents.services.google_oauth.data import (
@@ -55,6 +56,9 @@ def test_personal_google_connect_has_workspace_scoped_user_owner() -> None:
                     "https://www.googleapis.com/auth/calendar.events.readonly"
                 ],
                 "timeout": 30.0,
+                "tool_groups": [
+                    item.value for item in groups_for_services(["calendar"])
+                ],
             },
         )
     assert response.status_code == 200
@@ -105,6 +109,9 @@ def test_routes_capture_current_login_and_do_not_create_toolkit(
                     "https://www.googleapis.com/auth/calendar.events.readonly"
                 ],
                 "timeout": 30.0,
+                "tool_groups": [
+                    item.value for item in groups_for_services(["calendar"])
+                ],
             },
         )
     assert response.status_code == 200
@@ -148,6 +155,9 @@ def test_context_error_is_not_an_internal_server_error() -> None:
                     "https://www.googleapis.com/auth/calendar.events.readonly"
                 ],
                 "timeout": 30.0,
+                "tool_groups": [
+                    item.value for item in groups_for_services(["calendar"])
+                ],
             },
         )
     assert response.status_code == 404
@@ -180,10 +190,11 @@ def test_service_save_routes_preserve_exact_manager_context(owner: str) -> None:
         oauth_request_scopes=("email", "openid"),
         granted_scopes=None,
         timeout=30.0,
-        accesses=service_accesses((), None),
+        accesses=service_accesses((), None, tool_groups=groups_for_services(())),
         drive_access=drive_access((), None),
         renewable=False,
         service_access_verified=False,
+        tool_groups=groups_for_services(()),
     )
     if owner == "personal":
         path = "/workspaces/ws/personal-toolkit-configs/toolkit/google/services"
@@ -203,10 +214,26 @@ def test_service_save_routes_preserve_exact_manager_context(owner: str) -> None:
         path = "/workspaces/ws/toolkit-configs/toolkit/google/services"
         expected = GoogleSubject("manager", "auth-session", "workspace", None)
     with TestClient(_app(service)) as client:
-        response = client.patch(path, json={"services": [], "expected_revision": 3})
+        response = client.patch(
+            path,
+            json={
+                "services": [],
+                "tool_groups": [
+                    item.value
+                    for item in groups_for_services(("calendar", "drive", "gmail"))
+                ],
+                "expected_revision": 3,
+            },
+        )
     assert response.status_code == 200 and response.json()["revision"] == 4
     service.update_services.assert_awaited_once_with(
-        expected, "toolkit", GoogleServicesUpdateInput(services=(), expected_revision=3)
+        expected,
+        "toolkit",
+        GoogleServicesUpdateInput(
+            services=(),
+            expected_revision=3,
+            tool_groups=groups_for_services(("calendar", "drive", "gmail")),
+        ),
     )
 
 
@@ -239,6 +266,6 @@ def test_stale_service_save_is_an_explicit_conflict() -> None:
     with TestClient(_app(service)) as client:
         response = client.patch(
             "/workspaces/ws/toolkit-configs/toolkit/google/services",
-            json={"services": [], "expected_revision": 3},
+            json={"services": [], "tool_groups": [], "expected_revision": 3},
         )
     assert response.status_code == 409 and response.json()["detail"]["code"] == "stale"

@@ -16,7 +16,7 @@
   "operatorRequired": "管理者による設定が必要です",
   "operatorDescription": "システム管理者に Google OAuth アプリの設定を依頼してください。この画面ではアプリのシークレットを入力しません。",
   "preparationUnverified": "アプリはローカルに設定されています。実際の Google サービスへのアクセスは未検証です。",
-  "selectDescription": "権限は Google の同意画面で選択してください。許可した権限に応じてツールが自動的に決まります。",
+  "selectDescription": "サービスごとに使うツールグループを選択します。必要な権限で OAuth を要求し、プリセット適用後も個別に調整できます。",
   "timeout": "ツールリクエストの制限時間（秒）",
   "authorize": "Google で同意する",
   "authorizeAgain": "置き換える接続を承認",
@@ -28,7 +28,7 @@
   "agentOwnership": "この接続はこの Agent のみが所有します。実行には参加者のアカウントではなく、保存されたアカウントが使われます。",
   "sharedOwnership": "Workspace の共有接続です。権限のあるユーザーや Agent が、このアカウントで作業できます。",
   "personalOwnership": "この接続はあなたのアカウントが所有します。許可した Agent との個人 Session でのみ使用できます。",
-  "actualPermissions": "有効なサービスで使えるツールは、Google が実際に許可した権限に応じて自動的に決まります。",
+  "actualPermissions": "選択したツールのうち、Google が実際に許可した権限で使えるものだけが有効になります。",
   "missingRenewal": "更新可能な認証情報が返されませんでした。この候補は保存できません。新しい同意手続きを明示的に開始してください。",
   "name": "Toolkit 名",
   "slug": "ツールの名前空間（任意）",
@@ -108,5 +108,33 @@
   "pickerSelected": "Google で {count} 件のファイルを選択しました。利用資格は Google が管理し、ローカルのアクセス一覧には保存しません。",
   "pickerCancelled": "選択結果を保持せずにファイル選択を閉じました。",
   "pickerFailed": "Google のファイル選択を利用できません。接続状態を再読み込みし、管理者の設定を確認してから再試行してください。",
-  "pickerExpired": "ファイル選択用の一時認証情報の期限が切れました。選択画面を開き直して新しい認証情報を取得してください。"
+  "pickerExpired": "ファイル選択用の一時認証情報の期限が切れました。選択画面を開き直して新しい認証情報を取得してください。",
+  "groups": {
+    "gmail_read": "メール・添付ファイルを読む",
+    "gmail_labels": "ラベルを管理",
+    "gmail_drafts": "下書きを作成・管理",
+    "gmail_send": "メールの送信・返信・転送",
+    "gmail_organize": "メールの整理・ゴミ箱移動・復元",
+    "gmail_filters": "フィルタ管理・既存メールへの適用",
+    "calendar_read": "カレンダー・予定を読む",
+    "calendar_availability": "空き時間の確認・提案",
+    "calendar_events": "予定の作成・編集・参加回答",
+    "calendar_status": "集中時間・不在の予定を管理",
+    "calendar_create": "カレンダーを作成",
+    "drive_read": "Drive ファイルの読み取り・エクスポート",
+    "drive_files": "Drive ファイルの作成・変更",
+    "drive_sharing": "共有・アクセスを管理",
+    "drive_ownership": "ファイルの所有権を移譲"
+  },
+  "presets": {
+    "read_only": "読み取り専用",
+    "assistant": "日常業務の補助",
+    "full": "すべてのツール",
+    "clear": "選択を解除"
+  },
+  "presetsTitle": "プリセットを適用、またはツールグループを選択",
+  "groupResult": "{total} ツール中 {available} 件が利用可能",
+  "groupUnavailable": "Google が許可した権限で利用できないツールは有効になりません。",
+  "groupTools": "含まれる {count} ツールを確認",
+  "finalGroupsTitle": "確定したツールグループ"
 }

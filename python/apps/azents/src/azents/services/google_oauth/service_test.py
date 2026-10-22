@@ -25,6 +25,7 @@ from azents.core.google_oauth import (
 )
 from azents.core.google_policy import GoogleService
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.toolkit_ownership import ToolkitOwnerKind, UserToolkitOwner
 from azents.repos.google_oauth.management import GoogleOAuthRepository
@@ -84,6 +85,7 @@ def _harness(
         ),
         timeout=30.0,
         target=None,
+        tool_groups=groups_for_services((GoogleService.CALENDAR, GoogleService.GMAIL)),
     )
     receipt_payload: dict[str, object] = {
         "access_token": "ACCESS-SECRET",
@@ -161,6 +163,7 @@ async def test_all_off_save_remains_connected_without_provider_io() -> None:
         "toolkit",
         8,
         (),
+        (),
         ("https://www.googleapis.com/auth/calendar.events.readonly",),
         30.0,
         connection,
@@ -168,14 +171,22 @@ async def test_all_off_save_remains_connected_without_provider_io() -> None:
     result = await h.service.update_services(
         h.subject,
         "toolkit",
-        GoogleServicesUpdateInput(expected_revision=7, services=()),
+        GoogleServicesUpdateInput(
+            expected_revision=7,
+            services=(),
+            tool_groups=groups_for_services(("calendar", "drive", "gmail")),
+        ),
     )
     assert result.status == "connected" and result.services == ()
     assert result.connection_id == connection.id and result.revision == 8
     assert result.identity == candidate.identity and result.renewable
     assert all(item.status == "disabled" for item in result.accesses)
     h.repo.update_services.assert_awaited_once_with(
-        h.subject, toolkit_id="toolkit", expected_revision=7, services=()
+        h.subject,
+        toolkit_id="toolkit",
+        expected_revision=7,
+        services=(),
+        tool_groups=groups_for_services(("calendar", "drive", "gmail")),
     )
     h.provider.refresh.assert_not_awaited()
     h.provider.exchange.assert_not_awaited()
@@ -207,6 +218,9 @@ async def test_gmail_scope_receipt_difference_does_not_imply_read_or_send_denial
                 "email",
                 "https://www.googleapis.com/auth/gmail.readonly",
             ),
+            "tool_groups": [
+                item.value for item in groups_for_services((GoogleService.GMAIL,))
+            ],
         }
     )
     h.repo.claim.return_value = dataclasses.replace(h.attempt, setup=setup)
@@ -413,6 +427,7 @@ async def test_start_returns_ciphertext_and_distinct_oidc_nonce() -> None:
                 "https://www.googleapis.com/auth/calendar.events.readonly",
             ),
             timeout=30.0,
+            tool_groups=groups_for_services((GoogleService.CALENDAR,)),
         ),
         target_toolkit_id=None,
     )
@@ -430,6 +445,7 @@ async def test_disconnected_status_has_no_identity_or_google_network_call() -> N
         "toolkit",
         1,
         (GoogleService.CALENDAR,),
+        groups_for_services((GoogleService.CALENDAR,)),
         ("https://www.googleapis.com/auth/calendar.events.readonly",),
         30.0,
         None,

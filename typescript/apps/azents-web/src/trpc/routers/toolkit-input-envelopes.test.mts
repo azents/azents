@@ -68,6 +68,7 @@ const attempt = { ...scope, attemptId: "attempt" };
 const exchange = { ...configured, code: "synthetic", state: "opaque" };
 const desired = {
   services: ["calendar"],
+  tool_groups: ["calendar_read"],
   oauth_request_scopes: [
     "openid",
     "email",
@@ -234,7 +235,15 @@ const googleFixtures: OperationFixture[] = [
   { name: "outcome", input: attempt },
   { name: "status", input: saved },
   { name: "disconnect", input: saved },
-  { name: "services", input: { ...saved, services: [], expectedRevision: 1 } },
+  {
+    name: "services",
+    input: {
+      ...saved,
+      services: [],
+      toolGroups: ["calendar_read"],
+      expectedRevision: 1,
+    },
+  },
   {
     name: "pickerToken",
     input: { ...saved, expectedRevision: 1, connectionId: "connection" },

@@ -39,7 +39,18 @@ class TestGooglePreparation(unittest.TestCase):
                 client_id = '',
                 callback_url = '',
                 picker_status = 'not_configured',
-                service_access_verified = True
+                service_access_verified = True,
+                tool_group_catalog = [
+                    azentspublicclient.models.google_group_definition.GoogleGroupDefinition(
+                        group = 'gmail_read', 
+                        service = 'calendar', 
+                        operations = [
+                            'gmail_search_messages'
+                            ], 
+                        request_scopes = [
+                            ''
+                            ], )
+                    ]
             )
         else:
             return GooglePreparation(
@@ -48,6 +59,17 @@ class TestGooglePreparation(unittest.TestCase):
                 callback_url = '',
                 picker_status = 'not_configured',
                 service_access_verified = True,
+                tool_group_catalog = [
+                    azentspublicclient.models.google_group_definition.GoogleGroupDefinition(
+                        group = 'gmail_read', 
+                        service = 'calendar', 
+                        operations = [
+                            'gmail_search_messages'
+                            ], 
+                        request_scopes = [
+                            ''
+                            ], )
+                    ],
         )
         """
 

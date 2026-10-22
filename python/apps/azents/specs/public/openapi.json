@@ -33999,6 +33999,13 @@
             "type": "array",
             "title": "Services"
           },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
           "oauth_request_scopes": {
             "items": {
               "type": "string"
@@ -34017,6 +34024,7 @@
         "type": "object",
         "required": [
           "services",
+          "tool_groups",
           "oauth_request_scopes",
           "timeout"
         ],
@@ -34097,6 +34105,13 @@
             "type": "array",
             "title": "Services"
           },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
           "oauth_request_scopes": {
             "items": {
               "type": "string"
@@ -34151,6 +34166,7 @@
           "status",
           "identity",
           "services",
+          "tool_groups",
           "oauth_request_scopes",
           "granted_scopes",
           "timeout",
@@ -34234,6 +34250,13 @@
             "type": "array",
             "title": "Services"
           },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
           "oauth_request_scopes": {
             "items": {
               "type": "string"
@@ -34305,6 +34328,7 @@
         "type": "object",
         "required": [
           "services",
+          "tool_groups",
           "oauth_request_scopes",
           "timeout",
           "name",
@@ -34316,6 +34340,38 @@
         ],
         "title": "GoogleFinalSettings",
         "description": "Complete reviewed metadata and service/request settings; never grants."
+      },
+      "GoogleGroupDefinition": {
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GoogleToolGroup"
+          },
+          "service": {
+            "$ref": "#/components/schemas/GoogleService"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleWorkspaceOperation"
+            },
+            "type": "array",
+            "title": "Operations"
+          },
+          "request_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Request Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "group",
+          "service",
+          "operations",
+          "request_scopes"
+        ],
+        "title": "GoogleGroupDefinition"
       },
       "GoogleIdentity": {
         "properties": {
@@ -34453,6 +34509,15 @@
             "type": "boolean",
             "title": "Service Access Verified",
             "description": "Local preparation does not verify live service access."
+          },
+          "tool_group_catalog": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleGroupDefinition"
+            },
+            "type": "array",
+            "title": "Tool Group Catalog",
+            "description": "Expose nonsecret supported capabilities from the canonical catalog.",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -34461,7 +34526,8 @@
           "client_id",
           "callback_url",
           "picker_status",
-          "service_access_verified"
+          "service_access_verified",
+          "tool_group_catalog"
         ],
         "title": "GooglePreparation",
         "description": "Separate local OAuth and optional Picker preparation, without live claims."
@@ -34512,6 +34578,13 @@
             "type": "array",
             "title": "Services"
           },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
           "oauth_request_scopes": {
             "items": {
               "type": "string"
@@ -34530,6 +34603,7 @@
         "type": "object",
         "required": [
           "services",
+          "tool_groups",
           "oauth_request_scopes",
           "timeout"
         ],
@@ -34580,6 +34654,13 @@
             },
             "type": "array",
             "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
           },
           "oauth_request_scopes": {
             "items": {
@@ -34651,6 +34732,7 @@
           "ownership",
           "reconnect_toolkit_id",
           "services",
+          "tool_groups",
           "oauth_request_scopes",
           "granted_scopes",
           "timeout",
@@ -34734,16 +34816,46 @@
             },
             "type": "array",
             "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "expected_revision",
-          "services"
+          "services",
+          "tool_groups"
         ],
         "title": "GoogleServicesUpdateInput",
         "description": "Revision-fenced local switch save; empty services is a valid inactive state."
+      },
+      "GoogleToolGroup": {
+        "type": "string",
+        "enum": [
+          "gmail_read",
+          "gmail_labels",
+          "gmail_drafts",
+          "gmail_send",
+          "gmail_organize",
+          "gmail_filters",
+          "calendar_read",
+          "calendar_availability",
+          "calendar_events",
+          "calendar_status",
+          "calendar_create",
+          "drive_read",
+          "drive_files",
+          "drive_sharing",
+          "drive_ownership"
+        ],
+        "title": "GoogleToolGroup",
+        "description": "Closed capability selections; Google scopes remain independent evidence."
       },
       "GoogleWorkspaceOperation": {
         "type": "string",

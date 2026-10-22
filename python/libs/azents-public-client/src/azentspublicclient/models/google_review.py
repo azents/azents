@@ -24,6 +24,7 @@ from azentspublicclient.models.google_drive_access import GoogleDriveAccess
 from azentspublicclient.models.google_identity import GoogleIdentity
 from azentspublicclient.models.google_service import GoogleService
 from azentspublicclient.models.google_service_access import GoogleServiceAccess
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
 from typing import List, Optional, Set
 from typing_extensions import Self
 
@@ -38,6 +39,7 @@ class GoogleReview(BaseModel):
     ownership: StrictStr
     reconnect_toolkit_id: Optional[StrictStr]
     services: List[GoogleService]
+    tool_groups: List[GoogleToolGroup]
     oauth_request_scopes: List[StrictStr]
     granted_scopes: Optional[List[StrictStr]]
     timeout: Union[StrictFloat, StrictInt]
@@ -48,7 +50,7 @@ class GoogleReview(BaseModel):
     can_confirm: StrictBool
     service_access_verified: StrictBool = Field(description="Scope review does not verify live resource access.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["attempt_id", "expires_at", "identity", "client_id", "ownership", "reconnect_toolkit_id", "services", "oauth_request_scopes", "granted_scopes", "timeout", "accesses", "drive_access", "grant_result", "renewable", "can_confirm", "service_access_verified"]
+    __properties: ClassVar[List[str]] = ["attempt_id", "expires_at", "identity", "client_id", "ownership", "reconnect_toolkit_id", "services", "tool_groups", "oauth_request_scopes", "granted_scopes", "timeout", "accesses", "drive_access", "grant_result", "renewable", "can_confirm", "service_access_verified"]
 
     @field_validator('ownership')
     def ownership_validate_enum(cls, value):
@@ -162,6 +164,7 @@ class GoogleReview(BaseModel):
             "ownership": obj.get("ownership"),
             "reconnect_toolkit_id": obj.get("reconnect_toolkit_id"),
             "services": obj.get("services"),
+            "tool_groups": obj.get("tool_groups"),
             "oauth_request_scopes": obj.get("oauth_request_scopes"),
             "granted_scopes": obj.get("granted_scopes"),
             "timeout": obj.get("timeout"),

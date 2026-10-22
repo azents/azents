@@ -17,6 +17,7 @@ from azents.core.google_system_setting import (
     GoogleApplicationRegistration,
     GoogleApplicationSecrets,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.personal_toolkit import PersonalToolkitAccessMutation
 from azents.core.system_setting import (
@@ -66,6 +67,10 @@ async def test_google_personal_current_admission_and_post_gap_refresh_publicatio
                         "https://www.googleapis.com/auth/calendar.events.readonly"
                     ],
                     "timeout": 30.0,
+                    "tool_groups": [
+                        item.value
+                        for item in groups_for_services([GoogleService.CALENDAR.value])
+                    ],
                 },
                 "credentials": None,
             }

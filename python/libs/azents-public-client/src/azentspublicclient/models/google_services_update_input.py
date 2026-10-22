@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from azentspublicclient.models.google_service import GoogleService
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
 from typing import List, Optional, Set
 from typing_extensions import Self
 
@@ -30,7 +31,8 @@ class GoogleServicesUpdateInput(BaseModel):
     """ # noqa: E501
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
     services: List[GoogleService]
-    __properties: ClassVar[List[str]] = ["expected_revision", "services"]
+    tool_groups: List[GoogleToolGroup]
+    __properties: ClassVar[List[str]] = ["expected_revision", "services", "tool_groups"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -86,7 +88,8 @@ class GoogleServicesUpdateInput(BaseModel):
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
             "expected_revision": obj.get("expected_revision"),
-            "services": obj.get("services")
+            "services": obj.get("services"),
+            "tool_groups": obj.get("tool_groups")
             }.items() if _key in obj
         })
         return _obj

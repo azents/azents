@@ -7,6 +7,7 @@ import {
 } from "./google-application-state.ts";
 import type { GoogleApplicationDetail } from "@azents/admin-client";
 const detail: GoogleApplicationDetail = {
+  tool_group_catalog: [],
   status: "configured_unverified",
   client_id: "operator-client",
   callback_url: "https://app.example.invalid/oauth/google/callback",

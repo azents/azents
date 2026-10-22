@@ -16,7 +16,11 @@ import {
 } from "react";
 import { trpc } from "@/trpc/client";
 import { revealGitHubWizardHeading } from "../github-wizard-progression";
-import { googleScopesForServices } from "../google-access";
+import {
+  googleGroupsUsable,
+  googlePresetGroups,
+  googleScopesForGroups,
+} from "../google-access";
 import {
   deserializeGoogleResume,
   GOOGLE_RESUME_KEY,
@@ -43,6 +47,7 @@ import type {
   GooglePublishedOutput,
   GoogleReview,
   GoogleService,
+  GoogleToolGroup,
 } from "@azents/public-client";
 
 export type GoogleSetupContainerProps = ToolkitOwnerScope & {
@@ -101,6 +106,17 @@ export function useGoogleSetupContainer(
   });
   const [flow, setFlow] = useState<GoogleFlowState>({ type: "SELECT" });
   const [services, setServices] = useState<GoogleService[]>([]);
+  const [toolGroups, setToolGroups] = useState<GoogleToolGroup[]>([]);
+  const catalog = preparationQuery.data?.tool_group_catalog ?? [];
+  const activeGroups = toolGroups.filter((id) =>
+    catalog.some(
+      (group) => group.group === id && services.includes(group.service),
+    ),
+  );
+  const reviewAllowed =
+    flow.type === "REVIEW" &&
+    canPublishGoogleReview(flow.review, services, Date.now()) &&
+    googleGroupsUsable(services, activeGroups, catalog, flow.review.accesses);
   const [timeout, setTimeoutValue] = useState(30);
   const [metadata, setMetadata] = useState<GoogleMetadata>({
     name: "",
@@ -191,6 +207,7 @@ export function useGoogleSetupContainer(
   };
   const acceptReview = (review: GoogleReview): void => {
     setServices(review.services);
+    setToolGroups(review.tool_groups);
     setTimeoutValue(review.timeout);
     setFlow({ type: "REVIEW", review });
   };
@@ -241,6 +258,7 @@ export function useGoogleSetupContainer(
     }
     initializedSaved.current = true;
     setServices(statusQuery.data.services);
+    setToolGroups(statusQuery.data.tool_groups);
     setTimeoutValue(statusQuery.data.timeout);
   }, [statusQuery.data]);
   useEffect(() => {
@@ -305,7 +323,7 @@ export function useGoogleSetupContainer(
     return () => onPendingChange?.(false);
   }, [busy, flow.type, onPendingChange]);
   async function authorize(): Promise<void> {
-    if (pending.current || services.length === 0) {
+    if (pending.current || services.length === 0 || activeGroups.length === 0) {
       return;
     }
     pending.current = true;
@@ -315,7 +333,8 @@ export function useGoogleSetupContainer(
     try {
       const desired = {
         services,
-        oauth_request_scopes: googleScopesForServices(services),
+        tool_groups: activeGroups,
+        oauth_request_scopes: googleScopesForGroups(activeGroups, catalog),
         timeout,
       };
       const result =
@@ -354,7 +373,7 @@ export function useGoogleSetupContainer(
       flow.type !== "REVIEW" ||
       active.current == null ||
       !sameGoogleResumeAttempt(readResume(), active.current) ||
-      !canPublishGoogleReview(flow.review, services, Date.now())
+      !reviewAllowed
     ) {
       return;
     }
@@ -368,9 +387,10 @@ export function useGoogleSetupContainer(
     try {
       const settings = {
         services,
-        oauth_request_scopes: review.oauth_request_scopes.filter((scope) =>
-          googleScopesForServices(services).includes(scope),
+        tool_groups: activeGroups.filter((group) =>
+          review.tool_groups.includes(group),
         ),
+        oauth_request_scopes: review.oauth_request_scopes,
         timeout,
       };
       const outcome =
@@ -527,8 +547,10 @@ export function useGoogleSetupContainer(
           : { type: "READY", detail: statusQuery.data };
   const servicesDirty =
     saved.type === "READY" &&
-    [...services].sort().join(",") !==
-      [...saved.detail.services].sort().join(",");
+    ([...services].sort().join(",") !==
+      [...saved.detail.services].sort().join(",") ||
+      [...toolGroups].sort().join(",") !==
+        [...saved.detail.tool_groups].sort().join(","));
   const pickerAvailable =
     saved.type === "READY" &&
     saved.detail.status === "connected" &&
@@ -592,6 +614,7 @@ export function useGoogleSetupContainer(
         toolkitId,
         expectedRevision: saved.detail.revision,
         services,
+        toolGroups,
       });
       if (isCurrent(operation)) {
         await invalidate();
@@ -613,11 +636,10 @@ export function useGoogleSetupContainer(
     saved,
     flow,
     services,
+    toolGroups,
     timeout,
     metadata,
-    publishingAllowed:
-      flow.type === "REVIEW" &&
-      canPublishGoogleReview(flow.review, services, Date.now()),
+    publishingAllowed: reviewAllowed,
     reconnect: toolkitId != null,
     ownership:
       "owner" in scope ? "user" : scope.agentId != null ? "agent" : "workspace",
@@ -639,6 +661,14 @@ export function useGoogleSetupContainer(
           : current.filter((item) => item !== service),
       );
     },
+    onGroupChange: (group, selected) =>
+      setToolGroups((current) =>
+        selected
+          ? Array.from(new Set([...current, group]))
+          : current.filter((id) => id !== group),
+      ),
+    onPresetChange: (preset) =>
+      setToolGroups(googlePresetGroups(preset, services, catalog)),
     onSaveServices: saveServices,
     onTimeoutChange: setTimeoutValue,
     onMetadataChange: (patch) =>

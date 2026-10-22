@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from azentsadminclient.models.google_group_definition import GoogleGroupDefinition
 from azentsadminclient.models.system_setting_field_source import SystemSettingFieldSource
 from typing import List, Optional, Set
 from typing_extensions import Self
@@ -42,8 +43,9 @@ class GoogleApplicationDetail(BaseModel):
     picker_app_id: Optional[StrictStr]
     picker_api_key_source: SystemSettingFieldSource
     picker_app_id_source: SystemSettingFieldSource
+    tool_group_catalog: List[GoogleGroupDefinition] = Field(description="Expose nonsecret supported capabilities from the canonical catalog.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "picker_status", "service_access_verified", "section", "schema_version", "admin_version", "client_id_source", "client_secret_source", "client_secret_configured", "picker_api_key", "picker_app_id", "picker_api_key_source", "picker_app_id_source"]
+    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "picker_status", "service_access_verified", "section", "schema_version", "admin_version", "client_id_source", "client_secret_source", "client_secret_configured", "picker_api_key", "picker_app_id", "picker_api_key_source", "picker_app_id_source", "tool_group_catalog"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
@@ -107,6 +109,13 @@ class GoogleApplicationDetail(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in tool_group_catalog (list)
+        _items = []
+        if self.tool_group_catalog:
+            for _item_tool_group_catalog in self.tool_group_catalog:
+                if _item_tool_group_catalog:
+                    _items.append(_item_tool_group_catalog.to_dict())
+            _dict['tool_group_catalog'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -160,7 +169,8 @@ class GoogleApplicationDetail(BaseModel):
             "picker_api_key": obj.get("picker_api_key"),
             "picker_app_id": obj.get("picker_app_id"),
             "picker_api_key_source": obj.get("picker_api_key_source"),
-            "picker_app_id_source": obj.get("picker_app_id_source")
+            "picker_app_id_source": obj.get("picker_app_id_source"),
+            "tool_group_catalog": [GoogleGroupDefinition.from_dict(_item) for _item in obj["tool_group_catalog"]] if obj.get("tool_group_catalog") is not None else None
             }.items() if _key in obj
         })
         # store additional fields in additional_properties

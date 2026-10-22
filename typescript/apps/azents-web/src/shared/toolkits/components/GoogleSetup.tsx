@@ -18,12 +18,16 @@ import {
   Title,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
+import { googleGroupPresets } from "../google-access";
 import { googleServiceSchema } from "../google-schemas";
 import { ToolkitDisconnectConfirmation } from "./ToolkitDisconnectConfirmation";
 import type { GoogleSetupProps } from "../google-types";
 import type {
   GoogleDriveAccess,
+  GoogleGroupDefinition,
+  GoogleService,
   GoogleServiceAccess,
+  GoogleToolGroup,
 } from "@azents/public-client";
 
 function Capability({
@@ -105,6 +109,79 @@ function DriveExtent({
     </Stack>
   );
 }
+function ToolGroupsAccess({
+  catalog,
+  groups,
+  services,
+  accesses,
+}: {
+  catalog: GoogleGroupDefinition[];
+  groups: GoogleToolGroup[];
+  services: GoogleService[];
+  accesses: GoogleServiceAccess[];
+}): React.ReactElement {
+  const t = useTranslations("googleToolkit");
+  return (
+    <Stack gap="xs" role="group" aria-label={t("finalGroupsTitle")}>
+      {catalog
+        .filter(
+          (group) =>
+            groups.includes(group.group) && services.includes(group.service),
+        )
+        .map((group) => {
+          const access = accesses.find(
+            (item) => item.service === group.service,
+          );
+          const permitted = group.operations.filter((operation) =>
+            access?.permitted_tools.includes(operation),
+          );
+          return (
+            <Stack key={group.group} gap="xs">
+              <Group justify="space-between">
+                <Text fw={500}>{t(`groups.${group.group}`)}</Text>
+                <Badge
+                  color={
+                    permitted.length === 0
+                      ? "gray"
+                      : permitted.length === group.operations.length
+                        ? "green"
+                        : "yellow"
+                  }
+                >
+                  {t("groupResult", {
+                    available: permitted.length,
+                    total: group.operations.length,
+                  })}
+                </Badge>
+              </Group>
+              {permitted.length < group.operations.length && (
+                <Text size="xs" c="dimmed">
+                  {t("groupUnavailable")}
+                </Text>
+              )}
+              <details>
+                <summary>{t("permissionDetails")}</summary>
+                <Stack gap="xs" mt="xs">
+                  {group.operations.map((operation) => (
+                    <Text key={operation} size="xs">
+                      <Code>{operation}</Code>
+                      {" — "}
+                      {t(
+                        permitted.includes(operation)
+                          ? "access.permitted"
+                          : "access.not_granted",
+                      )}
+                    </Text>
+                  ))}
+                </Stack>
+              </details>
+            </Stack>
+          );
+        })}
+    </Stack>
+  );
+}
+
 export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
   const t = useTranslations("googleToolkit");
   const { preparation, saved, flow } = props;
@@ -118,6 +195,8 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
     props.disconnecting ||
     props.savingServices;
   const selecting = flow.type === "SELECT";
+  const catalog =
+    preparation.type === "READY" ? preparation.detail.tool_group_catalog : [];
   return (
     <Container
       size="md"
@@ -167,6 +246,12 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
             {saved.detail.accesses.map((access) => (
               <Capability key={access.service} access={access} />
             ))}
+            <ToolGroupsAccess
+              catalog={catalog}
+              groups={saved.detail.tool_groups}
+              services={saved.detail.services}
+              accesses={saved.detail.accesses}
+            />
             {saved.detail.services.includes("drive") && (
               <DriveExtent access={saved.detail.drive_access} />
             )}
@@ -279,19 +364,67 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
               <summary>{t("selectionDetails")}</summary>
               <Stack gap="md" mt="sm">
                 <Text size="sm">{t("selectDescription")}</Text>
+                <Text fw={500}>{t("presetsTitle")}</Text>
+                <Group gap="xs">
+                  {googleGroupPresets.map((preset) => (
+                    <Button
+                      key={preset}
+                      type="button"
+                      variant="default"
+                      size="xs"
+                      disabled={
+                        !selecting || busy || props.services.length === 0
+                      }
+                      onClick={() => props.onPresetChange(preset)}
+                    >
+                      {t(`presets.${preset}`)}
+                    </Button>
+                  ))}
+                </Group>
                 {googleServiceSchema.options.map((service) => (
-                  <Switch
-                    key={service}
-                    label={t(`services.${service}`)}
-                    checked={props.services.includes(service)}
-                    disabled={!selecting || busy}
-                    onChange={(event) =>
-                      props.onServiceChange(
-                        service,
-                        event.currentTarget.checked,
-                      )
-                    }
-                  />
+                  <Stack key={service} gap="xs">
+                    <Switch
+                      label={t(`services.${service}`)}
+                      checked={props.services.includes(service)}
+                      disabled={!selecting || busy}
+                      onChange={(event) =>
+                        props.onServiceChange(
+                          service,
+                          event.currentTarget.checked,
+                        )
+                      }
+                    />
+                    {props.services.includes(service) &&
+                      catalog
+                        .filter((group) => group.service === service)
+                        .map((group) => (
+                          <Stack key={group.group} gap="xs" pl="md">
+                            <Checkbox
+                              label={t(`groups.${group.group}`)}
+                              checked={props.toolGroups.includes(group.group)}
+                              disabled={!selecting || busy}
+                              onChange={(event) =>
+                                props.onGroupChange(
+                                  group.group,
+                                  event.currentTarget.checked,
+                                )
+                              }
+                            />
+                            <details>
+                              <summary>
+                                {t("groupTools", {
+                                  count: group.operations.length,
+                                })}
+                              </summary>
+                              <Stack gap="xs" mt="xs">
+                                {group.operations.map((operation) => (
+                                  <Code key={operation}>{operation}</Code>
+                                ))}
+                              </Stack>
+                            </details>
+                          </Stack>
+                        ))}
+                  </Stack>
                 ))}
                 {saved.type === "READY" && selecting && (
                   <>
@@ -329,6 +462,11 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                 onClick={props.onAuthorize}
                 disabled={
                   props.services.length === 0 ||
+                  !catalog.some(
+                    (group) =>
+                      props.services.includes(group.service) &&
+                      props.toolGroups.includes(group.group),
+                  ) ||
                   busy ||
                   preparation.type !== "READY" ||
                   preparation.detail.status !== "configured_unverified" ||
@@ -404,6 +542,13 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                   )}
                 </Stack>
               ))}
+              <Title order={4}>{t("finalGroupsTitle")}</Title>
+              <ToolGroupsAccess
+                catalog={catalog}
+                groups={props.toolGroups}
+                services={props.services}
+                accesses={review.accesses}
+              />
               {props.services.includes("drive") && (
                 <DriveExtent access={review.drive_access} />
               )}

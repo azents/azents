@@ -39,6 +39,9 @@ class TestGoogleReconnectConfirmRequest(unittest.TestCase):
                     services = [
                         'calendar'
                         ], 
+                    tool_groups = [
+                        'gmail_read'
+                        ], 
                     oauth_request_scopes = [
                         ''
                         ], 
@@ -49,6 +52,9 @@ class TestGoogleReconnectConfirmRequest(unittest.TestCase):
                 settings = azentspublicclient.models.google_reconnect_settings.GoogleReconnectSettings(
                     services = [
                         'calendar'
+                        ], 
+                    tool_groups = [
+                        'gmail_read'
                         ], 
                     oauth_request_scopes = [
                         ''

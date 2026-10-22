@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from azents.core.google_oauth import GoogleIdentity
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
 from azents.core.google_workspace_policy import (
     GoogleDriveAccess,
     GoogleWorkspaceConnectInput,
@@ -32,6 +32,7 @@ class GoogleServicesUpdateInput(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     expected_revision: int = Field(ge=0, strict=True)
     services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
 
     @field_validator("services")
     @classmethod
@@ -69,6 +70,7 @@ class GoogleReview(BaseModel):
     ownership: Literal["agent_only", "workspace_shared", "personal"]
     reconnect_toolkit_id: str | None
     services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
     oauth_request_scopes: tuple[str, ...]
     granted_scopes: tuple[str, ...] | None
     timeout: float
@@ -117,6 +119,7 @@ class GoogleConnectionOutput(BaseModel):
     ]
     identity: GoogleIdentity | None
     services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
     oauth_request_scopes: tuple[str, ...]
     granted_scopes: tuple[str, ...] | None
     timeout: float

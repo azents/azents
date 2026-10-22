@@ -10,6 +10,10 @@ import {
   object,
 } from "../../shared/testing/hook-test-harness.ts";
 import * as googleAccess from "../../shared/toolkits/google-access.ts";
+import {
+  googleFixtureScopes,
+  googleGroupCatalog,
+} from "../../shared/toolkits/google-group-fixtures.ts";
 import * as googleResume from "../../shared/toolkits/google-resume.ts";
 import * as googleTypes from "../../shared/toolkits/google-types.ts";
 import * as popupMessages from "../../shared/toolkits/popup-messages.ts";
@@ -46,7 +50,8 @@ const review = {
   attempt_id: "old",
   reconnect_toolkit_id: null,
   services: ["calendar"],
-  oauth_request_scopes: googleAccess.googleScopesForServices(["calendar"]),
+  tool_groups: ["calendar_read"],
+  oauth_request_scopes: googleFixtureScopes(["calendar"]),
   granted_scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"],
   drive_access: {
     whole_content_read: false,
@@ -456,7 +461,7 @@ for (const agentOwned of [false, true]) {
     const confirmedConfig = {
       ...oldConfig,
       services: ["calendar"],
-      oauth_request_scopes: googleAccess.googleScopesForServices(["calendar"]),
+      oauth_request_scopes: googleFixtureScopes(["calendar"]),
       timeout: 12,
     };
     toolkit = { ...toolkit, config: confirmedConfig };
@@ -501,6 +506,7 @@ function setupHarness(
         query({
           status: "configured_unverified",
           client_id: "client",
+          tool_group_catalog: googleGroupCatalog,
           callback_url: "https://app.example.invalid/oauth/google/callback",
           picker_status: "not_configured",
           service_access_verified: false,
@@ -658,6 +664,7 @@ void test("saved service switches allow all-off without replacing scope intent o
     status: "connected",
     identity: review.identity,
     services: ["calendar"],
+    tool_groups: review.tool_groups,
     oauth_request_scopes: review.oauth_request_scopes,
     granted_scopes: review.granted_scopes,
     accesses: review.accesses,
@@ -693,6 +700,7 @@ void test("saved service switches allow all-off without replacing scope intent o
       toolkitId: "saved",
       expectedRevision: 7,
       services: [],
+      toolGroups: review.tool_groups,
     },
   ]);
   output = harness.render();
@@ -704,7 +712,7 @@ void test("saved service switches allow all-off without replacing scope intent o
 });
 
 for (const ownership of ["workspace", "agent", "user"]) {
-  void test(`${ownership} consent requests permissions automatically for the enabled services`, async () => {
+  void test(`${ownership} consent requests the selected preset's permissions`, async () => {
     const dispatched = deferred<unknown>();
     const h = setupHarness(
       new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY),
@@ -731,11 +739,17 @@ for (const ownership of ["workspace", "agent", "user"]) {
     output = h.render();
     invoke(output.onServiceChange, "gmail", false);
     output = h.render();
+    invoke(output.onPresetChange, "read_only");
+    output = h.render();
     invoke(output.onAuthorize);
     const input = object(await dispatched.promise);
     assert.deepEqual(JSON.parse(JSON.stringify(object(input.desired))), {
       services: ["drive"],
-      oauth_request_scopes: googleAccess.googleScopesForServices(["drive"]),
+      tool_groups: ["drive_read"],
+      oauth_request_scopes: googleAccess.googleScopesForGroups(
+        ["drive_read"],
+        googleGroupCatalog,
+      ),
       timeout: 30,
     });
     assert.equal(input.owner ?? null, ownership === "user" ? "user" : null);
@@ -774,7 +788,7 @@ void test("explicit reconnect offers supported permissions without changing save
   assert.equal(input.toolkitId, "saved");
   assert.deepEqual(
     JSON.parse(JSON.stringify(object(input.desired).oauth_request_scopes)),
-    googleAccess.googleScopesForServices(["calendar"]),
+    googleAccess.googleScopesForGroups(["calendar_read"], googleGroupCatalog),
   );
   assert.deepEqual(saved.granted_scopes, review.granted_scopes);
   assert.equal(saved.connection_id, "same-grant");

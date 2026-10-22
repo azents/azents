@@ -1,49 +1,101 @@
-import type { GoogleService } from "@azents/public-client";
+import type {
+  GoogleGroupDefinition,
+  GoogleService,
+  GoogleServiceAccess,
+  GoogleToolGroup,
+} from "@azents/public-client";
 
-const prefix = "https://www.googleapis.com/auth/";
-const serviceScopes: Record<GoogleService, string[]> = {
-  gmail: [
-    "https://mail.google.com/",
-    ...[
-      "gmail.readonly",
-      "gmail.compose",
-      "gmail.modify",
-      "gmail.send",
-      "gmail.labels",
-      "gmail.metadata",
-      "gmail.settings.basic",
-    ].map((scope) => prefix + scope),
+export type GoogleGroupPreset = "read_only" | "assistant" | "full" | "clear";
+const presets: Record<GoogleGroupPreset, GoogleToolGroup[]> = {
+  read_only: [
+    "gmail_read",
+    "calendar_read",
+    "calendar_availability",
+    "drive_read",
   ],
-  calendar: [
-    "calendar.events.readonly",
-    "calendar.calendarlist.readonly",
-    "calendar.events.freebusy",
-    "calendar.events",
-    "calendar.app.created",
-    "calendar.readonly",
-    "calendar",
-    "calendar.freebusy",
-    "calendar.events.owned",
-    "calendar.events.owned.readonly",
-    "calendar.events.public.readonly",
-    "calendar.calendars",
-    "calendar.calendarlist",
-  ].map((scope) => prefix + scope),
-  drive: [
-    "drive",
-    "drive.readonly",
-    "drive.file",
-    "drive.metadata",
-    "drive.metadata.readonly",
-  ].map((scope) => prefix + scope),
+  assistant: [
+    "gmail_read",
+    "gmail_drafts",
+    "gmail_send",
+    "gmail_organize",
+    "calendar_read",
+    "calendar_availability",
+    "calendar_events",
+    "drive_read",
+    "drive_files",
+  ],
+  full: [
+    "gmail_read",
+    "gmail_labels",
+    "gmail_drafts",
+    "gmail_send",
+    "gmail_organize",
+    "gmail_filters",
+    "calendar_read",
+    "calendar_availability",
+    "calendar_events",
+    "calendar_status",
+    "calendar_create",
+    "drive_read",
+    "drive_files",
+    "drive_sharing",
+    "drive_ownership",
+  ],
+  clear: [],
 };
-/** Offer supported service permissions at Google consent; actual grants admit tools. */
-export function googleScopesForServices(services: GoogleService[]): string[] {
+export const googleGroupPresets: GoogleGroupPreset[] = [
+  "read_only",
+  "assistant",
+  "full",
+  "clear",
+];
+
+export function googlePresetGroups(
+  preset: GoogleGroupPreset,
+  services: GoogleService[],
+  catalog: GoogleGroupDefinition[],
+): GoogleToolGroup[] {
+  return catalog
+    .filter(
+      (group) =>
+        services.includes(group.service) &&
+        presets[preset].includes(group.group),
+    )
+    .map((group) => group.group)
+    .sort();
+}
+
+export function googleScopesForGroups(
+  groups: GoogleToolGroup[],
+  catalog: GoogleGroupDefinition[],
+): string[] {
   return Array.from(
     new Set([
       "openid",
       "email",
-      ...services.flatMap((service) => serviceScopes[service]),
+      ...catalog
+        .filter((group) => groups.includes(group.group))
+        .flatMap((group) => group.request_scopes),
     ]),
   ).sort();
+}
+
+export function googleGroupsUsable(
+  services: GoogleService[],
+  groups: GoogleToolGroup[],
+  catalog: GoogleGroupDefinition[],
+  accesses: GoogleServiceAccess[],
+): boolean {
+  return catalog.some(
+    (group) =>
+      groups.includes(group.group) &&
+      services.includes(group.service) &&
+      group.operations.some((operation) =>
+        accesses.some(
+          (access) =>
+            access.service === group.service &&
+            access.permitted_tools.includes(operation),
+        ),
+      ),
+  );
 }

@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **callback_url** | **str** |  | 
 **picker_status** | **str** |  | 
 **service_access_verified** | **bool** | Local preparation does not verify live service access. | 
+**tool_group_catalog** | [**List[GoogleGroupDefinition]**](GoogleGroupDefinition.md) | Expose nonsecret supported capabilities from the canonical catalog. | 
 
 ## Example
 

@@ -7,6 +7,7 @@ Complete reviewed metadata and service/request settings; never grants.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
 **oauth_request_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
 **name** | **str** |  | 

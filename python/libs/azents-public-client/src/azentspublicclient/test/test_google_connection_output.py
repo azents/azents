@@ -46,6 +46,9 @@ class TestGoogleConnectionOutput(unittest.TestCase):
                 services = [
                     'calendar'
                     ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
                 oauth_request_scopes = [
                     ''
                     ],
@@ -87,6 +90,9 @@ class TestGoogleConnectionOutput(unittest.TestCase):
                     email = '', ),
                 services = [
                     'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
                     ],
                 oauth_request_scopes = [
                     ''

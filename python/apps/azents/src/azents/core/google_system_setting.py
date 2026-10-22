@@ -4,9 +4,10 @@ import dataclasses
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from typing_extensions import TypedDict
 
+from azents.core.google_tool_groups import GOOGLE_TOOL_GROUPS, GoogleGroupDefinition
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingActivationMode,
@@ -95,6 +96,12 @@ class GooglePreparation(BaseModel):
         strict=True,
         description="Local preparation does not verify live service access.",
     )
+
+    @computed_field
+    @property
+    def tool_group_catalog(self) -> tuple[GoogleGroupDefinition, ...]:
+        """Expose nonsecret supported capabilities from the canonical catalog."""
+        return tuple(GOOGLE_TOOL_GROUPS.values())
 
 
 class GoogleApplicationDetail(GooglePreparation):
