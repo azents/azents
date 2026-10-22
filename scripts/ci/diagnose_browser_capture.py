@@ -10,11 +10,15 @@ def main() -> None:
     helper = """
 function azCaptureTrace(stage, elapsed) {
   if (!process.env.AZ_CAPTURE_TRACE) return;
-  require('node:fs').appendFileSync(process.env.AZ_CAPTURE_TRACE, JSON.stringify({
-    diagnostic_only:true, pid:process.pid, stage,
-    monotonic_ms:Number(process.hrtime.bigint())/1000000,
-    elapsed_ms:elapsed === undefined ? null : elapsed
-  })+'\\n');
+  try {
+    require('node:fs').appendFileSync(process.env.AZ_CAPTURE_TRACE, JSON.stringify({
+      diagnostic_only:true, pid:process.pid, stage,
+      monotonic_ms:Number(process.hrtime.bigint())/1000000,
+      elapsed_ms:elapsed === undefined ? null : elapsed
+    })+'\\n');
+  } catch {
+    // Missing diagnostic evidence invalidates the experiment, not the SDK call.
+  }
 }
 """
     replacements = {
@@ -67,9 +71,13 @@ function azCaptureTrace(stage, elapsed) {
       }
 """
     source = source[:start] + replacement + source[end:]
+    directive = '"use strict";'
+    if not source.startswith(directive):
+        raise RuntimeError("Pinned SDK directive prologue mismatch")
+    source = directive + helper + source[len(directive) :]
     # uv may hardlink installed files to its shared cache; replace only this copy.
     temporary = bundle.with_suffix(".diagnostic.tmp")
-    temporary.write_text(helper + source)
+    temporary.write_text(source)
     temporary.replace(bundle)
 
 
