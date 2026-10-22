@@ -206,13 +206,7 @@ jobs:
         run: |
           cd "${{ matrix.project }}"
           uv run ty check --error-on-warning
-      - name: Diagnose first native capture (temporary; not acceptance)
-        id: capture_probe
-        if: matrix.project == 'python/apps/azents-runtime-runner'
-        working-directory: python/apps/azents-runtime-runner
-        run: uv run python ci_capture_probe.py
       - name: Pytest
-        if: ${{ !cancelled() && (success() || steps.capture_probe.outcome == 'failure') }}
         run: |
           pytest_execution=()
           if [ "${{ matrix.project }}" = 'python/apps/azents' ]; then
