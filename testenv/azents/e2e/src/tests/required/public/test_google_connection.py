@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 from urllib.parse import parse_qs, urlsplit
 
 import azentsadminclient
@@ -32,7 +32,7 @@ from azentspublicclient.models.google_connection_output import GoogleConnectionO
 from azentspublicclient.models.google_picker_token_output import GooglePickerTokenOutput
 from azentspublicclient.models.google_published_output import GooglePublishedOutput
 from azentspublicclient.models.google_review import GoogleReview
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from support.google_provider_fake import CLIENT_ID, CLIENT_SECRET, FILE_BYTES, SCOPE
 from support.google_provider_fixture import GoogleProviderFixture
@@ -66,6 +66,19 @@ class ProviderState(BaseModel):
 class Callback(NamedTuple):
     code: str
     state: str
+
+
+class CalendarGuestPrivileges(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+    modify: bool = Field(alias="guestsCanModify")
+    invite: bool = Field(alias="guestsCanInviteOthers")
+    see_guests: bool = Field(alias="guestsCanSeeOtherGuests")
+
+
+class GoogleTextOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    type: Literal["text"]
+    text: str
 
 
 def saved_status(base: str, token: str, toolkit_id: str) -> GoogleConnectionOutput:
@@ -614,6 +627,14 @@ def test_google_gmail_drive_runtime_file_roundtrip(
         result = results["call_google_direct_" + stage]
         assert result.status == "completed", result.model_dump_json()
     assert results["call_google_direct_denied"].status == "failed"
+    calendar_output = TypeAdapter(list[GoogleTextOutput]).validate_python(
+        results["call_google_direct_calendar"].output
+    )
+    assert len(calendar_output) == 1
+    privileges = CalendarGuestPrivileges.model_validate_json(calendar_output[0].text)
+    assert privileges.modify is False
+    assert privileges.invite is True
+    assert privileges.see_guests is False
     assert "GOOGLE_E2E_MAIL_OK" in results["call_google_direct_mail"].model_dump_json()
     assert "artifact://" in results["call_google_direct_download"].model_dump_json()
     assert (
