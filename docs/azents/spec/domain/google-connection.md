@@ -163,6 +163,12 @@ Calendar includes calendar discovery/creation, bounded event search/get, free-bu
 explicit event creation/update/delete and supported event types. Time ranges,
 recurrence, status-event properties, notification intent and conference request
 identity are validated before dispatch.
+Create and update inputs support guest privileges to modify events, invite other
+guests and see other guests. Create uses required nullable privilege fields;
+null leaves Google's default in effect. Patch omission preserves the saved
+privilege, and explicit true/false changes it. Provider-returned privilege values
+are retained in event results without inventing defaults for omitted fields.
+Google organizer and resource restrictions still apply.
 
 Gmail includes message/thread search and reads, labels and modification, drafts,
 new/reply/forward sending and filter lifecycle. Compose inputs distinguish inline

@@ -98,6 +98,9 @@ def event() -> CalendarEventFields:
         attendees=(),
         recurrence=(),
         event_type="default",
+        guests_can_modify=None,
+        guests_can_invite_others=None,
+        guests_can_see_other_guests=None,
         focus_time=None,
         out_of_office=None,
         conference=None,
@@ -246,6 +249,95 @@ async def test_create_event_preserves_timezones_attendees_conference_and_notific
         == "fixture-conference-request"
     )
     assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;COUNT=2"]
+
+
+@pytest.mark.parametrize("allowed", [True, False, None])
+async def test_create_guest_privileges_preserve_explicit_values_and_provider_defaults(
+    allowed: bool | None,
+    event: CalendarEventFields,
+) -> None:
+    payload = event.model_dump()
+    payload.update(
+        guests_can_modify=allowed,
+        guests_can_invite_others=allowed,
+        guests_can_see_other_guests=allowed,
+    )
+    fields = CalendarEventFields.model_validate(payload)
+    requests: list[httpx.Request] = []
+    response = {"id": "created"}
+    if allowed is not None:
+        response.update(
+            guestsCanModify=allowed,
+            guestsCanInviteOthers=allowed,
+            guestsCanSeeOtherGuests=allowed,
+        )
+    result = await _run(
+        lambda session: calendar.create_event(
+            session,
+            CalendarCreateInput(
+                calendar_id="primary", event=fields, send_updates="none"
+            ),
+        ),
+        (response,),
+        requests,
+    )
+    body = json.loads(requests[0].content)
+    for key in ("guestsCanModify", "guestsCanInviteOthers", "guestsCanSeeOtherGuests"):
+        if allowed is None:
+            assert key not in body
+        else:
+            assert body[key] is allowed
+        assert result.model_dump(by_alias=True)[key] is allowed
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+async def test_patch_can_change_guest_privileges_without_replacing_attendees(
+    allowed: bool,
+) -> None:
+    requests: list[httpx.Request] = []
+    value = CalendarPatchInput.model_validate(
+        {
+            "calendar_id": "primary",
+            "event_id": "event",
+            "changes": {
+                "guests_can_modify": allowed,
+                "guests_can_invite_others": allowed,
+                "guests_can_see_other_guests": allowed,
+            },
+            "send_updates": "none",
+        }
+    )
+    await _run(
+        lambda session: calendar.patch_event(session, value),
+        ({"id": "event"},),
+        requests,
+    )
+    assert json.loads(requests[0].content) == {
+        "guestsCanModify": allowed,
+        "guestsCanInviteOthers": allowed,
+        "guestsCanSeeOtherGuests": allowed,
+    }
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["guests_can_modify", "guests_can_invite_others", "guests_can_see_other_guests"],
+)
+@pytest.mark.parametrize("invalid", [None, "false", 0, 1])
+def test_patch_guest_privileges_require_explicit_booleans(
+    field: str, invalid: object
+) -> None:
+    with pytest.raises(ValidationError):
+        CalendarPatchInput.model_validate(
+            {
+                "calendar_id": "primary",
+                "event_id": "event",
+                "changes": {field: invalid},
+                "send_updates": "none",
+            }
+        )
 
 
 async def test_patch_omission_keeps_other_fields_and_explicit_empty_text_clears() -> (

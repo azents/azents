@@ -153,6 +153,18 @@ class CalendarEventFields(CalendarInput):
     focus_time: CalendarFocusTime | None
     out_of_office: CalendarOutOfOffice | None
     conference: CalendarConference | None
+    guests_can_modify: bool | None = Field(
+        strict=True,
+        description="Whether guests may modify the event; null uses Google's default.",
+    )
+    guests_can_invite_others: bool | None = Field(
+        strict=True,
+        description="Whether guests may invite others; null uses Google's default.",
+    )
+    guests_can_see_other_guests: bool | None = Field(
+        strict=True,
+        description="Whether guests may see other guests; null uses Google's default.",
+    )
 
     @field_validator("recurrence")
     @classmethod
@@ -284,6 +296,9 @@ class CalendarEventPatch(TypedDict, total=False):
     focus_time: CalendarFocusTime
     out_of_office: CalendarOutOfOffice
     conference: CalendarConference
+    guests_can_modify: Annotated[bool, Field(strict=True)]
+    guests_can_invite_others: Annotated[bool, Field(strict=True)]
+    guests_can_see_other_guests: Annotated[bool, Field(strict=True)]
 
 
 class CalendarPatchInput(CalendarEventGetInput):
@@ -426,6 +441,13 @@ class CalendarEventResult(CalendarProviderModel):
         default=None, alias="originalStartTime"
     )
     attendees: tuple[CalendarAttendeeResult, ...] | None = None
+    guests_can_modify: bool | None = Field(default=None, alias="guestsCanModify")
+    guests_can_invite_others: bool | None = Field(
+        default=None, alias="guestsCanInviteOthers"
+    )
+    guests_can_see_other_guests: bool | None = Field(
+        default=None, alias="guestsCanSeeOtherGuests"
+    )
     hangout_link: str | None = Field(default=None, alias="hangoutLink")
     conference: CalendarConferenceResult | None = Field(
         default=None, alias="conferenceData"

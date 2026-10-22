@@ -25,6 +25,7 @@ from azents.services.google_workspace import gmail_models as gm
 from azents.services.google_workspace.drive_models import DriveCreateFileInput
 from azents.services.google_workspace.file_models import GoogleFileInput
 from azents.services.google_workspace.transport import GoogleWorkspaceSdk
+from azents.services.google_workspace.transport_test import _Stream
 
 
 def _mock(value: object) -> NonCallableMock:
@@ -53,6 +54,45 @@ def test_filter_schema_describes_persistent_forwarding(
             "historical messages",
         )
     )
+
+
+async def test_calendar_model_tools_expose_and_execute_guest_privileges() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            stream=_Stream((b'{"id":"event","guestsCanModify":false}',)),
+        )
+
+    toolkit = _workspace_toolkit(
+        GoogleService.CALENDAR, "calendar.events", _sdk(handler), _bridge()
+    )
+    tools = (await toolkit.update_context(_turn())).tools
+    tool = next(item for item in tools if item.spec.name == "calendar_update_event")
+    result = await tool.handler(
+        json.dumps(
+            {
+                "calendar_id": "primary",
+                "event_id": "event",
+                "changes": {
+                    "guests_can_modify": False,
+                    "guests_can_invite_others": True,
+                    "guests_can_see_other_guests": False,
+                },
+                "send_updates": "none",
+            }
+        )
+    )
+    assert isinstance(result, FunctionToolResult)
+    assert len(requests) == 1
+    assert json.loads(requests[0].content) == {
+        "guestsCanModify": False,
+        "guestsCanInviteOthers": True,
+        "guestsCanSeeOtherGuests": False,
+    }
 
 
 def _workspace_toolkit(

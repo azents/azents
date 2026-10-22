@@ -115,6 +115,12 @@ def _event(value: CalendarEventFields) -> "Event":
         result["outOfOfficeProperties"] = _out_of_office(value.out_of_office)
     if value.conference is not None:
         result["conferenceData"] = _conference(value.conference)
+    if value.guests_can_modify is not None:
+        result["guestsCanModify"] = value.guests_can_modify
+    if value.guests_can_invite_others is not None:
+        result["guestsCanInviteOthers"] = value.guests_can_invite_others
+    if value.guests_can_see_other_guests is not None:
+        result["guestsCanSeeOtherGuests"] = value.guests_can_see_other_guests
     return result
 
 
@@ -264,6 +270,12 @@ def patch_event(
         body["outOfOfficeProperties"] = _out_of_office(changes["out_of_office"])
     if "conference" in changes:
         body["conferenceData"] = _conference(changes["conference"])
+    if "guests_can_modify" in changes:
+        body["guestsCanModify"] = changes["guests_can_modify"]
+    if "guests_can_invite_others" in changes:
+        body["guestsCanInviteOthers"] = changes["guests_can_invite_others"]
+    if "guests_can_see_other_guests" in changes:
+        body["guestsCanSeeOtherGuests"] = changes["guests_can_see_other_guests"]
     request = session.calendar.events().patch(
         calendarId=value.calendar_id,
         eventId=value.event_id,
