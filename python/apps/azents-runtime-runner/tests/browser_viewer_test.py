@@ -25,7 +25,7 @@ from azents_runtime_control.runtime_stream_session import (
     WebSocketOpcode,
 )
 from browser_test import _action
-from patchright.async_api import Error
+from patchright.async_api import Error, Route
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_editables import BrowserEditableRegions
@@ -33,6 +33,7 @@ from azents_runtime_runner.browser_input import BrowserInputKey
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     _capture_error_code,
+    _capture_timeout_stage,
     _LatestPage,
 )
 
@@ -52,6 +53,33 @@ def test_live_capture_error_diagnostics_are_fixed_codes(
     message: str, code: str
 ) -> None:
     assert _capture_error_code(Error(message)) == code
+
+
+@pytest.mark.parametrize(
+    "call_log,stage",
+    [
+        ("", "browser_capture_stage_unknown"),
+        ("  - taking page screenshot\n", "browser_capture_preparing"),
+        (
+            "  - taking page screenshot\n  - waiting for fonts to load...\n",
+            "browser_capture_fonts_pending",
+        ),
+        (
+            "  - waiting for fonts to load...\n  - fonts loaded\n",
+            "browser_capture_after_font_wait",
+        ),
+        ("  - private-url-with-fonts loaded\n", "browser_capture_stage_unknown"),
+    ],
+)
+def test_capture_timeout_stage_uses_only_fixed_call_log_milestones(
+    call_log: str, stage: str
+) -> None:
+    error = Error("Timeout 2000ms exceeded.\nCall log:\n" + call_log)
+    assert _capture_timeout_stage(error) == stage
+    assert (
+        _capture_timeout_stage(Error("taking page screenshot: " + call_log))
+        == "browser_capture_stage_unknown"
+    )
 
 
 class Budget:
@@ -311,6 +339,47 @@ async def test_capture_failure_reason_survives_plain_text_logging(
     assert "capture_once" in caplog.text
     assert code in caplog.text
     assert "synthetic-secret" not in caplog.text
+
+
+async def test_native_font_wait_timeout_has_content_free_stage_diagnostics(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    site: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    page = manager.tasks[authority.task_id].pages[authority.page_id]
+    requested, release = asyncio.Event(), asyncio.Event()
+    budget = Budget()
+    source = _LatestPage(page, budget)
+
+    async def hold_font(route: Route) -> None:
+        requested.set()
+        await release.wait()
+        await route.abort()
+
+    await page.page.route("https://fonts.example.test/**", hold_font)
+    try:
+        await page.page.set_content(
+            "<style>@font-face {font-family: Pending;"
+            "src:url(https://fonts.example.test/private-font.woff2)}"
+            "p {font-family:Pending}</style><p>Private synthetic fixture</p>",
+            wait_until="domcontentloaded",
+        )
+        async with asyncio.timeout(5):
+            await requested.wait()
+        async with asyncio.timeout(10):
+            await source.capture()
+        assert source.failed and source.latest is None and budget.bytes == 0
+        assert "browser_capture_timeout" in caplog.text
+        assert "browser_capture_fonts_pending" in caplog.text
+        assert "fonts.example.test" not in caplog.text
+        assert "private-font" not in caplog.text
+        assert "Private synthetic fixture" not in caplog.text
+    finally:
+        release.set()
+        await page.page.unroute_all(behavior="wait")
+        await source.close()
 
 
 async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(

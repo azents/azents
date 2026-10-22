@@ -94,6 +94,19 @@ def _capture_error_code(error: Error) -> str:
     return "browser_capture_sdk_error"
 
 
+def _capture_timeout_stage(error: Error) -> str:
+    """Report only fixed SDK progress milestones, never native message data."""
+    call_log = error.message.partition("\nCall log:\n")[2]
+    milestones = {line.strip() for line in call_log.splitlines()}
+    if "- fonts loaded" in milestones:
+        return "browser_capture_after_font_wait"
+    if "- waiting for fonts to load..." in milestones:
+        return "browser_capture_fonts_pending"
+    if "- taking page screenshot" in milestones:
+        return "browser_capture_preparing"
+    return "browser_capture_stage_unknown"
+
+
 @dataclass(frozen=True)
 class _Image:
     source: ViewerSource
@@ -142,12 +155,20 @@ class _LatestPage:
                 "browser_capture_failed", "Browser live capture failed"
             ).with_traceback(error.__traceback__)
             diagnostic.add_note(reason_code)
+            capture_stage = (
+                _capture_timeout_stage(error)
+                if isinstance(error, Error) and reason_code == "browser_capture_timeout"
+                else None
+            )
+            if capture_stage is not None:
+                diagnostic.add_note(capture_stage)
             logging.getLogger(__name__).warning(
                 "Browser live capture stopped",
                 exc_info=diagnostic,
                 extra={
                     "page_id": self.page.id,
                     "reason_code": reason_code,
+                    "capture_stage": capture_stage,
                 },
             )
         finally:
