@@ -209,6 +209,9 @@ class GoogleFileBridge:
                     unconfirmed_action="publish_file",
                     remaining_ids=tuple(str(item) for item in range(index, len(files))),
                     cause_code=error.code,
+                    provider_error=error.provider_error
+                    if isinstance(error, GoogleSdkError)
+                    else None,
                     status=error.status if isinstance(error, GoogleSdkError) else None,
                     dispatched=True,
                 ) from None

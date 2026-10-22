@@ -231,7 +231,13 @@ def _definition[T: BaseModel, R: BaseModel](
             except GoogleWorkspacePartialError as error:
                 raise FunctionToolError(
                     "Google operation partially completed. Confirmed steps are "
-                    "retained; do not replay them. " + error.partial.model_dump_json(),
+                    "retained; do not replay them. "
+                    + error.partial.model_dump_json()
+                    + (
+                        " " + error.provider_error.describe(error.status)
+                        if error.provider_error is not None
+                        else ""
+                    ),
                     metadata={
                         "google_error": error.code,
                         "dispatched": error.dispatched,
@@ -241,6 +247,11 @@ def _definition[T: BaseModel, R: BaseModel](
                 raise FunctionToolError(
                     f"Google operation failed ({error.code}). "
                     + (
+                        error.provider_error.describe(error.status) + " "
+                        if error.provider_error is not None
+                        else ""
+                    )
+                    + (
                         "The operation may have completed; it was not replayed."
                         if error.dispatched
                         else "No Google request was sent."
@@ -248,6 +259,12 @@ def _definition[T: BaseModel, R: BaseModel](
                     metadata={
                         "google_error": error.code,
                         "dispatched": error.dispatched,
+                        "http_status": error.status,
+                        "google_provider_error": (
+                            error.provider_error.model_dump(mode="json")
+                            if error.provider_error is not None
+                            else None
+                        ),
                     },
                 ) from None
             except GoogleOAuthError as error:

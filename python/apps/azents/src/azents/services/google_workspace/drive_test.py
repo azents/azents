@@ -762,6 +762,8 @@ async def test_partial_sharing_keeps_confirmed_ids_without_recipient_content() -
     assert len(requests) == 2
     assert error.value.partial.completed[0].resource_ids == ("permission0",)
     assert error.value.partial.remaining_ids == ("1", "2")
+    assert error.value.provider_error is not None
+    assert error.value.provider_error.message == "provider-private-detail"
     assert "user1@example.com" not in str(error.value)
     assert "provider-private-detail" not in str(error.value)
 

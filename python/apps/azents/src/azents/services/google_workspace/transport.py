@@ -24,6 +24,11 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import HttpRequest
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from azents.services.google_workspace.provider_error import (
+    GoogleProviderError,
+    decode_provider_error,
+)
+
 if TYPE_CHECKING:
     from googleapiclient._apis.calendar.v3.resources import CalendarResource
     from googleapiclient._apis.drive.v3.resources import DriveResource
@@ -37,6 +42,7 @@ class GoogleSdkError(ValueError):
         self.code = code
         self.dispatched = dispatched
         self.status = status
+        self.provider_error: GoogleProviderError | None = None
         super().__init__(
             "Google operation could not be confirmed. No automatic replay was made."
             if dispatched
@@ -315,7 +321,9 @@ def _sdk_errors(state: _JobState) -> Iterator[None]:
             if status in {400, 403, 404, 409, 412}
             else "provider_unavailable"
         )
-        raise GoogleSdkError(code, dispatched=state.dispatched, status=status) from None
+        failure = GoogleSdkError(code, dispatched=state.dispatched, status=status)
+        failure.provider_error = decode_provider_error(error.content)
+        raise failure from None
     except httpx.HTTPError, httplib2.HttpLib2Error:
         raise GoogleSdkError(
             "transport_uncertain", dispatched=state.dispatched, status=None
@@ -487,7 +495,9 @@ class GoogleWorkspaceSdk:
         operation: Callable[[GoogleSdkSession], T],
     ) -> T:
         state = _JobState(
-            time.monotonic() + limits.timeout, threading.Event(), before_request
+            deadline=time.monotonic() + limits.timeout,
+            cancelled=threading.Event(),
+            before_request=before_request,
         )
         loop = asyncio.get_running_loop()
         borrower = object()
