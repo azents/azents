@@ -3,6 +3,7 @@
 from scripts.ci.observability import JUnitSummary
 
 STORIES = {
+    "src/shared/toolkits/components/ToolkitTypeIcon.stories.tsx": ("All Providers",),
     "src/features/session-routines/components/SessionRoutines.stories.tsx": (
         "Inventory",
         "Loading",
