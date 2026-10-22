@@ -10,6 +10,7 @@ const types = [
   "sentry",
   "aws",
   "google_analytics",
+  "google",
   "gcp",
   "brave_search",
   "kubernetes",
@@ -30,6 +31,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const AllProviders = {
+  tags: ["ci-contract"],
   render: () => (
     <SimpleGrid cols={{ base: 2, sm: 4 }}>
       {types.map((type) => (
@@ -48,5 +50,11 @@ export const AllProviders = {
     for (const type of types) {
       await expect(canvas.getByText(type)).toBeVisible();
     }
+    await expect(
+      canvasElement.querySelectorAll(".tabler-icon-brand-google"),
+    ).toHaveLength(2);
+    await expect(
+      canvasElement.querySelectorAll(".tabler-icon-tool"),
+    ).toHaveLength(2);
   },
 } satisfies Story;
