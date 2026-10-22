@@ -1453,6 +1453,34 @@ async def test_started_scheduled_run_retries_without_stop_or_signal() -> None:
     assert not any(event.startswith(("stop:", "signal:")) for event in events)
 
 
+async def test_started_scheduled_continuation_gap_retries_without_fencing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No active Run exists between successful completion and its continuation."""
+    events: list[str] = []
+    service, retention, sessions, _, worktrees, broker, s3 = _build_service(
+        events=events,
+        active_checks=[False],
+        scheduled_allows_active_runs=True,
+    )
+    monkeypatch.setattr(
+        service.operations.scheduled_participant,
+        "has_started_work",
+        AsyncMock(return_value=True),
+    )
+    summary = await service.purge_once(lease_owner="worker-1", deadline=_deadline())
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 0
+    assert retention.retry is not None
+    assert retention.retry["error_kind"] == "ActiveAgentRun"
+    assert sessions.deleted is False
+    assert "fence_generations" not in events
+    assert worktrees.calls == 0
+    assert broker.purged_session_ids == []
+    assert s3.deleted_keys == []
+    assert not any(event.startswith(("stop:", "signal:")) for event in events)
+
+
 async def test_object_delete_failure_preserves_tree_for_retry() -> None:
     """Object-storage failure leaves terminal metadata and the tree retryable."""
     events: list[str] = []

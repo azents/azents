@@ -19,10 +19,15 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
-from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.mailbox_data import (
+    MailboxItemCreate,
+    MailboxPresentationItem,
+    ScheduledTaskContinuationMailboxPayload,
+)
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.scheduled_task import RDBScheduledTask
@@ -565,9 +570,14 @@ class TestScheduledTaskLifecycleRepository:
             is None
         )
 
+    @pytest.mark.parametrize(
+        "status",
+        [AgentRunStatus.PENDING, AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED],
+    )
     async def test_purge_waits_for_started_cycle_and_verifies_absence(
         self,
         rdb_session: WriteSession,
+        status: AgentRunStatus,
     ) -> None:
         """Permanent purge remains fenced until preserved cycle state is gone."""
         subject = await _create_subject(
@@ -581,6 +591,16 @@ class TestScheduledTaskLifecycleRepository:
             started=True,
         )
         repository = ScheduledTaskLifecycleRepository()
+        run = await rdb_session.read_session.get(RDBAgentRun, started.run_id)
+        assert run is not None
+        run.status = status
+        if status is AgentRunStatus.COMPLETED:
+            conversation = await rdb_session.read_session.get(
+                RDBConversation, subject.session_id
+            )
+            assert conversation is not None
+            conversation.pending_idle_continuation_run_id = run.id
+        await rdb_session.write_session.flush()
         await repository.terminate_session_tree(
             rdb_session,
             session_ids=[subject.session_id],
@@ -613,3 +633,157 @@ class TestScheduledTaskLifecycleRepository:
         assert verification.trigger_count == 0
         assert verification.admitted_cycle_count == 0
         assert verification.started_cycle_count == 0
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            AgentRunStatus.FAILED,
+            AgentRunStatus.STOPPED,
+            AgentRunStatus.INTERRUPTED,
+            AgentRunStatus.CANCELLED,
+            AgentRunStatus.COMPLETED,
+        ],
+    )
+    async def test_purge_removes_cycles_without_resumable_hosts(
+        self, rdb_session: WriteSession, status: AgentRunStatus
+    ) -> None:
+        subject = await _create_subject(
+            rdb_session, handle=f"purge-terminal-cycle-{status.value}"
+        )
+        started = await _create_task_cycle(
+            rdb_session, subject=subject, title="Abandoned cycle", started=True
+        )
+        run = await rdb_session.read_session.get(RDBAgentRun, started.run_id)
+        assert run is not None
+        run.status = status
+        await rdb_session.write_session.flush()
+        repository = ScheduledTaskLifecycleRepository()
+        # Archive itself still preserves the immutable cycle.
+        archived = await repository.terminate_session_tree(
+            rdb_session, session_ids=[subject.session_id]
+        )
+        assert archived.preserved_started_cycle_count == 1
+        assert not await repository.has_preservable_started_work(
+            rdb_session, session_ids=[subject.session_id]
+        )
+        await repository.require_purge_ready(
+            rdb_session, session_ids=[subject.session_id]
+        )
+        cleanup = await repository.purge_session_tree(
+            rdb_session, session_ids=[subject.session_id]
+        )
+        assert cleanup.deleted_started_cycle_count == 1
+        assert cleanup.preserved_started_cycle_count == 0
+        verification = await repository.verify_session_tree(
+            rdb_session, session_ids=[subject.session_id]
+        )
+        assert verification.started_cycle_count == 0
+        assert verification.task_count == verification.trigger_count == 0
+
+    async def test_pending_idle_scheduled_host_allows_preservation(
+        self, rdb_session: WriteSession
+    ) -> None:
+        subject = await _create_subject(
+            rdb_session, handle="scheduled-pending-idle-preservation"
+        )
+        started = await _create_task_cycle(
+            rdb_session, subject=subject, title="Waiting for continuation", started=True
+        )
+        run = await rdb_session.read_session.get(RDBAgentRun, started.run_id)
+        conversation = await rdb_session.read_session.get(
+            RDBConversation, subject.session_id
+        )
+        assert run is not None and conversation is not None
+        run.status = AgentRunStatus.COMPLETED
+        conversation.pending_idle_continuation_run_id = run.id
+        await rdb_session.write_session.flush()
+        repository = ScheduledTaskLifecycleRepository()
+        assert await repository.has_preservable_started_work(
+            rdb_session, session_ids=[subject.session_id]
+        )
+        assert await repository.archive_allows_active_runs(
+            rdb_session,
+            session_ids=[subject.session_id],
+            running_session_ids=[subject.session_id],
+        )
+        with pytest.raises(RuntimeError, match="started cycles remain active"):
+            await repository.purge_session_tree(
+                rdb_session, session_ids=[subject.session_id]
+            )
+        assert (
+            await repository.verify_session_tree(
+                rdb_session, session_ids=[subject.session_id]
+            )
+        ).started_cycle_count == 1
+
+    @pytest.mark.parametrize("matching", [False, True])
+    async def test_completed_host_requires_its_own_queued_continuation(
+        self, rdb_session: WriteSession, matching: bool
+    ) -> None:
+        subject = await _create_subject(rdb_session, handle="purge-queued-cycle")
+        started = await _create_task_cycle(
+            rdb_session, subject=subject, title="Queued cycle", started=True
+        )
+        run = await rdb_session.read_session.get(RDBAgentRun, started.run_id)
+        assert run is not None
+        run.status = AgentRunStatus.COMPLETED
+        cycle_id = started.cycle.state.cycle_id if matching else uuid7().hex
+        item = RDBMailboxItem(
+            session_id=subject.session_id,
+            kind=MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
+            sender_user_id=None,
+            idempotency_key=f"queued-cycle:{cycle_id}",
+            payload=ScheduledTaskContinuationMailboxPayload(
+                type="scheduled_task_continuation",
+                cycle_id=cycle_id,
+                items=[
+                    MailboxPresentationItem(
+                        item_key="scheduled_task_continuation:0",
+                        presentation_kind="scheduled_task_continuation",
+                        content="Finish the cycle.",
+                        metadata={"title": "Queued cycle"},
+                    )
+                ],
+            ).model_dump(mode="json"),
+        )
+        item.order_group = uuid7().hex
+        item.order_sequence = 0
+        rdb_session.write_session.add(item)
+        await rdb_session.write_session.flush()
+        repository = ScheduledTaskLifecycleRepository()
+        assert (
+            await repository.has_preservable_started_work(
+                rdb_session, session_ids=[subject.session_id]
+            )
+            is matching
+        )
+
+    async def test_purge_missing_host_is_scoped_to_requested_tree(
+        self, rdb_session: WriteSession
+    ) -> None:
+        subject = await _create_subject(rdb_session, handle="purge-missing-host")
+        other = await _create_subject(rdb_session, handle="purge-unrelated-host")
+        started = await _create_task_cycle(
+            rdb_session, subject=subject, title="Missing host", started=True
+        )
+        await _create_task_cycle(
+            rdb_session, subject=other, title="Unrelated host", started=True
+        )
+        run = await rdb_session.read_session.get(RDBAgentRun, started.run_id)
+        assert run is not None
+        await rdb_session.write_session.delete(run)
+        await rdb_session.write_session.flush()
+        repository = ScheduledTaskLifecycleRepository()
+        cleanup = await repository.purge_session_tree(
+            rdb_session, session_ids=[subject.session_id]
+        )
+        assert cleanup.deleted_started_cycle_count == 1
+        assert (
+            await repository.verify_session_tree(
+                rdb_session, session_ids=[other.session_id]
+            )
+        ).started_cycle_count == 1

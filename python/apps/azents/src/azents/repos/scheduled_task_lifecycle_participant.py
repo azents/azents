@@ -11,7 +11,7 @@ from azents.core.session_lifecycle import (
     SessionLifecyclePurgeContext,
     SessionLifecycleTransitionContext,
 )
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.scheduled_task.lifecycle import (
     ScheduledTaskLifecycleCleanup,
     ScheduledTaskLifecycleRepository,
@@ -32,6 +32,14 @@ class ScheduledTaskLifecycleParticipantRepository:
         ],
     ) -> None:
         self.repository = repository
+
+    async def has_started_work(
+        self, session: ReadSession, *, session_ids: Sequence[str]
+    ) -> bool:
+        """Keep preserved Scheduled hosts alive across continuation gaps."""
+        return await self.repository.has_preservable_started_work(
+            session, session_ids=session_ids
+        )
 
     async def archive_participant(
         self,

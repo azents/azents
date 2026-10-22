@@ -40,8 +40,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-10-20
-spec_version: 16
+last_verified_at: 2026-10-22
+spec_version: 17
 ---
 
 # Scheduled Task Domain Spec
@@ -344,9 +344,21 @@ future Tasks and pre-start work for the affected Binding. A started cycle may
 continue in the Session, but the disconnected Binding no longer authorizes
 provider progress or terminal effects.
 
-Permanent Session purge waits until preserved started cycles have finished, removes
-residual Task, trigger, and cycle state, and verifies absence before root-tree
-finalization. Agent and owner lifecycle cleanup use the same participant boundary.
+Permanent Session purge waits for started cycles with pending/running hosts, and
+for completed hosts with a matching pending idle-continuation token or queued
+Scheduled continuation. The root preparation gate counts this preserved work even
+between Runs, before fencing ownership or requesting stop. A pending idle
+Scheduled host also qualifies for the archive-preservation check while Session
+execution routing still says running.
+
+Started state left by failed, stopped, interrupted, cancelled, missing, or completed
+hosts without continuation authority cannot execute or submit a result. Only the
+permanent-purge participant removes that residual cycle state, rechecking the host
+after locking the cycle row; ordinary archive still preserves the cycle snapshot.
+Purge cleanup records the deleted-started count separately, removes residual Task
+and trigger authority, and verifies absence before root-tree finalization. A
+mismatched host identity remains an invariant error rather than authorizing cleanup.
+Agent and owner lifecycle cleanup use the same participant boundary.
 
 ## Event and Presentation Contracts
 
