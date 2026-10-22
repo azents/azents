@@ -1683,8 +1683,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             "Use absolute filesystem paths inside the runtime workspace.",
             "Prefer dedicated file tools for workspace operations: use `read`, "
             "`write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as "
-            "appropriate. Use `exec_command` for command execution and "
-            "`write_stdin` to interact with a running process.",
+            "appropriate. Use `exec_command` for command execution. "
+            "Use `wait` for interruptible command-completion waiting. Use "
+            "`write_stdin` for stdin input or unread output collection "
+            "(yield_time_ms=0 for immediate collection). Commands marked "
+            "fire_and_forget do not affect wait.",
         ]
         if working_folder_path is None or workspace_root is None:
             scope_lines.extend(
@@ -1756,7 +1759,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
 
         The Agent Workspace persists across turns and is the default place for files you create or edit. `/tmp/` is temporary scratch space.
 
-        Prefer dedicated file tools for filesystem operations: use `read`, `write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as appropriate. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `write_stdin` with empty chars to poll a running process.
+        Prefer dedicated file tools for filesystem operations: use `read`, `write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as appropriate. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `wait` for interruptible command-completion waiting; use `write_stdin` for stdin input or unread output collection (yield_time_ms=0 for immediate collection). Commands marked fire_and_forget do not affect wait.
 
         Use the dynamic Runtime Workspace prompt for the current Agent Workspace path.""")  # noqa: E501
     config_model = ShellToolkitConfig

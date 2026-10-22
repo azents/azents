@@ -3020,6 +3020,21 @@ class TestRuntimeToolkitDomainConfig:
     """ShellToolkitConfig domain fields are reflected in runtime operation/prompt."""
 
     @pytest.mark.asyncio
+    async def test_runtime_prompts_route_completion_waiting_to_wait(self) -> None:
+        toolkit = _make_toolkit()
+        context = _make_context()
+        await toolkit.update_context(context)
+        prompt = await toolkit.get_static_prompt(context)
+        provider_prompt = BuiltinToolkitProvider.system_prompt
+        for guidance in (prompt, provider_prompt):
+            assert "Use `wait` for interruptible command-completion waiting" in guidance
+            assert (
+                "`write_stdin` for stdin input or unread output collection" in guidance
+            )
+            assert "yield_time_ms=0 for immediate collection" in guidance
+            assert "fire_and_forget do not affect wait" in guidance
+
+    @pytest.mark.asyncio
     async def test_allowed_domains_in_prompt(self) -> None:
         """allowed_domains are included in prompt."""
         config = ShellToolkitConfig(allowed_domains=["example.com"])
