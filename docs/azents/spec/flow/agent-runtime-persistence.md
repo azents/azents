@@ -82,7 +82,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-17
+last_verified_at: 2026-10-22
 spec_version: 45
 ---
 
@@ -250,6 +250,13 @@ An existing logical Runtime is observed without a row lock. Actual creation uses
 unique Agent identity and conditional INSERT to return one winner; ordinary getters
 remain read-only and never create a Runtime. Descriptive snapshots do not authorize
 later lifecycle, configuration or resource mutations.
+
+Both logical Runtime ensure paths acquire the parent Agent's `FOR KEY SHARE`
+before attempting the unique Runtime insert. This preserves the Agent foreign-key
+and deletion-admission boundary while preventing a creator from occupying Runtime
+uniqueness before waiting on another transaction's Agent admission lock. Existing
+Runtime reads remain lock-free; this ordering does not add retries or relax Session
+creation authority.
 
 Interactive Terminal policy is independent durable configuration on infrastructure
 Profile, Workspace Profile, and Agent rows. Each default-true flag contributes to a

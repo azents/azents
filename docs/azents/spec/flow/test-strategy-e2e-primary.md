@@ -838,6 +838,8 @@ Always-on required CI does not depend on external credentials.
   test identities do not vary with the runner image's cached minor release.
   Different reporter escaping is retained as incomparable source evidence,
   not silently normalized into an accepted same-SHA testcase match.
+  Active server diagnostics are captured for fixture setup failures as well as
+  test-call failures before fixture teardown removes the failing process.
   CoreSimulator runtime listing, device creation and native XCTest execution record
   timestamped start/end markers and original command exit status in
   `simulator-setup.log`, included by the existing always-upload diagnostic path.

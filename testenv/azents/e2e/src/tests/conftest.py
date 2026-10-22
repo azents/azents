@@ -284,12 +284,12 @@ def pytest_runtest_makereport(
     item: pytest.Item,
     call: pytest.CallInfo[None],
 ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
-    """Retain the browser test call report for bounded failure evidence."""
+    """Retain browser reports and diagnose setup/call failures before teardown."""
     report = yield
     if report.when == "call":
         item.stash[_BROWSER_CALL_REPORT] = report
-        if report.failed:
-            _emit_active_server_logs(item.config, node_id=item.nodeid)
+    if report.when in {"setup", "call"} and report.failed:
+        _emit_active_server_logs(item.config, node_id=item.nodeid)
     return report
 
 

@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import pytest
 
@@ -60,9 +60,11 @@ def test_emit_container_logs_writes_complete_terminal_output() -> None:
     ]
 
 
+@pytest.mark.parametrize("phase", ["setup", "call"])
 def test_failed_report_emits_active_server_logs_to_terminal_reporter(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
+    phase: Literal["setup", "call"],
 ) -> None:
     """A failed test report prints complete active server logs to CI stdout."""
     lines: list[str] = []
@@ -90,7 +92,7 @@ def test_failed_report_emits_active_server_logs_to_terminal_reporter(
         _Container(b"public stdout", b"public stderr"),
     )
 
-    call = pytest.CallInfo.from_call(lambda: None, when="call")
+    call = pytest.CallInfo.from_call(lambda: None, when=phase)
     hook = e2e_conftest.pytest_runtest_makereport(item, call)
     assert next(hook) is None
     report = pytest.TestReport.from_item_and_call(item, call)
