@@ -538,5 +538,8 @@ def test_runtime_control_requires_workspace_s3_bucket() -> None:
         )
 
     error = raised.value.stderr.lower()
-    assert "objectstorage/external/bucket" in error
-    assert "minlength" in error
+    assert "objectstorage.external.bucket" in error.replace("/", ".")
+    assert (
+        "minlength: got 0, want 1" in error
+        or "string length must be greater than or equal to 1" in error
+    )

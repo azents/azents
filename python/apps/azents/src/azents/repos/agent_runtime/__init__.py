@@ -411,6 +411,7 @@ class AgentRuntimeRepository:
         if existing is not None:
             return AgentRuntimeEnsureResult(runtime=existing, created=False)
 
+        await self._lock_creation_agent(session, create.agent_id)
         insert_stmt = (
             insert(RDBAgentRuntime)
             .values(
@@ -451,9 +452,7 @@ class AgentRuntimeRepository:
         if existing is not None:
             return existing
 
-        agent = await session.write_session.get(RDBAgent, agent_id)
-        if agent is None:
-            raise ValueError("Agent not found")
+        agent = await self._lock_creation_agent(session, agent_id)
 
         insert_stmt = (
             insert(RDBAgentRuntime)
@@ -475,6 +474,19 @@ class AgentRuntimeRepository:
         if raced is None:
             raise RuntimeError("AgentRuntime ensure failed")
         return raced
+
+    async def _lock_creation_agent(
+        self, session: WriteSession, agent_id: str
+    ) -> RDBAgent:
+        """Acquire the parent FK lock before occupying Runtime's unique index."""
+        agent = await session.write_session.scalar(
+            sa.select(RDBAgent)
+            .where(RDBAgent.id == agent_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        if agent is None:
+            raise ValueError("Agent not found")
+        return agent
 
     async def set_desired_state(
         self,

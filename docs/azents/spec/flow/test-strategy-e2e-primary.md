@@ -834,6 +834,17 @@ Always-on required CI does not depend on external credentials.
   generated manifest. Missing or malformed digests, missing archives, substituted
   bytes and unsafe or duplicate ZIP paths fail closed. Historical raw evidence
   remains preserved; incomplete evidence is not upgraded to verified success.
+  Explicit JUnit testcase times, pytest phase/fixture numbers, image timing
+  numbers and lane durations must be finite and nonnegative. Malformed or
+  non-finite measurements fail parsing instead of becoming zero or valid
+  analysis. An omitted optional JUnit testcase time retains its zero default;
+  a supplied invalid time is not treated as omission.
+  The Linux TypeScript producer selects an exact Node release, so native JUnit
+  test identities do not vary with the runner image's cached minor release.
+  Different reporter escaping is retained as incomparable source evidence,
+  not silently normalized into an accepted same-SHA testcase match.
+  Active server diagnostics are captured for fixture setup failures as well as
+  test-call failures before fixture teardown removes the failing process.
   CoreSimulator runtime listing, device creation and native XCTest execution record
   timestamped start/end markers and original command exit status in
   `simulator-setup.log`, included by the existing always-upload diagnostic path.
