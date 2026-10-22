@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.runtime_terminal_lifecycle import RuntimeTerminalLifecycle
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeTerminalSummaryResponse(BaseModel):

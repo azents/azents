@@ -58,6 +58,8 @@ class GoogleApplicationPatchRequest(TypedDict, total=False, closed=True):
 
     expected_version: Required[Annotated[int, Field(ge=0, strict=True)]]
     client_id: str | None
+    picker_api_key: str | None
+    picker_app_id: str | None
     client_secret: SystemSettingSecretActionRequest
 
 
@@ -113,6 +115,10 @@ async def patch_google_oauth_setting(
     patch: GoogleApplicationConfigPatch = {}
     if "client_id" in request:
         patch["client_id"] = request["client_id"]
+    if "picker_api_key" in request:
+        patch["picker_api_key"] = request["picker_api_key"]
+    if "picker_app_id" in request:
+        patch["picker_app_id"] = request["picker_app_id"]
     action = request.get("client_secret")
     if not patch and action is None:
         raise HTTPException(

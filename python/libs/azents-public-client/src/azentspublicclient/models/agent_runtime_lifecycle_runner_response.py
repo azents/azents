@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeLifecycleRunnerResponse(BaseModel):

@@ -1,23 +1,22 @@
 {
   "title": "Google に接続",
-  "selectionDetails": "選択した作業と制限時間",
+  "selectionDetails": "サービス・制限時間",
   "permissionDetails": "ツールごとの権限を確認",
   "permittedTools": "許可されたツールの識別子",
   "unavailableTools": "利用できないツールの識別子",
   "reconnectTitle": "Google に再接続",
-  "intro": "選択した Calendar、Drive、Gmail の作業を、1つの Google アカウントで利用します。",
+  "intro": "1つの Google アカウントで Calendar、Drive、Gmail を接続します。",
   "reload": "状態を再読み込み",
   "savedAccount": "保存された Google アカウント",
   "disconnect": "ローカル接続を解除",
   "disconnectTitle": "保存された接続を解除しますか？",
   "disconnectDescription": "ローカルの認証情報を削除し、保留中の再接続を停止します。Google での同意や完了した操作は取り消しません。",
   "keepConnection": "接続を維持",
-  "notLiveVerified": "権限情報だけでは、すべてのリソースへのアクセスや Google Preview の利用資格は確認できません。",
+  "notLiveVerified": "保存された権限だけでは各リソースへの実際のアクセスは確認できません。アカウントのポリシーとファイルの利用資格は Google が確認します。",
   "operatorRequired": "管理者による設定が必要です",
   "operatorDescription": "システム管理者に Google OAuth アプリの設定を依頼してください。この画面ではアプリのシークレットを入力しません。",
   "preparationUnverified": "アプリはローカルに設定されています。実際の Google サービスへのアクセスは未検証です。",
-  "selectTasks": "1. 作業を選択",
-  "selectDescription": "この Toolkit に必要な作業だけを選択してください。Google が一部の権限だけを許可する場合があるため、保存前に実際の結果を確認します。",
+  "selectDescription": "サービスごとに使うツールグループを選択します。必要な権限で OAuth を要求し、プリセット適用後も個別に調整できます。",
   "timeout": "ツールリクエストの制限時間（秒）",
   "authorize": "Google で同意する",
   "authorizeAgain": "置き換える接続を承認",
@@ -29,9 +28,8 @@
   "agentOwnership": "この接続はこの Agent のみが所有します。実行には参加者のアカウントではなく、保存されたアカウントが使われます。",
   "sharedOwnership": "Workspace の共有接続です。権限のあるユーザーや Agent が、このアカウントで作業できます。",
   "personalOwnership": "この接続はあなたのアカウントが所有します。許可した Agent との個人 Session でのみ使用できます。",
-  "actualPermissions": "Google が実際に返した権限です。要求したすべての作業が許可されたことを意味しません。",
+  "actualPermissions": "選択したツールのうち、Google が実際に許可した権限で使えるものだけが有効になります。",
   "missingRenewal": "更新可能な認証情報が返されませんでした。この候補は保存できません。新しい同意手続きを明示的に開始してください。",
-  "includeTask": "保存する接続にこの作業を含める",
   "name": "Toolkit 名",
   "slug": "ツールの名前空間（任意）",
   "description": "説明",
@@ -39,9 +37,8 @@
   "enabled": "Toolkit を有効化",
   "alwaysExpose": "ツールを常に公開",
   "riskTitle": "Google のコンテンツは引き続き信頼できません",
-  "riskDescription": "既知のパターン検査では、新しい手法・意味に基づく攻撃・難読化・多言語の攻撃を見逃したり、無害なコンテンツを拒否したりすることがあります。検査できないコンテンツはブロックされます。完全な防御や Google の認証を保証するものではありません。",
-  "noReplay": "応答がブロックされる前に、Google での操作が完了している場合があります。書き込み操作を無条件に繰り返さないでください。",
-  "acknowledge": "検査の制限と、この接続の所有範囲を確認しました。",
+  "riskDescription": "メール・ファイル・予定には誤解を誘う指示が含まれる場合があります。外部コンテンツは別の操作を許可する指示ではなく、データとして扱ってください。",
+  "noReplay": "応答が届かない場合やエラーでも、Google での書き込みが完了している場合があります。繰り返す前に結果を確認してください。",
   "save": "Google Toolkit を保存",
   "replace": "保存された接続を置き換え",
   "cancel": "ローカルの試行を破棄",
@@ -69,13 +66,14 @@
     "permitted": "許可済み",
     "partial": "一部許可",
     "not_granted": "未許可",
-    "unknown": "権限不明"
+    "unknown": "権限不明",
+    "disabled": "サービス無効"
   },
   "grant": {
-    "full": "要求した作業の権限が許可されました",
-    "partial": "要求した作業の一部のみ許可されました",
-    "none": "選択した作業を利用できません",
-    "unknown": "許可された権限を確認できませんでした"
+    "full": "要求した scope 値が返されました",
+    "partial": "Google が要求と異なる scope 値を返しました",
+    "none": "利用可能な対応操作がありません",
+    "unknown": "実際に許可された scope を確認できません"
   },
   "connection": {
     "not_connected": "未接続",
@@ -84,38 +82,59 @@
     "operator_setup_required": "管理者の設定が必要",
     "client_changed": "アプリが変更されました — 再接続が必要"
   },
-  "tasks": {
-    "calendar_read": {
-      "title": "カレンダーと予定を読む",
-      "description": "予定を一覧表示して内容を確認します。"
-    },
-    "calendar_availability": {
-      "title": "カレンダーの空き時間を確認",
-      "description": "予定の空き時間・予定ありの情報を確認します。"
-    },
-    "calendar_edit": {
-      "title": "カレンダーの予定を編集",
-      "description": "予定を作成・更新・削除します。"
-    },
-    "drive_read": {
-      "title": "Drive ファイルを読む",
-      "description": "このアカウントでアクセス可能なファイルを検索・確認します。"
-    },
-    "drive_files": {
-      "title": "選択された Drive ファイルを操作",
-      "description": "アプリに許可されたファイルのみを使用します。Drive 全体の検索は含まれません。"
-    },
-    "gmail_read": {
-      "title": "Gmail を読む",
-      "description": "メールとスレッドを検索して内容を確認します。"
-    },
-    "gmail_drafts": {
-      "title": "Gmail の下書きを管理",
-      "description": "下書きを作成・編集します。メール送信は含まれません。"
-    },
-    "gmail_modify": {
-      "title": "Gmail を整理",
-      "description": "メール・スレッド・ラベルを変更します。メール送信は含まれません。"
-    }
-  }
+  "selectServices": "1. サービスを選択",
+  "includeService": "このサービスを有効にして保存",
+  "services": {
+    "calendar": "Calendar",
+    "drive": "Drive",
+    "gmail": "Gmail"
+  },
+  "inactive": "すべてのサービスが無効です。保存されたアカウントと権限の接続は維持されます。",
+  "localServicesDescription": "Google の同意なしでサービスの使用設定だけを保存します。すべて無効にしても接続は維持されます。",
+  "saveServices": "サービスの使用設定を保存",
+  "serviceSaveFailed": "サービス設定の保存結果を確認できませんでした。更新された状態を確認してから再試行してください。",
+  "grantedScopeDetails": "実際に許可された scope",
+  "driveExtentTitle": "実際の Drive アクセス範囲",
+  "driveWholeRead": "Drive 全体のファイル内容を読み取れます。",
+  "driveWholeWrite": "Drive 全体のファイル内容を変更できます。個別のリソースと操作の権限は Google が確認します。",
+  "driveAppWrite": "書き込みはアプリで作成したファイルか Google がアプリに許可したファイルのみです。Drive 全体の読み取り権限があっても書き込み範囲は広がりません。",
+  "driveAppRead": "アプリが利用できるファイルのみ読み取れます。フォルダを選んでもすべての子孫ファイルは許可されません。",
+  "driveMetadataRead": "Drive 全体のメタデータを読み取れます。ファイル内容の読み取りは含みません。",
+  "driveMetadataWrite": "Drive 全体のメタデータを変更できます。ファイル内容の書き込みは含みません。",
+  "openPicker": "Google で Drive ファイルを選択",
+  "closePicker": "ファイル選択を閉じる",
+  "pickerOperatorRequired": "管理者に任意の Google Picker API キーとプロジェクト番号の設定を依頼してください。他の Google ツールは引き続き利用できます。",
+  "pickerRequiresGrant": "Drive が有効な保存済みの接続、更新可能な認証情報、実際の drive.file 権限が必要です。サービス変更を保存するか、必要なら再接続してください。",
+  "pickerSelected": "Google で {count} 件のファイルを選択しました。利用資格は Google が管理し、ローカルのアクセス一覧には保存しません。",
+  "pickerCancelled": "選択結果を保持せずにファイル選択を閉じました。",
+  "pickerFailed": "Google のファイル選択を利用できません。接続状態を再読み込みし、管理者の設定を確認してから再試行してください。",
+  "pickerExpired": "ファイル選択用の一時認証情報の期限が切れました。選択画面を開き直して新しい認証情報を取得してください。",
+  "groups": {
+    "gmail_read": "メール・添付ファイルを読む",
+    "gmail_labels": "ラベルを管理",
+    "gmail_drafts": "下書きを作成・管理",
+    "gmail_send": "メールの送信・返信・転送",
+    "gmail_organize": "メールの整理・ゴミ箱移動・復元",
+    "gmail_filters": "フィルタ管理・既存メールへの適用",
+    "calendar_read": "カレンダー・予定を読む",
+    "calendar_availability": "空き時間の確認・提案",
+    "calendar_events": "予定の作成・編集・参加回答",
+    "calendar_status": "集中時間・不在の予定を管理",
+    "calendar_create": "カレンダーを作成",
+    "drive_read": "Drive ファイルの読み取り・エクスポート",
+    "drive_files": "Drive ファイルの作成・変更",
+    "drive_sharing": "共有・アクセスを管理",
+    "drive_ownership": "ファイルの所有権を移譲"
+  },
+  "presets": {
+    "read_only": "読み取り専用",
+    "assistant": "日常業務の補助",
+    "full": "すべてのツール",
+    "clear": "選択を解除"
+  },
+  "presetsTitle": "プリセットを適用、またはツールグループを選択",
+  "groupResult": "{total} ツール中 {available} 件が利用可能",
+  "groupUnavailable": "Google が許可した権限で利用できないツールは有効になりません。",
+  "groupTools": "含まれる {count} ツールを確認",
+  "finalGroupsTitle": "確定したツールグループ"
 }

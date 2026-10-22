@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.image_generation_catalog_entry_response import ImageGenerationCatalogEntryResponse
 from azentspublicclient.models.image_generation_catalog_sync_status_response import ImageGenerationCatalogSyncStatusResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ImageGenerationModelCatalogResponse(BaseModel):

@@ -2,6 +2,7 @@ import { Box, rem, ThemeIcon } from "@mantine/core";
 import {
   IconBrandAws,
   IconBrandGithub,
+  IconBrandGoogle,
   IconBrandGoogleAnalytics,
   IconBrandNotion,
   IconBrandSentry,
@@ -36,6 +37,9 @@ export function ToolkitTypeIcon({
       break;
     case "google_analytics":
       mark = <IconBrandGoogleAnalytics size={markSize} stroke={1.7} />;
+      break;
+    case "google":
+      mark = <IconBrandGoogle size={markSize} stroke={1.7} />;
       break;
     case "gcp":
     case "brave_search":

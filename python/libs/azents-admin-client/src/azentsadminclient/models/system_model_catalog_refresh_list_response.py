@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SystemModelCatalogRefreshListResponse(BaseModel):

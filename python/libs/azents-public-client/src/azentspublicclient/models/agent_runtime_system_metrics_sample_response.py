@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.agent_runtime_system_metric_observation_response import AgentRuntimeSystemMetricObservationResponse
 from azentspublicclient.models.runner_system_metrics_scope import RunnerSystemMetricsScope
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeSystemMetricsSampleResponse(BaseModel):

@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, ScrollArea, useComputedColorScheme } from "@mantine/core";
+import { Box, ScrollArea } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import {
@@ -8,6 +8,7 @@ import {
   vscDarkPlus,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { supportedCodeLanguage } from "../codeLanguage";
+import { useChatCodeBlockController } from "../containers/useChatCodeBlockController";
 import {
   activityDetailScrollAreaProps,
   activityDetailScrollbarSize,
@@ -16,7 +17,7 @@ import { ChatCopyButton } from "./ChatCopyButton";
 import classes from "./MarkdownContent.module.css";
 import type { ReactElement } from "react";
 
-interface ChatCodeBlockProps {
+export interface ChatCodeBlockProps {
   code: string;
   language: string | null;
   maxHeight?: string | number;
@@ -29,15 +30,17 @@ const CODE_BLOCK_THEMES = {
   light: prism,
 } as const;
 
-export function ChatCodeBlock({
+export function ChatCodeBlock({ ...props }: ChatCodeBlockProps): ReactElement {
+  return <ChatCodeBlockView {...useChatCodeBlockController(props)} />;
+}
+
+export function ChatCodeBlockView({
   code,
   language,
   maxHeight,
-}: ChatCodeBlockProps): ReactElement {
+  codeColorScheme,
+}: ChatCodeBlockProps & { codeColorScheme: CodeColorScheme }): ReactElement {
   const t = useTranslations("chat");
-  const computedColorScheme = useComputedColorScheme("light");
-  const codeColorScheme: CodeColorScheme =
-    computedColorScheme === "dark" ? "dark" : "light";
   const codeTheme = CODE_BLOCK_THEMES[codeColorScheme];
   const highlightedLanguage =
     language === null ? null : supportedCodeLanguage(language);

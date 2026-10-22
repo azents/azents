@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.project_browser_empty_state_response import ProjectBrowserEmptyStateResponse
 from azentspublicclient.models.project_browser_entry_response import ProjectBrowserEntryResponse
 from azentspublicclient.models.project_browser_mode_response import ProjectBrowserModeResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ProjectBrowserManifestResponse(BaseModel):

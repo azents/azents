@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ModelReasoningCapabilities(BaseModel):

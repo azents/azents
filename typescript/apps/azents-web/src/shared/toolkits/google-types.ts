@@ -1,9 +1,11 @@
+import type { GoogleGroupPreset } from "./google-access";
 import type {
   GoogleConnectionOutput,
   GooglePreparation,
   GooglePublishedOutput,
   GoogleReview,
-  GoogleTask,
+  GoogleService,
+  GoogleToolGroup,
 } from "@azents/public-client";
 import type { RefObject } from "react";
 
@@ -25,6 +27,13 @@ export type GoogleFlowState =
   | { type: "UNKNOWN"; checking: boolean; message: string | null }
   | { type: "ERROR"; message: string }
   | { type: "COMPLETE"; outcome: GooglePublishedOutput };
+export type GooglePickerState =
+  | { type: "IDLE" }
+  | { type: "LOADING" }
+  | { type: "OPEN" }
+  | { type: "SELECTED"; count: number }
+  | { type: "CANCELLED" }
+  | { type: "ERROR"; message: string };
 export interface GoogleMetadata {
   name: string;
   slug: string;
@@ -37,23 +46,31 @@ export interface GoogleSetupProps {
   preparation: GooglePreparationState;
   saved: GoogleSavedState;
   flow: GoogleFlowState;
-  tasks: GoogleTask[];
+  services: GoogleService[];
+  toolGroups: GoogleToolGroup[];
   timeout: number;
   metadata: GoogleMetadata;
-  acknowledged: boolean;
   publishingAllowed: boolean;
   reconnect: boolean;
   ownership: "user" | "workspace" | "agent";
   cancelling: boolean;
   disconnecting: boolean;
+  savingServices: boolean;
+  servicesDirty: boolean;
+  picker: GooglePickerState;
+  pickerAvailable: boolean;
   disconnectConfirmation: boolean;
   operationError: string | null;
   rootRef: RefObject<HTMLDivElement | null>;
   embedded: boolean;
-  onTaskChange: (task: GoogleTask, selected: boolean) => void;
+  onServiceChange: (service: GoogleService, selected: boolean) => void;
+  onGroupChange: (group: GoogleToolGroup, selected: boolean) => void;
+  onPresetChange: (preset: GoogleGroupPreset) => void;
+  onSaveServices: () => Promise<void>;
+  onOpenPicker: () => void;
+  onClosePicker: () => void;
   onTimeoutChange: (value: number) => void;
   onMetadataChange: (patch: Partial<GoogleMetadata>) => void;
-  onAcknowledgedChange: (value: boolean) => void;
   onAuthorize: () => void;
   onPublish: () => void;
   onCheckOutcome: () => void;
@@ -64,23 +81,21 @@ export interface GoogleSetupProps {
   onDismissDisconnect: () => void;
   onDisconnect: () => void;
 }
-/** Selected tasks and actual tool evidence, never requested scopes, admit publication. */
+/** Publication requires usable actual evidence, not a requested-scope ceiling. */
 export function canPublishGoogleReview(
   review: GoogleReview,
-  tasks: GoogleTask[],
-  acknowledged: boolean,
+  services: GoogleService[],
   now: number,
 ): boolean {
   return (
-    acknowledged &&
     review.can_confirm &&
     review.renewable &&
     Date.parse(review.expires_at) > now &&
-    tasks.length > 0 &&
-    tasks.every((task) => review.requested_tasks.includes(task)) &&
-    review.tasks.some(
+    services.length > 0 &&
+    services.every((service) => review.services.includes(service)) &&
+    review.accesses.some(
       (access) =>
-        tasks.includes(access.task) && access.permitted_tools.length > 0,
+        services.includes(access.service) && access.permitted_tools.length > 0,
     )
   );
 }

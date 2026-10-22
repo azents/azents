@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
 from typing import Any, ClassVar, Dict, Optional
 from azentsadminclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class WorkspaceRuntimeProfilePolicyV1(BaseModel):

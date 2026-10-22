@@ -1,6 +1,6 @@
 # GoogleCancelOutput
 
-Publication won the race or candidate was locally abandoned.
+Publication won the race or the candidate was locally abandoned.
 
 ## Properties
 

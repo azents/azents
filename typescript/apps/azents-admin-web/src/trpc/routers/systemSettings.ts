@@ -51,6 +51,8 @@ export const systemSettingsRouter = router({
         .object({
           expected_version: z.number().int().nonnegative(),
           client_id: z.string().nullable().optional(),
+          picker_api_key: z.string().nullable().optional(),
+          picker_app_id: z.string().nullable().optional(),
           client_secret: z
             .discriminatedUnion("action", [
               z

@@ -1,20 +1,21 @@
-"""Allowlisted Google management DTOs; internal credential models are never returned."""
+"""Token-free Google management contracts with independent service/grant evidence."""
 
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from azents.core.google_oauth import GoogleIdentity
-from azents.core.google_policy import GoogleService, GoogleTask
+from azents.core.google_policy import GoogleService, GoogleToolGroup
+from azents.core.google_workspace_policy import (
+    GoogleDriveAccess,
+    GoogleWorkspaceConnectInput,
+)
+from azents.services.google_oauth.workspace_projection import GoogleServiceAccess
 
 
-class GoogleConnectInput(BaseModel):
-    """Explicit work selection before initial or ordinary reconnect authorization."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    tasks: tuple[GoogleTask, ...] = Field(min_length=1)
-    timeout: float = Field(gt=0, le=300, allow_inf_nan=False)
+class GoogleConnectInput(GoogleWorkspaceConnectInput):
+    """Explicit service/scope intent before consent; requested scopes are not grants."""
 
 
 class GoogleConnectOutput(BaseModel):
@@ -25,18 +26,42 @@ class GoogleConnectOutput(BaseModel):
     expires_at: datetime.datetime
 
 
-class GoogleTaskAccess(BaseModel):
-    """Task-level permission evidence; no live resource-access promise."""
+class GoogleServicesUpdateInput(BaseModel):
+    """Revision-fenced local switch save; empty services is a valid inactive state."""
 
-    task: GoogleTask
-    service: GoogleService
-    status: Literal["permitted", "partial", "not_granted", "unknown"]
-    permitted_tools: tuple[str, ...]
-    unavailable_tools: tuple[str, ...]
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    expected_revision: int = Field(ge=0, strict=True)
+    services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
+
+    @field_validator("services")
+    @classmethod
+    def canonical_services(
+        cls, value: tuple[GoogleService, ...]
+    ) -> tuple[GoogleService, ...]:
+        return tuple(sorted(set(value)))
+
+
+class GooglePickerTokenInput(BaseModel):
+    """Only the expected current target is accepted; scope/token inputs are closed."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    expected_revision: int = Field(ge=0, strict=True)
+    connection_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class GooglePickerTokenOutput(BaseModel):
+    """Transient manager-browser bearer receipt, never an Agent/model response."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    access_token: str = Field(min_length=1, repr=False)
+    expires_at: AwareDatetime
+    api_key: str = Field(min_length=1, repr=False)
+    app_id: str = Field(min_length=1)
 
 
 class GoogleReview(BaseModel):
-    """Actual grant result with token-free exact ownership/capability projection."""
+    """Actual grant and reviewed intent remain separate, with no token projection."""
 
     attempt_id: str
     expires_at: datetime.datetime
@@ -44,16 +69,24 @@ class GoogleReview(BaseModel):
     client_id: str
     ownership: Literal["agent_only", "workspace_shared", "personal"]
     reconnect_toolkit_id: str | None
-    requested_tasks: tuple[GoogleTask, ...]
+    services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
+    oauth_request_scopes: tuple[str, ...]
+    granted_scopes: tuple[str, ...] | None
     timeout: float
-    tasks: tuple[GoogleTaskAccess, ...]
-    grant_result: Literal["full", "partial", "none", "unknown"]
+    accesses: tuple[GoogleServiceAccess, ...]
+    drive_access: GoogleDriveAccess
+    grant_result: Literal["full", "partial", "none", "unknown"] = Field(
+        description=(
+            "Receipt evidence for requested Workspace scopes, not an action ceiling. "
+            "Actual supported tools and Drive extent are projected independently."
+        )
+    )
     renewable: bool
     can_confirm: bool
-    service_access_verified: bool = Field(
-        strict=True, description="Scope review does not verify live resource access."
+    service_access_verified: Literal[False] = Field(
+        description="Scope review does not verify live resource access."
     )
-    security_notice: str
 
 
 class GooglePublishedOutput(BaseModel):
@@ -65,16 +98,18 @@ class GooglePublishedOutput(BaseModel):
 
 
 class GoogleCancelOutput(BaseModel):
-    """Publication won the race or candidate was locally abandoned."""
+    """Publication won the race or the candidate was locally abandoned."""
 
     cancelled: bool
     publication: GooglePublishedOutput | None
 
 
 class GoogleConnectionOutput(BaseModel):
-    """Saved identity, authorization and selected work under manager authority."""
+    """Saved local settings and actual grant evidence under current manager access."""
 
     toolkit_id: str
+    revision: int
+    connection_id: str | None
     status: Literal[
         "not_connected",
         "connected",
@@ -83,20 +118,14 @@ class GoogleConnectionOutput(BaseModel):
         "client_changed",
     ]
     identity: GoogleIdentity | None
-    selected_tasks: tuple[GoogleTask, ...]
+    services: tuple[GoogleService, ...]
+    tool_groups: tuple[GoogleToolGroup, ...]
+    oauth_request_scopes: tuple[str, ...]
+    granted_scopes: tuple[str, ...] | None
     timeout: float
-    tasks: tuple[GoogleTaskAccess, ...]
+    accesses: tuple[GoogleServiceAccess, ...]
+    drive_access: GoogleDriveAccess
     renewable: bool
-    service_access_verified: bool = Field(
-        strict=True, description="Saved grant metadata is not a live access probe."
+    service_access_verified: Literal[False] = Field(
+        description="Saved grant metadata is not a live access probe."
     )
-
-
-GOOGLE_SECURITY_NOTICE = (
-    "Google emails, files and events remain untrusted content. "
-    "Azents screens known instruction-override and exfiltration patterns, "
-    "but novel, semantic, obfuscated and multilingual attacks may be missed. "
-    "False positives and inspection limits may block legitimate content. "
-    "A blocked response does not undo an operation Google may have completed. "
-    "Shared runs use the connected account, not each participant's private account."
-)

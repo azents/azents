@@ -17,21 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Union
 from typing_extensions import Annotated
-from azentspublicclient.models.google_task import GoogleTask
-from typing import Optional, Set
+from azentspublicclient.models.google_service import GoogleService
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleReconnectSettings(BaseModel):
     """
-    Reconnect changes authentication selection, not unrelated saved metadata.
+    Reconnect changes reviewed request intent, not unrelated saved metadata.
     """ # noqa: E501
-    tasks: List[GoogleTask]
+    services: List[GoogleService]
+    tool_groups: List[GoogleToolGroup]
+    oauth_request_scopes: List[StrictStr]
     timeout: Union[Annotated[float, Field(le=300.0, strict=True)], Annotated[int, Field(le=300, strict=True)]]
-    security_risk_acknowledged: StrictBool
-    __properties: ClassVar[List[str]] = ["tasks", "timeout", "security_risk_acknowledged"]
+    __properties: ClassVar[List[str]] = ["services", "tool_groups", "oauth_request_scopes", "timeout"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -86,9 +88,10 @@ class GoogleReconnectSettings(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
-            "tasks": obj.get("tasks"),
-            "timeout": obj.get("timeout"),
-            "security_risk_acknowledged": obj.get("security_risk_acknowledged")
+            "services": obj.get("services"),
+            "tool_groups": obj.get("tool_groups"),
+            "oauth_request_scopes": obj.get("oauth_request_scopes"),
+            "timeout": obj.get("timeout")
             }.items() if _key in obj
         })
         return _obj

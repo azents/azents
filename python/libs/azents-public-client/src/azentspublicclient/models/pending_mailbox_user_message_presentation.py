@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.file_output_part import FileOutputPart
 from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class PendingMailboxUserMessagePresentation(BaseModel):

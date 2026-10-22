@@ -123,10 +123,15 @@ void test("the shared Admin shell renders all destinations and settings in a sin
 });
 
 const detail: GoogleApplicationDetail = {
+  tool_group_catalog: [],
   status: "not_configured",
   client_id: null,
   callback_url: "https://azents.example.invalid/oauth/google/callback",
-  preview_verified: false,
+  picker_status: "not_configured",
+  picker_api_key: null,
+  picker_app_id: null,
+  picker_api_key_source: "unset",
+  picker_app_id_source: "unset",
   service_access_verified: false,
   section: "google_oauth",
   schema_version: 1,
@@ -156,25 +161,17 @@ function cardProps(overrides: Partial<GoogleApplicationDetail> = {}): unknown {
 void test("Google guide renders the complete operator setup flow with official links", () => {
   const html = render(Guide, {});
   for (const step of [
-    "Get Preview access",
-    "Enable the Google services",
+    "Choose a Cloud project and enable the APIs",
     "Configure the OAuth consent screen",
     "Create a Web application client",
-    "Save the credentials here",
+    "Optionally prepare Google Picker",
+    "Save credentials, then connect a Toolkit",
   ]) {
     assert.ok(html.includes(step), step);
   }
-  for (const host of [
-    "calendarmcp.googleapis.com",
-    "drivemcp.googleapis.com",
-    "gmailmcp.googleapis.com",
-  ]) {
-    assert.ok(html.includes(host));
-  }
   for (const path of [
-    "preview",
-    "guides/configure-mcp-servers",
     "guides/configure-oauth-consent",
+    "drive/picker/guides/web-picker",
   ]) {
     assert.ok(
       html.includes(`href="https://developers.google.com/workspace/${path}"`),
@@ -192,16 +189,31 @@ void test("Google guide renders the complete operator setup flow with official l
     "gmail.readonly",
     "gmail.compose",
     "gmail.modify",
+    "drive",
+    "gmail.send",
+    "gmail.settings.basic",
   ]) {
     assert.ok(html.includes(`https://www.googleapis.com/auth/${scope}`));
   }
   assert.match(html, /AZ_GOOGLE_OAUTH_CLIENT_SECRET/);
   assert.match(
     html,
-    /does not test Preview eligibility or live service access/,
+    /does not test live service access or Google verification/,
   );
-  assert.match(html, /do not expose Gmail sending/);
-  assert.match(html, /does not enable whole-Drive search/);
+  assert.match(html, /Compose and modify grants include supported sending/);
+  assert.match(html, /whole reads but only app-file writes/);
+  assert.match(html, /AZ_GOOGLE_PICKER_API_KEY/);
+  assert.match(html, /numeric Cloud project number/);
+});
+
+void test("all Google scope examples wrap instead of widening the setup list", () => {
+  const html = render(Guide, {});
+  const blocks = [...html.matchAll(/<pre\b[^>]*>/g)];
+  assert.equal(blocks.length, 3);
+  for (const [tag] of blocks) {
+    assert.match(tag, /white-space:pre-wrap/);
+    assert.match(tag, /overflow-wrap:anywhere/);
+  }
 });
 
 void test("Google card opens help for setup and preserves the server callback and write-only secret", () => {
@@ -240,6 +252,69 @@ void test("settings navigation accepts known query values and safely defaults un
   }
   assert.equal(settingsSectionFromValue(null), "google");
   assert.equal(settingsSectionFromValue("unknown"), "google");
+});
+
+void test("GitHub labels and internal metadata stay at the component boundary", () => {
+  const Page = loadComponent(
+    "./components/SystemSettingsPageContent.tsx",
+    "SystemSettingsPageContent",
+    {
+      "../GoogleApplicationCardContainer": {
+        GoogleApplicationCardContainer: (): ReactElement =>
+          createElement("p", {}, "Google"),
+      },
+      "../SystemSettingsLayoutContainer": {
+        SystemSettingsLayoutContainer: (props: {
+          sections: unknown;
+        }): ReactElement => Layout({ ...props, activeSection: "github" }),
+      },
+      "./ExternalAccountOAuthCards": {
+        ExternalAccountOAuthCards: (): ReactElement =>
+          createElement("p", {}, "Accounts"),
+      },
+      "./HistoricalMemoryExecutionCard": {
+        HistoricalMemoryExecutionCard: (): ReactElement =>
+          createElement("p", {}, "Memory"),
+      },
+    },
+  );
+  const html = render(Page, {
+    state: {
+      type: "LOADED",
+      detail: {
+        admin_version: 1,
+        effective_generation: 12,
+        effective_status: "not_configured",
+        fields: [],
+        candidate: null,
+        health: null,
+        binding_impact: null,
+      },
+    },
+    draft: {
+      appId: "",
+      clientId: "draft-client-not-saved",
+      privateKey: "",
+      clientSecret: "",
+      clearPrivateKey: false,
+      clearClientSecret: false,
+    },
+    auditState: { type: "LOADED", events: [], total: 0 },
+    externalFilesState: { type: "LOADING" },
+    externalFilesDraft: { outboundMaxFileMiB: "", outboundMaxActionMiB: "" },
+  });
+  for (const label of [
+    "Platform GitHub App",
+    "App ID",
+    "Client ID",
+    "Private key replacement",
+    "Client secret replacement",
+    "Effective health",
+  ]) {
+    assert.ok(html.includes(label), label);
+  }
+  assert.match(html, /value="draft-client-not-saved"/);
+  assert.ok(!html.includes("effective_generation"));
 });
 
 void test("settings layout exposes one section while retaining every draft subtree", () => {

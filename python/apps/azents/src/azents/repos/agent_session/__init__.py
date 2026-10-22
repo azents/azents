@@ -2532,6 +2532,26 @@ class AgentSessionRepository:
             if isinstance(authority, _RuntimeFreeRootCreationAuthority)
             else AgentRuntimeCapability.MANAGED
         )
+        await self.confirm_root_creation_authority(
+            session,
+            agent_id=agent_id,
+            expected_runtime_capability=expected_runtime_capability,
+            expected_runtime_capability_version=authority.runtime_capability_version,
+        )
+
+    async def confirm_root_creation_authority(
+        self,
+        session: WriteSession,
+        *,
+        agent_id: str,
+        expected_runtime_capability: AgentRuntimeCapability,
+        expected_runtime_capability_version: int,
+    ) -> None:
+        """Fence the caller's original Project-validation authority before commit.
+
+        Runtime-first root persistence must precede this Agent update. Propagate
+        failure so the owning write scope rolls back the entire root transaction.
+        """
         confirmed_id = await session.write_session.scalar(
             sa.update(RDBAgent)
             .where(
@@ -2539,7 +2559,7 @@ class AgentSessionRepository:
                 RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
                 RDBAgent.runtime_capability == expected_runtime_capability,
                 RDBAgent.runtime_capability_version
-                == authority.runtime_capability_version,
+                == expected_runtime_capability_version,
             )
             .values(
                 runtime_capability_version=RDBAgent.runtime_capability_version,

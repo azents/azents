@@ -6,8 +6,13 @@ from typing import Annotated, assert_never
 from fastapi import Depends
 
 from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
+from azents.core.agent_mutation import AgentMutationReadOnly
 from azents.core.agent_session_data import AgentSessionCreate
-from azents.core.enums import AgentRuntimeCapability, AgentSessionKind
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentRuntimeCapability,
+    AgentSessionKind,
+)
 from azents.core.root_agent_session_creation import (
     AgentDefaultRootWorkspaceIntent,
     ExplicitRootWorkspaceIntent,
@@ -18,7 +23,6 @@ from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
-from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 
@@ -64,7 +68,10 @@ class RootAgentSessionCreationRepository:
         agent = await self.agent_repository.get_by_id(session, create.agent_id)
         if agent is None:
             raise ValueError("Agent is unavailable")
-        await require_active_agent(session, agent_id=create.agent_id)
+        # The lower repository acquires Runtime authority before its final Agent
+        # CAS. Keep this preliminary lifecycle observation lock-free.
+        if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise AgentMutationReadOnly()
         self._require_runtime_capability(
             agent.runtime_capability,
             runtime_dependent=False,
@@ -80,6 +87,12 @@ class RootAgentSessionCreationRepository:
             session,
             session_id=agent_session.id,
             project_paths=resolved_workspace.project_paths,
+        )
+        await self.agent_session_repository.confirm_root_creation_authority(
+            session,
+            agent_id=agent.id,
+            expected_runtime_capability=agent.runtime_capability,
+            expected_runtime_capability_version=agent.runtime_capability_version,
         )
         return RootAgentSessionCreationResult(
             agent_session=agent_session,
@@ -118,7 +131,8 @@ class RootAgentSessionCreationRepository:
                 initial_project_paths=tuple(project.path for project in projects),
                 policy_revision=None,
             )
-        await require_active_agent(session, agent_id=agent_id)
+        if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise AgentMutationReadOnly()
         policy = await self._require_automatic_project_policy(
             session,
             agent_id=agent_id,
@@ -148,6 +162,12 @@ class RootAgentSessionCreationRepository:
             session,
             session_id=ensured.session.id,
             project_paths=policy.project_paths,
+        )
+        await self.agent_session_repository.confirm_root_creation_authority(
+            session,
+            agent_id=agent.id,
+            expected_runtime_capability=agent.runtime_capability,
+            expected_runtime_capability_version=agent.runtime_capability_version,
         )
         return RootAgentSessionCreationResult(
             agent_session=ensured.session,

@@ -68,6 +68,13 @@ class TestGoogleToolkitV1Api(unittest.TestCase):
         """
         pass
 
+    def test_google_toolkit_v1_agent_google_picker_token(self) -> None:
+        """Test case for google_toolkit_v1_agent_google_picker_token
+
+        Agent Google Picker Token
+        """
+        pass
+
     def test_google_toolkit_v1_agent_google_preparation(self) -> None:
         """Test case for google_toolkit_v1_agent_google_preparation
 
@@ -93,6 +100,13 @@ class TestGoogleToolkitV1Api(unittest.TestCase):
         """Test case for google_toolkit_v1_agent_google_review
 
         Agent Google Review
+        """
+        pass
+
+    def test_google_toolkit_v1_agent_google_services(self) -> None:
+        """Test case for google_toolkit_v1_agent_google_services
+
+        Agent Google Services
         """
         pass
 
@@ -145,6 +159,13 @@ class TestGoogleToolkitV1Api(unittest.TestCase):
         """
         pass
 
+    def test_google_toolkit_v1_shared_google_picker_token(self) -> None:
+        """Test case for google_toolkit_v1_shared_google_picker_token
+
+        Shared Google Picker Token
+        """
+        pass
+
     def test_google_toolkit_v1_shared_google_preparation(self) -> None:
         """Test case for google_toolkit_v1_shared_google_preparation
 
@@ -170,6 +191,13 @@ class TestGoogleToolkitV1Api(unittest.TestCase):
         """Test case for google_toolkit_v1_shared_google_review
 
         Shared Google Review
+        """
+        pass
+
+    def test_google_toolkit_v1_shared_google_services(self) -> None:
+        """Test case for google_toolkit_v1_shared_google_services
+
+        Shared Google Services
         """
         pass
 

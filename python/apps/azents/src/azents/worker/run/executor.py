@@ -175,7 +175,6 @@ from azents.engine.tools.deps import (
     get_runtime_web_toolkit_provider,
     get_scheduled_toolkit_provider,
     get_todo_toolkit_provider,
-    get_toolkit_registry,
     get_vfs_projection_service,
 )
 from azents.engine.tools.dynamic_worktree import (
@@ -263,6 +262,7 @@ from azents.worker.deps import (
     get_worker_broker,
     get_worker_config,
     get_worker_external_channel_toolkit_provider,
+    get_worker_toolkit_registry,
 )
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.finalizer import (
@@ -432,7 +432,7 @@ class RunExecutor:
         ModelMetadataService, Depends(ModelMetadataService)
     ]
     toolkit_registry: Annotated[
-        dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
+        dict[str, ToolkitProvider[Any]], Depends(get_worker_toolkit_registry)
     ]
     vfs_projection_service: Annotated[
         VfsProjectionService, Depends(get_vfs_projection_service)
@@ -2332,6 +2332,8 @@ class RunExecutor:
                     retry_model_refresh_required = (
                         command_handler is None and isinstance(exc, ModelCallError)
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
                     await self.live_event_projector.discard_failed_attempt(
                         snapshot.session_id,
@@ -3131,6 +3133,8 @@ class RunExecutor:
             for target_session_id in route.target_session_ids:
                 try:
                     await dispatch_event(target_session_id, event)
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     logger.exception(
                         "Failed to publish committed SessionAgent tree change",

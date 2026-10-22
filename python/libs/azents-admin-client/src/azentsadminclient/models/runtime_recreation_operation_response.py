@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.runtime_recreation_item_response import RuntimeRecreationItemResponse
 from azentsadminclient.models.runtime_recreation_operation_status import RuntimeRecreationOperationStatus
 from azentsadminclient.models.runtime_recreation_target_kind import RuntimeRecreationTargetKind
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeRecreationOperationResponse(BaseModel):

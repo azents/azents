@@ -22,9 +22,13 @@ from azents.services.google_oauth.data import (
     GoogleConnectInput,
     GoogleConnectionOutput,
     GoogleConnectOutput,
+    GooglePickerTokenInput,
+    GooglePickerTokenOutput,
     GooglePublishedOutput,
     GoogleReview,
+    GoogleServicesUpdateInput,
 )
+from azents.services.google_oauth.picker import GooglePickerService
 from azents.services.google_oauth.service import GoogleOAuthService
 
 
@@ -55,6 +59,7 @@ class GoogleRoute(APIRoute):
 router = APIRouter(route_class=GoogleRoute)
 Member = Annotated[WorkspaceMember, Depends(get_workspace_member)]
 Service = Annotated[GoogleOAuthService, Depends()]
+Picker = Annotated[GooglePickerService, Depends()]
 
 
 class GoogleExchangeRequest(BaseModel):
@@ -345,6 +350,66 @@ async def agent_google_status(
 ) -> GoogleConnectionOutput:
     with _errors():
         return await service.status(_subject(member, agent_id), toolkit_id)
+
+
+@router.post("/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/picker-token")
+async def shared_google_picker_token(
+    member: Member,
+    picker: Picker,
+    toolkit_id: str,
+    expected: GooglePickerTokenInput,
+    response: Response,
+) -> GooglePickerTokenOutput:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    with _errors():
+        return await picker.issue(_subject(member, None), toolkit_id, expected)
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/picker-token"
+)
+async def agent_google_picker_token(
+    member: Member,
+    picker: Picker,
+    toolkit_id: str,
+    agent_id: str,
+    expected: GooglePickerTokenInput,
+    response: Response,
+) -> GooglePickerTokenOutput:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    with _errors():
+        return await picker.issue(_subject(member, agent_id), toolkit_id, expected)
+
+
+@router.patch("/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/services")
+async def shared_google_services(
+    member: Member,
+    service: Service,
+    toolkit_id: str,
+    desired: GoogleServicesUpdateInput,
+) -> GoogleConnectionOutput:
+    with _errors():
+        return await service.update_services(
+            _subject(member, None), toolkit_id, desired
+        )
+
+
+@router.patch(
+    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/services"
+)
+async def agent_google_services(
+    member: Member,
+    service: Service,
+    toolkit_id: str,
+    agent_id: str,
+    desired: GoogleServicesUpdateInput,
+) -> GoogleConnectionOutput:
+    with _errors():
+        return await service.update_services(
+            _subject(member, agent_id), toolkit_id, desired
+        )
 
 
 @router.delete("/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/connection")

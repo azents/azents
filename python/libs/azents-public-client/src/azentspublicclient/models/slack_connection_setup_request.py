@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
 from azentspublicclient.models.slack_connection_credentials import SlackConnectionCredentials
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SlackConnectionSetupRequest(BaseModel):

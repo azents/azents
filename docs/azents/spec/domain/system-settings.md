@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-21
+updated: 2026-10-22
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -35,6 +35,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/shared/components/AdminShell.tsx
   - typescript/apps/azents-admin-web/src/shared/components/MasterDetailLayout.tsx
   - typescript/apps/azents-admin-web/src/shared/containers/useAdminShellContainer.ts
+  - typescript/apps/azents-admin-web/src/shared/containers/useMasterDetailLayoutContainer.ts
   - typescript/apps/azents-admin-web/src/shared/lib/admin-navigation.ts
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
   - infra/charts/azents/templates/server/apiserver-deployment.yaml.tpl
@@ -69,7 +70,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle/compacted-event-retention
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-21
+last_verified_at: 2026-10-22
 spec_version: 10
 ---
 
@@ -102,7 +103,9 @@ Settings authority.
 `GET|PATCH /system-setting/v1/sections/google-oauth` provides redacted fields,
 callback, preparation status and optimistic `expected_version`; secrets use
 explicit replace/clear actions. Direct activation validates local configuration,
-not live client/Preview/service health. Invalid configuration reports a safe
+not live client/service health. Optional Picker browser API key and numeric
+project/app ID have independent readiness; their absence does not hide ordinary
+Google tools. Invalid configuration reports a safe
 operator-preparation error.
 
 Google grants retain client binding, never operator-secret copies. Same-client
@@ -116,11 +119,13 @@ Admin System Settings exposes a Google application card with redacted preparatio
 state, environment-owned read-only fields, explicit secret replacement/clear
 actions and the deployment callback. A conflict or uncertain save requires
 reloading current settings before retry; reload discards the draft. Local
-configuration is not presented as verified Preview eligibility or service access.
+configuration is not presented as verified service access.
 An expandable setup guide opens by default for incomplete or missing configuration.
-It explains Preview access, Cloud project and service enablement, consent setup,
+It explains Cloud project and Workspace API enablement, consent setup,
 Web application client creation, exact callback registration, credential entry,
-and the separate Toolkit account-connection flow, with official Google links.
+the separate Toolkit account-connection flow, Google verification and restricted-scope
+obligations, and optional browser-restricted Picker configuration, with official
+Google links.
 See [Google Connection](google-connection.md) for the exact management, execution
 and candidate/publication contracts.
 
@@ -285,6 +290,10 @@ Google. Header, active link and content read the same query state. The workspace
 is mounted by the persistent `/system-settings` route layout, so query navigation
 does not recreate its state owners. Section subtrees remain mounted, preserving
 in-progress drafts without saving them. Each section retains independent save controls.
+Component rendering and native controller tests own section labels, draft retention
+across query-only navigation and internal-metadata presentation. Browser E2E retains
+the authenticated settings route and redacted credential fields; persisted retention
+policy and dual-Web authentication journeys remain assembled-product checks.
 
 Platform GitHub App detail, field source and fallback state, explicit secret
 actions, candidate validation and health, aggregate binding impact, and

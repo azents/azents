@@ -1,17 +1,23 @@
 # GoogleConnectionOutput
 
-Saved identity, authorization and selected work under manager authority.
+Saved local settings and actual grant evidence under current manager access.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **toolkit_id** | **str** |  | 
+**revision** | **int** |  | 
+**connection_id** | **str** |  | 
 **status** | **str** |  | 
 **identity** | [**GoogleIdentity**](GoogleIdentity.md) |  | 
-**selected_tasks** | [**List[GoogleTask]**](GoogleTask.md) |  | 
+**services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
+**oauth_request_scopes** | **List[str]** |  | 
+**granted_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
-**tasks** | [**List[GoogleTaskAccess]**](GoogleTaskAccess.md) |  | 
+**accesses** | [**List[GoogleServiceAccess]**](GoogleServiceAccess.md) |  | 
+**drive_access** | [**GoogleDriveAccess**](GoogleDriveAccess.md) |  | 
 **renewable** | **bool** |  | 
 **service_access_verified** | **bool** | Saved grant metadata is not a live access probe. | 
 

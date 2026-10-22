@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState
 from azentspublicclient.models.runtime_provider_observed_state import RuntimeProviderObservedState
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeLifecycleProviderResponse(BaseModel):

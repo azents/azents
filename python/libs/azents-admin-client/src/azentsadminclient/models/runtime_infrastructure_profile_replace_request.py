@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from azentsadminclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
 from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeInfrastructureProfileReplaceRequest(BaseModel):

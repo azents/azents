@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.system_setting_secret_action_type import SystemSettingSecretActionType
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SystemSettingSecretActionRequest(BaseModel):

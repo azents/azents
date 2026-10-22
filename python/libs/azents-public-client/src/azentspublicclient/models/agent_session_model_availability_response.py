@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_candidate_identity import ModelCandidateIdentity
 from azentspublicclient.models.primary_model_reservation import PrimaryModelReservation
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentSessionModelAvailabilityResponse(BaseModel):

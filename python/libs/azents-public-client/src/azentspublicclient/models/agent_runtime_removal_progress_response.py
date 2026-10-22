@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_runtime_removal_stage import AgentRuntimeRemovalStage
 from azentspublicclient.models.agent_runtime_removal_status import AgentRuntimeRemovalStatus
 from azentspublicclient.models.runtime_terminal_delete_acknowledgement_kind import RuntimeTerminalDeleteAcknowledgementKind
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeRemovalProgressResponse(BaseModel):

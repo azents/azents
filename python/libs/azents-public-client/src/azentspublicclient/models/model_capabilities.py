@@ -27,7 +27,7 @@ from azentspublicclient.models.model_parameter_capabilities import ModelParamete
 from azentspublicclient.models.model_reasoning_capabilities import ModelReasoningCapabilities
 from azentspublicclient.models.model_request_constraints import ModelRequestConstraints
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ModelCapabilities(BaseModel):

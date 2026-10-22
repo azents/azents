@@ -63,7 +63,7 @@ export function GoogleApplicationCard({
         <Text size="sm">
           Configure the operator-owned OAuth application used by Google Toolkits
           for Calendar, Drive and Gmail. The configured application is not proof
-          of Preview eligibility or live service access.
+          of live service access or account-policy eligibility.
         </Text>
         <Accordion
           variant="contained"
@@ -157,6 +157,62 @@ export function GoogleApplicationCard({
           }
         />
         <Text size="sm" fw={600}>
+          Optional Drive file chooser
+        </Text>
+        <Badge variant="light">
+          {detail.picker_status === "configured_unverified"
+            ? "Picker configured locally"
+            : detail.picker_status === "incomplete"
+              ? "Picker preparation incomplete"
+              : "Picker not configured"}
+        </Badge>
+        <Text size="sm">
+          The optional Google Picker requires the Google Picker API, a
+          browser-restricted API key and the numeric Cloud project number for
+          the same OAuth application. Missing Picker settings do not disable
+          ordinary Google tools.
+        </Text>
+        <TextInput
+          label="Picker browser API key"
+          description={
+            detail.picker_api_key_source === "environment"
+              ? "Owned by process environment; read-only here."
+              : "Restrict this browser-visible key to your Web origin and the Google Picker API. Leave unchanged to keep it."
+          }
+          value={draft.pickerApiKey}
+          disabled={
+            detail.picker_api_key_source === "environment" ||
+            state.saving ||
+            state.reloadRequired
+          }
+          onChange={(event) =>
+            state.onDraftChange({
+              pickerApiKey: event.currentTarget.value,
+              pickerApiKeyTouched: true,
+            })
+          }
+        />
+        <TextInput
+          label="Picker Cloud project number"
+          description={
+            detail.picker_app_id_source === "environment"
+              ? "Owned by process environment; read-only here."
+              : "Numeric project number, not the project name or OAuth client ID."
+          }
+          value={draft.pickerAppId}
+          disabled={
+            detail.picker_app_id_source === "environment" ||
+            state.saving ||
+            state.reloadRequired
+          }
+          onChange={(event) =>
+            state.onDraftChange({
+              pickerAppId: event.currentTarget.value,
+              pickerAppIdTouched: true,
+            })
+          }
+        />
+        <Text size="sm" fw={600}>
           Registered callback URL
         </Text>
         {detail.callback_url == null ? (
@@ -179,7 +235,7 @@ export function GoogleApplicationCard({
         )}
         <Text size="xs" c="dimmed">
           Register this exact URL with Google. Application permissions and
-          Preview access must be verified separately. No live authorization is
+          account access must be verified separately. No live authorization is
           performed by this screen.
         </Text>
         <Group justify="space-between">

@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.catalog_price_rate import CatalogPriceRate
 from azentspublicclient.models.catalog_time_window import CatalogTimeWindow
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class CatalogOffPeakRule(BaseModel):

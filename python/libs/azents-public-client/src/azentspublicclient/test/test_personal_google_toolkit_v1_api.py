@@ -68,6 +68,13 @@ class TestPersonalGoogleToolkitV1Api(unittest.TestCase):
         """
         pass
 
+    def test_personal_google_toolkit_v1_personal_google_picker_token(self) -> None:
+        """Test case for personal_google_toolkit_v1_personal_google_picker_token
+
+        Personal Google Picker Token
+        """
+        pass
+
     def test_personal_google_toolkit_v1_personal_google_preparation(self) -> None:
         """Test case for personal_google_toolkit_v1_personal_google_preparation
 
@@ -93,6 +100,13 @@ class TestPersonalGoogleToolkitV1Api(unittest.TestCase):
         """Test case for personal_google_toolkit_v1_personal_google_review
 
         Personal Google Review
+        """
+        pass
+
+    def test_personal_google_toolkit_v1_personal_google_services(self) -> None:
+        """Test case for personal_google_toolkit_v1_personal_google_services
+
+        Personal Google Services
         """
         pass
 

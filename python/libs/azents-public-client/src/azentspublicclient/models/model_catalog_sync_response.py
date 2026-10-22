@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_provider import LLMProvider
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ModelCatalogSyncResponse(BaseModel):

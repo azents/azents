@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.routine_delivery_status import RoutineDeliveryStatus
 from azentspublicclient.models.routine_work_result import RoutineWorkResult
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RoutineWorkRecordResponse(BaseModel):

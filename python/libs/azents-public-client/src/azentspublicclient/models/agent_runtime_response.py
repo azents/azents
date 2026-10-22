@@ -26,7 +26,7 @@ from azentspublicclient.models.agent_runtime_public_actions_response import Agen
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse
 from azentspublicclient.models.agent_runtime_removal_impact_response import AgentRuntimeRemovalImpactResponse
 from azentspublicclient.models.agent_runtime_removal_progress_response import AgentRuntimeRemovalProgressResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeResponse(BaseModel):

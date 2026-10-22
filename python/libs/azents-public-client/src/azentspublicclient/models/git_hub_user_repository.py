@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.git_hub_user_repository_permissions import GitHubUserRepositoryPermissions
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubUserRepository(BaseModel):

@@ -32,11 +32,18 @@ from azents.core.google_oauth import (
     GoogleSetup,
     google_manager_for_owner,
 )
-from azents.core.google_policy import GoogleService, permitted_tools
+from azents.core.google_picker import GooglePickerState
+from azents.core.google_policy import GoogleService, GoogleToolGroup
 from azents.core.google_system_setting import (
     GoogleApplicationRegistration,
     GoogleApplicationUnavailable,
+    GooglePickerApplication,
     resolve_google_registration,
+)
+from azents.core.google_tool_groups import group_operations
+from azents.core.google_workspace_policy import (
+    GOOGLE_PICKER_SCOPE,
+    eligible_model_operations,
 )
 from azents.core.system_setting import SystemSettingSection
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
@@ -76,6 +83,11 @@ _FINAL_SETTINGS = TypeAdapter(GoogleFinalSettings | GoogleReconnectSettings)
 
 def attempt_from(row: RDBGoogleAttempt, cipher: CredentialCipher) -> GoogleAttempt:
     """Return detached typed records, never an ORM instance across operation scope."""
+    unpublished = row.status in {
+        GoogleAttemptStatus.PENDING,
+        GoogleAttemptStatus.EXCHANGING,
+        GoogleAttemptStatus.REVIEW,
+    }
     return GoogleAttempt(
         id=row.id,
         subject=google_manager_for_owner(
@@ -91,24 +103,28 @@ def attempt_from(row: RDBGoogleAttempt, cipher: CredentialCipher) -> GoogleAttem
         status=row.status,
         expires_at=row.expires_at,
         setup=None
-        if row.encrypted_setup is None
+        if not unpublished or row.encrypted_setup is None
         else GoogleSetup.model_validate_json(cipher.decrypt(row.encrypted_setup)),
         candidate=None
-        if row.encrypted_candidate is None
+        if not unpublished or row.encrypted_candidate is None
         else GoogleCandidate.model_validate_json(
             cipher.decrypt(row.encrypted_candidate)
         ),
         published_toolkit_id=row.published_toolkit_id,
         published_connection_id=row.published_connection_id,
         final_settings=None
-        if row.final_settings is None
+        if row.status is not GoogleAttemptStatus.PUBLISHED or row.final_settings is None
         else _FINAL_SETTINGS.validate_python(row.final_settings),
     )
 
 
 def expire_attempt(row: RDBGoogleAttempt) -> bool:
     """Erase expired unpublished ciphertext without changing published outcomes."""
-    if row.status is GoogleAttemptStatus.PUBLISHED:
+    if row.status not in {
+        GoogleAttemptStatus.PENDING,
+        GoogleAttemptStatus.EXCHANGING,
+        GoogleAttemptStatus.REVIEW,
+    }:
         return False
     if row.expires_at > datetime.datetime.now(datetime.UTC):
         return False
@@ -307,12 +323,12 @@ class GoogleOAuthRepository:
             raise GoogleOAuthError("not_found", "Google setup attempt not found.")
         return row
 
-    async def _target(
+    async def _toolkit(
         self,
         session: WriteSession,
         subject: GoogleManager,
         toolkit_id: str,
-    ) -> GoogleSavedTarget:
+    ) -> RDBToolkitConfig:
         toolkit = await session.write_session.scalar(
             sa.select(RDBToolkitConfig)
             .where(
@@ -333,6 +349,15 @@ class GoogleOAuthRepository:
         )
         if toolkit is None:
             raise GoogleOAuthError("not_found", "Google connection not found.")
+        return toolkit
+
+    async def _target(
+        self,
+        session: WriteSession,
+        subject: GoogleManager,
+        toolkit_id: str,
+    ) -> GoogleSavedTarget:
+        toolkit = await self._toolkit(session, subject, toolkit_id)
         connection = await session.write_session.scalar(
             sa.select(RDBGoogleConnection)
             .where(RDBGoogleConnection.toolkit_id == toolkit_id)
@@ -356,9 +381,10 @@ class GoogleOAuthRepository:
             if candidate is None
             else candidate.tokens.granted_scopes,
             status=None if connection is None else connection.status,
-            tasks=tuple(config.tasks),
+            services=config.services,
+            tool_groups=config.tool_groups,
+            oauth_request_scopes=config.oauth_request_scopes,
             timeout=config.timeout,
-            security_risk_acknowledged=config.security_risk_acknowledged,
         )
 
     async def start(
@@ -455,9 +481,168 @@ class GoogleOAuthRepository:
                     encrypted_payload=row.encrypted_payload,
                 )
             )
-            return GoogleSavedConnection(
-                toolkit_id, target.tasks, target.timeout, connection
+            revision = await session.read_session.scalar(
+                sa.select(RDBToolkitConfig.revision).where(
+                    RDBToolkitConfig.id == toolkit_id
+                )
             )
+            if revision is None:
+                raise GoogleOAuthError("stale", "Google Toolkit is unavailable.")
+            return GoogleSavedConnection(
+                toolkit_id=toolkit_id,
+                revision=revision,
+                services=target.services,
+                tool_groups=target.tool_groups,
+                oauth_request_scopes=target.oauth_request_scopes,
+                timeout=target.timeout,
+                connection=connection,
+            )
+
+    async def update_services(
+        self,
+        subject: GoogleManager,
+        *,
+        toolkit_id: str,
+        expected_revision: int,
+        services: tuple[GoogleService, ...],
+        tool_groups: tuple[GoogleToolGroup, ...],
+    ) -> None:
+        """Save only local switches while preserving credential and request intent."""
+        async with self.session_manager() as session:
+            await self._scope(session, subject, lock=True)
+            toolkit = await self._toolkit(session, subject, toolkit_id)
+            if toolkit.revision != expected_revision:
+                raise GoogleOAuthError(
+                    "stale", "Google settings changed. Reload current settings."
+                )
+            config = GoogleToolkitConfig.model_validate(toolkit.config)
+            toolkit.config = config.model_copy(
+                update={
+                    "services": tuple(sorted(set(services))),
+                    "tool_groups": tuple(sorted(set(tool_groups))),
+                }
+            ).model_dump(mode="json")
+            toolkit.revision += 1
+
+    async def admit_picker(
+        self,
+        subject: GoogleManager,
+        *,
+        toolkit_id: str,
+        expected_revision: int,
+        connection_id: str,
+        application: GooglePickerApplication,
+    ) -> GooglePickerState:
+        """Admit the saved manager/Drive/file-scope snapshot before scoped renewal."""
+        async with self.session_manager() as session:
+            await self._scope(session, subject, lock=True)
+            await self._registration(session, application.registration)
+            toolkit = await self._toolkit(session, subject, toolkit_id)
+            if toolkit.revision != expected_revision:
+                raise GoogleOAuthError("stale", "Google settings changed. Reload them.")
+            config = GoogleToolkitConfig.model_validate(toolkit.config)
+            if GoogleService.DRIVE not in config.services:
+                raise GoogleOAuthError(
+                    "capability_unavailable",
+                    "Enable Drive before opening Google Picker.",
+                )
+            row = await session.write_session.scalar(
+                sa.select(RDBGoogleConnection)
+                .where(RDBGoogleConnection.toolkit_id == toolkit_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if row is None or row.status is not GoogleConnectionStatus.CONNECTED:
+                raise GoogleOAuthError(
+                    "reconnect_required", "Reconnect Google before opening Picker."
+                )
+            if row.id != connection_id:
+                raise GoogleOAuthError("stale", "Google connection changed. Reload it.")
+            if row.client_id != application.registration.client_id:
+                raise GoogleOAuthError(
+                    "client_changed",
+                    "Google application changed. Reconnect this account.",
+                )
+            candidate = GoogleCandidate.model_validate_json(
+                self.cipher.decrypt(row.encrypted_payload)
+            )
+            if GOOGLE_PICKER_SCOPE not in (candidate.tokens.granted_scopes or ()):
+                raise GoogleOAuthError(
+                    "picker_scope_required",
+                    "Reconnect with actual app-file authorization to use Picker.",
+                )
+            if candidate.tokens.refresh_token is None:
+                raise GoogleOAuthError(
+                    "reconnect_required", "Google renewal authorization is missing."
+                )
+            return GooglePickerState(
+                subject=subject,
+                toolkit_id=toolkit_id,
+                revision=toolkit.revision,
+                config=config,
+                connection=GoogleConnection(
+                    row.id,
+                    row.toolkit_id,
+                    row.client_id,
+                    candidate,
+                    row.status,
+                    row.updated_at,
+                    row.encrypted_payload,
+                ),
+                application=application,
+            )
+
+    async def finalize_picker(
+        self,
+        snapshot: GooglePickerState,
+        *,
+        rotated_refresh: str | None,
+        rejected: bool,
+    ) -> None:
+        """Recheck exact authority; retain only proven current rotation/rejection."""
+        if rotated_refresh is not None and rejected:
+            raise ValueError("Picker finalization cannot rotate a rejected receipt.")
+        async with self.session_manager() as session:
+            await self._scope(session, snapshot.subject, lock=True)
+            await self._registration(session, snapshot.application.registration)
+            toolkit = await self._toolkit(
+                session, snapshot.subject, snapshot.toolkit_id
+            )
+            config = GoogleToolkitConfig.model_validate(toolkit.config)
+            if toolkit.revision != snapshot.revision or config != snapshot.config:
+                raise GoogleOAuthError(
+                    "stale", "Google settings changed during Picker issuance."
+                )
+            row = await session.write_session.scalar(
+                sa.select(RDBGoogleConnection)
+                .where(RDBGoogleConnection.toolkit_id == snapshot.toolkit_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            old = snapshot.connection
+            if (
+                row is None
+                or row.id != old.id
+                or row.client_id != old.client_id
+                or row.status is not GoogleConnectionStatus.CONNECTED
+                or row.encrypted_payload != old.encrypted_payload
+                or row.updated_at != old.updated_at
+            ):
+                raise GoogleOAuthError(
+                    "stale", "Google credential changed during Picker issuance."
+                )
+            if rotated_refresh is not None:
+                candidate = old.candidate.model_copy(
+                    update={
+                        "tokens": old.candidate.tokens.model_copy(
+                            update={"refresh_token": rotated_refresh}
+                        )
+                    }
+                )
+                row.encrypted_payload = self.cipher.encrypt(candidate.model_dump_json())
+            if rotated_refresh is not None or rejected:
+                row.status = GoogleConnectionStatus.RECONNECT_REQUIRED
+                row.updated_at = datetime.datetime.now(datetime.UTC)
 
     async def load(self, subject: GoogleManager, attempt_id: str) -> GoogleAttempt:
         """Commit expired-secret cleanup before reporting expiry to the service."""
@@ -615,34 +800,36 @@ class GoogleOAuthRepository:
                         "stale", "Google account is not ready for confirmation."
                     )
                 self._bound(setup, registration)
-                if not settings.security_risk_acknowledged:
-                    raise GoogleOAuthError(
-                        "risk_acknowledgement_required",
-                        "Review Google content-screening limitations "
-                        "before confirmation.",
-                    )
-                if not settings.tasks or not set(settings.tasks) <= set(setup.tasks):
+                if (
+                    not settings.services
+                    or not set(settings.tool_groups) <= set(setup.tool_groups)
+                    or not set(settings.services) <= set(setup.services)
+                    or not set(settings.oauth_request_scopes)
+                    <= set(setup.oauth_request_scopes)
+                ):
                     raise GoogleOAuthError(
                         "invalid_selection",
-                        "Final Google tasks must come from the reviewed selection.",
+                        "Final Google services and request intent must come "
+                        "from the reviewed selection.",
                     )
                 if (
                     candidate.tokens.expires_at <= datetime.datetime.now(datetime.UTC)
                     or candidate.tokens.refresh_token is None
-                ) or not any(
-                    permitted_tools(
-                        settings.tasks, candidate.tokens.granted_scopes, service
+                ) or not (
+                    eligible_model_operations(
+                        settings.services, candidate.tokens.granted_scopes
                     )
-                    for service in GoogleService
+                    & group_operations(settings.tool_groups)
                 ):
                     raise GoogleOAuthError(
                         "no_usable_capability",
                         "Google did not provide a durable usable authorization.",
                     )
                 config = GoogleToolkitConfig(
-                    tasks=list(settings.tasks),
+                    services=settings.services,
+                    tool_groups=settings.tool_groups,
+                    oauth_request_scopes=settings.oauth_request_scopes,
                     timeout=settings.timeout,
-                    security_risk_acknowledged=True,
                 ).model_dump(mode="json")
                 if setup.target is None:
                     if not isinstance(settings, GoogleFinalSettings):

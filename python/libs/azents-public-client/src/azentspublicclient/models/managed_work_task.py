@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.external_channel_work_task_status import ExternalChannelWorkTaskStatus
 from azentspublicclient.models.managed_work_source import ManagedWorkSource
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ManagedWorkTask(BaseModel):

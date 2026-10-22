@@ -20,24 +20,26 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing_extensions import Annotated
-from azentspublicclient.models.google_task import GoogleTask
-from typing import Optional, Set
+from azentspublicclient.models.google_service import GoogleService
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleFinalSettings(BaseModel):
     """
-    Complete final reviewed settings; no provider permission booleans accepted.
+    Complete reviewed metadata and service/request settings; never grants.
     """ # noqa: E501
+    services: List[GoogleService]
+    tool_groups: List[GoogleToolGroup]
+    oauth_request_scopes: List[StrictStr]
+    timeout: Union[Annotated[float, Field(le=300.0, strict=True)], Annotated[int, Field(le=300, strict=True)]]
     name: Optional[Annotated[str, Field(strict=True, max_length=255)]]
     slug: Optional[StrictStr]
     description: Optional[StrictStr]
     prompt: Optional[StrictStr]
     enabled: StrictBool
     always_expose_tools: StrictBool
-    tasks: List[GoogleTask]
-    timeout: Union[Annotated[float, Field(le=300.0, strict=True)], Annotated[int, Field(le=300, strict=True)]]
-    security_risk_acknowledged: StrictBool
-    __properties: ClassVar[List[str]] = ["name", "slug", "description", "prompt", "enabled", "always_expose_tools", "tasks", "timeout", "security_risk_acknowledged"]
+    __properties: ClassVar[List[str]] = ["services", "tool_groups", "oauth_request_scopes", "timeout", "name", "slug", "description", "prompt", "enabled", "always_expose_tools"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -112,15 +114,16 @@ class GoogleFinalSettings(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
+            "services": obj.get("services"),
+            "tool_groups": obj.get("tool_groups"),
+            "oauth_request_scopes": obj.get("oauth_request_scopes"),
+            "timeout": obj.get("timeout"),
             "name": obj.get("name"),
             "slug": obj.get("slug"),
             "description": obj.get("description"),
             "prompt": obj.get("prompt"),
             "enabled": obj.get("enabled"),
-            "always_expose_tools": obj.get("always_expose_tools"),
-            "tasks": obj.get("tasks"),
-            "timeout": obj.get("timeout"),
-            "security_risk_acknowledged": obj.get("security_risk_acknowledged")
+            "always_expose_tools": obj.get("always_expose_tools")
             }.items() if _key in obj
         })
         return _obj

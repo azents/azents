@@ -44,27 +44,42 @@ class TestGoogleReview(unittest.TestCase):
                 client_id = '',
                 ownership = 'agent_only',
                 reconnect_toolkit_id = '',
-                requested_tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
+                oauth_request_scopes = [
+                    ''
+                    ],
+                granted_scopes = [
+                    ''
                     ],
                 timeout = 1.337,
-                tasks = [
-                    azentspublicclient.models.google_task_access.GoogleTaskAccess(
-                        task = 'calendar_read', 
+                accesses = [
+                    azentspublicclient.models.google_service_access.GoogleServiceAccess(
                         service = 'calendar', 
-                        status = 'permitted', 
+                        enabled = True, 
+                        status = 'disabled', 
                         permitted_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], 
                         unavailable_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], )
                     ],
+                drive_access = azentspublicclient.models.google_drive_access.GoogleDriveAccess(
+                    whole_metadata_read = True, 
+                    whole_content_read = True, 
+                    whole_content_write = True, 
+                    whole_metadata_write = True, 
+                    app_file_read = True, 
+                    app_file_write = True, ),
                 grant_result = 'full',
                 renewable = True,
                 can_confirm = True,
-                service_access_verified = True,
-                security_notice = ''
+                service_access_verified = false
             )
         else:
             return GoogleReview(
@@ -77,27 +92,42 @@ class TestGoogleReview(unittest.TestCase):
                 client_id = '',
                 ownership = 'agent_only',
                 reconnect_toolkit_id = '',
-                requested_tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
+                oauth_request_scopes = [
+                    ''
+                    ],
+                granted_scopes = [
+                    ''
                     ],
                 timeout = 1.337,
-                tasks = [
-                    azentspublicclient.models.google_task_access.GoogleTaskAccess(
-                        task = 'calendar_read', 
+                accesses = [
+                    azentspublicclient.models.google_service_access.GoogleServiceAccess(
                         service = 'calendar', 
-                        status = 'permitted', 
+                        enabled = True, 
+                        status = 'disabled', 
                         permitted_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], 
                         unavailable_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], )
                     ],
+                drive_access = azentspublicclient.models.google_drive_access.GoogleDriveAccess(
+                    whole_metadata_read = True, 
+                    whole_content_read = True, 
+                    whole_content_write = True, 
+                    whole_metadata_write = True, 
+                    app_file_read = True, 
+                    app_file_write = True, ),
                 grant_result = 'full',
                 renewable = True,
                 can_confirm = True,
-                service_access_verified = True,
-                security_notice = '',
+                service_access_verified = false,
         )
         """
 

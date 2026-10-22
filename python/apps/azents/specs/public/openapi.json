@@ -16537,6 +16537,139 @@
         }
       }
     },
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/picker-token": {
+      "post": {
+        "tags": [
+          "Personal Google Toolkit v1"
+        ],
+        "summary": "Personal Google Picker Token",
+        "operationId": "personal_google_toolkit_v1_personal_google_picker_token",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GooglePickerTokenInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePickerTokenOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/services": {
+      "patch": {
+        "tags": [
+          "Personal Google Toolkit v1"
+        ],
+        "summary": "Personal Google Services",
+        "description": "Save personal service switches without replacing the connected identity.",
+        "operationId": "personal_google_toolkit_v1_personal_google_services",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleServicesUpdateInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectionOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/toolkit/v1/workspaces/{handle}/personal/github/platform-install-url": {
       "get": {
         "tags": [
@@ -23000,6 +23133,288 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/picker-token": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Picker Token",
+        "operationId": "google_toolkit_v1_shared_google_picker_token",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GooglePickerTokenInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePickerTokenOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/picker-token": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Picker Token",
+        "operationId": "google_toolkit_v1_agent_google_picker_token",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GooglePickerTokenInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePickerTokenOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/services": {
+      "patch": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Services",
+        "operationId": "google_toolkit_v1_shared_google_services",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleServicesUpdateInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectionOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/services": {
+      "patch": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Services",
+        "operationId": "google_toolkit_v1_agent_google_services",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleServicesUpdateInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectionOutput"
+                }
               }
             }
           },
@@ -33560,7 +33975,7 @@
           "publication"
         ],
         "title": "GoogleCancelOutput",
-        "description": "Publication won the race or candidate was locally abandoned."
+        "description": "Publication won the race or the candidate was locally abandoned."
       },
       "GoogleConfirmRequest": {
         "properties": {
@@ -33577,13 +33992,26 @@
       },
       "GoogleConnectInput": {
         "properties": {
-          "tasks": {
+          "services": {
             "items": {
-              "$ref": "#/components/schemas/GoogleTask"
+              "$ref": "#/components/schemas/GoogleService"
             },
             "type": "array",
-            "minItems": 1,
-            "title": "Tasks"
+            "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
+          "oauth_request_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Oauth Request Scopes"
           },
           "timeout": {
             "type": "number",
@@ -33595,11 +34023,13 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "tasks",
+          "services",
+          "tool_groups",
+          "oauth_request_scopes",
           "timeout"
         ],
         "title": "GoogleConnectInput",
-        "description": "Explicit work selection before initial or ordinary reconnect authorization."
+        "description": "Explicit service/scope intent before consent; requested scopes are not grants."
       },
       "GoogleConnectOutput": {
         "properties": {
@@ -33632,6 +34062,21 @@
             "type": "string",
             "title": "Toolkit Id"
           },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -33653,23 +34098,54 @@
               }
             ]
           },
-          "selected_tasks": {
+          "services": {
             "items": {
-              "$ref": "#/components/schemas/GoogleTask"
+              "$ref": "#/components/schemas/GoogleService"
             },
             "type": "array",
-            "title": "Selected Tasks"
+            "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
+          "oauth_request_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Oauth Request Scopes"
+          },
+          "granted_scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granted Scopes"
           },
           "timeout": {
             "type": "number",
             "title": "Timeout"
           },
-          "tasks": {
+          "accesses": {
             "items": {
-              "$ref": "#/components/schemas/GoogleTaskAccess"
+              "$ref": "#/components/schemas/GoogleServiceAccess"
             },
             "type": "array",
-            "title": "Tasks"
+            "title": "Accesses"
+          },
+          "drive_access": {
+            "$ref": "#/components/schemas/GoogleDriveAccess"
           },
           "renewable": {
             "type": "boolean",
@@ -33677,6 +34153,7 @@
           },
           "service_access_verified": {
             "type": "boolean",
+            "const": false,
             "title": "Service Access Verified",
             "description": "Saved grant metadata is not a live access probe."
           }
@@ -33684,16 +34161,61 @@
         "type": "object",
         "required": [
           "toolkit_id",
+          "revision",
+          "connection_id",
           "status",
           "identity",
-          "selected_tasks",
+          "services",
+          "tool_groups",
+          "oauth_request_scopes",
+          "granted_scopes",
           "timeout",
-          "tasks",
+          "accesses",
+          "drive_access",
           "renewable",
           "service_access_verified"
         ],
         "title": "GoogleConnectionOutput",
-        "description": "Saved identity, authorization and selected work under manager authority."
+        "description": "Saved local settings and actual grant evidence under current manager access."
+      },
+      "GoogleDriveAccess": {
+        "properties": {
+          "whole_metadata_read": {
+            "type": "boolean",
+            "title": "Whole Metadata Read"
+          },
+          "whole_content_read": {
+            "type": "boolean",
+            "title": "Whole Content Read"
+          },
+          "whole_content_write": {
+            "type": "boolean",
+            "title": "Whole Content Write"
+          },
+          "whole_metadata_write": {
+            "type": "boolean",
+            "title": "Whole Metadata Write"
+          },
+          "app_file_read": {
+            "type": "boolean",
+            "title": "App File Read"
+          },
+          "app_file_write": {
+            "type": "boolean",
+            "title": "App File Write"
+          }
+        },
+        "type": "object",
+        "required": [
+          "whole_metadata_read",
+          "whole_content_read",
+          "whole_content_write",
+          "whole_metadata_write",
+          "app_file_read",
+          "app_file_write"
+        ],
+        "title": "GoogleDriveAccess",
+        "description": "Scope extent only; Google retains resource eligibility and ACL authority."
       },
       "GoogleExchangeRequest": {
         "properties": {
@@ -33721,6 +34243,33 @@
       },
       "GoogleFinalSettings": {
         "properties": {
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleService"
+            },
+            "type": "array",
+            "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
+          "oauth_request_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Oauth Request Scopes"
+          },
+          "timeout": {
+            "type": "number",
+            "maximum": 300.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout"
+          },
           "name": {
             "anyOf": [
               {
@@ -33773,40 +34322,56 @@
           "always_expose_tools": {
             "type": "boolean",
             "title": "Always Expose Tools"
-          },
-          "tasks": {
-            "items": {
-              "$ref": "#/components/schemas/GoogleTask"
-            },
-            "type": "array",
-            "title": "Tasks"
-          },
-          "timeout": {
-            "type": "number",
-            "maximum": 300.0,
-            "exclusiveMinimum": 0.0,
-            "title": "Timeout"
-          },
-          "security_risk_acknowledged": {
-            "type": "boolean",
-            "title": "Security Risk Acknowledged"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "services",
+          "tool_groups",
+          "oauth_request_scopes",
+          "timeout",
           "name",
           "slug",
           "description",
           "prompt",
           "enabled",
-          "always_expose_tools",
-          "tasks",
-          "timeout",
-          "security_risk_acknowledged"
+          "always_expose_tools"
         ],
         "title": "GoogleFinalSettings",
-        "description": "Complete final reviewed settings; no provider permission booleans accepted."
+        "description": "Complete reviewed metadata and service/request settings; never grants."
+      },
+      "GoogleGroupDefinition": {
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GoogleToolGroup"
+          },
+          "service": {
+            "$ref": "#/components/schemas/GoogleService"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleWorkspaceOperation"
+            },
+            "type": "array",
+            "title": "Operations"
+          },
+          "request_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Request Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "group",
+          "service",
+          "operations",
+          "request_scopes"
+        ],
+        "title": "GoogleGroupDefinition"
       },
       "GoogleIdentity": {
         "properties": {
@@ -33839,6 +34404,64 @@
         ],
         "title": "GoogleIdentity",
         "description": "Principal obtained only from verified signed Google identity claims."
+      },
+      "GooglePickerTokenInput": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "connection_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Connection Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "connection_id"
+        ],
+        "title": "GooglePickerTokenInput",
+        "description": "Only the expected current target is accepted; scope/token inputs are closed."
+      },
+      "GooglePickerTokenOutput": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Access Token"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "api_key": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Api Key"
+          },
+          "app_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "App Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_at",
+          "api_key",
+          "app_id"
+        ],
+        "title": "GooglePickerTokenOutput",
+        "description": "Transient manager-browser bearer receipt, never an Agent/model response."
       },
       "GooglePreparation": {
         "properties": {
@@ -33873,15 +34496,28 @@
             ],
             "title": "Callback Url"
           },
-          "preview_verified": {
-            "type": "boolean",
-            "title": "Preview Verified",
-            "description": "Always false for local operator preparation."
+          "picker_status": {
+            "type": "string",
+            "enum": [
+              "not_configured",
+              "incomplete",
+              "configured_unverified"
+            ],
+            "title": "Picker Status"
           },
           "service_access_verified": {
             "type": "boolean",
             "title": "Service Access Verified",
             "description": "Local preparation does not verify live service access."
+          },
+          "tool_group_catalog": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleGroupDefinition"
+            },
+            "type": "array",
+            "title": "Tool Group Catalog",
+            "description": "Expose nonsecret supported capabilities from the canonical catalog.",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -33889,11 +34525,12 @@
           "status",
           "client_id",
           "callback_url",
-          "preview_verified",
-          "service_access_verified"
+          "picker_status",
+          "service_access_verified",
+          "tool_group_catalog"
         ],
         "title": "GooglePreparation",
-        "description": "Public redacted declaration; never claims verified Preview or service access."
+        "description": "Separate local OAuth and optional Picker preparation, without live claims."
       },
       "GooglePublishedOutput": {
         "properties": {
@@ -33934,33 +34571,44 @@
       },
       "GoogleReconnectSettings": {
         "properties": {
-          "tasks": {
+          "services": {
             "items": {
-              "$ref": "#/components/schemas/GoogleTask"
+              "$ref": "#/components/schemas/GoogleService"
             },
             "type": "array",
-            "title": "Tasks"
+            "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
+          "oauth_request_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Oauth Request Scopes"
           },
           "timeout": {
             "type": "number",
             "maximum": 300.0,
             "exclusiveMinimum": 0.0,
             "title": "Timeout"
-          },
-          "security_risk_acknowledged": {
-            "type": "boolean",
-            "title": "Security Risk Acknowledged"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "tasks",
-          "timeout",
-          "security_risk_acknowledged"
+          "services",
+          "tool_groups",
+          "oauth_request_scopes",
+          "timeout"
         ],
         "title": "GoogleReconnectSettings",
-        "description": "Reconnect changes authentication selection, not unrelated saved metadata."
+        "description": "Reconnect changes reviewed request intent, not unrelated saved metadata."
       },
       "GoogleReview": {
         "properties": {
@@ -34000,23 +34648,54 @@
             ],
             "title": "Reconnect Toolkit Id"
           },
-          "requested_tasks": {
+          "services": {
             "items": {
-              "$ref": "#/components/schemas/GoogleTask"
+              "$ref": "#/components/schemas/GoogleService"
             },
             "type": "array",
-            "title": "Requested Tasks"
+            "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          },
+          "oauth_request_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Oauth Request Scopes"
+          },
+          "granted_scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granted Scopes"
           },
           "timeout": {
             "type": "number",
             "title": "Timeout"
           },
-          "tasks": {
+          "accesses": {
             "items": {
-              "$ref": "#/components/schemas/GoogleTaskAccess"
+              "$ref": "#/components/schemas/GoogleServiceAccess"
             },
             "type": "array",
-            "title": "Tasks"
+            "title": "Accesses"
+          },
+          "drive_access": {
+            "$ref": "#/components/schemas/GoogleDriveAccess"
           },
           "grant_result": {
             "type": "string",
@@ -34026,7 +34705,8 @@
               "none",
               "unknown"
             ],
-            "title": "Grant Result"
+            "title": "Grant Result",
+            "description": "Receipt evidence for requested Workspace scopes, not an action ceiling. Actual supported tools and Drive extent are projected independently."
           },
           "renewable": {
             "type": "boolean",
@@ -34038,12 +34718,9 @@
           },
           "service_access_verified": {
             "type": "boolean",
+            "const": false,
             "title": "Service Access Verified",
             "description": "Scope review does not verify live resource access."
-          },
-          "security_notice": {
-            "type": "string",
-            "title": "Security Notice"
           }
         },
         "type": "object",
@@ -34054,17 +34731,20 @@
           "client_id",
           "ownership",
           "reconnect_toolkit_id",
-          "requested_tasks",
+          "services",
+          "tool_groups",
+          "oauth_request_scopes",
+          "granted_scopes",
           "timeout",
-          "tasks",
+          "accesses",
+          "drive_access",
           "grant_result",
           "renewable",
           "can_confirm",
-          "service_access_verified",
-          "security_notice"
+          "service_access_verified"
         ],
         "title": "GoogleReview",
-        "description": "Actual grant result with token-free exact ownership/capability projection."
+        "description": "Actual grant and reviewed intent remain separate, with no token projection."
       },
       "GoogleService": {
         "type": "string",
@@ -34074,34 +34754,21 @@
           "gmail"
         ],
         "title": "GoogleService",
-        "description": "Fixed official Google Workspace MCP services."
+        "description": "Supported Google Workspace services."
       },
-      "GoogleTask": {
-        "type": "string",
-        "enum": [
-          "calendar_read",
-          "calendar_availability",
-          "calendar_edit",
-          "drive_read",
-          "drive_files",
-          "gmail_read",
-          "gmail_drafts",
-          "gmail_modify"
-        ],
-        "title": "GoogleTask",
-        "description": "Explicit selected work; no task is silently selected."
-      },
-      "GoogleTaskAccess": {
+      "GoogleServiceAccess": {
         "properties": {
-          "task": {
-            "$ref": "#/components/schemas/GoogleTask"
-          },
           "service": {
             "$ref": "#/components/schemas/GoogleService"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
           },
           "status": {
             "type": "string",
             "enum": [
+              "disabled",
               "permitted",
               "partial",
               "not_granted",
@@ -34111,29 +34778,163 @@
           },
           "permitted_tools": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/GoogleWorkspaceOperation"
             },
             "type": "array",
             "title": "Permitted Tools"
           },
           "unavailable_tools": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/GoogleWorkspaceOperation"
             },
             "type": "array",
             "title": "Unavailable Tools"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "task",
           "service",
+          "enabled",
           "status",
           "permitted_tools",
           "unavailable_tools"
         ],
-        "title": "GoogleTaskAccess",
-        "description": "Task-level permission evidence; no live resource-access promise."
+        "title": "GoogleServiceAccess",
+        "description": "Local enablement and actual operation evidence are independent facts."
+      },
+      "GoogleServicesUpdateInput": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleService"
+            },
+            "type": "array",
+            "title": "Services"
+          },
+          "tool_groups": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleToolGroup"
+            },
+            "type": "array",
+            "title": "Tool Groups"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "services",
+          "tool_groups"
+        ],
+        "title": "GoogleServicesUpdateInput",
+        "description": "Revision-fenced local switch save; empty services is a valid inactive state."
+      },
+      "GoogleToolGroup": {
+        "type": "string",
+        "enum": [
+          "gmail_read",
+          "gmail_labels",
+          "gmail_drafts",
+          "gmail_send",
+          "gmail_organize",
+          "gmail_filters",
+          "calendar_read",
+          "calendar_availability",
+          "calendar_events",
+          "calendar_status",
+          "calendar_create",
+          "drive_read",
+          "drive_files",
+          "drive_sharing",
+          "drive_ownership"
+        ],
+        "title": "GoogleToolGroup",
+        "description": "Closed capability selections; Google scopes remain independent evidence."
+      },
+      "GoogleWorkspaceOperation": {
+        "type": "string",
+        "enum": [
+          "gmail_search_messages",
+          "gmail_get_message",
+          "gmail_batch_get_messages",
+          "gmail_search_threads",
+          "gmail_get_thread",
+          "gmail_download_attachment",
+          "gmail_list_labels",
+          "gmail_get_label",
+          "gmail_create_label",
+          "gmail_update_label",
+          "gmail_delete_label",
+          "gmail_list_drafts",
+          "gmail_get_draft",
+          "gmail_create_draft",
+          "gmail_update_draft",
+          "gmail_delete_draft",
+          "gmail_send_draft",
+          "gmail_send_message",
+          "gmail_get_send_as",
+          "gmail_reply_message",
+          "gmail_forward_message",
+          "gmail_modify_message",
+          "gmail_batch_modify_messages",
+          "gmail_modify_thread",
+          "gmail_trash_message",
+          "gmail_untrash_message",
+          "gmail_trash_thread",
+          "gmail_untrash_thread",
+          "gmail_list_filters",
+          "gmail_get_filter",
+          "gmail_create_filter",
+          "gmail_delete_filter",
+          "gmail_replace_filter",
+          "gmail_apply_filter",
+          "gmail_preview_filter",
+          "calendar_list_calendars",
+          "calendar_list_events",
+          "calendar_get_event",
+          "calendar_list_instances",
+          "calendar_query_freebusy",
+          "calendar_suggest_time",
+          "calendar_create_event",
+          "calendar_update_event",
+          "calendar_delete_event",
+          "calendar_respond_event",
+          "calendar_list_status_events",
+          "calendar_create_status_event",
+          "calendar_update_status_event",
+          "calendar_delete_status_event",
+          "calendar_create_calendar",
+          "drive_search_files",
+          "drive_get_metadata",
+          "drive_read_content",
+          "drive_download_file",
+          "drive_export_file",
+          "drive_get_link",
+          "drive_list_permissions",
+          "drive_get_permission",
+          "drive_create_file",
+          "drive_create_folder",
+          "drive_copy_file",
+          "drive_update_metadata",
+          "drive_update_content",
+          "drive_append_text",
+          "drive_import_document",
+          "drive_import_spreadsheet",
+          "drive_import_presentation",
+          "drive_create_permission",
+          "drive_update_permission",
+          "drive_delete_permission",
+          "drive_transfer_ownership",
+          "drive_update_access"
+        ],
+        "title": "GoogleWorkspaceOperation",
+        "description": "Supported direct operations; this is not a provider-method executor."
       },
       "HTTPValidationError": {
         "properties": {

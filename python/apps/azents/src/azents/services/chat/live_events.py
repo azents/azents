@@ -63,6 +63,35 @@ from azents.engine.events.types import (
 from azents.utils.appctx import AppContext
 
 _LIVE_EVENT_TTL_SECONDS = 300
+
+
+@dataclasses.dataclass(frozen=True)
+class _ReasoningIdentity:
+    item_id: str | None
+    output_index: int | None
+    summary_index: int | None
+
+
+def _decode_reasoning_identity(item: Mapping[str, object]) -> _ReasoningIdentity:
+    """Project consumed native fields without changing the opaque artifact."""
+    item_id = item.get("id")
+    output_index = item.get("output_index")
+    summary_index = item.get("summary_index")
+    return _ReasoningIdentity(
+        item_id=item_id if isinstance(item_id, str) else None,
+        output_index=(
+            output_index
+            if isinstance(output_index, int) and not isinstance(output_index, bool)
+            else None
+        ),
+        summary_index=(
+            summary_index
+            if isinstance(summary_index, int) and not isinstance(summary_index, bool)
+            else None
+        ),
+    )
+
+
 _OWNER_GENERATION_FIELD = "__owner_generation__"
 _live_event_adapter = TypeAdapter(Event)
 _chat_action_adapter = TypeAdapter(PersistedChatAction)
@@ -924,11 +953,13 @@ class BaseLiveEventStore:
             else None
         )
         current_text = current_payload.text if current_payload is not None else ""
-        current_summary_index: int | None = None
-        if current_payload is not None:
-            value = current_payload.native_artifact.item.get("summary_index")
-            if isinstance(value, int) and not isinstance(value, bool):
-                current_summary_index = value
+        current_summary_index = (
+            _decode_reasoning_identity(
+                current_payload.native_artifact.item
+            ).summary_index
+            if current_payload is not None
+            else None
+        )
         separator = (
             "\n"
             if current_text
@@ -989,16 +1020,9 @@ class BaseLiveEventStore:
                 ):
                     await self.remove(event.session_id, live_event.id)
         elif isinstance(event.payload, ReasoningPayload):
-            native_item = event.payload.native_artifact.item
-            raw_item_id = native_item.get("id")
-            item_id = raw_item_id if isinstance(raw_item_id, str) else None
-            raw_output_index = native_item.get("output_index")
-            output_index = (
-                raw_output_index
-                if isinstance(raw_output_index, int)
-                and not isinstance(raw_output_index, bool)
-                else None
-            )
+            identity = _decode_reasoning_identity(event.payload.native_artifact.item)
+            item_id = identity.item_id
+            output_index = identity.output_index
             live_events = [
                 live_event
                 for live_event in await self.list_by_session_id(event.session_id)

@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_provider_integration_create_request_config import LLMProviderIntegrationCreateRequestConfig
 from azentspublicclient.models.secrets1 import Secrets1
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class LLMProviderIntegrationUpdateRequest(BaseModel):

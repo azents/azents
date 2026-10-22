@@ -1,6 +1,7 @@
 """Exercise SDK-owned token grants and real signed identity verification."""
 
 import json
+import logging
 import time
 from unittest.mock import create_autospec
 from urllib.parse import parse_qs, urlsplit
@@ -14,8 +15,10 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from azents.core.config import Config
 from azents.core.google_oauth import GoogleOAuthError, GoogleSetup
-from azents.core.google_policy import GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.google_tool_groups import groups_for_services
+from azents.core.google_workspace_policy import GOOGLE_PICKER_SCOPE
 from azents.services.google_oauth.provider import (
     GoogleOAuthProvider,
     GoogleTokenResponse,
@@ -30,9 +33,14 @@ def _setup() -> GoogleSetup:
         state_nonce="state-nonce",
         oidc_nonce="identity-nonce",
         code_verifier="x" * 43,
-        tasks=(GoogleTask.CALENDAR_READ,),
+        services=(GoogleService.CALENDAR,),
+        oauth_request_scopes=(
+            "https://www.googleapis.com/auth/calendar.events.readonly",
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        ),
         timeout=30.0,
         target=None,
+        tool_groups=groups_for_services((GoogleService.CALENDAR,)),
     )
 
 
@@ -113,6 +121,50 @@ async def test_refresh_omission_does_not_fabricate_scope_or_refresh_token() -> N
         )
     assert refreshed.granted_scopes is None
     assert refreshed.refresh_token is None
+
+
+@pytest.mark.parametrize("returned_scope", [None, GOOGLE_PICKER_SCOPE])
+async def test_picker_sdk_requests_exact_scope_without_inventing_receipt(
+    returned_scope: str | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    requests: list[httpx.Request] = []
+    caplog.set_level(logging.DEBUG)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = parse_qs(request.content.decode())
+        assert body["scope"] == [GOOGLE_PICKER_SCOPE]
+        assert body["grant_type"] == ["refresh_token"]
+        assert body["refresh_token"] == ["SERVER-REFRESH-CANARY"]
+        payload: dict[str, object] = {
+            "access_token": "PICKER-ACCESS-CANARY",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        }
+        if returned_scope is not None:
+            payload["scope"] = returned_scope
+        return httpx.Response(200, json=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        receipt = await GoogleOAuthProvider(client, _config()).refresh_picker(
+            GoogleApplicationRegistration(
+                "client", "SERVER-SECRET-CANARY", "g", _setup().redirect_uri
+            ),
+            "SERVER-REFRESH-CANARY",
+        )
+    assert len(requests) == 1
+    assert receipt.scope == returned_scope
+    assert receipt.refresh_token is None
+    assert ("scope" in receipt.model_fields_set) == (returned_scope is not None)
+    assert all(
+        value not in caplog.text
+        for value in (
+            "PICKER-ACCESS-CANARY",
+            "SERVER-REFRESH-CANARY",
+            "SERVER-SECRET-CANARY",
+        )
+    )
 
 
 @pytest.mark.parametrize("scope", [None, ""])

@@ -35,19 +35,29 @@ class TestGoogleReconnectSettings(unittest.TestCase):
         model = GoogleReconnectSettings()
         if include_optional:
             return GoogleReconnectSettings(
-                tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
                     ],
-                timeout = 1.337,
-                security_risk_acknowledged = True
+                tool_groups = [
+                    'gmail_read'
+                    ],
+                oauth_request_scopes = [
+                    ''
+                    ],
+                timeout = 1.337
             )
         else:
             return GoogleReconnectSettings(
-                tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
+                oauth_request_scopes = [
+                    ''
                     ],
                 timeout = 1.337,
-                security_risk_acknowledged = True,
         )
         """
 

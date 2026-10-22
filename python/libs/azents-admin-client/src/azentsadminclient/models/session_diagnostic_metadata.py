@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.agent_session_run_state import AgentSessionRunState
 from azentsadminclient.models.agent_session_status import AgentSessionStatus
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SessionDiagnosticMetadata(BaseModel):

@@ -10,10 +10,12 @@ Method | HTTP request | Description
 [**personal_google_toolkit_v1_personal_google_disconnect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Disconnect
 [**personal_google_toolkit_v1_personal_google_exchange**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_exchange) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/exchange | Personal Google Exchange
 [**personal_google_toolkit_v1_personal_google_outcome**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_outcome) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/outcome | Personal Google Outcome
+[**personal_google_toolkit_v1_personal_google_picker_token**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_picker_token) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/picker-token | Personal Google Picker Token
 [**personal_google_toolkit_v1_personal_google_preparation**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_preparation) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/preparation | Personal Google Preparation
 [**personal_google_toolkit_v1_personal_google_reconnect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/reconnect | Personal Google Reconnect
 [**personal_google_toolkit_v1_personal_google_reconnect_confirm**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect_confirm) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/reconnect-confirm | Personal Google Reconnect Confirm
 [**personal_google_toolkit_v1_personal_google_review**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_review) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id} | Personal Google Review
+[**personal_google_toolkit_v1_personal_google_services**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_services) | **PATCH** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/services | Personal Google Services
 [**personal_google_toolkit_v1_personal_google_status**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_status) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Status
 
 
@@ -507,6 +509,88 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **personal_google_toolkit_v1_personal_google_picker_token**
+> GooglePickerTokenOutput personal_google_toolkit_v1_personal_google_picker_token(toolkit_id, handle, google_picker_token_input)
+
+Personal Google Picker Token
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.google_picker_token_input import GooglePickerTokenInput
+from azentspublicclient.models.google_picker_token_output import GooglePickerTokenOutput
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
+    toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
+    google_picker_token_input = azentspublicclient.GooglePickerTokenInput() # GooglePickerTokenInput | 
+
+    try:
+        # Personal Google Picker Token
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_picker_token(toolkit_id, handle, google_picker_token_input)
+        print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_picker_token:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_picker_token: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **google_picker_token_input** | [**GooglePickerTokenInput**](GooglePickerTokenInput.md)|  | 
+
+### Return type
+
+[**GooglePickerTokenOutput**](GooglePickerTokenOutput.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **personal_google_toolkit_v1_personal_google_preparation**
 > GooglePreparation personal_google_toolkit_v1_personal_google_preparation(handle)
 
@@ -824,6 +908,90 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **personal_google_toolkit_v1_personal_google_services**
+> GoogleConnectionOutput personal_google_toolkit_v1_personal_google_services(toolkit_id, handle, google_services_update_input)
+
+Personal Google Services
+
+Save personal service switches without replacing the connected identity.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.google_connection_output import GoogleConnectionOutput
+from azentspublicclient.models.google_services_update_input import GoogleServicesUpdateInput
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
+    toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
+    google_services_update_input = azentspublicclient.GoogleServicesUpdateInput() # GoogleServicesUpdateInput | 
+
+    try:
+        # Personal Google Services
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_services(toolkit_id, handle, google_services_update_input)
+        print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_services:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_services: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **google_services_update_input** | [**GoogleServicesUpdateInput**](GoogleServicesUpdateInput.md)|  | 
+
+### Return type
+
+[**GoogleConnectionOutput**](GoogleConnectionOutput.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 ### HTTP response details

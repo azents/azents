@@ -11,12 +11,14 @@ from azents.core.google_oauth import (
     GoogleOAuthError,
     GoogleTokens,
 )
-from azents.core.google_policy import GoogleService, GoogleTask, permitted_tools
+from azents.core.google_policy import GoogleService
 from azents.core.google_system_setting import (
     GoogleApplicationConfig,
     GoogleApplicationRegistration,
     GoogleApplicationSecrets,
 )
+from azents.core.google_tool_groups import groups_for_services
+from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.personal_toolkit import PersonalToolkitAccessMutation
 from azents.core.system_setting import (
     ResolvedSystemSetting,
@@ -60,8 +62,15 @@ async def test_google_personal_current_admission_and_post_gap_refresh_publicatio
             update={
                 "toolkit_type": "google",
                 "config": {
-                    "tasks": [GoogleTask.CALENDAR_READ.value],
-                    "security_risk_acknowledged": True,
+                    "services": [GoogleService.CALENDAR.value],
+                    "oauth_request_scopes": [
+                        "https://www.googleapis.com/auth/calendar.events.readonly"
+                    ],
+                    "timeout": 30.0,
+                    "tool_groups": [
+                        item.value
+                        for item in groups_for_services([GoogleService.CALENDAR.value])
+                    ],
                 },
                 "credentials": None,
             }
@@ -156,24 +165,17 @@ async def test_google_personal_current_admission_and_post_gap_refresh_publicatio
     provider.refresh = AsyncMock(side_effect=refresh)
     if withdrawal == "before":
         await withdraw()
-    raw_name = next(
-        iter(
-            permitted_tools(
-                (GoogleTask.CALENDAR_READ,),
-                candidate.tokens.granted_scopes,
-                GoogleService.CALENDAR,
-            )
-        )
-    )
     if withdrawal == "none" and outcome == "success":
-        admitted = await service.authorize_tool(
-            root.owner, saved.id, GoogleService.CALENDAR, raw_name
+        admitted = await service.authorize_operation(
+            root.owner, saved.id, Op.CALENDAR_LIST_EVENTS, ()
         )
-        assert admitted.access_token == "fixture-new-token"
+        assert admitted.snapshot.connection.candidate.tokens.access_token == (
+            "fixture-new-token"
+        )
     else:
         with pytest.raises(GoogleOAuthError):
-            await service.authorize_tool(
-                root.owner, saved.id, GoogleService.CALENDAR, raw_name
+            await service.authorize_operation(
+                root.owner, saved.id, Op.CALENDAR_LIST_EVENTS, ()
             )
     async with f.writes() as session:
         row = await session.read_session.scalar(

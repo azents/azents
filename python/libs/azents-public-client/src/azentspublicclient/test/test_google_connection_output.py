@@ -36,56 +36,92 @@ class TestGoogleConnectionOutput(unittest.TestCase):
         if include_optional:
             return GoogleConnectionOutput(
                 toolkit_id = '',
+                revision = 56,
+                connection_id = '',
                 status = 'not_connected',
                 identity = azentspublicclient.models.google_identity.GoogleIdentity(
                     issuer = '', 
                     subject = '', 
                     email = '', ),
-                selected_tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
+                oauth_request_scopes = [
+                    ''
+                    ],
+                granted_scopes = [
+                    ''
                     ],
                 timeout = 1.337,
-                tasks = [
-                    azentspublicclient.models.google_task_access.GoogleTaskAccess(
-                        task = 'calendar_read', 
+                accesses = [
+                    azentspublicclient.models.google_service_access.GoogleServiceAccess(
                         service = 'calendar', 
-                        status = 'permitted', 
+                        enabled = True, 
+                        status = 'disabled', 
                         permitted_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], 
                         unavailable_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], )
                     ],
+                drive_access = azentspublicclient.models.google_drive_access.GoogleDriveAccess(
+                    whole_metadata_read = True, 
+                    whole_content_read = True, 
+                    whole_content_write = True, 
+                    whole_metadata_write = True, 
+                    app_file_read = True, 
+                    app_file_write = True, ),
                 renewable = True,
-                service_access_verified = True
+                service_access_verified = false
             )
         else:
             return GoogleConnectionOutput(
                 toolkit_id = '',
+                revision = 56,
+                connection_id = '',
                 status = 'not_connected',
                 identity = azentspublicclient.models.google_identity.GoogleIdentity(
                     issuer = '', 
                     subject = '', 
                     email = '', ),
-                selected_tasks = [
-                    'calendar_read'
+                services = [
+                    'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
+                oauth_request_scopes = [
+                    ''
+                    ],
+                granted_scopes = [
+                    ''
                     ],
                 timeout = 1.337,
-                tasks = [
-                    azentspublicclient.models.google_task_access.GoogleTaskAccess(
-                        task = 'calendar_read', 
+                accesses = [
+                    azentspublicclient.models.google_service_access.GoogleServiceAccess(
                         service = 'calendar', 
-                        status = 'permitted', 
+                        enabled = True, 
+                        status = 'disabled', 
                         permitted_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], 
                         unavailable_tools = [
-                            ''
+                            'gmail_search_messages'
                             ], )
                     ],
+                drive_access = azentspublicclient.models.google_drive_access.GoogleDriveAccess(
+                    whole_metadata_read = True, 
+                    whole_content_read = True, 
+                    whole_content_write = True, 
+                    whole_metadata_write = True, 
+                    app_file_read = True, 
+                    app_file_write = True, ),
                 renewable = True,
-                service_access_verified = True,
+                service_access_verified = false,
         )
         """
 

@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.external_channel_multi_impact_binding import ExternalChannelMultiImpactBinding
 from azentspublicclient.models.external_channel_multi_impact_default import ExternalChannelMultiImpactDefault
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ExternalChannelMultiConnectionImpact(BaseModel):

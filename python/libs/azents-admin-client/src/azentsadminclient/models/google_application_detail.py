@@ -19,8 +19,9 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from azentsadminclient.models.google_group_definition import GoogleGroupDefinition
 from azentsadminclient.models.system_setting_field_source import SystemSettingFieldSource
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleApplicationDetail(BaseModel):
@@ -30,7 +31,7 @@ class GoogleApplicationDetail(BaseModel):
     status: StrictStr
     client_id: Optional[StrictStr]
     callback_url: Optional[StrictStr]
-    preview_verified: StrictBool = Field(description="Always false for local operator preparation.")
+    picker_status: StrictStr
     service_access_verified: StrictBool = Field(description="Local preparation does not verify live service access.")
     section: StrictStr
     schema_version: StrictInt
@@ -38,11 +39,23 @@ class GoogleApplicationDetail(BaseModel):
     client_id_source: SystemSettingFieldSource
     client_secret_source: SystemSettingFieldSource
     client_secret_configured: StrictBool
+    picker_api_key: Optional[StrictStr]
+    picker_app_id: Optional[StrictStr]
+    picker_api_key_source: SystemSettingFieldSource
+    picker_app_id_source: SystemSettingFieldSource
+    tool_group_catalog: List[GoogleGroupDefinition] = Field(description="Expose nonsecret supported capabilities from the canonical catalog.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "preview_verified", "service_access_verified", "section", "schema_version", "admin_version", "client_id_source", "client_secret_source", "client_secret_configured"]
+    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "picker_status", "service_access_verified", "section", "schema_version", "admin_version", "client_id_source", "client_secret_source", "client_secret_configured", "picker_api_key", "picker_app_id", "picker_api_key_source", "picker_app_id_source", "tool_group_catalog"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
+            raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
+        return value
+
+    @field_validator('picker_status')
+    def picker_status_validate_enum(cls, value):
         """Validates the enum"""
         if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
             raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
@@ -96,6 +109,13 @@ class GoogleApplicationDetail(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in tool_group_catalog (list)
+        _items = []
+        if self.tool_group_catalog:
+            for _item_tool_group_catalog in self.tool_group_catalog:
+                if _item_tool_group_catalog:
+                    _items.append(_item_tool_group_catalog.to_dict())
+            _dict['tool_group_catalog'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -110,6 +130,16 @@ class GoogleApplicationDetail(BaseModel):
         # and model_fields_set contains the field
         if self.callback_url is None and "callback_url" in self.model_fields_set:
             _dict['callback_url'] = None
+
+        # set to None if picker_api_key (nullable) is None
+        # and model_fields_set contains the field
+        if self.picker_api_key is None and "picker_api_key" in self.model_fields_set:
+            _dict['picker_api_key'] = None
+
+        # set to None if picker_app_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.picker_app_id is None and "picker_app_id" in self.model_fields_set:
+            _dict['picker_app_id'] = None
 
         return _dict
 
@@ -128,14 +158,19 @@ class GoogleApplicationDetail(BaseModel):
             "status": obj.get("status"),
             "client_id": obj.get("client_id"),
             "callback_url": obj.get("callback_url"),
-            "preview_verified": obj.get("preview_verified"),
+            "picker_status": obj.get("picker_status"),
             "service_access_verified": obj.get("service_access_verified"),
             "section": obj.get("section"),
             "schema_version": obj.get("schema_version"),
             "admin_version": obj.get("admin_version"),
             "client_id_source": obj.get("client_id_source"),
             "client_secret_source": obj.get("client_secret_source"),
-            "client_secret_configured": obj.get("client_secret_configured")
+            "client_secret_configured": obj.get("client_secret_configured"),
+            "picker_api_key": obj.get("picker_api_key"),
+            "picker_app_id": obj.get("picker_app_id"),
+            "picker_api_key_source": obj.get("picker_api_key_source"),
+            "picker_app_id_source": obj.get("picker_app_id_source"),
+            "tool_group_catalog": [GoogleGroupDefinition.from_dict(_item) for _item in obj["tool_group_catalog"]] if obj.get("tool_group_catalog") is not None else None
             }.items() if _key in obj
         })
         # store additional fields in additional_properties

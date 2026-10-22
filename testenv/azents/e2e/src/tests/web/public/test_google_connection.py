@@ -3,20 +3,31 @@
 import azentsadminclient
 import azentspublicclient
 import pytest
+from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
+from azentsadminclient.models.google_application_patch_request import (
+    GoogleApplicationPatchRequest,
+)
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.google_connect_output import GoogleConnectOutput
+from azentspublicclient.models.google_published_output import GooglePublishedOutput
+from azentspublicclient.models.google_review import GoogleReview
 from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 
+from support.google_provider_fake import SCOPE
 from support.google_provider_fixture import GoogleProviderFixture
 from support.utils import single_candidate_model_options
 from tests.required.public.test_google_connection import (
+    authorize,
+    final_settings,
     fixture_ready,
     prepare_operator,
+    response,
     saved_status,
     scenario,
 )
@@ -100,19 +111,22 @@ def test_google_same_context_partial_review_and_metadata_preservation(
                 )
             )
         ).click()
-    _assert_visible_text(browser_driver, "1. Choose tasks")
+    _assert_visible_text(browser_driver, "1. Choose services")
     assert not any(
         item.is_selected()
         for item in browser_driver.find_elements(
             By.CSS_SELECTOR,
-            'section[aria-labelledby="google-select-heading"] input[type="checkbox"]',
+            'section[aria-labelledby="google-select-heading"] input[role="switch"]',
         )
     )
-    check(browser_driver, "Read calendars and events")
-    check(browser_driver, "Read Gmail")
+    check(browser_driver, "Calendar")
+    check(browser_driver, "Gmail")
+    _click_button(browser_driver, "Read only")
+    check(browser_driver, "Create, edit and respond to events")
     original_window = browser_driver.current_window_handle
     _click_button(browser_driver, "Continue to Google")
     _assert_visible_text(browser_driver, "2. Review account and permissions")
+    _assert_visible_text(browser_driver, "Final tool groups")
     _assert_visible_text(browser_driver, "connected-account@example.invalid")
     assert browser_driver.current_window_handle == original_window
     assert browser_driver.current_url == azents_main_web_url + path
@@ -138,12 +152,8 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     save = browser_driver.find_element(
         By.XPATH, '//button[normalize-space()="Save Google Toolkit"]'
     )
-    assert not save.is_enabled()
+    assert save.is_enabled()
     _fill_text_input(browser_driver, "Toolkit name", "Google browser connection")
-    check(
-        browser_driver,
-        "I have reviewed these screening limits and the ownership of this connection.",
-    )
     _click_button(browser_driver, "Save Google Toolkit")
     _assert_visible_text(browser_driver, "Google browser connection")
     if agent_id is None:
@@ -172,10 +182,7 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     _fill_text_input(browser_driver, "Tool request timeout (seconds)", "12")
     _click_button(browser_driver, "Authorize replacement connection")
     _assert_visible_text(browser_driver, "2. Review account and permissions")
-    check(
-        browser_driver,
-        "I have reviewed these screening limits and the ownership of this connection.",
-    )
+    _assert_visible_text(browser_driver, "Final tool groups")
     _click_button(browser_driver, "Replace saved connection")
     _assert_visible_text(browser_driver, "Connection saved")
     _fill_text_input(browser_driver, "Name", "Renamed after reconnect")
@@ -212,7 +219,134 @@ def test_google_same_context_partial_review_and_metadata_preservation(
         "" if agent_id is None else "/agents/" + agent_id
     )
     assert saved_status(base, workspace.token, saved.id).status == "connected"
-    assert (
-        "synthetic-access-" not in browser_driver.page_source
-        and "synthetic-renewal-" not in browser_driver.page_source
+    if any(
+        marker in browser_driver.page_source
+        for marker in ("synthetic-access-", "synthetic-renewal-")
+    ):
+        raise AssertionError("Google credentials leaked into the rendered document.")
+
+
+def test_google_picker_browser_lifetime(
+    browser_driver: WebDriver,
+    azents_main_web_url: str,
+    azents_public_server_url: str,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    google_provider_fixture: GoogleProviderFixture | None,
+) -> None:
+    """Exercise deployed UI/API/SDK-loader integration against a synthetic peer."""
+    fixture = fixture_ready(google_provider_fixture)
+    scenario(fixture, "full")
+    prepare_operator(admin_api_client)
+    operator_api = SystemSettingsV1Api(admin_api_client)
+    operator = operator_api.system_settings_v1_get_google_oauth_setting()
+    operator_api.system_settings_v1_patch_google_oauth_setting(
+        GoogleApplicationPatchRequest(
+            expected_version=operator.admin_version,
+            picker_api_key="synthetic-browser-key",
+            picker_app_id="123456789",
+        )
     )
+    workspace = _create_workspace(
+        public_api_client=public_api_client,
+        admin_api_client=admin_api_client,
+        server_url=azents_public_server_url,
+        with_runtime_profile=False,
+    )
+    base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
+    scopes = ["openid", "email", SCOPE + "drive.file"]
+    prepared = GoogleConnectOutput.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            "/google/connect",
+            {
+                "services": ["drive"],
+                "tool_groups": ["drive_read", "drive_files"],
+                "oauth_request_scopes": scopes,
+                "timeout": 30,
+            },
+        ).text
+    )
+    assert prepared is not None
+    callback = authorize(fixture, prepared.authorization_url)
+    review = GoogleReview.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            "/google/exchange",
+            {"code": callback.code, "state": callback.state},
+        ).text
+    )
+    assert review is not None
+    published = GooglePublishedOutput.from_json(
+        response(
+            base,
+            workspace.token,
+            "POST",
+            "/google/attempts/" + review.attempt_id + "/confirm",
+            {
+                "settings": {
+                    **final_settings("google_picker", review),
+                    "services": ["drive"],
+                    "tool_groups": ["drive_read", "drive_files"],
+                    "oauth_request_scopes": review.oauth_request_scopes,
+                }
+            },
+        ).text
+    )
+    assert published is not None
+    before = saved_status(base, workspace.token, published.toolkit_id)
+    _login_main_web(browser_driver, base_url=azents_main_web_url, email=workspace.email)
+    browser_driver.get(
+        f"{azents_main_web_url}/w/{workspace.handle}/toolkits/{published.toolkit_id}/edit"
+    )
+    _assert_visible_text(browser_driver, "Saved Google account")
+    _click_button(browser_driver, "Choose Drive files with Google")
+    _click_button(browser_driver, "Synthetic Picker select")
+    _assert_visible_text(
+        browser_driver,
+        "1 file selected in Google. Google controls eligibility; "
+        "this is not a local access list.",
+    )
+    assert not browser_driver.find_elements(
+        By.CSS_SELECTOR, '[aria-label="Synthetic Google Picker"]'
+    )
+    _click_button(browser_driver, "Choose Drive files with Google")
+    _click_button(browser_driver, "Synthetic Picker cancel")
+    _assert_visible_text(
+        browser_driver, "File selection closed without retaining a selection."
+    )
+    _click_button(browser_driver, "Choose Drive files with Google")
+    _wait(browser_driver).until(
+        ec.presence_of_element_located(
+            (By.CSS_SELECTOR, '[aria-label="Synthetic Google Picker"]')
+        )
+    )
+    browser_driver.get(f"{azents_main_web_url}/w/{workspace.handle}/toolkits")
+    _assert_visible_text(browser_driver, "Google product fixture")
+    assert not browser_driver.find_elements(
+        By.CSS_SELECTOR, '[aria-label="Synthetic Google Picker"]'
+    )
+    after = saved_status(base, workspace.token, published.toolkit_id)
+    assert before == after
+    persisted = browser_driver.execute_script(
+        "return JSON.stringify([Object.entries(localStorage), "
+        "Object.entries(sessionStorage)]);"
+    )
+    assert isinstance(persisted, str)
+    if any(
+        marker in persisted
+        for marker in (
+            "synthetic-access-",
+            "synthetic-renewal-",
+            "app-file",
+        )
+    ):
+        raise AssertionError(
+            "Picker credentials or selection entered persistent storage."
+        )
+    if "synthetic-access-" in browser_driver.page_source:
+        raise AssertionError("Picker credential leaked into the rendered document.")

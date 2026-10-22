@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_v
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentsadminclient.models.docker_container_resources import DockerContainerResources
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class DockerContainerProfileSpecV1(BaseModel):

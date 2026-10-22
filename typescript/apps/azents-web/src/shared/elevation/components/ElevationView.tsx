@@ -12,6 +12,7 @@ import {
   Loader,
   PasswordInput,
   PinInput,
+  rem,
   Stack,
   Text,
   Title,
@@ -100,7 +101,7 @@ function ChooseMethod({
       </Text>
       <Button
         variant="default"
-        leftSection={<IconMail size={18} />}
+        leftSection={<IconMail size={rem(18)} />}
         onClick={onSelectEmail}
         fullWidth
         justify="start"
@@ -110,7 +111,7 @@ function ChooseMethod({
       {hasPassword && (
         <Button
           variant="default"
-          leftSection={<IconLock size={18} />}
+          leftSection={<IconLock size={rem(18)} />}
           onClick={onSelectPassword}
           fullWidth
           justify="start"
@@ -191,7 +192,7 @@ export function EmailCodeStepView({
         size="sm"
         c="dimmed"
         onClick={onResend}
-        style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+        style={{ display: "inline-flex", alignItems: "center", gap: rem(4) }}
       >
         {t("resendCode")}
       </Anchor>

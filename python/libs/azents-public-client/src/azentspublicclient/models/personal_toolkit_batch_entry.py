@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.personal_toolkit_access_mode import PersonalToolkitAccessMode
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class PersonalToolkitBatchEntry(BaseModel):

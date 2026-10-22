@@ -36,32 +36,42 @@ class TestGoogleConfirmRequest(unittest.TestCase):
         if include_optional:
             return GoogleConfirmRequest(
                 settings = azentspublicclient.models.google_final_settings.GoogleFinalSettings(
+                    services = [
+                        'calendar'
+                        ], 
+                    tool_groups = [
+                        'gmail_read'
+                        ], 
+                    oauth_request_scopes = [
+                        ''
+                        ], 
+                    timeout = 1.337, 
                     name = '', 
                     slug = '', 
                     description = '', 
                     prompt = '', 
                     enabled = True, 
-                    always_expose_tools = True, 
-                    tasks = [
-                        'calendar_read'
-                        ], 
-                    timeout = 1.337, 
-                    security_risk_acknowledged = True, )
+                    always_expose_tools = True, )
             )
         else:
             return GoogleConfirmRequest(
                 settings = azentspublicclient.models.google_final_settings.GoogleFinalSettings(
+                    services = [
+                        'calendar'
+                        ], 
+                    tool_groups = [
+                        'gmail_read'
+                        ], 
+                    oauth_request_scopes = [
+                        ''
+                        ], 
+                    timeout = 1.337, 
                     name = '', 
                     slug = '', 
                     description = '', 
                     prompt = '', 
                     enabled = True, 
-                    always_expose_tools = True, 
-                    tasks = [
-                        'calendar_read'
-                        ], 
-                    timeout = 1.337, 
-                    security_risk_acknowledged = True, ),
+                    always_expose_tools = True, ),
         )
         """
 

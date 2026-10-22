@@ -24,7 +24,7 @@ from azentspublicclient.models.external_channel_app_mode import ExternalChannelA
 from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ManagedMultiConnection(BaseModel):

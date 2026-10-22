@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction
 from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ChatInputWriteRequest(BaseModel):

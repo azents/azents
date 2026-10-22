@@ -216,7 +216,8 @@ def test_compute_failure_next_run_at_uses_next_interval() -> None:
     assert result == now + datetime.timedelta(hours=1)
 
 
-def test_compute_failure_next_run_at_bounds_backoff() -> None:
+@pytest.mark.parametrize("failure_streak", [5, 30, 50, 1_000_000, 10**100])
+def test_compute_failure_next_run_at_bounds_backoff(failure_streak: int) -> None:
     """bounded_backoff is capped by max_delay."""
     now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
     result = compute_failure_next_run_at(
@@ -226,10 +227,45 @@ def test_compute_failure_next_run_at_bounds_backoff() -> None:
             max_delay=datetime.timedelta(minutes=30),
         ),
         datetime.timedelta(hours=1),
-        5,
+        failure_streak,
         now,
     )
     assert result == now + datetime.timedelta(minutes=30)
+
+
+@pytest.mark.parametrize(
+    ("failure_streak", "delay_minutes"), [(0, 5), (1, 5), (2, 10), (3, 20), (4, 30)]
+)
+def test_compute_failure_next_run_at_grows_until_cap(
+    failure_streak: int, delay_minutes: int
+) -> None:
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+    result = compute_failure_next_run_at(
+        RetryPolicy(
+            kind="bounded_backoff",
+            min_delay=datetime.timedelta(minutes=5),
+            max_delay=datetime.timedelta(minutes=30),
+        ),
+        datetime.timedelta(hours=1),
+        failure_streak,
+        now,
+    )
+    assert result == now + datetime.timedelta(minutes=delay_minutes)
+
+
+def test_compute_failure_next_run_at_zero_delay_is_constant() -> None:
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+    result = compute_failure_next_run_at(
+        RetryPolicy(
+            kind="bounded_backoff",
+            min_delay=datetime.timedelta(0),
+            max_delay=datetime.timedelta(minutes=30),
+        ),
+        datetime.timedelta(hours=1),
+        10**100,
+        now,
+    )
+    assert result == now
 
 
 @pytest.mark.asyncio

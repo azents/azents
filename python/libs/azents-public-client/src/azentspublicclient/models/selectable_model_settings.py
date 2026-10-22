@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SelectableModelSettings(BaseModel):

@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.system_user_role_assignment_response import SystemUserRoleAssignmentResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SystemUserRoleAssignmentListResponse(BaseModel):

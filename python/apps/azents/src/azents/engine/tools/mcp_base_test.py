@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx2 as httpx
 import pytest
+from mcp import MCPError
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as McpBaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -576,6 +577,46 @@ async def test_expected_background_group_remains_nonfatal(
     await toolkit._connect_and_list_tools()
     assert toolkit._bg_error is not None
     assert (await toolkit.update_context(_context())).tools == []
+
+
+async def test_background_throttling_is_actionable_and_preserves_snapshot(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    failure = ExceptionGroup("transport", [MCPError(-32000, "Too many requests")])
+    with patch.object(
+        mcp_base_module,
+        "mcp_list_tools",
+        return_value=McpToolListResult(
+            tools=[_tool("alpha")], use_streamable_http=True
+        ),
+    ):
+        await toolkit._connect_and_list_tools()
+    monkeypatch.setattr(
+        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+    )
+    await toolkit._connect_and_list_tools()
+    assert toolkit._bg_error == "MCP server rate limited discovery. Retry later."
+    state = await toolkit.update_context(_context())
+    assert [tool.spec.name for tool in state.tools] == ["alpha"]
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "MCP discovery remains rate limited"
+    ]
+    assert len(records) == 1
+    assert records[0].levelname == "WARNING"
+    assert records[0].exc_info is not None
 
 
 async def test_background_cancellation_stays_cancellation(

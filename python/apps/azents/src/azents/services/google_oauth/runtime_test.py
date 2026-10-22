@@ -1,4 +1,4 @@
-"""Exact raw-tool admission, permission loss on renewal and stale 401 protection."""
+"""Current operation admission and detached fenced renewal behavior."""
 
 import dataclasses
 import datetime
@@ -8,15 +8,16 @@ from unittest.mock import Mock, create_autospec
 import pytest
 
 from azents.core.google_oauth import (
-    GoogleAuthorization,
     GoogleConnection,
     GoogleConnectionStatus,
     GoogleOAuthError,
     GoogleTokens,
 )
-from azents.core.google_policy import GoogleService, GoogleTask
+from azents.core.google_policy import GoogleService
 from azents.core.google_runtime import GoogleExecutionState
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.google_tool_groups import groups_for_services
+from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import GoogleToolkitConfig
 from azents.repos.google_oauth.management_test import _candidate
@@ -56,9 +57,13 @@ def _harness(*, expired: bool) -> Harness:
         )
     current = GoogleExecutionState(
         GoogleToolkitConfig(
-            tasks=[GoogleTask.CALENDAR_READ, GoogleTask.CALENDAR_EDIT],
+            services=(GoogleService.CALENDAR,),
+            oauth_request_scopes=(
+                "https://www.googleapis.com/auth/calendar.events.readonly",
+                "https://www.googleapis.com/auth/calendar.events",
+            ),
             timeout=30.0,
-            security_risk_acknowledged=True,
+            tool_groups=groups_for_services((GoogleService.CALENDAR,)),
         ),
         GoogleConnection(
             "connection",
@@ -70,6 +75,7 @@ def _harness(*, expired: bool) -> Harness:
             "encrypted",
         ),
         registration,
+        1,
     )
     repo.load.return_value = current
     return Harness(
@@ -81,18 +87,16 @@ def _harness(*, expired: bool) -> Harness:
     )
 
 
-@pytest.mark.asyncio
 async def test_ungranted_write_rejected_before_renewal() -> None:
     h = _harness(expired=True)
     with pytest.raises(GoogleOAuthError) as caught:
-        await h.service.authorize_tool(
-            h.owner, "toolkit", GoogleService.CALENDAR, "delete_event"
+        await h.service.authorize_operation(
+            h.owner, "toolkit", Op.CALENDAR_DELETE_EVENT, ()
         )
     assert caught.value.code == "capability_unavailable"
     h.provider.refresh.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_grant_reduction_during_renewal_denies_formerly_permitted_call() -> None:
     h = _harness(expired=True)
     reduced_tokens = GoogleTokens(
@@ -110,83 +114,49 @@ async def test_grant_reduction_during_renewal_denies_formerly_permitted_call() -
             ),
         ),
     )
-    h.repo.load.side_effect = [h.current, reduced]
+    h.repo.load.side_effect = [h.current, reduced, reduced]
     h.repo.finalize_refresh.return_value = True
     h.provider.refresh.return_value = reduced_tokens
     with pytest.raises(GoogleOAuthError) as caught:
-        await h.service.authorize_tool(
-            h.owner, "toolkit", GoogleService.CALENDAR, "list_events"
+        await h.service.authorize_operation(
+            h.owner, "toolkit", Op.CALENDAR_LIST_EVENTS, ()
         )
     assert caught.value.code == "capability_unavailable"
     h.provider.refresh.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_transient_renewal_failure_does_not_invalidate_saved_grant() -> None:
     h = _harness(expired=True)
     h.provider.refresh.side_effect = GoogleOAuthError(
         "provider_unavailable", "Remote unavailable."
     )
     with pytest.raises(GoogleOAuthError):
-        await h.service.authorize_tool(
-            h.owner, "toolkit", GoogleService.CALENDAR, "list_events"
+        await h.service.authorize_operation(
+            h.owner, "toolkit", Op.CALENDAR_LIST_EVENTS, ()
         )
     h.repo.finalize_refresh.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_stale_invalid_grant_yields_to_newer_reconnect() -> None:
     h = _harness(expired=True)
-    candidate = _candidate("replacement-token")
     replacement = dataclasses.replace(
         h.current,
         connection=dataclasses.replace(
             h.current.connection,
             id="replacement",
-            candidate=candidate,
+            candidate=_candidate("replacement-token"),
         ),
     )
-    h.repo.load.side_effect = [h.current, replacement]
+    h.repo.load.side_effect = [h.current, replacement, replacement]
     h.provider.refresh.side_effect = GoogleOAuthError("invalid_grant", "Rejected.")
     h.repo.finalize_refresh.return_value = False
-    admitted = await h.service.authorize_tool(
-        h.owner,
-        "toolkit",
-        GoogleService.CALENDAR,
-        "list_events",
+    admitted = await h.service.authorize_operation(
+        h.owner, "toolkit", Op.CALENDAR_LIST_EVENTS, ()
     )
-    assert admitted == GoogleAuthorization("replacement-token", "replacement")
+    assert admitted.snapshot == replacement
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("changed", ["id", "token"])
-async def test_late_401_cannot_invalidate_changed_credentials(changed: str) -> None:
-    h = _harness(expired=False)
-    admitted = GoogleAuthorization("old-token", "old-connection")
-    if changed == "id":
-        admitted = GoogleAuthorization("current-token", "old-connection")
-    else:
-        admitted = GoogleAuthorization("old-token", "connection")
-    await h.service.authentication_failed(h.owner, "toolkit", admitted)
-    h.repo.finalize_refresh.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_matching_401_finalizes_under_exact_snapshot_and_owner() -> None:
-    h = _harness(expired=False)
-    await h.service.authentication_failed(
-        h.owner, "toolkit", GoogleAuthorization("current-token", "connection")
-    )
-    h.repo.finalize_refresh.assert_awaited_once_with(
-        h.owner,
-        snapshot=h.current,
-        refreshed=None,
-        rejected=True,
-    )
-
-
-@pytest.mark.asyncio
 async def test_model_projection_does_not_trigger_google_refresh() -> None:
     h = _harness(expired=True)
-    assert await h.service.permitted_tools(h.owner, "toolkit", GoogleService.CALENDAR)
+    assert await h.service.direct_operations(h.owner, "toolkit")
     h.provider.refresh.assert_not_awaited()

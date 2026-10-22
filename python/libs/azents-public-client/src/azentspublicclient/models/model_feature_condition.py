@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.model_capability_feature import ModelCapabilityFeature
 from azentspublicclient.models.reasoning_effort_value import ReasoningEffortValue
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ModelFeatureCondition(BaseModel):

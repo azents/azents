@@ -29,8 +29,10 @@ import Link from "next/link";
 
 /** Agent session context inspector view. */
 import { formatLocalizedDate } from "@/shared/lib/date-format";
+import { projectSessionContextUsage } from "./containers/session-context-usage";
 import { useSessionRawEventsViewController } from "./containers/useSessionRawEventsViewController";
 import { useSessionSystemPromptViewController } from "./containers/useSessionSystemPromptViewController";
+import type { SessionContextUsage } from "./containers/session-context-usage";
 import type { SessionRawEventsViewViewProps } from "./containers/useSessionRawEventsViewController";
 import type { SessionSystemPromptViewViewProps } from "./containers/useSessionSystemPromptViewController";
 import type {
@@ -103,17 +105,6 @@ function formatCost(value?: number | null): string {
   return `$${value.toFixed(6)}`;
 }
 
-function getUsageNumber(
-  usage: Record<string, unknown> | null,
-  key: string,
-): number | null {
-  if (usage === null) {
-    return null;
-  }
-  const value = usage[key];
-  return typeof value === "number" ? value : null;
-}
-
 function stringifyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -156,19 +147,34 @@ function metadataEntries(
   return Object.entries(metadata).filter((entry) => entry[1].trim().length > 0);
 }
 
-export function SessionContextView({
+export function SessionContextView(
+  props: SessionContextViewProps,
+): React.ReactElement {
+  return (
+    <SessionContextPresentation
+      {...props}
+      usage={projectSessionContextUsage(props.context.usage)}
+    />
+  );
+}
+
+export function SessionContextPresentation({
   context,
   systemPromptHref,
   rawEventsHref,
-}: SessionContextViewProps): React.ReactElement {
+  usage,
+}: SessionContextViewProps & {
+  usage: SessionContextUsage;
+}): React.ReactElement {
   const t = useTranslations("chat.context");
-  const usage = context.usage ?? null;
-  const totalTokens = getUsageNumber(usage, "total_tokens");
-  const promptTokens = getUsageNumber(usage, "prompt_tokens");
-  const completionTokens = getUsageNumber(usage, "completion_tokens");
-  const reasoningTokens = getUsageNumber(usage, "reasoning_tokens");
-  const cachedTokens = getUsageNumber(usage, "cached_tokens");
-  const cacheCreationTokens = getUsageNumber(usage, "cache_creation_tokens");
+  const {
+    totalTokens,
+    promptTokens,
+    completionTokens,
+    reasoningTokens,
+    cachedTokens,
+    cacheCreationTokens,
+  } = usage;
   return (
     <Stack gap="md">
       <SimpleGrid cols={{ base: 2, md: 4 }} spacing="sm">

@@ -27,7 +27,7 @@ from azentspublicclient.models.agent_session_status import AgentSessionStatus
 from azentspublicclient.models.agent_session_title_source import AgentSessionTitleSource
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentSessionResponse(BaseModel):

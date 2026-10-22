@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validat
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.runtime_configuration_status import RuntimeConfigurationStatus
 from azentspublicclient.models.runtime_network_mode import RuntimeNetworkMode
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeConfigurationNetworkResponse(BaseModel):

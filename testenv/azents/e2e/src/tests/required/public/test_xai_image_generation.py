@@ -43,10 +43,6 @@ from support.observations import (
     ToolResultObservation,
     decode_history_page,
 )
-from support.runtime_profiles import (
-    create_workspace_runtime_profile,
-    start_and_wait_for_agent_runtime,
-)
 from support.utils import authenticate_user, unique, wait_until
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
@@ -207,7 +203,7 @@ def _setup_xai_agent(
     access_token: str,
     refresh_token: str | None,
 ) -> _XaiAgentFixture:
-    """Create one xAI integration, Agent, and primary session via public APIs."""
+    """Create a Runtime-free xAI Agent for the provider/storage-only journey."""
     uniq = unique()
     token, _, _ = authenticate_user(
         public_api_client,
@@ -308,12 +304,6 @@ def _setup_xai_agent(
         [{"name": "image_generation"}] if enabled else []
     )
     no_builtin_tools: list[dict[str, str]] = []
-    runtime_profile_id = create_workspace_runtime_profile(
-        public_api_client,
-        token=token,
-        workspace_handle=handle,
-        provider_id="system-docker",
-    )
     created = _response_model(
         requests.post(
             f"{server_url}/agent/v1/workspaces/{handle}/agents",
@@ -355,19 +345,14 @@ def _setup_xai_agent(
                 ],
                 "main_model_label": "Quality",
                 "lightweight_model_label": "Fast",
-                "runtime_profile_id": runtime_profile_id,
+                "runtime_profile_id": None,
             },
             timeout=10,
         ),
         model=AgentResponse,
     )
+    assert created.runtime_capability.value == "none"
     agent_id = created.id
-    start_and_wait_for_agent_runtime(
-        public_api_client,
-        token=token,
-        workspace_handle=handle,
-        agent_id=agent_id,
-    )
     session = _response_model(
         requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",

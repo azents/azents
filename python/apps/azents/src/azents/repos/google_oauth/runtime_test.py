@@ -219,3 +219,34 @@ async def test_same_grant_omission_retains_actual_scope_not_requested_scope(
     assert (
         await h.repository.load(h.owner, h.toolkit_id, h.registration)
     ).connection.status is GoogleConnectionStatus.CONNECTED
+
+
+@pytest.mark.parametrize("rejected", [False, True])
+async def test_revision_change_fences_stale_refresh_success_and_401(
+    rdb_session_manager: SessionManager[WriteSession],
+    rejected: bool,
+) -> None:
+    h = await _runtime(rdb_session_manager, owned=False)
+    snapshot = await h.repository.load(h.owner, h.toolkit_id, h.registration)
+    async with rdb_session_manager() as session:
+        await session.write_session.execute(
+            sa.update(RDBToolkitConfig)
+            .where(RDBToolkitConfig.id == h.toolkit_id)
+            .values(revision=RDBToolkitConfig.revision + 1)
+        )
+    refreshed = GoogleTokens(
+        access_token="stale-token",
+        refresh_token=None,
+        granted_scopes=None,
+        expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1),
+    )
+    assert not await h.repository.finalize_refresh(
+        h.owner,
+        snapshot=snapshot,
+        refreshed=None if rejected else refreshed,
+        rejected=rejected,
+    )
+    current = await h.repository.load(h.owner, h.toolkit_id, h.registration)
+    assert current.revision == snapshot.revision + 1
+    assert current.connection.encrypted_payload == snapshot.connection.encrypted_payload
+    assert current.connection.status is GoogleConnectionStatus.CONNECTED

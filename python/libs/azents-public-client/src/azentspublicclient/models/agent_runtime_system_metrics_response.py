@@ -23,7 +23,7 @@ from azentspublicclient.models.agent_runtime_system_metric_current_response impo
 from azentspublicclient.models.agent_runtime_system_metrics_sample_response import AgentRuntimeSystemMetricsSampleResponse
 from azentspublicclient.models.runner_system_metrics_scope import RunnerSystemMetricsScope
 from azentspublicclient.models.runtime_system_metrics_summary import RuntimeSystemMetricsSummary
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeSystemMetricsResponse(BaseModel):

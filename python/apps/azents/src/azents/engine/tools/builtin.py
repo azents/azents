@@ -210,11 +210,13 @@ _MEMORY_CONTEXT_RULES_PROMPT = dedent("""\
 _MEMORY_WRITE_RULES_PROMPT = dedent("""\
     ### Memory Write Rules
 
-    Use `save_memory` with `agent` scope to store durable shared information and
+    Use `save_memory` to store durable information and
     `delete_memory` to remove stale or unwanted entries.
 
-    Save information only when it is appropriate for every user of this Agent. Do
-    not store private personal preferences as shared Agent Memory.
+    In individual sessions, store personal information about the user in
+    user-scoped memory. Use agent-scoped memory for shared knowledge and context.
+    In team sessions, store team knowledge and information about team members in
+    agent-scoped memory.
 
     #### What NOT to save
 

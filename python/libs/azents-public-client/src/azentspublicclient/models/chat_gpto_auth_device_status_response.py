@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.chat_gpto_auth_session_status import ChatGPTOAuthSessionStatus
 from azentspublicclient.models.llm_provider_integration_response import LLMProviderIntegrationResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ChatGPTOAuthDeviceStatusResponse(BaseModel):

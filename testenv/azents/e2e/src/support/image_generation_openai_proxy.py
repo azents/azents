@@ -1348,6 +1348,23 @@ def request_has_tool_output(value: object, call_id: str) -> bool:
     return any(output.call_id == call_id for output in outputs)
 
 
+def _google_direct_completed_stages(
+    request: _ModelRequest, stages: list[str]
+) -> set[str]:
+    """Advance deterministic writes across incremental Responses requests."""
+    previous_stage = next(
+        (
+            index
+            for index, stage in enumerate(stages)
+            if request.previous_response_id == "resp_google_direct_" + stage
+        ),
+        -1,
+    )
+    return {item.call_id for item in request.tool_outputs} | {
+        "call_google_direct_" + stage for stage in stages[: previous_stage + 1]
+    }
+
+
 def apply_patch_scenario(request: _ModelRequestInput) -> str | None:
     """Return the current deterministic apply-patch scenario."""
     request = _decode_model_request(request)
@@ -3206,6 +3223,170 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
         if self.path == "/v1/responses" and (
+            user_text == "Google Direct E2E files"
+            or any(
+                item.call_id.startswith("call_google_direct_")
+                for item in request.tool_outputs
+            )
+        ):
+            calls: list[tuple[str, str, dict[str, object]]] = [
+                (
+                    "calendar",
+                    "google_product__calendar_create_event",
+                    {
+                        "calendar_id": "primary",
+                        "send_updates": "none",
+                        "event": {
+                            "summary": "Synthetic SDK write",
+                            "description": None,
+                            "location": None,
+                            "start": {
+                                "date": None,
+                                "date_time": "2030-01-01T10:00:00Z",
+                                "time_zone": "UTC",
+                            },
+                            "end": {
+                                "date": None,
+                                "date_time": "2030-01-01T11:00:00Z",
+                                "time_zone": "UTC",
+                            },
+                            "attendees": [],
+                            "recurrence": [],
+                            "event_type": "default",
+                            "focus_time": None,
+                            "out_of_office": None,
+                            "conference": None,
+                        },
+                    },
+                ),
+                (
+                    "mail",
+                    "google_product__gmail_get_message",
+                    {"message_id": "message-fixture", "body_character_limit": 1024},
+                ),
+                (
+                    "send",
+                    "google_product__gmail_send_message",
+                    {
+                        "message": {
+                            "sender": None,
+                            "to": [
+                                {
+                                    "email": "recipient@example.invalid",
+                                    "display_name": None,
+                                }
+                            ],
+                            "cc": [],
+                            "bcc": [],
+                            "reply_to": [],
+                            "subject": "Synthetic E2E",
+                            "text": "Synthetic E2E",
+                            "html": None,
+                            "body_file": None,
+                            "body_file_format": None,
+                            "attachments": [],
+                        }
+                    },
+                ),
+                (
+                    "filter",
+                    "google_product__gmail_create_filter",
+                    {
+                        "criteria": {
+                            "sender": None,
+                            "recipient": None,
+                            "subject": None,
+                            "query": "subject:synthetic",
+                            "negated_query": None,
+                            "has_attachment": None,
+                            "exclude_chats": None,
+                            "size": None,
+                            "size_comparison": None,
+                        },
+                        "action": {
+                            "add_label_ids": ["STARRED"],
+                            "remove_label_ids": [],
+                            "forward": None,
+                        },
+                    },
+                ),
+                (
+                    "denied",
+                    "google_product__drive_get_metadata",
+                    {"file_id": "whole-only", "resource_key": None},
+                ),
+                (
+                    "download",
+                    "google_product__drive_download_file",
+                    {
+                        "file_id": "app-file",
+                        "resource_key": None,
+                        "follow_shortcuts": False,
+                        "acknowledge_abuse": False,
+                    },
+                ),
+            ]
+            completed = {
+                item.call_id: item.output_text for item in request.tool_outputs
+            }
+            # Responses may send only the delta after the previous response.
+            # Advance from that immutable response identity; never replay an
+            # already-issued write merely because its older output is omitted.
+            stages = [stage for stage, _, _ in calls] + ["import", "upload"]
+            observed = _google_direct_completed_stages(request, stages)
+            for stage, name, arguments in calls:
+                call_id = "call_google_direct_" + stage
+                if call_id not in observed:
+                    self._write_function_call_response(
+                        request, call_id=call_id, name=name, arguments=arguments
+                    )
+                    return
+            if "call_google_direct_import" not in observed:
+                output = completed["call_google_direct_download"]
+                uri = re.search(r'artifact://[^\s"\\<>]+', output or "")
+                if uri is None:
+                    self._write_text_response(
+                        request,
+                        "Missing canonical download artifact.",
+                        response_id="resp_google_direct_missing_file",
+                    )
+                    return
+                self._write_function_call_response(
+                    request,
+                    call_id="call_google_direct_import",
+                    name="import_file",
+                    arguments={
+                        "uri": uri.group(),
+                        "path": "/tmp/google-direct-roundtrip.txt",
+                        "overwrite": False,
+                    },
+                )
+            elif "call_google_direct_upload" not in observed:
+                self._write_function_call_response(
+                    request,
+                    call_id="call_google_direct_upload",
+                    name="google_product__drive_create_file",
+                    arguments={
+                        "name": "roundtrip.txt",
+                        "parent_id": None,
+                        "description": None,
+                        "text": None,
+                        "media_type": "text/plain",
+                        "content": {
+                            "source": "/tmp/google-direct-roundtrip.txt",
+                            "filename": None,
+                            "media_type": None,
+                        },
+                    },
+                )
+            else:
+                self._write_text_response(
+                    request,
+                    "GOOGLE_DIRECT_E2E_COMPLETED",
+                    response_id="resp_google_direct_completed",
+                )
+            return
+        if self.path == "/v1/responses" and (
             user_text == "Google Connection E2E partial"
             or (
                 user_text is None
@@ -3231,7 +3412,16 @@ class _Handler(BaseHTTPRequestHandler):
                     request,
                     call_id="call_google_product_read",
                     name="google_product__calendar_list_events",
-                    arguments={},
+                    arguments={
+                        "calendar_id": "primary",
+                        "page_token": None,
+                        "page_size": 10,
+                        "time_min": None,
+                        "time_max": None,
+                        "query": None,
+                        "expand_recurring": False,
+                        "event_types": [],
+                    },
                 )
             elif not request_has_tool_output(request, "call_google_product_write"):
                 self._write_function_call_response(

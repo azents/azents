@@ -134,8 +134,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-20
-spec_version: 151
+last_verified_at: 2026-10-22
+spec_version: 152
 ---
 
 # Toolkit
@@ -154,7 +154,7 @@ This domain covers four feature groups.
    `import_file` materializes one selected entry; Memory has no transfer capability.
 
 The [Google connection backend](google-connection.md) adds a `google` provider
-for official Calendar, Drive and Gmail MCP endpoints. It retains Toolkit ownership
+for typed official Calendar, Drive and Gmail SDK operations. It retains Toolkit ownership
 and execution contracts but stores one Google grant separately from generic MCP
 OAuth. Unpublished setup, explicit reduced-capability review and atomic confirm
 precede creation; plain Toolkit CRUD cannot bypass that publication boundary.
@@ -1084,6 +1084,8 @@ MCP-backed toolkits must keep `list_tools` discovery off the normal run preparat
 - `update_context()` reads the latest successful session-bound Toolkit State snapshot and returns immediately.
 - If no successful snapshot exists, the toolkit exposes no MCP tools.
 - Background refresh lists tools, sorts them deterministically, builds a complete serializable snapshot, then atomically replaces the stored snapshot.
+- Discovery retries HTTP 429 and MCP `Too many requests` failures up to three times with 1s/2s/4s backoff when no numeric `Retry-After` is provided. Numeric delays up to 60s are honored; invalid or longer delays stop the attempt rather than retrying early. Nested groups are retryable only when every leaf is throttling. This read-only retry boundary does not replay tool execution.
+- Exhausted discovery throttling retains an actionable internal error and a sanitized warning with traceback; unrelated connection failures remain errors and cancellation propagates.
 - Refresh failure keeps the previous successful snapshot unchanged. If there is no previous snapshot, no tools are exposed.
 - Loading, retry, setup, and status pseudo-tools are not model-visible MCP availability controls.
 - MCP loading/error text is not injected into Toolkit prompts.
@@ -1501,7 +1503,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `gcp`, `aws` | Cloud-provider native auth (IRSA / workload identity) | — (no config) |
 | `kubernetes` | depends on `clusters[].auth_type` — kubeconfig / token / EKS / GKE | kubeconfig secret |
 | `google_analytics` | service account / ADC | — |
-| `google` | current canonical Session owner and enabled effective Toolkit; selected work, actual scopes, verified subject/current client, and screened remote contract | encrypted Google Toolkit-owned grant and current operator `google_oauth` Section |
+| `google` | current canonical Session owner and enabled effective Toolkit; enabled services, actual scopes, verified subject/current client, and typed SDK operation admission | encrypted Google Toolkit-owned grant and current operator `google_oauth` Section |
 | `brave_search` | enabled attached ToolkitConfig with a valid non-empty API key | ToolkitConfig `encrypted_credentials` |
 
 ### Runtime-Only Toolkit Boundary

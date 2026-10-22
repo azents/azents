@@ -26,7 +26,7 @@ from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunSt
 from azentspublicclient.models.goal_state_response import GoalStateResponse
 from azentspublicclient.models.pending_mailbox_envelope import PendingMailboxEnvelope
 from azentspublicclient.models.todo_state_response import TodoStateResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ChatWriteSnapshotResponse(BaseModel):

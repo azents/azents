@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ChatSessionModelProfileUpdateRequest(BaseModel):

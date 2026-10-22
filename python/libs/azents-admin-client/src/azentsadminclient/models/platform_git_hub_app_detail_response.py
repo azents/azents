@@ -25,7 +25,7 @@ from azentsadminclient.models.platform_git_hub_app_effective_status import Platf
 from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse
 from azentsadminclient.models.system_setting_validation_status import SystemSettingValidationStatus
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class PlatformGitHubAppDetailResponse(BaseModel):

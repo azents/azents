@@ -15,6 +15,7 @@ from azents.core.google_oauth import (
     GooglePersonalSubject,
     GoogleReconnectSettings,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.personal_toolkit import PersonalToolkitAccessMutation
 from azents.core.toolkit_ownership import (
     PersonalToolkitAccessMode,
@@ -195,7 +196,12 @@ async def test_personal_confirm_creates_workspace_scoped_default_all_and_exact_o
         )
         assert toolkit is not None and toolkit.owner == h.subject.owner
         assert toolkit.access_mode is PersonalToolkitAccessMode.ALL
-        assert toolkit.config["security_risk_acknowledged"] is True
+        assert toolkit.config["services"] == [
+            service.value for service in _settings().services
+        ]
+        assert toolkit.config["oauth_request_scopes"] == list(
+            _settings().oauth_request_scopes
+        )
         assert await ToolkitRepository().get_shared_by_id(session, toolkit.id) is None
         assert await ToolkitRepository().get_by_id(session, toolkit.id) is None
         row = await session.read_session.get(RDBGoogleAttempt, attempt.id)
@@ -255,7 +261,10 @@ async def test_personal_reconnect_preserves_allowance_and_current_settings(
             },
         )
     settings = GoogleReconnectSettings(
-        tasks=_settings().tasks, timeout=12.0, security_risk_acknowledged=True
+        services=_settings().services,
+        oauth_request_scopes=_settings().oauth_request_scopes,
+        timeout=12.0,
+        tool_groups=groups_for_services(_settings().services),
     )
     changed = await h.shared.repo.confirm(
         h.subject,
@@ -316,7 +325,10 @@ async def test_personal_disconnect_and_cancel_defeat_stale_publication(
             attempt_id=reconnect.id,
             registration=h.shared.registration,
             settings=GoogleReconnectSettings(
-                tasks=_settings().tasks, timeout=12.0, security_risk_acknowledged=True
+                services=_settings().services,
+                oauth_request_scopes=_settings().oauth_request_scopes,
+                timeout=12.0,
+                tool_groups=groups_for_services(_settings().services),
             ),
         )
     saved = await h.shared.repo.saved(h.subject, published.toolkit_id)

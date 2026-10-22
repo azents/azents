@@ -27,8 +27,8 @@ from azents.core.google_oauth import (
     GoogleSetup,
     GoogleTokens,
 )
-from azents.core.google_policy import requested_scopes
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.google_workspace_policy import GOOGLE_PICKER_SCOPE
 from azents.core.oauth2 import _OAuthHttpTransport
 
 GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -162,7 +162,7 @@ class GoogleOAuthProvider:
             session=None,
             client_id=setup.client_id,
             redirect_uri=setup.redirect_uri,
-            scope=" ".join(requested_scopes(setup.tasks)),
+            scope=" ".join(setup.oauth_request_scopes),
         )
         url, _state = sdk.create_authorization_url(
             GOOGLE_AUTHORIZATION_URL,
@@ -237,6 +237,39 @@ class GoogleOAuthProvider:
                 "invalid_response", "Google renewal response is invalid."
             ) from None
         return decoder.result().tokens()
+
+    async def refresh_picker(
+        self, registration: GoogleApplicationRegistration, refresh_token: str
+    ) -> GoogleTokenResponse:
+        """Request precisely app-file scope; retain actual receipt evidence."""
+        decoder = _GoogleTokenDecoder(None)
+        try:
+            async with AsyncOAuth2Client(
+                client_id=registration.client_id,
+                client_secret=registration.client_secret,
+                token_endpoint_auth_method="client_secret_post",
+                transport=_OAuthHttpTransport(self.http_client),
+            ) as sdk:
+                sdk.register_compliance_hook("refresh_token_response", decoder.decode)
+                await sdk.refresh_token(
+                    GOOGLE_TOKEN_URL,
+                    refresh_token=refresh_token,
+                    scope=GOOGLE_PICKER_SCOPE,
+                    headers={"Accept": "application/json"},
+                )
+        except asyncio.CancelledError:
+            raise
+        except httpx.HTTPStatusError as error:
+            self._http_rejection(error)
+        except httpx.RequestError:
+            raise GoogleOAuthError(
+                "provider_unavailable", "Google Picker credential outcome is uncertain."
+            ) from None
+        except ValidationError, json.JSONDecodeError, OverflowError:
+            raise GoogleOAuthError(
+                "invalid_response", "Google Picker credential response is invalid."
+            ) from None
+        return decoder.result()
 
     async def identity(
         self, receipt: GoogleTokenResponse, client_id: str, oidc_nonce: str

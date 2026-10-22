@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.system_setting_field_source import SystemSettingFieldSource
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class PlatformGitHubAppFieldResponse(BaseModel):

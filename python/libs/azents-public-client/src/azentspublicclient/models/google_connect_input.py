@@ -17,20 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Union
 from typing_extensions import Annotated
-from azentspublicclient.models.google_task import GoogleTask
-from typing import Optional, Set
+from azentspublicclient.models.google_service import GoogleService
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleConnectInput(BaseModel):
     """
-    Explicit work selection before initial or ordinary reconnect authorization.
+    Explicit service/scope intent before consent; requested scopes are not grants.
     """ # noqa: E501
-    tasks: Annotated[List[GoogleTask], Field(min_length=1)]
+    services: List[GoogleService]
+    tool_groups: List[GoogleToolGroup]
+    oauth_request_scopes: List[StrictStr]
     timeout: Union[Annotated[float, Field(le=300.0, strict=True)], Annotated[int, Field(le=300, strict=True)]]
-    __properties: ClassVar[List[str]] = ["tasks", "timeout"]
+    __properties: ClassVar[List[str]] = ["services", "tool_groups", "oauth_request_scopes", "timeout"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -85,7 +88,9 @@ class GoogleConnectInput(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
-            "tasks": obj.get("tasks"),
+            "services": obj.get("services"),
+            "tool_groups": obj.get("tool_groups"),
+            "oauth_request_scopes": obj.get("oauth_request_scopes"),
             "timeout": obj.get("timeout")
             }.items() if _key in obj
         })

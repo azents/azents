@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SlackManifestGuidance(BaseModel):

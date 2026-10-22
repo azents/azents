@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.discord_thread_auto_archive_duration_minutes import DiscordThreadAutoArchiveDurationMinutes
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class MultiDiscordThreadAutoArchiveDurationRequest(BaseModel):

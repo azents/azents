@@ -9,7 +9,7 @@ Name | Type | Description | Notes
 **status** | **str** |  | 
 **client_id** | **str** |  | 
 **callback_url** | **str** |  | 
-**preview_verified** | **bool** | Always false for local operator preparation. | 
+**picker_status** | **str** |  | 
 **service_access_verified** | **bool** | Local preparation does not verify live service access. | 
 **section** | **str** |  | 
 **schema_version** | **int** |  | 
@@ -17,6 +17,11 @@ Name | Type | Description | Notes
 **client_id_source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  | 
 **client_secret_source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  | 
 **client_secret_configured** | **bool** |  | 
+**picker_api_key** | **str** |  | 
+**picker_app_id** | **str** |  | 
+**picker_api_key_source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  | 
+**picker_app_id_source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  | 
+**tool_group_catalog** | [**List[GoogleGroupDefinition]**](GoogleGroupDefinition.md) | Expose nonsecret supported capabilities from the canonical catalog. | 
 
 ## Example
 

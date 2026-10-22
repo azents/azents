@@ -286,10 +286,12 @@ Class | Method | HTTP request | Description
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_disconnect**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/connection | Agent Google Disconnect
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_exchange**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_exchange) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/exchange | Agent Google Exchange
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_outcome**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_outcome) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/attempts/{attempt_id}/outcome | Agent Google Outcome
+*GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_picker_token**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_picker_token) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/picker-token | Agent Google Picker Token
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_preparation**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_preparation) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/preparation | Agent Google Preparation
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_reconnect**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_reconnect) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/reconnect | Agent Google Reconnect
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_reconnect_confirm**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_reconnect_confirm) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/attempts/{attempt_id}/reconnect-confirm | Agent Google Reconnect Confirm
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_review**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_review) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/attempts/{attempt_id} | Agent Google Review
+*GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_services**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_services) | **PATCH** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/services | Agent Google Services
 *GoogleToolkitV1Api* | [**google_toolkit_v1_agent_google_status**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_agent_google_status) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/connection | Agent Google Status
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_cancel**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id} | Shared Google Cancel
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_confirm**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_confirm) | **POST** /toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id}/confirm | Shared Google Confirm
@@ -297,10 +299,12 @@ Class | Method | HTTP request | Description
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_disconnect**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/connection | Shared Google Disconnect
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_exchange**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_exchange) | **POST** /toolkit/v1/workspaces/{handle}/google/exchange | Shared Google Exchange
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_outcome**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_outcome) | **GET** /toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id}/outcome | Shared Google Outcome
+*GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_picker_token**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_picker_token) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/picker-token | Shared Google Picker Token
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_preparation**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_preparation) | **GET** /toolkit/v1/workspaces/{handle}/google/preparation | Shared Google Preparation
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_reconnect**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_reconnect) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/reconnect | Shared Google Reconnect
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_reconnect_confirm**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_reconnect_confirm) | **POST** /toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id}/reconnect-confirm | Shared Google Reconnect Confirm
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_review**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_review) | **GET** /toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id} | Shared Google Review
+*GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_services**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_services) | **PATCH** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/services | Shared Google Services
 *GoogleToolkitV1Api* | [**google_toolkit_v1_shared_google_status**](azentspublicclient/docs/GoogleToolkitV1Api.md#google_toolkit_v1_shared_google_status) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/connection | Shared Google Status
 *HealthV1Api* | [**health_v1_liveness**](azentspublicclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentspublicclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
@@ -358,10 +362,12 @@ Class | Method | HTTP request | Description
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_disconnect**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Disconnect
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_exchange**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_exchange) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/exchange | Personal Google Exchange
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_outcome**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_outcome) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/outcome | Personal Google Outcome
+*PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_picker_token**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_picker_token) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/picker-token | Personal Google Picker Token
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_preparation**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_preparation) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/preparation | Personal Google Preparation
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_reconnect**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/reconnect | Personal Google Reconnect
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_reconnect_confirm**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect_confirm) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/reconnect-confirm | Personal Google Reconnect Confirm
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_review**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_review) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id} | Personal Google Review
+*PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_services**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_services) | **PATCH** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/services | Personal Google Services
 *PersonalGoogleToolkitV1Api* | [**personal_google_toolkit_v1_personal_google_status**](azentspublicclient/docs/PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_status) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Status
 *PersonalToolkitOAuthV1Api* | [**personal_toolkit_oauth_v1_connect_personal_oauth**](azentspublicclient/docs/PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_connect_personal_oauth) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth/connect | Connect Personal Oauth
 *PersonalToolkitOAuthV1Api* | [**personal_toolkit_oauth_v1_disconnect_personal_oauth**](azentspublicclient/docs/PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_disconnect_personal_oauth) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth | Disconnect Personal Oauth
@@ -738,17 +744,23 @@ Class | Method | HTTP request | Description
  - [GoogleConnectInput](azentspublicclient/docs/GoogleConnectInput.md)
  - [GoogleConnectOutput](azentspublicclient/docs/GoogleConnectOutput.md)
  - [GoogleConnectionOutput](azentspublicclient/docs/GoogleConnectionOutput.md)
+ - [GoogleDriveAccess](azentspublicclient/docs/GoogleDriveAccess.md)
  - [GoogleExchangeRequest](azentspublicclient/docs/GoogleExchangeRequest.md)
  - [GoogleFinalSettings](azentspublicclient/docs/GoogleFinalSettings.md)
+ - [GoogleGroupDefinition](azentspublicclient/docs/GoogleGroupDefinition.md)
  - [GoogleIdentity](azentspublicclient/docs/GoogleIdentity.md)
+ - [GooglePickerTokenInput](azentspublicclient/docs/GooglePickerTokenInput.md)
+ - [GooglePickerTokenOutput](azentspublicclient/docs/GooglePickerTokenOutput.md)
  - [GooglePreparation](azentspublicclient/docs/GooglePreparation.md)
  - [GooglePublishedOutput](azentspublicclient/docs/GooglePublishedOutput.md)
  - [GoogleReconnectConfirmRequest](azentspublicclient/docs/GoogleReconnectConfirmRequest.md)
  - [GoogleReconnectSettings](azentspublicclient/docs/GoogleReconnectSettings.md)
  - [GoogleReview](azentspublicclient/docs/GoogleReview.md)
  - [GoogleService](azentspublicclient/docs/GoogleService.md)
- - [GoogleTask](azentspublicclient/docs/GoogleTask.md)
- - [GoogleTaskAccess](azentspublicclient/docs/GoogleTaskAccess.md)
+ - [GoogleServiceAccess](azentspublicclient/docs/GoogleServiceAccess.md)
+ - [GoogleServicesUpdateInput](azentspublicclient/docs/GoogleServicesUpdateInput.md)
+ - [GoogleToolGroup](azentspublicclient/docs/GoogleToolGroup.md)
+ - [GoogleWorkspaceOperation](azentspublicclient/docs/GoogleWorkspaceOperation.md)
  - [HTTPValidationError](azentspublicclient/docs/HTTPValidationError.md)
  - [HealthStatus](azentspublicclient/docs/HealthStatus.md)
  - [HistoricalMemoryListResponse](azentspublicclient/docs/HistoricalMemoryListResponse.md)

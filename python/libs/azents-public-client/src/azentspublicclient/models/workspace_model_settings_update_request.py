@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class WorkspaceModelSettingsUpdateRequest(BaseModel):

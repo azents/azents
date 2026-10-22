@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  googlePresetGroups,
+  googleScopesForGroups,
+} from "../../shared/toolkits/google-access.ts";
+import { googleGroupCatalog } from "../../shared/toolkits/google-group-fixtures.ts";
+import {
   decodeGoogleResume,
   deserializeGoogleResume,
   googleResumeMatches,
@@ -11,6 +16,7 @@ import {
 import {
   googleDesiredSchema,
   googleFinalSettingsSchema,
+  googleReconnectSettingsSchema,
 } from "../../shared/toolkits/google-schemas.ts";
 import { canPublishGoogleReview } from "../../shared/toolkits/google-types.ts";
 import type { GoogleReview } from "@azents/public-client";
@@ -38,19 +44,14 @@ void test("Google resume validates exact shared/Agent return destination", () =>
     googleResumeMatches(context, { handle: "team", agentId: "agent" }, "saved"),
     false,
   );
-  assert.equal(
-    decodeGoogleResume({ ...fixture, returnPath: "/w/other/toolkits/new" }),
-    null,
-  );
-  assert.equal(
-    decodeGoogleResume({ ...fixture, returnPath: "https://example.invalid" }),
-    null,
-  );
-  assert.equal(decodeGoogleResume({ ...fixture, code: "secret-code" }), null);
-  assert.equal(
-    decodeGoogleResume({ ...fixture, state: "encrypted-state" }),
-    null,
-  );
+  for (const invalid of [
+    { returnPath: "/w/other/toolkits/new" },
+    { returnPath: "https://example.invalid" },
+    { code: "secret-code" },
+    { state: "encrypted-state" },
+  ]) {
+    assert.equal(decodeGoogleResume({ ...fixture, ...invalid }), null);
+  }
   assert.equal(deserializeGoogleResume("not-json"), null);
 });
 void test("Personal Google resume is account-scoped without a workload Workspace", () => {
@@ -100,36 +101,86 @@ void test("nonsecret state digests distinguish sibling callbacks", async () => {
   assert.notEqual(first, await googleStateDigest("opaque-second-state"));
   assert.equal(first, await googleStateDigest("opaque-first-state"));
 });
-void test("Google task selection is explicit and bounded", () => {
+void test("Google service and request contracts preserve explicit reconnect intent", () => {
   assert.equal(
-    googleDesiredSchema.safeParse({ tasks: [], timeout: 30 }).success,
-    false,
-  );
-  assert.equal(
-    googleDesiredSchema.safeParse({ tasks: ["gmail_send"], timeout: 30 })
-      .success,
-    false,
-  );
-  assert.equal(
-    googleDesiredSchema.safeParse({ tasks: ["drive_files"], timeout: 30 })
-      .success,
-    true,
-  );
-  assert.equal(
-    googleDesiredSchema.safeParse({ tasks: ["gmail_read"], timeout: 0 })
-      .success,
-    false,
-  );
-  assert.equal(
-    googleFinalSettingsSchema.safeParse({
-      tasks: ["calendar_read"],
+    googleDesiredSchema.safeParse({
+      services: [],
+      oauth_request_scopes: [],
       timeout: 30,
     }).success,
     false,
   );
+  assert.equal(
+    googleDesiredSchema.safeParse({
+      services: ["unknown"],
+      oauth_request_scopes: [],
+      timeout: 30,
+    }).success,
+    false,
+  );
+  assert.equal(
+    googleDesiredSchema.safeParse({
+      services: ["drive"],
+      tool_groups: ["drive_read"],
+      oauth_request_scopes: googleScopesForGroups(
+        ["drive_read"],
+        googleGroupCatalog,
+      ),
+      timeout: 30,
+    }).success,
+    true,
+  );
+  assert.equal(
+    googleDesiredSchema.safeParse({
+      services: ["gmail"],
+      oauth_request_scopes: [],
+      timeout: 0,
+    }).success,
+    false,
+  );
+  assert.equal(
+    googleFinalSettingsSchema.safeParse({
+      services: ["calendar"],
+      oauth_request_scopes: [],
+      timeout: 30,
+    }).success,
+    false,
+  );
+  assert.equal(
+    googleReconnectSettingsSchema.safeParse({
+      services: [],
+      tool_groups: [],
+      oauth_request_scopes: [],
+      timeout: 30,
+    }).success,
+    true,
+  );
 });
-
-void test("publication requires fresh acknowledgement and actual usable task evidence", () => {
+void test("editable presets request only the selected tool groups' permissions", () => {
+  const selected = googlePresetGroups(
+    "read_only",
+    ["drive", "gmail"],
+    googleGroupCatalog,
+  );
+  assert.deepEqual(selected, ["drive_read", "gmail_read"]);
+  assert.deepEqual(googleScopesForGroups(selected, googleGroupCatalog), [
+    "email",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "openid",
+  ]);
+  selected.push("gmail_send");
+  assert.ok(
+    new Set(googleScopesForGroups(selected, googleGroupCatalog)).has(
+      "https://www.googleapis.com/auth/gmail.compose",
+    ),
+  );
+  assert.deepEqual(
+    googlePresetGroups("clear", ["gmail"], googleGroupCatalog),
+    [],
+  );
+});
+void test("publication requires a renewable reviewed service with actual usable evidence", () => {
   const review: GoogleReview = {
     attempt_id: "attempt",
     expires_at: "2026-10-15T00:00:00Z",
@@ -141,72 +192,57 @@ void test("publication requires fresh acknowledgement and actual usable task evi
     client_id: "client",
     ownership: "workspace_shared",
     reconnect_toolkit_id: null,
-    requested_tasks: ["calendar_read", "gmail_read"],
+    services: ["calendar", "gmail"],
+    tool_groups: ["calendar_read", "gmail_read"],
+    oauth_request_scopes: ["openid", "email"],
+    granted_scopes: [
+      "https://www.googleapis.com/auth/calendar.events.readonly",
+    ],
     timeout: 30,
-    tasks: [
+    drive_access: {
+      whole_content_read: false,
+      whole_content_write: false,
+      whole_metadata_read: false,
+      whole_metadata_write: false,
+      app_file_read: false,
+      app_file_write: false,
+    },
+    accesses: [
       {
-        task: "calendar_read",
         service: "calendar",
+        enabled: true,
         status: "partial",
-        permitted_tools: ["list_events"],
-        unavailable_tools: ["list_calendars"],
+        permitted_tools: ["calendar_list_events"],
+        unavailable_tools: ["calendar_list_calendars"],
       },
       {
-        task: "gmail_read",
         service: "gmail",
+        enabled: true,
         status: "not_granted",
         permitted_tools: [],
-        unavailable_tools: ["list_messages"],
+        unavailable_tools: ["gmail_search_messages"],
       },
     ],
     grant_result: "partial",
     renewable: true,
     can_confirm: true,
     service_access_verified: false,
-    security_notice: "Known-pattern limitations.",
   };
   const now = Date.parse("2026-10-14T00:00:00Z");
+  assert.equal(canPublishGoogleReview(review, ["calendar"], now), true);
+  assert.equal(canPublishGoogleReview(review, [], now), false);
+  assert.equal(canPublishGoogleReview(review, ["gmail"], now), false);
+  assert.equal(canPublishGoogleReview(review, ["drive"], now), false);
   assert.equal(
-    canPublishGoogleReview(review, ["calendar_read"], true, now),
-    true,
-  );
-  assert.equal(
-    canPublishGoogleReview(review, ["calendar_read"], false, now),
+    canPublishGoogleReview({ ...review, renewable: false }, ["calendar"], now),
     false,
   );
   assert.equal(
-    canPublishGoogleReview(review, ["gmail_read"], true, now),
+    canPublishGoogleReview({ ...review, accesses: [] }, ["calendar"], now),
     false,
   );
   assert.equal(
-    canPublishGoogleReview(review, ["calendar_edit"], true, now),
-    false,
-  );
-  assert.equal(
-    canPublishGoogleReview(
-      { ...review, renewable: false },
-      ["calendar_read"],
-      true,
-      now,
-    ),
-    false,
-  );
-  assert.equal(
-    canPublishGoogleReview(
-      { ...review, tasks: [] },
-      ["calendar_read"],
-      true,
-      now,
-    ),
-    false,
-  );
-  assert.equal(
-    canPublishGoogleReview(
-      review,
-      ["calendar_read"],
-      true,
-      Date.parse(review.expires_at),
-    ),
+    canPublishGoogleReview(review, ["calendar"], Date.parse(review.expires_at)),
     false,
   );
 });

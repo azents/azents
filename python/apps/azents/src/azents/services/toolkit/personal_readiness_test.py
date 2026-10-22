@@ -12,6 +12,7 @@ from azents.core.google_oauth import (
     GooglePersonalSubject,
     GoogleSavedConnection,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.repos.google_oauth.management_test import _candidate, _settings
 from azents.repos.toolkit.data import ToolkitCreation
 from azents.repos.toolkit.personal_management_test import Harness
@@ -49,9 +50,15 @@ async def test_google_readiness_in_detail_list_and_agent_choices(
             name="Personal Google",
             slug="google",
             config={
-                "tasks": [task.value for task in settings.tasks],
+                "services": [service.value for service in settings.services],
+                "oauth_request_scopes": list(settings.oauth_request_scopes),
                 "timeout": settings.timeout,
-                "security_risk_acknowledged": True,
+                "tool_groups": [
+                    item.value
+                    for item in groups_for_services(
+                        [service.value for service in settings.services]
+                    )
+                ],
             },
             enabled=enabled,
             always_expose_tools=False,
@@ -72,7 +79,10 @@ async def test_google_readiness_in_detail_list_and_agent_choices(
     )
     google.repo.saved.return_value = GoogleSavedConnection(
         saved.toolkit.id,
-        settings.tasks,
+        saved.toolkit.revision,
+        settings.services,
+        settings.tool_groups,
+        settings.oauth_request_scopes,
         settings.timeout,
         None if state == "not_connected" else connection,
     )

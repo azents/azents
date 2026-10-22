@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.model_execution_option_definition import ModelExecutionOptionDefinition
 from azentspublicclient.models.selectable_model_candidate_response import SelectableModelCandidateResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class SelectableModelOptionResponse(BaseModel):

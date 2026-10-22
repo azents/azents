@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.routine_objective_outcome import RoutineObjectiveOutcome
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RoutineWorkResult(BaseModel):

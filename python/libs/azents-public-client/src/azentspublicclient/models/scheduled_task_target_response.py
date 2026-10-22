@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.external_channel_conversation_location import ExternalChannelConversationLocation
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ScheduledTaskTargetResponse(BaseModel):

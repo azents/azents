@@ -19,32 +19,48 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional, Union
+from azentspublicclient.models.google_drive_access import GoogleDriveAccess
 from azentspublicclient.models.google_identity import GoogleIdentity
-from azentspublicclient.models.google_task import GoogleTask
-from azentspublicclient.models.google_task_access import GoogleTaskAccess
-from typing import Optional, Set
+from azentspublicclient.models.google_service import GoogleService
+from azentspublicclient.models.google_service_access import GoogleServiceAccess
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleConnectionOutput(BaseModel):
     """
-    Saved identity, authorization and selected work under manager authority.
+    Saved local settings and actual grant evidence under current manager access.
     """ # noqa: E501
     toolkit_id: StrictStr
+    revision: StrictInt
+    connection_id: Optional[StrictStr]
     status: StrictStr
     identity: Optional[GoogleIdentity]
-    selected_tasks: List[GoogleTask]
+    services: List[GoogleService]
+    tool_groups: List[GoogleToolGroup]
+    oauth_request_scopes: List[StrictStr]
+    granted_scopes: Optional[List[StrictStr]]
     timeout: Union[StrictFloat, StrictInt]
-    tasks: List[GoogleTaskAccess]
+    accesses: List[GoogleServiceAccess]
+    drive_access: GoogleDriveAccess
     renewable: StrictBool
     service_access_verified: StrictBool = Field(description="Saved grant metadata is not a live access probe.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["toolkit_id", "status", "identity", "selected_tasks", "timeout", "tasks", "renewable", "service_access_verified"]
+    __properties: ClassVar[List[str]] = ["toolkit_id", "revision", "connection_id", "status", "identity", "services", "tool_groups", "oauth_request_scopes", "granted_scopes", "timeout", "accesses", "drive_access", "renewable", "service_access_verified"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
         """Validates the enum"""
         if value not in set(['not_connected', 'connected', 'reconnect_required', 'operator_setup_required', 'client_changed']):
             raise ValueError("must be one of enum values ('not_connected', 'connected', 'reconnect_required', 'operator_setup_required', 'client_changed')")
+        return value
+
+    @field_validator('service_access_verified')
+    def service_access_verified_validate_enum(cls, value):
+        """Validates the enum"""
+        # The pinned generator quotes boolean enum/const values as strings.
+        if str(value).lower() not in set([str('false').lower()]):
+            raise ValueError("must match the declared boolean enum")
         return value
 
     model_config = ConfigDict(
@@ -91,22 +107,35 @@ class GoogleConnectionOutput(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of identity
         if self.identity:
             _dict['identity'] = self.identity.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of each item in tasks (list)
+        # override the default output from pydantic by calling `to_dict()` of each item in accesses (list)
         _items = []
-        if self.tasks:
-            for _item_tasks in self.tasks:
-                if _item_tasks:
-                    _items.append(_item_tasks.to_dict())
-            _dict['tasks'] = _items
+        if self.accesses:
+            for _item_accesses in self.accesses:
+                if _item_accesses:
+                    _items.append(_item_accesses.to_dict())
+            _dict['accesses'] = _items
+        # override the default output from pydantic by calling `to_dict()` of drive_access
+        if self.drive_access:
+            _dict['drive_access'] = self.drive_access.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if connection_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.connection_id is None and "connection_id" in self.model_fields_set:
+            _dict['connection_id'] = None
+
         # set to None if identity (nullable) is None
         # and model_fields_set contains the field
         if self.identity is None and "identity" in self.model_fields_set:
             _dict['identity'] = None
+
+        # set to None if granted_scopes (nullable) is None
+        # and model_fields_set contains the field
+        if self.granted_scopes is None and "granted_scopes" in self.model_fields_set:
+            _dict['granted_scopes'] = None
 
         return _dict
 
@@ -123,11 +152,17 @@ class GoogleConnectionOutput(BaseModel):
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
             "toolkit_id": obj.get("toolkit_id"),
+            "revision": obj.get("revision"),
+            "connection_id": obj.get("connection_id"),
             "status": obj.get("status"),
             "identity": GoogleIdentity.from_dict(obj["identity"]) if obj.get("identity") is not None else None,
-            "selected_tasks": obj.get("selected_tasks"),
+            "services": obj.get("services"),
+            "tool_groups": obj.get("tool_groups"),
+            "oauth_request_scopes": obj.get("oauth_request_scopes"),
+            "granted_scopes": obj.get("granted_scopes"),
             "timeout": obj.get("timeout"),
-            "tasks": [GoogleTaskAccess.from_dict(_item) for _item in obj["tasks"]] if obj.get("tasks") is not None else None,
+            "accesses": [GoogleServiceAccess.from_dict(_item) for _item in obj["accesses"]] if obj.get("accesses") is not None else None,
+            "drive_access": GoogleDriveAccess.from_dict(obj["drive_access"]) if obj.get("drive_access") is not None else None,
             "renewable": obj.get("renewable"),
             "service_access_verified": obj.get("service_access_verified")
             }.items() if _key in obj

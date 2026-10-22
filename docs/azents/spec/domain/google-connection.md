@@ -1,6 +1,7 @@
 ---
 title: "Google Connection"
 created: 2026-10-14
+updated: 2026-10-22
 tags: [google, toolkit, oauth, backend, frontend, engine, security]
 spec_type: domain
 domain: google-connection
@@ -9,18 +10,18 @@ code_paths:
   - python/apps/azents/src/azents/core/tools.py
   - python/apps/azents/src/azents/services/google_application/**
   - python/apps/azents/src/azents/services/google_oauth/**
+  - python/apps/azents/src/azents/services/google_workspace/**
   - python/apps/azents/src/azents/repos/google_oauth/**
   - python/apps/azents/src/azents/rdb/models/google_oauth.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/google.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/personal_google.py
-  - python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py
   - python/apps/azents/src/azents/api/admin/system_setting/v1/google.py
-  - python/apps/azents/src/azents/engine/tools/google.py
+  - python/apps/azents/src/azents/engine/tools/google*.py
   - python/apps/azents/src/azents/engine/tools/deps.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/e5bb444eed80_add_google_connection_authority.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/d1142f351e96_cut_over_google_workspace_direct_tool_.py
   - typescript/apps/azents-web/src/shared/toolkits/google-*.ts
-  - typescript/apps/azents-web/src/shared/toolkits/components/GoogleSetup.tsx
-  - typescript/apps/azents-web/src/shared/toolkits/containers/useGoogleSetupContainer.ts
+  - typescript/apps/azents-web/src/shared/toolkits/components/Google*.tsx
+  - typescript/apps/azents-web/src/shared/toolkits/containers/useGoogle*.ts
   - typescript/apps/azents-web/src/shared/toolkits/containers/useToolkitFormContainer.ts
   - typescript/apps/azents-web/src/shared/toolkits/toolkit-form-lifecycle.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
@@ -34,249 +35,264 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
   - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
   - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
-last_verified_at: 2026-10-17
+last_verified_at: 2026-10-22
 spec_version: 1
 ---
 
 # Google Connection
 
-The `google` provider composes fixed official Calendar, Drive and Gmail MCP
-endpoints. It is separate from generic single-server MCP, GCP and Google Analytics.
-This Spec covers backend/API execution and the management surfaces. Live Google
-interoperability remains distinct from deterministic local verification.
+The `google` provider exposes a closed typed catalog of Gmail, Calendar and Drive
+operations using the official Google API Python Client and Google authentication
+SDKs. It is distinct from generic MCP, GCP and Google Analytics. Resource requests
+use fixed official service hosts; callers cannot supply provider methods, hosts,
+paths, authorization headers or arbitrary request bodies.
 
-## Management Surfaces
+## Service Selection and Actual Access
 
-The platform creation catalog (`GET /toolkit/v1/toolkits`), shared by Workspace
-and Agent Toolkit selection, includes Google only when effective operator client
-ID, secret and deployment callback preparation are complete. Missing, incomplete
-or invalid registration hides Google without hiding unrelated providers. Complete
-environment-owned registration remains supported. This local availability check
-does not assert Preview eligibility or live service access. Saved Google connections
-remain queryable and manageable; catalog filtering does not remove their provider
-from execution or replace current-grant authorization checks.
+Canonical configuration contains `services`, `tool_groups`,
+`oauth_request_scopes` and `timeout`. Managers choose service-specific groups
+directly or edit the read-only, assistant, full or clear presets. New connections
+start without selected groups. The backend-owned closed catalog describes each
+group's operations and sufficient SDK method scopes. Connect/reconnect derives
+request scopes from selected groups, including internal prerequisites, and removes
+only scopes redundant under the compiled policy. Client scope strings are not
+authorization authority.
 
-Main Web routes Google creation through its unpublished lifecycle rather than
-generic Toolkit creation. Managers explicitly select tasks without write defaults,
-authorize, then inspect the actual account and full/partial/none/unknown task
-permissions. Earlier selections remain available in a disclosure. Task summaries
-are localized; exact permitted/unavailable tool identifiers are inspectable in
-separate details. Empty usable evidence, missing renewal or an expired attempt
-cannot enable publication. Security acknowledgement starts false on each review.
+Selected groups are an execution ceiling independent of actual Google grants.
+Final review shows the usable count and unavailable operations for every selected
+group; partial consent cannot enable an unavailable member. Confirmation may narrow
+the reviewed groups but cannot add unreviewed groups. Saved status, reconnect and
+publication retain explicit selections. Preset names are not persisted authority.
+A local change can enable or disable a service or selected group without reconnecting,
+adding authorization, changing the connected account or revoking remote effects.
+An empty enabled-service set is valid for a saved connection.
 
-The same setup component supports Workspace-shared, exact Agent and
-User-within-Workspace ownership. Personal creation/editing is reached through
-`/w/{handle}/personal-tools`; its strict scope, query keys, staged resume and
-callback return carry that Workspace handle. Another Workspace's resume cannot
-restore the personal draft even for the same User and Toolkit identifier.
-Saved Toolkit metadata updates omit Google provider configuration, preserving the
-task/timeout settings confirmed independently by reconnect. Task permission changes
-use ordinary staged reconnect and reviewed atomic replacement. Agent capabilities
-restores only the matching Google create or exact Agent-owned edit surface, including
-uncertain-publication recovery. Closing or backing out of staged Google creation
-invokes exact local abandonment; successful cleanup can finish after view unmount
-only while the stored resume still belongs to that attempt. A publication that wins
-that cancellation race remains an inspectable outcome. Local disconnect has
-explicit confirmation and does not claim remote revocation or reversal of effects.
+The compiled operation policy maps each typed operation to supported SDK methods
+and sufficient scope alternatives. It projects permitted/unavailable tool names,
+actual grant evidence and Drive extent separately. Partial grants can publish when
+at least one selected group has a durable usable capability. Unknown scope
+receipts do not become requested-scope evidence. Broad returned grants never expose
+unselected operations.
 
-The `/oauth/google/callback` page scrubs transient query data and matches a
-nonsecret digest to the exact originating attempt before exchange or denial
-cancellation. Browser resume stores only exact context, deadline, attempt ID,
-correlation digest, phase and validated return destination. It contains no code,
-token, secret or OAuth state. The backend's encrypted state remains authoritative.
-A stale callback attaches nothing and does not cancel a sibling attempt.
-Every post-await callback storage write and navigation checks both the mounted
-operation and the exact current resume owner. Leaving or replacing the callback
-fences a late exchange/denial result without clearing a newer attempt. Strict Mode
-probing finishes before the one-use external exchange is dispatched.
+Drive distinguishes whole-Drive read/write, metadata-only access and Google-limited
+app-file access. `drive.file` does not grant arbitrary known-ID access or whole-Drive
+search. With mixed whole-read and app-file grants, whole-Drive readability does not
+imply whole-Drive writability. Google still enforces per-resource ACLs, protected
+resources and app-file eligibility. New Drive write, sharing and ownership groups
+request sufficient `drive.file` permission; whole-Drive reads are selected
+separately. This does not manufacture whole-Drive write authority or narrow an
+existing broader grant.
 
-An uncertain exchange is inspected through review without exchanging again. An
-uncertain publication offers exact outcome lookup or local cancellation; it does
-not automatically authorize, resubmit settings or replay a tool operation.
-Outcome lookup alone does not prove cancellation or current readiness.
+## Management and Ownership
 
-Admin System Settings has a Google application card with redacted preparation,
-environment-owned read-only fields, explicit secret replacement/clear actions,
-fixed callback copy and current-version conflict feedback. Saving uses optimistic
-versioning. A conflict or uncertain save requires reloading before another mutation;
-reloading discards the draft rather than silently merging secret edits. Configured
-locally is not labeled verified service access or Preview eligibility.
+The creation catalog includes Google only when effective operator client ID,
+secret and callback preparation are complete. Filtering the catalog preserves
+unrelated providers and saved Google management. Local registration is not a live
+service-access probe.
 
-## Operator Registration and Ownership
+Shared management requires Workspace `TOOLKITS_WRITE`. Agent-owned management
+requires the Workspace Owner or the exact active Agent's explicit AgentAdmin.
+Personal management requires ordinary membership in the real Workspace and binds
+the exact User and initiating Auth Session. It does not require shared-manager
+privileges. Candidate identities, callback purposes and target Toolkit ownership
+are exact; another Workspace, User or Agent cannot resume or replace them.
 
-The optional `google_oauth` System Settings Section owns one current operator
-client and encrypted secret. Only System Admin manages it. Public managers see
-redacted local preparation; configuration is not verified Preview/client/service
-access. Each published Toolkit owns one verified subject/client-bound grant.
+Main Web uses the common staged Wizard for Workspace-shared, Agent-owned and
+personal Toolkits. Managers choose services, authorize at Google, review the
+connected identity and actual full/partial/none/unknown
+access, and explicitly publish. Plain Toolkit creation cannot bypass this flow.
+Saved metadata edits omit provider configuration and preserve independently saved
+service/timeout settings. Reconnect replaces authorization, not unrelated metadata.
 
-Workspace-shared management requires `TOOLKITS_WRITE`. Agent-owned management
-requires the Workspace Owner or exact active Agent's explicit AgentAdmin. Callback
-and candidate operations retain exact initiating User/Auth Session/Workspace/
-Agent. Manager identity is never the runtime execution principal.
+The same-context `/oauth/google/callback` removes transient query data and matches
+a nonsecret digest to the exact originating attempt. Browser resume stores only
+context, deadline, attempt ID, correlation digest, phase and validated return
+location, never codes, credentials or OAuth state. Every post-await storage write
+and navigation fences the current mounted operation and resume owner. Strict Mode
+probing finishes before one-use exchange dispatch.
 
-Runtime uses canonical active/running `SessionExecutionOwner` and PostgreSQL
-`owner_generation`, current Agent/Workspace/root identity, effective Toolkit
-relation/namespace and current grant/client/task evidence. Both private and Team
-runs use the stored connected account, never a channel participant's identity.
+An uncertain exchange uses review rather than exchanging again. An uncertain
+publication permits exact outcome lookup or local cancellation, not automatic
+resubmission. Historical outcomes are nonsecret observations and do not prove
+current readiness. Disconnect is local and does not promise Google revocation or
+reversal of mail, file, calendar or filter effects.
 
-## OAuth Candidate and Publication
+## OAuth and Current Execution Authority
 
-Personal management is available through
-`/toolkit/v1/workspaces/{handle}/personal/google` and the Workspace-scoped personal
-saved-connection routes. Its User-owned subject requires the real Workspace and
-binds the current User and exact initiating Auth Session, with no owning Agent.
-Ordinary current membership is required; personal management does not require
-shared Toolkit-manager or AgentAdmin authority. Separate personal callback purpose
-and exact User/Workspace owner context prevent shared/Agent or other-Workspace
-callbacks from changing a personal attempt, including for the same User. The common staged
-connect, exchange, review, confirm, outcome, cancellation, reconnect, status and
-local disconnect lifecycle remains authoritative.
+Connect creates an encrypted unpublished attempt with PKCE S256, signed OIDC nonce,
+separate callback nonce, exact manager/client generation, request intent and optional
+reconnect target. Fresh consent and offline access occur only at manager-started
+connect/reconnect. Each candidate needs its own renewal credential. Missing renewal
+cannot borrow the old connection's credential.
 
-Personal confirmation publishes the canonical Toolkit and Google grant
-atomically with default dynamic `all` access. Reconnect preserves the current
-personal access policy and unrelated metadata while applying the existing
-grant/client/attempt replacement checks. Personal User ownership is legal in
-the staged-attempt schema; existing Workspace/Agent attempt identities and
-encrypted payloads are preserved. Personal Web management reuses the common
-staged Wizard and saved metadata form in the Workspace's personal surface.
+Exchange claims once before provider I/O, verifies issuer/audience/signature/expiry/
+subject/nonce using supported SDKs, and retains actual token receipt omissions.
+Post-I/O staging and atomic confirmation repeat manager, client and target fences.
+Initial confirm creates Toolkit/grant/owning-Agent namespace atomically. Exact
+confirmation replay observes the historical outcome; different settings conflict.
+Cancellation, denial and expiry remove only unpublished local credentials.
 
-Personal Session execution uses an exact source-bound adapter to the common current
-grant/client/task checks. Its canonical User-root association, active owner, ordinary Agent
-access, personal policy and source revision are rechecked before discovery, renewal and
-calls. Post-renewal publication repeats personal parent admission inside the existing
-current-grant CAS operation; withdrawal, source change and changed client evidence defeat
-stale success and failure. Shared/Agent delegation behavior remains unchanged.
+Runtime authority uses canonical active/running `SessionExecutionOwner`, PostgreSQL
+`owner_generation`, Agent/Workspace/root identity, effective Toolkit/source revision,
+current client, local service and group selection and actual grants. A manager is not the
+execution principal; private and Team runs use the stored connected account.
+Personal tools additionally require the User root, current access policy and exact
+source admission. Discovery is authorization-filtered; captured handlers repeat
+current checks before provider effects and file resolution/publication.
 
-Connect stores an unpublished encrypted attempt with separate callback-state
-nonce, OIDC nonce, PKCE verifier, exact callback/client generation, selected tasks
-and optional saved reconnect target. Authorization requests use supported Authlib
-APIs, PKCE S256, minimal identity/task scopes and offline access with fresh consent
-only at the explicitly manager-started Connect/Reconnect boundary. Each candidate
-uses its own returned renewal credential, never a copied saved grant token. Missing
-renewal remains unavailable despite the consent request. Encrypted callback
-state also binds the exact manager context.
+Lazy refresh performs SDK I/O outside database transactions and finalizes under an
+exact-current compare-and-set fence. Changed credentials, ownership, client,
+services, groups or source authority defeat stale success and failure. Same-current-grant
+omissions retain existing renewal/scope evidence. Matching-current credential
+rejection marks only that grant reconnect-required. Resource ACL/policy and
+transient failures do not globally revoke the connection. Uncertain writes are
+never automatically replayed.
 
-Exchange claims once before SDK/provider I/O. Signed Google identity verification
-precedes issuer/audience/expiry/subject/nonce projection. The Google token decoder
-retains actual scope and refresh-token absence before SDK normalization. Requested
-scope never substitutes for actual grant evidence.
+Google HTTP failures retain their HTTP status, structured provider status/reasons
+and bounded original `error.message` in tool errors. Unknown reasons are retained;
+account/resource identifiers, API names and diagnostic console links are retained.
+Provider-owned diagnostic text is passed through without masking or substitution,
+including credential-like strings. SDK request/URI serialization, headers and
+arbitrary response fields are not copied. Malformed
+error envelopes retain the generic failure. Compound failures preserve both the
+confirmed-step receipt and the provider explanation without replaying any step.
 
-Post-I/O staging rechecks current manager, client generation and attempt/target
-state. No Toolkit or grant executes before explicit confirm. Review exposes only
-identity, selected tasks, exact permitted/unavailable tools, full/partial/none/
-unknown grant evidence, renewal availability and security notice.
+## Typed Workspace Operations
 
-Confirm requires at least one durable usable capability, selected tasks within
-the reviewed set and fresh strict-boolean security acknowledgement. Initial
-publication atomically creates Toolkit/grant and owning-Agent namespace where
-applicable. Plain Toolkit CRUD cannot create Google connections.
+Calendar includes calendar discovery/creation, bounded event search/get, free-busy,
+explicit event creation/update/delete and supported event types. Time ranges,
+recurrence, status-event properties, notification intent and conference request
+identity are validated before dispatch.
 
-Published attempt outcomes contain minimal final nonsecret settings and identities,
-not candidate/setup ciphertext. Exact replay observes the outcome; different
-settings conflict. Outcome lookup does not require the current operator secret
-and does not imply current readiness after later replacement/disconnect.
+Gmail includes message/thread search and reads, labels and modification, drafts,
+new/reply/forward sending and filter lifecycle. Compose inputs distinguish inline
+body, authorized body file and attachments; primary-account or verified send-as
+identity is checked independently. Reply/forward provenance preserves source/thread
+semantics. Applying an existing filter to historical mail changes labels only;
+future automatic forwarding remains a persistent Gmail rule. Deleting or locally
+disabling a connection does not undo an existing remote filter.
 
-## Ordinary Reconnect and Local Cleanup
+Drive includes metadata/search/link, content read/download/export, blob creation,
+folders/copy/content/metadata changes, permissions and supported native imports.
+Native format conversion is explicit. Shortcuts have bounded traversal and do not
+transfer writability from the readable target. Outputs distinguish confirmed
+results, bounded omissions, extraction status and partial multi-step completion.
 
-Reconnect stages against exact saved connection identity, permission/auth state
-and authentication-affecting configuration. Routine access-token renewal retains
-identity; unrelated metadata changes are preserved. Reviewed confirmation replaces
-the current grant atomically with a new identity, defeating older refreshes and
-sibling reconnect targets.
+## Canonical Files and Bounded Content
 
-Cancel, denial, expiry and failed verification abandon only local unpublished
-credentials. Local cancellation never promises to undo Google consent or provider
-effects. Disconnect deletes local current grant and fences pending targets.
-A fresh explicit reconnect started after disconnect may publish into the saved
-Toolkit after new review; an old cancelled target cannot resurrect it.
+Inputs accept authorized Exchange/Artifact/current-run VFS resources or absolute
+Runner-authorized Runtime paths. A provider HTTP URL or Worker-local file is not a
+canonical source. Current resource authority, integrity, total byte limits and
+admission are checked before and after reading. Main OAuth credentials remain
+server-side and never enter file URLs or model arguments.
 
-Expiry checks delete unpublished ciphertext in a committed operation before
-reporting expiry. Start also removes expired unpublished credentials within its
-exact initiating context. This is not a user-facing saved-draft/history feature.
+Returned bytes become ordinary canonical Artifacts under current Session resource
+authority. Publication validates size/hash and source identity. A multi-part failure
+reports already completed publications without replaying a Google effect. Runtime
+imports and later outbound file operations use the ordinary transfer coordinator
+and Runner authority. Runtime-free reads and inline operations remain available;
+Runtime paths require a managed Runtime.
 
-## Task and Execution Policy
+Transport, pagination, parser, expansion and inline-output limits are bounded.
+Text extraction supports the declared text/PDF/Office formats with truthful
+unsupported/failed/truncated status; it does not claim OCR or formula evaluation.
+Mail/file/provider content remains untrusted data. There is no Google-specific
+security scanner or security acknowledgement gate.
 
-Eight explicit task groups cover Calendar read/availability/edit, Drive read/
-restricted files, and Gmail read/drafts/modification. No task is preselected.
-Exact compiled remote names and sufficient scope alternatives intersect current
-selection and actual grants. Within-group partial permissions remain visible.
-`drive.file` does not grant whole-Drive search. There is no Gmail send tool.
+## Picker
 
-Each service uses a stable Toolkit/service snapshot key. Discovery is asynchronous;
-schema snapshots are not authorization. Unsupported root schemas, unknown tools
-and flagged schemas are quarantined. Cached schemas are re-filtered against current
-grants at projection, and captured handlers repeat exact raw-name admission before
-outbound effects. Service-prefixed names avoid collisions.
+Optional operator browser API key and numeric project/app ID enable Picker without
+changing OAuth client registration. Shared, Agent and personal managers request a
+short-lived token for the exact current connection ID and revision. The server
+requires Drive enabled and actual `drive.file` authorization, renews with exactly
+that scope, and validates the returned scope, token type and expiry. A broad,
+unknown or too-short receipt is rejected. Refresh-token rotation is preserved under
+the current fence and requires reconnect before browser delivery.
 
-Lazy renewal uses detached current state, SDK I/O outside DB transactions and
-owner-fenced compare-and-set finalization. Changed credentials, current client/
-generation, delegation, selection or Session ownership defeat stale success and
-failure. Same-current-grant refresh omissions retain existing renewal/scope
-evidence; other Toolkit/subject/client credentials are never borrowed.
+Picker responses have `Cache-Control: no-store` and `Pragma: no-cache`. The main
+credential remains server-side. Picker-only bearer data lives in browser memory
+for the active operation and is discarded on completion, cancellation, expiry,
+context change or unmount. Selected IDs are transient UI results, not stored grants
+or a server-side file allowlist. Picker selection cannot narrow an existing broad
+Drive grant; reconnect is required to replace that authorization.
 
-Definitive matching-token authentication rejection marks only that current grant
-reconnect-required. Resource ACL/policy and transient failures are not global
-revocation evidence. Google calls are not automatically replayed after uncertain
-effects or reconnection.
+## API and Operator Settings
 
-## Content Inspection
-
-The Google-specific local scanner inspects complete remote tool text/schema,
-outgoing argument keys/values and incoming text/structured results before common
-extraction/artifact creation. Cached schema text is inspected again. Unknown binary
-content is rejected rather than claimed scanned.
-
-Traversal and normalized/decoded views have depth/node/string/total budgets.
-Unicode/invisible/percent and explicitly supported base64 inspection detects a
-tested known-pattern corpus. Prefix truncation cannot approve uninspected content.
-Flagged/uninspectable/inspector-failed arguments cause no Google data operation.
-Blocked incoming content publishes no original response/artifact and reports that
-the provider effect may already have completed.
-
-Known-pattern screening is not complete prevention. The final notice documents
-novel/semantic/obfuscated/multilingual gaps, false positives, false negatives and
-inspection limits. Diagnostics never contain blocked payloads or token/secret data.
-No paid processor, Model Armor activation, generic scanner plugin or relay exists.
-
-## API
-
-Shared base: `/toolkit/v1/workspaces/{handle}`.
-Agent base adds `/agents/{agent_id}`. Both ownership routes provide:
+Shared base is `/toolkit/v1/workspaces/{handle}`; Agent base adds
+`/agents/{agent_id}`. Both expose:
 
 - `GET /google/preparation`;
-- `POST /google/connect` and `POST /google/exchange`;
-- `GET|DELETE /google/attempts/{attempt_id}` for review/local cancellation;
-- `POST /google/attempts/{attempt_id}/confirm` for new publication;
-- `POST /google/attempts/{attempt_id}/reconnect-confirm` for saved replacement;
+- `POST /google/connect` and `/google/exchange`;
+- `GET|DELETE /google/attempts/{attempt_id}`;
+- `POST /google/attempts/{attempt_id}/confirm` and `/reconnect-confirm`;
 - `GET /google/attempts/{attempt_id}/outcome`;
 - `POST /toolkit-configs/{toolkit_id}/google/reconnect`;
-- `GET|DELETE /toolkit-configs/{toolkit_id}/google/connection`.
+- `GET|DELETE /toolkit-configs/{toolkit_id}/google/connection`;
+- `PATCH /toolkit-configs/{toolkit_id}/google/services`;
+- `POST /toolkit-configs/{toolkit_id}/google/picker-token`.
 
-Authorization-input validation removes code/state/body values from diagnostics.
-Saved projections contain no tokens and distinguish missing grants, reconnect,
-operator configuration and changed-client binding. Admin operator routes are
-`GET|PATCH /system-setting/v1/sections/google-oauth`.
+Personal uses `/personal/google` for staged actions and
+`/personal-toolkit-configs/{toolkit_id}/google` for saved actions under the same
+Workspace base. Ordinary projections contain no credentials. Callback validation
+redacts input values from errors. Service changes require `expected_revision`;
+Picker additionally requires `connection_id`.
+
+Admin `GET|PATCH /system-setting/v1/sections/google-oauth` manages redacted local
+preparation using optimistic `expected_version` and explicit secret replace/clear.
+Environment-owned fields stay read-only. Same-client secret rotation preserves
+bindings; a changed client requires reconnect. The setup guide explains ordinary
+Workspace APIs, consent, callback, Google verification/restricted-scope obligations
+and optional Picker preparation. Configured is not verified live access.
+
+## Stopped Data Cutover
+
+The one-time `d1142f351e96` migration runs only across the stopped application
+boundary. Its frozen finite mapping converts old task/config and publication
+settings into canonical services/request intent, abandons unpublished candidates
+and clears Google-only discovery/deferred snapshots. It preserves encrypted current
+grants and historical publication identities. Ambiguous ownership or malformed
+rows fail atomically with nonsecret diagnostics. There is no runtime legacy decoder.
+After commit, rollback requires the matching operator checkpoint, not a downgrade
+that invents old authorization state. No operational migration is implied by local
+migration tests.
+
+The stopped `f512e037a843` conversion adds all existing groups for each formerly
+enabled service to saved configurations, encrypted setup and nested saved targets,
+and published create/reconnect settings. It preserves the previous effective
+operation set for every actual grant, rather than inferring capabilities from
+requested scopes. Existing credentials, actual grants, connection identities,
+revisions and metadata remain unchanged. Pending setup requires the deployment
+encryption key and is re-encrypted without changing candidate credentials. A
+malformed row or wrong key aborts the transaction with identifier-only diagnostics.
+No permanent missing-group runtime fallback is provided; downgrade requires the
+pre-migration checkpoint to avoid turning narrow selections into broader authority.
 
 ## Verification Limits
 
-Deterministic unit, HTTP-route and PostgreSQL tests validate local contracts,
-including real independent-transaction confirm/cancel ordering. Assembled-product
-E2E uses synthetic fixed-host Google TLS/OAuth/identity/MCP inside the isolated
-test Docker network, with ephemeral certificate trust in Public API and Worker
-containers. Product URLs, supported SDK verification and authorization remain
-unchanged. The fixture does not use a live Google account or write the product DB.
+Unit, HTTP-route and independent-transaction PostgreSQL tests own scope matrices,
+currentness/races, service updates, Picker receipt validation and migration
+preservation. Component tests own detailed Wizard, Picker and operator UI states.
+Assembled E2E routes official SDK requests to synthetic fixed-host Google
+TLS/OAuth/identity/Workspace peers in isolated Docker, with ephemeral trust in API
+and Worker. Product hosts, SDK decoding and authorization remain unchanged; the
+fixture does not write the product database.
 
-Representative API flows cover partial grants, unpublished review, explicit
-acknowledgement, idempotent publication, reconnect cancellation/replacement,
-historical outcome and local disconnect. Worker E2E proves SDK refresh, a permitted
-Calendar read and absence of the ungranted write at the synthetic provider.
-Browser E2E covers same-window/context callback return, partial review and explicit
-publication for Workspace-shared and Agent-owned surfaces, ordinary reconnect and
-metadata updates that preserve its confirmed timeout. Narrower tests own the
-remaining authorization, race, scanner and UI-state matrices.
+Required E2E verifies partial grants, unpublished review, exact publication,
+reconnect cancellation/replacement, historical outcome, disconnect, actual Calendar
+read and refresh, and absence of an ungranted write at the provider. Gmail/Drive
+E2E verifies allowed Calendar event creation, message read/send, Gmail filter
+creation, `drive.file` resource denial, canonical Artifact bytes, real Runner import
+and resumable upload with matching SHA-256 through shared Team and personal User
+Session sources. The personal flow also verifies minimal Picker issuance, noncacheable
+response headers and rejection after revision-fenced local service withdrawal. Browser E2E
+verifies same-context callback, partial review, explicit publication and reconnect
+metadata preservation on shared and Agent surfaces. Picker browser verification
+uses the deployed loader/API and a synthetic modal peer to observe selection,
+cancellation, disposal and navigation cleanup without changing the main grant or
+persisting credentials/selected IDs.
 
-These checks establish assembled local behavior against a synthetic contract.
-Public discovery established endpoint metadata and catalogs, not authenticated permissions.
-Live scope-to-tool mapping, endpoint token reuse, Preview/renewal behavior,
-screening efficacy/compliance and mixed-version rollback remain conditional.
-No live Google account or production change is claimed.
+These are synthetic contract checks, not live Google interoperability, security
+certification, quota/load evidence or compliance approval. Live OAuth, real Picker,
+restricted-scope review, real account ACLs and Google format conversion remain
+external prerequisites. No live Google account, production migration, merge,
+deployment or release is claimed.

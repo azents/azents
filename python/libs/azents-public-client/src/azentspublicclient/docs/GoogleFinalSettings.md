@@ -1,20 +1,21 @@
 # GoogleFinalSettings
 
-Complete final reviewed settings; no provider permission booleans accepted.
+Complete reviewed metadata and service/request settings; never grants.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
+**oauth_request_scopes** | **List[str]** |  | 
+**timeout** | **float** |  | 
 **name** | **str** |  | 
 **slug** | **str** |  | 
 **description** | **str** |  | 
 **prompt** | **str** |  | 
 **enabled** | **bool** |  | 
 **always_expose_tools** | **bool** |  | 
-**tasks** | [**List[GoogleTask]**](GoogleTask.md) |  | 
-**timeout** | **float** |  | 
-**security_risk_acknowledged** | **bool** |  | 
 
 ## Example
 

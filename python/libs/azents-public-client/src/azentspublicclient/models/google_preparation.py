@@ -19,23 +19,32 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from typing import Optional, Set
+from azentspublicclient.models.google_group_definition import GoogleGroupDefinition
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GooglePreparation(BaseModel):
     """
-    Public redacted declaration; never claims verified Preview or service access.
+    Separate local OAuth and optional Picker preparation, without live claims.
     """ # noqa: E501
     status: StrictStr
     client_id: Optional[StrictStr]
     callback_url: Optional[StrictStr]
-    preview_verified: StrictBool = Field(description="Always false for local operator preparation.")
+    picker_status: StrictStr
     service_access_verified: StrictBool = Field(description="Local preparation does not verify live service access.")
+    tool_group_catalog: List[GoogleGroupDefinition] = Field(description="Expose nonsecret supported capabilities from the canonical catalog.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "preview_verified", "service_access_verified"]
+    __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "picker_status", "service_access_verified", "tool_group_catalog"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
+            raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
+        return value
+
+    @field_validator('picker_status')
+    def picker_status_validate_enum(cls, value):
         """Validates the enum"""
         if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
             raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
@@ -82,6 +91,13 @@ class GooglePreparation(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in tool_group_catalog (list)
+        _items = []
+        if self.tool_group_catalog:
+            for _item_tool_group_catalog in self.tool_group_catalog:
+                if _item_tool_group_catalog:
+                    _items.append(_item_tool_group_catalog.to_dict())
+            _dict['tool_group_catalog'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -114,8 +130,9 @@ class GooglePreparation(BaseModel):
             "status": obj.get("status"),
             "client_id": obj.get("client_id"),
             "callback_url": obj.get("callback_url"),
-            "preview_verified": obj.get("preview_verified"),
-            "service_access_verified": obj.get("service_access_verified")
+            "picker_status": obj.get("picker_status"),
+            "service_access_verified": obj.get("service_access_verified"),
+            "tool_group_catalog": [GoogleGroupDefinition.from_dict(_item) for _item in obj["tool_group_catalog"]] if obj.get("tool_group_catalog") is not None else None
             }.items() if _key in obj
         })
         # store additional fields in additional_properties

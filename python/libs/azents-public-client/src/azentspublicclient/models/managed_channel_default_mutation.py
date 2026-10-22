@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.managed_channel_default import ManagedChannelDefault
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ManagedChannelDefaultMutation(BaseModel):

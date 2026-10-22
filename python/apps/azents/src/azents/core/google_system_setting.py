@@ -4,9 +4,10 @@ import dataclasses
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from typing_extensions import TypedDict
 
+from azents.core.google_tool_groups import GOOGLE_TOOL_GROUPS, GoogleGroupDefinition
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingActivationMode,
@@ -23,6 +24,19 @@ class GoogleApplicationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     client_id: str | None = None
+    picker_api_key: str | None = Field(
+        default=None, min_length=1, max_length=255, repr=False
+    )
+    picker_app_id: str | None = Field(
+        default=None, min_length=1, max_length=32, pattern=r"^[0-9]+$"
+    )
+
+    @field_validator("picker_api_key")
+    @classmethod
+    def trimmed_picker_key(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or value != value.strip()):
+            raise ValueError("Google Picker API key must be nonblank and trimmed.")
+        return value
 
     @field_validator("client_id")
     @classmethod
@@ -62,19 +76,32 @@ class GoogleApplicationRegistration:
     redirect_uri: str
 
 
+@dataclasses.dataclass(frozen=True)
+class GooglePickerApplication:
+    """One detached operator snapshot; browser preparation is not live verification."""
+
+    registration: GoogleApplicationRegistration = dataclasses.field(repr=False)
+    api_key: str = dataclasses.field(repr=False)
+    app_id: str
+
+
 class GooglePreparation(BaseModel):
-    """Public redacted declaration; never claims verified Preview or service access."""
+    """Separate local OAuth and optional Picker preparation, without live claims."""
 
     status: Literal["not_configured", "incomplete", "configured_unverified"]
     client_id: str | None
     callback_url: str | None
-    preview_verified: bool = Field(
-        strict=True, description="Always false for local operator preparation."
-    )
+    picker_status: Literal["not_configured", "incomplete", "configured_unverified"]
     service_access_verified: bool = Field(
         strict=True,
         description="Local preparation does not verify live service access.",
     )
+
+    @computed_field
+    @property
+    def tool_group_catalog(self) -> tuple[GoogleGroupDefinition, ...]:
+        """Expose nonsecret supported capabilities from the canonical catalog."""
+        return tuple(GOOGLE_TOOL_GROUPS.values())
 
 
 class GoogleApplicationDetail(GooglePreparation):
@@ -86,12 +113,18 @@ class GoogleApplicationDetail(GooglePreparation):
     client_id_source: SystemSettingFieldSource
     client_secret_source: SystemSettingFieldSource
     client_secret_configured: bool
+    picker_api_key: str | None = Field(repr=False)
+    picker_app_id: str | None
+    picker_api_key_source: SystemSettingFieldSource
+    picker_app_id_source: SystemSettingFieldSource
 
 
 class GoogleApplicationConfigPatch(TypedDict, total=False, closed=True):
     """Presence-aware operator nonsecret patch; explicit null clears a field."""
 
     client_id: str | None
+    picker_api_key: str | None
+    picker_app_id: str | None
 
 
 def resolve_google_registration(
@@ -135,11 +168,18 @@ def google_preparation(
         status = "incomplete"
     else:
         status = "configured_unverified"
+    picker_status: Literal["not_configured", "incomplete", "configured_unverified"]
+    if config.picker_api_key is None and config.picker_app_id is None:
+        picker_status = "not_configured"
+    elif config.picker_api_key is None or config.picker_app_id is None:
+        picker_status = "incomplete"
+    else:
+        picker_status = "configured_unverified"
     return GooglePreparation(
         status=status,
         client_id=config.client_id,
         callback_url=redirect_uri,
-        preview_verified=False,
+        picker_status=picker_status,
         service_access_verified=False,
     )
 
@@ -169,6 +209,16 @@ def get_google_oauth_definition() -> SystemSettingDefinition:
                 field_name="client_secret",
                 environment_variable="AZ_GOOGLE_OAUTH_CLIENT_SECRET",
                 target=SystemSettingFieldTarget.SECRET,
+            ),
+            SystemSettingEnvironmentBinding(
+                field_name="picker_api_key",
+                environment_variable="AZ_GOOGLE_PICKER_API_KEY",
+                target=SystemSettingFieldTarget.CONFIG,
+            ),
+            SystemSettingEnvironmentBinding(
+                field_name="picker_app_id",
+                environment_variable="AZ_GOOGLE_PICKER_APP_ID",
+                target=SystemSettingFieldTarget.CONFIG,
             ),
         ),
         candidate_ttl=datetime.timedelta(hours=24),

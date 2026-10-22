@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class ExternalChannelCapabilitySnapshot(BaseModel):

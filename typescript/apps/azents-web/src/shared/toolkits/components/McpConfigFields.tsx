@@ -19,6 +19,7 @@ import {
   Button,
   NumberInput,
   PasswordInput,
+  rem,
   Select,
   Stack,
   TagsInput,
@@ -148,7 +149,7 @@ export function McpConfigFieldsView({
       {canTest && (
         <Button
           variant="light"
-          leftSection={<IconPlugConnected size={16} />}
+          leftSection={<IconPlugConnected size={rem(16)} />}
           onClick={() => onTestConnection()}
           loading={testState.type === "TESTING"}
           w="fit-content"

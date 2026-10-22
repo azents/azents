@@ -18,21 +18,28 @@ import {
   Title,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { googleTaskSchema } from "../google-schemas";
+import { googleGroupPresets } from "../google-access";
+import { googleServiceSchema } from "../google-schemas";
 import { ToolkitDisconnectConfirmation } from "./ToolkitDisconnectConfirmation";
 import type { GoogleSetupProps } from "../google-types";
-import type { GoogleTaskAccess } from "@azents/public-client";
+import type {
+  GoogleDriveAccess,
+  GoogleGroupDefinition,
+  GoogleService,
+  GoogleServiceAccess,
+  GoogleToolGroup,
+} from "@azents/public-client";
 
 function Capability({
   access,
 }: {
-  access: GoogleTaskAccess;
+  access: GoogleServiceAccess;
 }): React.ReactElement {
   const t = useTranslations("googleToolkit");
   return (
     <Stack gap="xs">
       <Group justify="space-between" wrap="wrap">
-        <Text fw={500}>{t(`tasks.${access.task}.title`)}</Text>
+        <Text fw={500}>{t(`services.${access.service}`)}</Text>
         <Badge
           color={
             access.status === "permitted"
@@ -45,9 +52,6 @@ function Capability({
           {t(`access.${access.status}`)}
         </Badge>
       </Group>
-      <Text size="sm" c="dimmed">
-        {t(`tasks.${access.task}.description`)}
-      </Text>
       <Text size="xs">
         {t("availableActions", { count: access.permitted_tools.length })}
       </Text>
@@ -75,6 +79,109 @@ function Capability({
     </Stack>
   );
 }
+function DriveExtent({
+  access,
+}: {
+  access: GoogleDriveAccess;
+}): React.ReactElement {
+  const t = useTranslations("googleToolkit");
+  return (
+    <Stack gap="xs">
+      <Text size="sm">{t("driveExtentTitle")}</Text>
+      {access.whole_content_read && (
+        <Text size="sm">{t("driveWholeRead")}</Text>
+      )}
+      {access.whole_content_write && (
+        <Text size="sm">{t("driveWholeWrite")}</Text>
+      )}
+      {!access.whole_content_write && access.app_file_write && (
+        <Text size="sm">{t("driveAppWrite")}</Text>
+      )}
+      {!access.whole_content_read && access.app_file_read && (
+        <Text size="sm">{t("driveAppRead")}</Text>
+      )}
+      {!access.whole_content_read && access.whole_metadata_read && (
+        <Text size="sm">{t("driveMetadataRead")}</Text>
+      )}
+      {!access.whole_content_write && access.whole_metadata_write && (
+        <Text size="sm">{t("driveMetadataWrite")}</Text>
+      )}
+    </Stack>
+  );
+}
+function ToolGroupsAccess({
+  catalog,
+  groups,
+  services,
+  accesses,
+}: {
+  catalog: GoogleGroupDefinition[];
+  groups: GoogleToolGroup[];
+  services: GoogleService[];
+  accesses: GoogleServiceAccess[];
+}): React.ReactElement {
+  const t = useTranslations("googleToolkit");
+  return (
+    <Stack gap="xs" role="group" aria-label={t("finalGroupsTitle")}>
+      {catalog
+        .filter(
+          (group) =>
+            groups.includes(group.group) && services.includes(group.service),
+        )
+        .map((group) => {
+          const access = accesses.find(
+            (item) => item.service === group.service,
+          );
+          const permitted = group.operations.filter((operation) =>
+            access?.permitted_tools.includes(operation),
+          );
+          return (
+            <Stack key={group.group} gap="xs">
+              <Group justify="space-between">
+                <Text fw={500}>{t(`groups.${group.group}`)}</Text>
+                <Badge
+                  color={
+                    permitted.length === 0
+                      ? "gray"
+                      : permitted.length === group.operations.length
+                        ? "green"
+                        : "yellow"
+                  }
+                >
+                  {t("groupResult", {
+                    available: permitted.length,
+                    total: group.operations.length,
+                  })}
+                </Badge>
+              </Group>
+              {permitted.length < group.operations.length && (
+                <Text size="xs" c="dimmed">
+                  {t("groupUnavailable")}
+                </Text>
+              )}
+              <details>
+                <summary>{t("permissionDetails")}</summary>
+                <Stack gap="xs" mt="xs">
+                  {group.operations.map((operation) => (
+                    <Text key={operation} size="xs">
+                      <Code>{operation}</Code>
+                      {" — "}
+                      {t(
+                        permitted.includes(operation)
+                          ? "access.permitted"
+                          : "access.not_granted",
+                      )}
+                    </Text>
+                  ))}
+                </Stack>
+              </details>
+            </Stack>
+          );
+        })}
+    </Stack>
+  );
+}
+
 export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
   const t = useTranslations("googleToolkit");
   const { preparation, saved, flow } = props;
@@ -85,8 +192,11 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
     flow.type === "VERIFYING" ||
     flow.type === "CONFIRMING" ||
     props.cancelling ||
-    props.disconnecting;
+    props.disconnecting ||
+    props.savingServices;
   const selecting = flow.type === "SELECT";
+  const catalog =
+    preparation.type === "READY" ? preparation.detail.tool_group_catalog : [];
   return (
     <Container
       size="md"
@@ -130,9 +240,67 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
             <Text size="xs" c="dimmed">
               {t("notLiveVerified")}
             </Text>
-            {saved.detail.tasks.map((access) => (
-              <Capability key={access.task} access={access} />
+            {saved.detail.services.length === 0 && (
+              <Text size="sm">{t("inactive")}</Text>
+            )}
+            {saved.detail.accesses.map((access) => (
+              <Capability key={access.service} access={access} />
             ))}
+            <ToolGroupsAccess
+              catalog={catalog}
+              groups={saved.detail.tool_groups}
+              services={saved.detail.services}
+              accesses={saved.detail.accesses}
+            />
+            {saved.detail.services.includes("drive") && (
+              <DriveExtent access={saved.detail.drive_access} />
+            )}
+            <Group>
+              <Button
+                type="button"
+                variant="default"
+                onClick={props.onOpenPicker}
+                disabled={
+                  !props.pickerAvailable || props.picker.type === "OPEN"
+                }
+                loading={props.picker.type === "LOADING"}
+              >
+                {t("openPicker")}
+              </Button>
+              {(props.picker.type === "OPEN" ||
+                props.picker.type === "LOADING") && (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  onClick={props.onClosePicker}
+                >
+                  {t("closePicker")}
+                </Button>
+              )}
+            </Group>
+            {!props.pickerAvailable && (
+              <Text size="xs" c="dimmed">
+                {t(
+                  preparation.type === "READY" &&
+                    preparation.detail.picker_status !== "configured_unverified"
+                    ? "pickerOperatorRequired"
+                    : "pickerRequiresGrant",
+                )}
+              </Text>
+            )}
+            <div role="status">
+              {props.picker.type === "SELECTED" && (
+                <Text size="sm">
+                  {t("pickerSelected", { count: props.picker.count })}
+                </Text>
+              )}
+              {props.picker.type === "CANCELLED" && (
+                <Text size="sm">{t("pickerCancelled")}</Text>
+              )}
+              {props.picker.type === "ERROR" && (
+                <Alert color="red">{props.picker.message}</Alert>
+              )}
+            </div>
             {!props.disconnectConfirmation &&
               saved.detail.status !== "not_connected" && (
                 <Button
@@ -190,24 +358,90 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
         <section aria-labelledby="google-select-heading">
           <Stack gap="md">
             <Title order={4} id="google-select-heading" tabIndex={-1}>
-              {t("selectTasks")}
+              {t("selectServices")}
             </Title>
             <details open={selecting}>
               <summary>{t("selectionDetails")}</summary>
               <Stack gap="md" mt="sm">
                 <Text size="sm">{t("selectDescription")}</Text>
-                {googleTaskSchema.options.map((task) => (
-                  <Checkbox
-                    key={task}
-                    label={t(`tasks.${task}.title`)}
-                    description={t(`tasks.${task}.description`)}
-                    checked={props.tasks.includes(task)}
-                    disabled={!selecting}
-                    onChange={(event) =>
-                      props.onTaskChange(task, event.currentTarget.checked)
-                    }
-                  />
+                <Text fw={500}>{t("presetsTitle")}</Text>
+                <Group gap="xs">
+                  {googleGroupPresets.map((preset) => (
+                    <Button
+                      key={preset}
+                      type="button"
+                      variant="default"
+                      size="xs"
+                      disabled={
+                        !selecting || busy || props.services.length === 0
+                      }
+                      onClick={() => props.onPresetChange(preset)}
+                    >
+                      {t(`presets.${preset}`)}
+                    </Button>
+                  ))}
+                </Group>
+                {googleServiceSchema.options.map((service) => (
+                  <Stack key={service} gap="xs">
+                    <Switch
+                      label={t(`services.${service}`)}
+                      checked={props.services.includes(service)}
+                      disabled={!selecting || busy}
+                      onChange={(event) =>
+                        props.onServiceChange(
+                          service,
+                          event.currentTarget.checked,
+                        )
+                      }
+                    />
+                    {props.services.includes(service) &&
+                      catalog
+                        .filter((group) => group.service === service)
+                        .map((group) => (
+                          <Stack key={group.group} gap="xs" pl="md">
+                            <Checkbox
+                              label={t(`groups.${group.group}`)}
+                              checked={props.toolGroups.includes(group.group)}
+                              disabled={!selecting || busy}
+                              onChange={(event) =>
+                                props.onGroupChange(
+                                  group.group,
+                                  event.currentTarget.checked,
+                                )
+                              }
+                            />
+                            <details>
+                              <summary>
+                                {t("groupTools", {
+                                  count: group.operations.length,
+                                })}
+                              </summary>
+                              <Stack gap="xs" mt="xs">
+                                {group.operations.map((operation) => (
+                                  <Code key={operation}>{operation}</Code>
+                                ))}
+                              </Stack>
+                            </details>
+                          </Stack>
+                        ))}
+                  </Stack>
                 ))}
+                {saved.type === "READY" && selecting && (
+                  <>
+                    <Text size="sm">{t("localServicesDescription")}</Text>
+                    <Button
+                      type="button"
+                      variant="default"
+                      onClick={() => {
+                        void props.onSaveServices();
+                      }}
+                      loading={props.savingServices}
+                      disabled={!props.servicesDirty || busy}
+                    >
+                      {t("saveServices")}
+                    </Button>
+                  </>
+                )}
                 <NumberInput
                   label={t("timeout")}
                   value={props.timeout}
@@ -227,7 +461,13 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                 type="button"
                 onClick={props.onAuthorize}
                 disabled={
-                  props.tasks.length === 0 ||
+                  props.services.length === 0 ||
+                  !catalog.some(
+                    (group) =>
+                      props.services.includes(group.service) &&
+                      props.toolGroups.includes(group.group),
+                  ) ||
+                  busy ||
                   preparation.type !== "READY" ||
                   preparation.detail.status !== "configured_unverified" ||
                   saved.type === "LOADING" ||
@@ -284,22 +524,46 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                   </Text>
                 )}
               </Alert>
-              {review.tasks.map((access) => (
-                <Stack key={access.task} gap="xs">
+              {review.accesses.map((access) => (
+                <Stack key={access.service} gap="xs">
                   <Capability access={access} />
-                  <Checkbox
-                    label={t("includeTask")}
-                    checked={props.tasks.includes(access.task)}
-                    disabled={busy}
-                    onChange={(event) =>
-                      props.onTaskChange(
-                        access.task,
-                        event.currentTarget.checked,
-                      )
-                    }
-                  />
+                  {review.services.includes(access.service) && (
+                    <Checkbox
+                      label={t("includeService")}
+                      checked={props.services.includes(access.service)}
+                      disabled={busy}
+                      onChange={(event) =>
+                        props.onServiceChange(
+                          access.service,
+                          event.currentTarget.checked,
+                        )
+                      }
+                    />
+                  )}
                 </Stack>
               ))}
+              <Title order={4}>{t("finalGroupsTitle")}</Title>
+              <ToolGroupsAccess
+                catalog={catalog}
+                groups={props.toolGroups}
+                services={props.services}
+                accesses={review.accesses}
+              />
+              {props.services.includes("drive") && (
+                <DriveExtent access={review.drive_access} />
+              )}
+              <details>
+                <summary>{t("grantedScopeDetails")}</summary>
+                {review.granted_scopes?.map((scope) => (
+                  <Code
+                    key={scope}
+                    display="block"
+                    style={{ overflowWrap: "anywhere" }}
+                  >
+                    {scope}
+                  </Code>
+                )) ?? <Text size="sm">{t("access.unknown")}</Text>}
+              </details>
               <Text size="xs" c="dimmed">
                 {t("notLiveVerified")}
               </Text>
@@ -375,14 +639,6 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                   {t("noReplay")}
                 </Text>
               </Alert>
-              <Checkbox
-                label={t("acknowledge")}
-                checked={props.acknowledged}
-                disabled={busy}
-                onChange={(event) =>
-                  props.onAcknowledgedChange(event.currentTarget.checked)
-                }
-              />
               <Group>
                 <Button
                   type="button"

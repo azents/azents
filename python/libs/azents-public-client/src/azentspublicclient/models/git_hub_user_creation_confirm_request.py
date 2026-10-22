@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict
 from typing_extensions import Annotated
 from azentspublicclient.models.git_hub_user_creation_final_settings import GitHubUserCreationFinalSettings
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GitHubUserCreationConfirmRequest(BaseModel):

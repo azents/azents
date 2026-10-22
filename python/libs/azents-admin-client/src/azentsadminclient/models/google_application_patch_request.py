@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentsadminclient.models.system_setting_secret_action_request import SystemSettingSecretActionRequest
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class GoogleApplicationPatchRequest(BaseModel):
@@ -30,8 +30,10 @@ class GoogleApplicationPatchRequest(BaseModel):
     """ # noqa: E501
     expected_version: Annotated[int, Field(strict=True, ge=0)]
     client_id: Optional[StrictStr] = None
+    picker_api_key: Optional[StrictStr] = None
+    picker_app_id: Optional[StrictStr] = None
     client_secret: Optional[SystemSettingSecretActionRequest] = None
-    __properties: ClassVar[List[str]] = ["expected_version", "client_id", "client_secret"]
+    __properties: ClassVar[List[str]] = ["expected_version", "client_id", "picker_api_key", "picker_app_id", "client_secret"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,6 +82,16 @@ class GoogleApplicationPatchRequest(BaseModel):
         if self.client_id is None and "client_id" in self.model_fields_set:
             _dict['client_id'] = None
 
+        # set to None if picker_api_key (nullable) is None
+        # and model_fields_set contains the field
+        if self.picker_api_key is None and "picker_api_key" in self.model_fields_set:
+            _dict['picker_api_key'] = None
+
+        # set to None if picker_app_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.picker_app_id is None and "picker_app_id" in self.model_fields_set:
+            _dict['picker_app_id'] = None
+
         return _dict
 
     @classmethod
@@ -96,6 +108,8 @@ class GoogleApplicationPatchRequest(BaseModel):
             _key: _value for _key, _value in {
             "expected_version": obj.get("expected_version"),
             "client_id": obj.get("client_id"),
+            "picker_api_key": obj.get("picker_api_key"),
+            "picker_app_id": obj.get("picker_app_id"),
             "client_secret": SystemSettingSecretActionRequest.from_dict(obj["client_secret"]) if obj.get("client_secret") is not None else None
             }.items() if _key in obj
         })

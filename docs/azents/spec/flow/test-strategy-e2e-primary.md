@@ -115,6 +115,11 @@ along with Runtime Web navigation and service lifecycle evidence. Component
 interaction passes do not establish accessibility conformance; accessibility
 diagnostics remain separate evidence.
 
+Admin System Settings follows the same ownership split: native component/controller
+tests cover label presentation and unsaved drafts during query-only section changes.
+The representative authenticated settings/redaction boundary, cross-Web authentication
+and persisted retention-policy updates remain browser E2E responsibilities.
+
 ## Login Browser Readiness
 
 The invalid-refresh-cookie login journey checks the email input's visibility

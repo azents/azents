@@ -1,12 +1,14 @@
 # GoogleConnectInput
 
-Explicit work selection before initial or ordinary reconnect authorization.
+Explicit service/scope intent before consent; requested scopes are not grants.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**tasks** | [**List[GoogleTask]**](GoogleTask.md) |  | 
+**services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
+**oauth_request_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
 
 ## Example

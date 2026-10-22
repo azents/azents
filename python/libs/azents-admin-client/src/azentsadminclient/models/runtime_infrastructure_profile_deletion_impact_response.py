@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from azentsadminclient.models.runtime_infrastructure_profile_deletion_reference_response import RuntimeInfrastructureProfileDeletionReferenceResponse
-from typing import Optional, Set
+from typing import List, Optional, Set
 from typing_extensions import Self
 
 class RuntimeInfrastructureProfileDeletionImpactResponse(BaseModel):
