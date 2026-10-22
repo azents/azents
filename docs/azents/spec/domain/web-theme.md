@@ -29,7 +29,9 @@ and shade 0 in dark mode. Semantic status colors remain caller choices.
 The shared filled-variant resolver computes the foreground from the actual
 background separately for each color scheme, including explicitly selected
 palette shades. Automatic contrast selects whichever pure black or white has
-the higher WCAG contrast. Dedicated contrast tokens keep this independent of
+the higher WCAG contrast. Button, ActionIcon, and selected Chip also resolve
+their foreground against the hover fill for desktop hover and touch pressed
+states. Dedicated contrast tokens keep this independent of
 the warm canvas white and black tokens. Explicit `autoContrast={false}` retains
 Mantine's caller opt-out. Other variants retain Mantine's normal resolver.
 

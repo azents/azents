@@ -19,6 +19,8 @@ STORIES = {
         "Dark",
         "Overrides Light",
         "Overrides Dark",
+        "Hover Light",
+        "Hover Dark",
     ),
     "src/shared/toolkits/components/GoogleSetup.stories.tsx": (
         "Explicit Selection",

@@ -1,9 +1,13 @@
 import {
+  ActionIcon,
   Badge,
+  Button,
   Checkbox,
   Chip,
   createTheme,
+  darken,
   defaultVariantColorsResolver,
+  getPrimaryShade,
   luminance,
   type MantineColorsTuple,
   type MantineTheme,
@@ -21,16 +25,28 @@ function filledForeground(
   theme: MantineTheme,
   color?: string,
   autoContrast?: boolean,
+  hovered = false,
 ): string {
   if (!(autoContrast ?? theme.autoContrast)) {
     return "var(--mantine-color-white)";
   }
   function foreground(colorScheme: "light" | "dark"): string {
-    const fill = parseThemeColor({
+    const parsed = parseThemeColor({
       theme,
       color: color ?? theme.primaryColor,
       colorScheme,
-    }).value;
+    });
+    let fill = parsed.value;
+    if (hovered) {
+      if (parsed.isThemeColor) {
+        const shade = parsed.shade ?? getPrimaryShade(theme, colorScheme);
+        // Mantine's filled-hover token advances one shade, wrapping 9 to 8.
+        fill =
+          theme.colors[parsed.color]?.[shade === 9 ? 8 : shade + 1] ?? fill;
+      } else {
+        fill = darken(color ?? theme.primaryColor, 0.1);
+      }
+    }
     // The crossover gives the higher WCAG contrast of pure black and white.
     return luminance(fill) > Math.sqrt(0.05 * 1.05) - 0.05
       ? "var(--azents-color-contrast-dark)"
@@ -170,6 +186,12 @@ export const theme = createTheme({
         input.color,
         input.autoContrast,
       );
+      resolved.hoverColor = filledForeground(
+        input.theme,
+        input.color,
+        input.autoContrast,
+        true,
+      );
     }
     return resolved;
   },
@@ -184,8 +206,23 @@ export const theme = createTheme({
   components: {
     // These components omit resolved foreground variables without a variant/color.
     Badge: Badge.extend({ defaultProps: { variant: "filled" } }),
+    Button: Button.extend({ defaultProps: { variant: "filled" } }),
+    ActionIcon: ActionIcon.extend({ defaultProps: { variant: "filled" } }),
     ThemeIcon: ThemeIcon.extend({ defaultProps: { variant: "filled" } }),
-    Chip: Chip.extend({ defaultProps: { variant: "filled" } }),
+    Chip: Chip.extend({
+      defaultProps: { variant: "filled" },
+      classNames: (_theme, props) => ({
+        label: props.variant === "filled" ? classes.chipLabel : void 0,
+      }),
+      styles: (theme, props) => ({
+        root: {
+          "--azents-chip-hover-foreground":
+            props.variant === "filled"
+              ? filledForeground(theme, props.color, props.autoContrast, true)
+              : void 0,
+        },
+      }),
+    }),
     Paper: Paper.extend({
       styles: (theme, props) => ({
         root:

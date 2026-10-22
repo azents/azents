@@ -36,6 +36,10 @@ const colors = [
   "blue.8",
   "orange.9",
   "blue.6",
+  "blue.7",
+  "red.8",
+  "teal.8",
+  "violet.5",
 ];
 
 function ThemeContrast(): React.ReactElement {
@@ -140,6 +144,38 @@ export const Light: Story = {
 export const Dark: Story = {
   globals: { colorScheme: "dark" },
   play: async ({ canvasElement }) => assertContrast(canvasElement, "dark"),
+};
+
+async function assertHoverContrast(
+  canvasElement: HTMLElement,
+  mode: "light" | "dark",
+): Promise<void> {
+  await assertContrast(canvasElement, mode);
+  if (import.meta.env.MODE !== "test") {
+    return;
+  }
+  // Native pointer movement is required: synthetic mouseover does not set :hover.
+  const { userEvent } = await import("vitest/browser");
+  const controls = canvasElement.querySelectorAll(
+    ".mantine-Button-root, .mantine-ActionIcon-root, .mantine-Chip-label",
+  );
+  await expect(controls).toHaveLength(colors.length * 3);
+  for (const control of controls) {
+    await userEvent.hover(control);
+    await expect(control.matches(":hover")).toBe(true);
+    await waitFor(async () => expectReadableContrast(control));
+    await userEvent.unhover(control);
+  }
+}
+
+export const HoverLight: Story = {
+  globals: { colorScheme: "light" },
+  play: async ({ canvasElement }) =>
+    assertHoverContrast(canvasElement, "light"),
+};
+export const HoverDark: Story = {
+  globals: { colorScheme: "dark" },
+  play: async ({ canvasElement }) => assertHoverContrast(canvasElement, "dark"),
 };
 
 function ExplicitOverrides(): React.ReactElement {

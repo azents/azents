@@ -2,3 +2,17 @@
   --switch-text-color: var(--azents-switch-foreground);
   --switch-thumb-bg: var(--azents-switch-foreground);
 }
+
+@media (hover: hover) {
+  .chipLabel[data-checked]:not([data-disabled]):hover {
+    color: var(--azents-chip-hover-foreground);
+    --chip-icon-color: var(--azents-chip-hover-foreground);
+  }
+}
+
+@media (hover: none) {
+  .chipLabel[data-checked]:not([data-disabled]):active {
+    color: var(--azents-chip-hover-foreground);
+    --chip-icon-color: var(--azents-chip-hover-foreground);
+  }
+}
