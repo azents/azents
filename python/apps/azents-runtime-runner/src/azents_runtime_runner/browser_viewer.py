@@ -133,18 +133,21 @@ class _LatestPage:
             raise
         except (Error, BrowserFailure) as error:
             self.failed = True
+            reason_code = (
+                error.code
+                if isinstance(error, BrowserFailure)
+                else _capture_error_code(error)
+            )
+            diagnostic = BrowserFailure(
+                "browser_capture_failed", "Browser live capture failed"
+            ).with_traceback(error.__traceback__)
+            diagnostic.add_note(reason_code)
             logging.getLogger(__name__).warning(
                 "Browser live capture stopped",
-                exc_info=BrowserFailure(
-                    "browser_capture_failed", "Browser live capture failed"
-                ).with_traceback(error.__traceback__),
+                exc_info=diagnostic,
                 extra={
                     "page_id": self.page.id,
-                    "reason_code": (
-                        error.code
-                        if isinstance(error, BrowserFailure)
-                        else _capture_error_code(error)
-                    ),
+                    "reason_code": reason_code,
                 },
             )
         finally:

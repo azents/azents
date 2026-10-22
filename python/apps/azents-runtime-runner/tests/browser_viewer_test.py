@@ -269,6 +269,50 @@ async def stop(task: asyncio.Task[None], transport: Transport) -> None:
         await task
 
 
+@pytest.mark.parametrize(
+    "error,code",
+    [
+        (Error("Timeout 2000ms exceeded: synthetic-secret"), "browser_capture_timeout"),
+        (Error("synthetic-secret"), "browser_capture_sdk_error"),
+        (
+            BrowserFailure("browser_resource_exhausted", "synthetic-secret"),
+            "browser_resource_exhausted",
+        ),
+    ],
+)
+async def test_capture_failure_reason_survives_plain_text_logging(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    site: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error: Error | BrowserFailure,
+    code: str,
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    page = manager.tasks[authority.task_id].pages[authority.page_id]
+    budget = Budget()
+    source = _LatestPage(page, budget)
+    monkeypatch.setattr(page.page, "screenshot", AsyncMock(side_effect=error))
+
+    await source.capture()
+
+    assert source.failed and source.latest is None and budget.bytes == 0
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "Browser live capture stopped"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["reason_code"] == code
+    assert record.__dict__["page_id"] == page.id
+    assert record.exc_info is not None and record.exc_info[2] is not None
+    assert "capture_once" in caplog.text
+    assert code in caplog.text
+    assert "synthetic-secret" not in caplog.text
+
+
 async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
