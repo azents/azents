@@ -24,22 +24,22 @@ export function ToolkitTypeIcon({
   let mark: ReactElement;
   switch (toolkitType) {
     case "github":
-      mark = <IconBrandGithub size={markSize} stroke={1.7} />;
+      mark = <IconBrandGithub size={rem(markSize)} stroke={1.7} />;
       break;
     case "notion":
-      mark = <IconBrandNotion size={markSize} stroke={1.7} />;
+      mark = <IconBrandNotion size={rem(markSize)} stroke={1.7} />;
       break;
     case "sentry":
-      mark = <IconBrandSentry size={markSize} stroke={1.7} />;
+      mark = <IconBrandSentry size={rem(markSize)} stroke={1.7} />;
       break;
     case "aws":
-      mark = <IconBrandAws size={markSize} stroke={1.7} />;
+      mark = <IconBrandAws size={rem(markSize)} stroke={1.7} />;
       break;
     case "google_analytics":
-      mark = <IconBrandGoogleAnalytics size={markSize} stroke={1.7} />;
+      mark = <IconBrandGoogleAnalytics size={rem(markSize)} stroke={1.7} />;
       break;
     case "google":
-      mark = <IconBrandGoogle size={markSize} stroke={1.7} />;
+      mark = <IconBrandGoogle size={rem(markSize)} stroke={1.7} />;
       break;
     case "gcp":
     case "brave_search":
@@ -65,7 +65,7 @@ export function ToolkitTypeIcon({
       break;
     }
     default:
-      mark = <IconTool size={markSize} stroke={1.7} />;
+      mark = <IconTool size={rem(markSize)} stroke={1.7} />;
   }
   return (
     <ThemeIcon

@@ -917,6 +917,8 @@ class TestEventExecutionRepositories:
                 session = ReadWriteSession(_raw_session)
                 try:
                     yield session
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     await session.write_session.rollback()
                     raise

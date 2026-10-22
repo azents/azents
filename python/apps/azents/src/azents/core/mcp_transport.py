@@ -223,6 +223,8 @@ async def _list_tools_once(
         ) as session:
             result = await session.list_tools()
             return McpToolListResult(tools=list(result.tools), use_streamable_http=True)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         if not _is_http_405(exc):
             raise
@@ -274,6 +276,8 @@ async def call_tool(
                 auth=auth,
             ) as session:
                 return await session.call_tool(tool_name, arguments=arguments)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             delay = _extract_rate_limit_delay(exc)
             if delay is None or attempt >= _RATE_LIMIT_MAX_RETRIES:
@@ -364,6 +368,8 @@ async def test_mcp_transport(
         result = await list_tools(
             server_url, headers, timeout, proxy_url=proxy_url, auth=auth
         )
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         message = extract_network_error(exc)
         if message is not None:
