@@ -2728,8 +2728,50 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "azents://memory/README.md" in prompt
         assert "narrow `glob`" in prompt
         assert "`grep` roots" in prompt
-        assert "with `agent` scope" in prompt
+        assert "Use agent-scoped memory for shared knowledge and context." in prompt
         assert "What NOT to save" in prompt
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("associated_user_id", [None, "user-1"])
+    async def test_memory_write_guidance_routes_information_by_scope(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        associated_user_id: str | None,
+    ) -> None:
+        """Team and individual executions receive explicit memory scope guidance."""
+        monkeypatch.setattr(
+            builtin_module,
+            "_resolve_associated_user_id",
+            AsyncMock(return_value=associated_user_id),
+        )
+        toolkit = MemoryWriteToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            repositories=_tool_repositories(
+                session_manager=_make_mock_session_manager(),
+                memory_repo=_make_mock_memory_repo(),
+            ),
+        )
+        toolkit.set_session_id("session-1")
+        context = _make_context()
+
+        state = await toolkit.update_context(context)
+        prompt = " ".join((await toolkit.get_dynamic_prompt(context)).split())
+
+        assert {tool.spec.name for tool in state.tools} == {
+            "save_memory",
+            "delete_memory",
+        }
+        assert "Use `save_memory` to store durable information" in prompt
+        assert (
+            "In individual sessions, store personal information about the user in "
+            "user-scoped memory."
+        ) in prompt
+        assert "Use agent-scoped memory for shared knowledge and context." in prompt
+        assert (
+            "In team sessions, store team knowledge and information about team "
+            "members in agent-scoped memory."
+        ) in prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
