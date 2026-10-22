@@ -1613,6 +1613,11 @@ export const MobileDirectTouchHoldAndDrag = {
   play: async ({ canvasElement }) => {
     const surface = await enableDirectTouch(canvasElement);
     const canvas = within(canvasElement.ownerDocument.body);
+    const keyboard = canvas.getByRole("textbox", {
+      name: "Remote browser keyboard",
+    });
+    keyboard.focus({ preventScroll: true });
+    await expect(keyboard).toHaveFocus();
     const rect = surface.getBoundingClientRect();
     const start = {
       pointerType: "touch",
@@ -1633,6 +1638,7 @@ export const MobileDirectTouchHoldAndDrag = {
       ),
     );
     await expect(actions).toHaveBeenCalledTimes(1);
+    await expect(keyboard).toHaveFocus();
     await expect(
       canvas.getByRole("button", { name: "Touch held — release" }),
     ).toBeVisible();
@@ -1653,10 +1659,13 @@ export const MobileDirectTouchHoldAndDrag = {
       expect.objectContaining({ kind: "pointer", phase: "up" }),
     );
     await expect(actions).toHaveBeenCalledTimes(3);
+    await expect(keyboard).not.toHaveFocus();
 
+    keyboard.focus({ preventScroll: true });
     actions.mockClear();
     await fireEvent.pointerDown(surface, start);
     await fireEvent.pointerDown(surface, { ...start, pointerId: 42 });
+    await expect(keyboard).toHaveFocus();
     await expect(actions).toHaveBeenLastCalledWith(
       frame,
       expect.objectContaining({ kind: "pointer", phase: "cancel" }),

@@ -144,11 +144,8 @@ export function useBrowserDirectTouch(options: Options): Output {
         !event.target.readOnly
           ? event.target
           : null;
-      if (receiver === null) {
-        current.keyboardRef.current?.blur();
-      } else {
-        receiver.focus({ preventScroll: true });
-      }
+      // Retain local keyboard focus until release, keeping the visual viewport
+      // from shifting beneath a held remote pointer.
       if (
         !current.onAction(current.frame, {
           kind: "pointer",
@@ -224,7 +221,11 @@ export function useBrowserDirectTouch(options: Options): Output {
         ) {
           held.current = null;
           update("ready");
-          original.receiver?.focus({ preventScroll: true });
+          if (original.receiver === null) {
+            current.keyboardRef.current?.blur();
+          } else {
+            original.receiver.focus({ preventScroll: true });
+          }
         } else {
           release();
         }
