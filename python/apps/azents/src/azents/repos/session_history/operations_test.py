@@ -72,12 +72,14 @@ async def test_session_history_search_closes_transaction_before_returning() -> N
         *,
         scope: SessionHistoryScope,
         query: str,
+        exclude_tools: bool,
         limit: int,
         before: tuple[datetime.datetime, str] | None,
     ) -> SearchPage[SessionSearchHit]:
         assert transaction_active
         assert current_session is session
         assert query == ""
+        assert exclude_tools is True
         assert limit == 10
         assert before is None
         assert scope.agent_id == "agent-1"
@@ -97,6 +99,7 @@ async def test_session_history_search_closes_transaction_before_returning() -> N
         agent_id="agent-1",
         current_session_id="session-1",
         query="",
+        exclude_tools=True,
         limit=10,
         before=None,
     )

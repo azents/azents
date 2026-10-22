@@ -85,8 +85,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory
-last_verified_at: 2026-10-14
-spec_version: 24
+last_verified_at: 2026-10-22
+spec_version: 25
 ---
 
 # Memory
@@ -446,6 +446,32 @@ execution is restricted to its associated User's Sessions. Scoped search can
 target the current concrete execution or a known permitted Session. Search and
 history pages contain at most ten entries, and exact tool-result reads return
 bounded text with continuation rather than raw payloads or hidden artifacts.
+Text search includes semantic conversation and ordinary client/provider tool
+output by default. `search_sessions.exclude_tools=true` excludes ordinary tool
+output before SQL paging and root discovery; it retains channel replies, Scheduled
+Task final reports and Routine user notifications as conversation. Scoped matches
+identify `category: conversation|tool_output` while preserving canonical Event
+IDs and kinds. Tool arguments, native artifacts, hidden reasoning, output
+references and attachment metadata are not search surfaces.
+
+`channel_action.message` is projected from its JSON-function call, with correlated
+reply results supplying `delivered`, `partial`, `failed` or `unknown` provenance.
+All reply parts contribute to delivery status; the first successful part does not
+prove full delivery. Ignore and message-less calls are not searchable conversation.
+Scheduled reports use the canonical `scheduled_task_result.result`, retaining
+task title, scheduled time and task status independently of delivery success.
+Routine chat notifications use `routine_notification.content`; Primary-channel
+notifications use the newly recorded `record_routine_result` output's user
+message and delivery status. Silent work, replayed recordings, internal results
+and next hints are excluded from conversation search. When a matching Routine chat
+notification exists, it owns the conversation instead of the recording tool
+result. Publication-tool bookkeeping outputs are not indexed as generic tool
+results, preventing duplicate reports and internal-state matches.
+
+History pages expose these report bodies as assistant conversation with bounded
+text and delivery provenance where available; ordinary tools retain their compact
+status-only representation. These are read projections over existing Events,
+not duplicate assistant Events or a new persisted search index.
 All three input objects reject unknown fields before repository operations.
 Optional selectors retain their omission and explicit-null semantics; execution
 identity and access authority remain server-bound rather than caller-supplied.
@@ -534,6 +560,7 @@ Old-code rollback after destructive removal of obsolete schema is not promised.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-22 | 25 | Search and read tool-mediated conversation, Scheduled reports and Routine notifications; add ordinary-tool exclusion and aggregate multipart reply delivery |
 | 2026-10-07 | 23 | Replace integration drafts/manifests and Scheduler-local hosts with summary-only common Worker executions, explicit file submission, retained audit and scope-only current results |
 | 2026-10-06 | 22 | Added Saved cursor paging and integrated Historical overview, one-level session details, automatic scroll pagination and full-width header description |
 | 2026-10-06 | 19 | Replace nonwaiting producer/source/handover fences with exact waiting admission, renewable-lease-safe participant planning and whole-operation/page recovery |

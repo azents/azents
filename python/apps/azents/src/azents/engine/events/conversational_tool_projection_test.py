@@ -9,6 +9,7 @@ import pytest
 from azents.engine.events.conversational_tool_projection import (
     CONVERSATIONAL_TOOL_PROJECTIONS,
     project_conversational_tool_call,
+    project_routine_notification_result,
 )
 from azents.engine.events.types import (
     ClientToolCallPayload,
@@ -274,7 +275,7 @@ def test_nonobject_historical_arguments_are_not_conversation(arguments: object) 
                     {"operation": "reply", "status": "delivered"},
                 ]
             },
-            "unknown",
+            "partial",
         ),
         ([], "unknown"),
     ],
@@ -282,7 +283,7 @@ def test_nonobject_historical_arguments_are_not_conversation(arguments: object) 
 def test_historical_reply_decoder_retains_order_and_delivery_meanings(
     output: object, expected: str
 ) -> None:
-    """The first matching reply outcome remains the delivery authority."""
+    """Every reply part contributes to historical delivery evidence."""
     result = ClientToolResultPayload(
         call_id="call-1",
         name="channel_action",
@@ -293,3 +294,82 @@ def test_historical_reply_decoder_retains_order_and_delivery_meanings(
     projection = project_conversational_tool_call(_call({"message": "answer"}), result)
     assert projection is not None
     assert projection.delivery_status == expected
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        (["delivered", "delivered"], "delivered"),
+        (["delivered", "failed"], "partial"),
+        (["failed", "delivered"], "partial"),
+        (["failed", "not_attempted"], "failed"),
+        (["failed", "unrecognized"], "unknown"),
+        ([], "unknown"),
+    ],
+)
+def test_reply_delivery_aggregates_all_parts(
+    statuses: list[str], expected: str
+) -> None:
+    result = _result("delivered").model_copy(
+        update={
+            "output": json.dumps(
+                {
+                    "outcomes": [
+                        {"operation": "reply", "part": part, "status": status}
+                        for part, status in enumerate(statuses)
+                    ],
+                }
+            )
+        }
+    )
+    projection = project_conversational_tool_call(_call({"message": "report"}), result)
+    assert projection is not None
+    assert projection.delivery_status == expected
+
+
+@pytest.mark.parametrize(
+    ("notify", "created", "status", "visible"),
+    [
+        (True, True, "delivered", True),
+        (True, True, "failed", True),
+        (True, True, "pending", True),
+        (False, True, "not_requested", False),
+        (True, False, "delivered", False),
+    ],
+)
+def test_routine_projection_only_exposes_new_user_notifications(
+    notify: bool,
+    created: bool,
+    status: str,
+    visible: bool,
+) -> None:
+    result = _result("delivered").model_copy(
+        update={
+            "name": "record_routine_result",
+            "output": json.dumps(
+                {
+                    "created": created,
+                    "execution": {
+                        "work": {
+                            "notify": notify,
+                            "message": "User notification",
+                            "result": "Internal work",
+                            "next_hint": "Internal continuity",
+                        },
+                        "delivery_status": status,
+                    },
+                }
+            ),
+        }
+    )
+    projection = project_routine_notification_result(result)
+    if not visible:
+        assert projection is None
+    else:
+        assert projection is not None
+        assert projection.text == "User notification"
+        assert projection.context == ()
+        assert "Internal" not in projection.render()
+        assert projection.delivery_status == (
+            status if status in {"delivered", "failed"} else "unknown"
+        )

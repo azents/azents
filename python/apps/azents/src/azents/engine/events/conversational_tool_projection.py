@@ -18,7 +18,7 @@ from azents.engine.events.sensitive_text import (
 from azents.engine.events.types import ClientToolCallPayload, ClientToolResultPayload
 
 ConversationSpeaker = Literal["assistant"]
-ConversationDeliveryStatus = Literal["delivered", "failed", "unknown"]
+ConversationDeliveryStatus = Literal["delivered", "partial", "failed", "unknown"]
 
 
 class RenderedConversationContext(NamedTuple):
@@ -200,12 +200,66 @@ def _delivery_status(
         )
     except ValidationError:
         return "unknown"
-    for outcome in payload.outcomes:
-        if outcome.operation != "reply":
-            continue
-        if outcome.status == "delivered":
-            return "delivered"
-        if outcome.status in {"failed", "not_attempted"}:
-            return "failed"
-        return "unknown"
+    statuses = [
+        outcome.status for outcome in payload.outcomes if outcome.operation == "reply"
+    ]
+    if statuses and all(status == "delivered" for status in statuses):
+        return "delivered"
+    if "delivered" in statuses:
+        return "partial"
+    if statuses and all(status in {"failed", "not_attempted"} for status in statuses):
+        return "failed"
     return "unknown"
+
+
+class _RoutineNotificationWork(BaseModel):
+    """Read only the public notification fields of a saved Routine result."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+    notify: bool
+    message: str | None
+
+
+class _RoutineNotificationExecution(BaseModel):
+    """Historical notification evidence, independent of execution schema changes."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+    work: _RoutineNotificationWork
+    delivery_status: str | None
+
+
+class _RoutineNotificationResult(BaseModel):
+    """A newly recorded result owns one notification; retries do not duplicate it."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+    created: bool
+    execution: _RoutineNotificationExecution
+
+
+def project_routine_notification_result(
+    result: ClientToolResultPayload,
+) -> ConversationalToolProjection | None:
+    """Expose the user notification, never the internal result or next hint."""
+    if result.name != "record_routine_result" or result.status != "completed":
+        return None
+    try:
+        saved = _RoutineNotificationResult.model_validate_json(
+            lower_output_to_text(result.output)
+        )
+    except ValidationError:
+        return None
+    message = saved.execution.work.message
+    if not saved.created or not saved.execution.work.notify or not message:
+        return None
+    status: ConversationDeliveryStatus = "unknown"
+    if saved.execution.delivery_status == "delivered":
+        status = "delivered"
+    elif saved.execution.delivery_status == "failed":
+        status = "failed"
+    return ConversationalToolProjection(
+        tool_name="record_routine_result",
+        speaker="assistant",
+        text=redact_sensitive_text(message),
+        context=(),
+        delivery_status=status,
+    )

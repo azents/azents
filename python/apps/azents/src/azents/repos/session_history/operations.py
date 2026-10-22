@@ -11,6 +11,9 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
 )
+from azents.engine.events.conversational_tool_projection import (
+    ConversationalToolProjection,
+)
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
@@ -59,6 +62,7 @@ class SessionHistoryEvent:
     payload: object
     created_at: datetime.datetime
     reverted: bool
+    conversation: ConversationalToolProjection | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,6 +116,7 @@ class SessionHistoryOperationRepository:
         current_session_id: str,
         target_session_id: str,
         query: str,
+        exclude_tools: bool,
         limit: int,
         before: str | None,
     ) -> SessionHistoryScopedSearch:
@@ -131,6 +136,7 @@ class SessionHistoryOperationRepository:
                 session,
                 session_id=target.id,
                 query=query,
+                exclude_tools=exclude_tools,
                 limit=limit,
                 before=before,
             )
@@ -142,6 +148,7 @@ class SessionHistoryOperationRepository:
         agent_id: str,
         current_session_id: str,
         query: str,
+        exclude_tools: bool,
         limit: int,
         before: tuple[datetime.datetime, str] | None,
     ) -> SearchPage[SessionSearchHit]:
@@ -156,6 +163,7 @@ class SessionHistoryOperationRepository:
                 session,
                 scope=scope,
                 query=query,
+                exclude_tools=exclude_tools,
                 limit=limit,
                 before=before,
             )
@@ -204,9 +212,19 @@ class SessionHistoryOperationRepository:
                 around=around_event_id,
                 visible_kinds=VISIBLE_KINDS,
             )
+            projections = await self.history_repository.conversation_projections(
+                session,
+                session_id=target.id,
+                event_ids=[event.id for event in page.items],
+            )
             return SessionHistoryEventPage(
                 session_id=target.id,
-                items=[self._event(event, reverted=False) for event in page.items],
+                items=[
+                    self._event(
+                        event, reverted=False, conversation=projections.get(event.id)
+                    )
+                    for event in page.items
+                ],
                 has_older=page.has_more,
                 has_newer=page.has_newer,
             )
@@ -236,7 +254,7 @@ class SessionHistoryOperationRepository:
                 raise SessionHistoryUnavailableError
             return SessionHistoryToolEvent(
                 session_id=target.id,
-                event=self._event(event, reverted=event.reverted),
+                event=self._event(event, reverted=event.reverted, conversation=None),
             )
 
     async def _source_scope(
@@ -330,7 +348,12 @@ class SessionHistoryOperationRepository:
         return _ActiveSessionRoot(concrete=concrete, root=root)
 
     @staticmethod
-    def _event(event: _EventLike, *, reverted: bool) -> SessionHistoryEvent:
+    def _event(
+        event: _EventLike,
+        *,
+        reverted: bool,
+        conversation: ConversationalToolProjection | None,
+    ) -> SessionHistoryEvent:
         """Detach the Event fields consumed by History rendering."""
         return SessionHistoryEvent(
             id=event.id,
@@ -339,4 +362,5 @@ class SessionHistoryOperationRepository:
             payload=event.payload,
             created_at=event.created_at,
             reverted=reverted,
+            conversation=conversation,
         )

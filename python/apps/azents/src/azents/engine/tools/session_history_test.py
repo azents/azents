@@ -104,6 +104,7 @@ def _tools(
     """Provide injected repositories for one execution-bound tool factory."""
     sessions = AsyncMock(spec=AgentSessionRepository)
     history = AsyncMock(spec=SessionHistoryRepository)
+    history.conversation_projections.return_value = {}
     messages = AsyncMock(spec=MessageRepository)
     users = AsyncMock(spec=WorkspaceUserRepository)
     known = {current.id: current}
@@ -344,6 +345,7 @@ async def test_global_search_accepts_typed_cursor(
         datetime(2026, 9, 26, tzinfo=UTC),
         _CURRENT,
     )
+    assert fixture.history.search_roots.await_args.kwargs["exclude_tools"] is False
 
 
 async def test_current_search_uses_concrete_child_but_root_team_authority(
@@ -374,6 +376,27 @@ async def test_current_search_uses_concrete_child_but_root_team_authority(
     assert result["matches"][0]["event_id"] == _EVENT
     assert result["matches"][0]["snippet"] == "purple comet"
     assert history.search_events.await_args.kwargs["session_id"] == _CHILD
+    assert result["matches"][0]["category"] == "conversation"
+
+
+@pytest.mark.parametrize("session_id", [None, "current"])
+async def test_search_tool_forwards_exclusion_to_both_search_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+    session_id: str | None,
+) -> None:
+    fixture = _tools(monkeypatch, current=_root(_CURRENT))
+    fixture.history.search_roots.return_value = SearchPage(items=[], has_more=False)
+    fixture.history.search_events.return_value = SearchPage(items=[], has_more=False)
+    await _json_result(
+        fixture.tools["search_sessions"],
+        {"query": "report", "session_id": session_id, "exclude_tools": True},
+    )
+    method = (
+        fixture.history.search_roots
+        if session_id is None
+        else fixture.history.search_events
+    )
+    assert method.await_args.kwargs["exclude_tools"] is True
 
 
 @pytest.mark.parametrize(

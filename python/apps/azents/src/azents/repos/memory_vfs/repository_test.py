@@ -970,6 +970,7 @@ async def test_profile_free_execution_is_not_a_memory_source_or_consumer(
                 associated_user_id=None,
             ),
             query="private audit text",
+            exclude_tools=True,
             limit=20,
             before=None,
         )
