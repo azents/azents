@@ -1,3 +1,5 @@
+import { expect, waitFor } from "storybook/test";
+import { expectReadableContrast } from "@/shared/storybook/contrast";
 import { SessionContextPresentation } from "./SessionContextView";
 import type { SessionContextResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -37,6 +39,36 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const UnavailableCounters = {} satisfies Story;
+export const BreakdownLight: Story = {
+  globals: { colorScheme: "light" },
+  args: {
+    context: {
+      ...context,
+      breakdown: [
+        { key: "system", tokens: 20, percent: 20 },
+        { key: "user", tokens: 20, percent: 20 },
+        { key: "assistant", tokens: 20, percent: 20 },
+        { key: "tool", tokens: 20, percent: 20 },
+        { key: "other", tokens: 20, percent: 20 },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => {
+      const badges = canvasElement.querySelectorAll(
+        '.mantine-Badge-root[data-variant="filled"]',
+      );
+      await expect(badges).toHaveLength(5);
+      for (const badge of badges) {
+        await expectReadableContrast(badge);
+      }
+    });
+  },
+};
+export const BreakdownDark: Story = {
+  ...BreakdownLight,
+  globals: { colorScheme: "dark" },
+};
 export const UsageCounters = {
   args: {
     usage: {

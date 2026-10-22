@@ -1,5 +1,6 @@
 import { rem } from "@mantine/core";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { expectReadableContrast } from "@/shared/storybook/contrast";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { DEFAULT_GITHUB_WIZARD_SETTINGS } from "../github-wizard-state";
 import {
@@ -521,22 +522,6 @@ export const SelectionGeometryMobile: Story = {
   },
 };
 
-function relativeLuminance(color: string): number {
-  const channels = color.match(/[\d.]+/g)?.map(Number);
-  if (channels == null || channels.length !== 3) {
-    throw new Error(`Expected an opaque computed RGB color, received ${color}`);
-  }
-  const linear = channels.map((channel) => {
-    const value = channel / 255;
-    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-  });
-  const [red, green, blue] = linear;
-  if (red == null || green == null || blue == null) {
-    throw new Error("Computed RGB channels are missing");
-  }
-  return red * 0.2126 + green * 0.7152 + blue * 0.0722;
-}
-
 async function assertAppBadgeContrast(
   canvasElement: HTMLElement,
   colorScheme: "light" | "dark",
@@ -553,13 +538,7 @@ async function assertAppBadgeContrast(
       throw new Error("Verified App identity badge is missing");
     }
     await expect(badge).toBeVisible();
-    const style = getComputedStyle(badge);
-    const foreground = relativeLuminance(style.color);
-    const background = relativeLuminance(style.backgroundColor);
-    const contrast =
-      (Math.max(foreground, background) + 0.05) /
-      (Math.min(foreground, background) + 0.05);
-    await expect(contrast).toBeGreaterThanOrEqual(4.5);
+    await expectReadableContrast(badge);
   });
 }
 

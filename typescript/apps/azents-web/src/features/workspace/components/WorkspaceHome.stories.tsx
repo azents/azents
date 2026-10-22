@@ -1,7 +1,10 @@
 import { rem } from "@mantine/core";
 import { useState } from "react";
+import { expect, waitFor } from "storybook/test";
+import { expectReadableContrast } from "@/shared/storybook/contrast";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { WorkspaceHome } from "./WorkspaceHome";
+import styles from "./WorkspaceHome.module.css";
 import type { WorkspaceHomeContainerOutput } from "../containers/useWorkspaceHomeContainer";
 import type { AgentTeamFilter, EnrichedAgent } from "../types";
 import type { AgentModelSelection } from "@azents/public-client";
@@ -200,3 +203,28 @@ export const All = {
     initialShowDisabled: true,
   },
 } satisfies Story;
+
+export const ThemeLight: Story = {
+  tags: ["ci-contract"],
+  globals: { colorScheme: "light" },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => {
+      const root = canvasElement.querySelector(`.${styles.root}`);
+      if (root == null) {
+        throw new Error("Missing Workspace Home");
+      }
+      const text = root.querySelectorAll(
+        `.${styles.mutedText}, .${styles.rowDescription}`,
+      );
+      await expect(text.length).toBeGreaterThan(0);
+      for (const element of text) {
+        await expectReadableContrast(element, root);
+      }
+    });
+  },
+};
+export const ThemeDark: Story = {
+  ...ThemeLight,
+  tags: ["ci-contract"],
+  globals: { colorScheme: "dark" },
+};

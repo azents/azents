@@ -9,7 +9,7 @@
  */
 import { MantineProvider } from "@mantine/core";
 import { ModalsProvider } from "@mantine/modals";
-import { theme } from "@/shared/theme";
+import { theme, themeCssVariables } from "@/shared/theme";
 import type { ReactNode } from "react";
 
 type MantineColorScheme = "light" | "dark" | "auto";
@@ -28,6 +28,7 @@ export function AppMantineProvider({
   return (
     <MantineProvider
       theme={theme}
+      cssVariablesResolver={themeCssVariables}
       defaultColorScheme={defaultColorScheme}
       forceColorScheme={forceColorScheme}
     >

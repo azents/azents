@@ -1,0 +1,4 @@
+.switchInput:checked:not(:disabled):not([data-disabled]) + .switchTrack {
+  --switch-text-color: var(--azents-switch-foreground);
+  --switch-thumb-bg: var(--azents-switch-foreground);
+}

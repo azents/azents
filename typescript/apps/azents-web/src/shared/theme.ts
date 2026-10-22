@@ -1,11 +1,80 @@
 import {
+  Badge,
   Checkbox,
+  Chip,
   createTheme,
   defaultVariantColorsResolver,
+  luminance,
   type MantineColorsTuple,
+  type MantineTheme,
+  Paper,
+  parseThemeColor,
+  Radio,
   rem,
   Switch,
+  ThemeIcon,
 } from "@mantine/core";
+import classes from "./theme.module.css";
+import type { CSSVariablesResolver } from "@mantine/core";
+
+function filledForeground(
+  theme: MantineTheme,
+  color?: string,
+  autoContrast?: boolean,
+): string {
+  if (!(autoContrast ?? theme.autoContrast)) {
+    return "var(--mantine-color-white)";
+  }
+  function foreground(colorScheme: "light" | "dark"): string {
+    const fill = parseThemeColor({
+      theme,
+      color: color ?? theme.primaryColor,
+      colorScheme,
+    }).value;
+    // The crossover gives the higher WCAG contrast of pure black and white.
+    return luminance(fill) > Math.sqrt(0.05 * 1.05) - 0.05
+      ? "var(--azents-color-contrast-dark)"
+      : "var(--azents-color-contrast-light)";
+  }
+  const light = foreground("light");
+  const dark = foreground("dark");
+  return `light-dark(${light}, ${dark})`;
+}
+
+/** Shared semantic surfaces keep screen styles independent of palette shades. */
+export const themeCssVariables: CSSVariablesResolver = (theme) => ({
+  variables: {
+    "--azents-color-contrast-dark": "#000000",
+    "--azents-color-contrast-light": "#ffffff",
+    "--azents-color-inverse": "var(--mantine-color-gray-9)",
+    "--azents-color-on-inverse": filledForeground(theme, "gray.9"),
+    "--azents-color-inverse-muted": "var(--mantine-color-gray-5)",
+  },
+  light: {
+    "--mantine-color-dimmed": "var(--mantine-color-gray-7)",
+    "--azents-color-canvas": "var(--mantine-color-mono-1)",
+    "--azents-color-surface": "var(--mantine-color-white)",
+    "--azents-color-surface-raised": "var(--mantine-color-white)",
+    "--azents-color-surface-hover": "var(--mantine-color-mono-0)",
+    "--azents-color-border": "var(--mantine-color-mono-3)",
+    "--azents-color-border-strong": "var(--mantine-color-mono-5)",
+    "--azents-color-muted": "var(--mantine-color-mono-7)",
+    "--azents-color-subtle": "var(--mantine-color-mono-8)",
+    "--azents-color-error": "var(--mantine-color-red-7)",
+  },
+  dark: {
+    "--mantine-color-dimmed": "var(--mantine-color-dark-1)",
+    "--azents-color-canvas": "var(--mantine-color-dark-8)",
+    "--azents-color-surface": "var(--mantine-color-dark-6)",
+    "--azents-color-surface-raised": "var(--mantine-color-dark-5)",
+    "--azents-color-surface-hover": "var(--mantine-color-dark-4)",
+    "--azents-color-border": "var(--mantine-color-dark-4)",
+    "--azents-color-border-strong": "var(--mantine-color-dark-3)",
+    "--azents-color-muted": "var(--mantine-color-dark-1)",
+    "--azents-color-subtle": "var(--mantine-color-dark-2)",
+    "--azents-color-error": "var(--mantine-color-red-4)",
+  },
+});
 
 /**
  * azents-web theme.
@@ -44,7 +113,7 @@ const mono: MantineColorsTuple = [
  * Adjusted to higher brightness and warmer tone.
  * Mantine dark mode CSS variable mapping:
  * - dark[0] → --mantine-color-text (#efece8)
- * - dark[2] → --mantine-color-dimmed (#9b9690)
+ * - dark[1] → --mantine-color-dimmed (#cec9c3, shared readable secondary text)
  * - dark[4] → --mantine-color-default-border (#353230)
  * - dark[6] → --mantine-color-default (#1a1917)
  * - dark[7] → --mantine-color-body (#0c0b09)
@@ -91,14 +160,16 @@ export const theme = createTheme({
   /**
    * Mantine defaultVariantColorsResolver does not pass colorScheme when calling
    * parseThemeColor, so isLight is always calculated with the light-mode shade.
-   * When primaryShade differs by mode, filled variant text color becomes wrong;
-   * correct it for runtime colorScheme with CSS light-dark().
+   * Resolve foreground from each mode's actual fill, including explicit shades.
    */
   variantColorResolver: (input) => {
     const resolved = defaultVariantColorsResolver(input);
     if (input.variant === "filled") {
-      resolved.color =
-        "light-dark(var(--mantine-color-white), var(--mantine-color-black))";
+      resolved.color = filledForeground(
+        input.theme,
+        input.color,
+        input.autoContrast,
+      );
     }
     return resolved;
   },
@@ -111,21 +182,48 @@ export const theme = createTheme({
   },
   fontFamilyMonospace: "var(--font-geist-mono, 'Menlo'), 'Consolas', monospace",
   components: {
+    // These components omit resolved foreground variables without a variant/color.
+    Badge: Badge.extend({ defaultProps: { variant: "filled" } }),
+    ThemeIcon: ThemeIcon.extend({ defaultProps: { variant: "filled" } }),
+    Chip: Chip.extend({ defaultProps: { variant: "filled" } }),
+    Paper: Paper.extend({
+      styles: (theme, props) => ({
+        root:
+          props.variant === "message"
+            ? {
+                backgroundColor: "var(--mantine-color-blue-6)",
+                color: filledForeground(theme, "blue.6"),
+              }
+            : {},
+      }),
+    }),
     Checkbox: Checkbox.extend({
-      styles: {
-        icon: {
-          color:
-            "light-dark(var(--mantine-color-white), var(--mantine-color-black))",
+      vars: (theme, props) => ({
+        root: {
+          "--checkbox-icon-color":
+            props.iconColor || props.variant === "outline"
+              ? void 0
+              : filledForeground(theme, props.color, props.autoContrast),
         },
-      },
+      }),
+    }),
+    Radio: Radio.extend({
+      vars: (theme, props) => ({
+        root: {
+          "--radio-icon-color":
+            props.iconColor || props.variant === "outline"
+              ? void 0
+              : filledForeground(theme, props.color, props.autoContrast),
+        },
+      }),
     }),
     Switch: Switch.extend({
-      styles: {
+      classNames: { input: classes.switchInput, track: classes.switchTrack },
+      styles: (theme, props) => ({
         root: {
-          "--switch-color":
-            "light-dark(var(--mantine-primary-color-filled), var(--mantine-color-mono-6))",
+          "--azents-switch-foreground": filledForeground(theme, props.color),
         },
-      },
+      }),
     }),
   },
 });

@@ -28,7 +28,7 @@ const meta = {
     (Story) => (
       <StorybookCanvas maxWidth={rem(520)}>
         <MessageMetadataSurface>
-          <Paper bg="blue.6" c="white" p="sm" radius="lg">
+          <Paper variant="message" p="sm" radius="lg">
             Hover this message to reveal its metadata.
           </Paper>
           <Group justify="flex-end" mt={rem(4)}>

@@ -191,7 +191,7 @@ function ConnectionEvidence({
           ) : (
             <Group>
               <Text fw={600}>{result.identity.name}</Text>
-              <Badge variant="filled">{t("appIdentity")}</Badge>
+              <Badge>{t("appIdentity")}</Badge>
             </Group>
           )}
           {result.installations.map((target) => (

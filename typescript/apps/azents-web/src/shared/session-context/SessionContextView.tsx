@@ -54,37 +54,12 @@ interface SessionRawEventsViewProps {
   context: SessionContextResponse;
 }
 
-interface BreakdownColor {
-  background: string;
-  text: string;
-}
-
-const BREAKDOWN_COLORS: Record<string, BreakdownColor> = {
-  system: {
-    background: "var(--mantine-color-violet-7)",
-    text: "var(--mantine-color-gray-0)",
-  },
-  user: {
-    background: "var(--mantine-color-green-8)",
-    text: "var(--mantine-color-gray-0)",
-  },
-  assistant: {
-    background: "var(--mantine-color-blue-8)",
-    text: "var(--mantine-color-gray-0)",
-  },
-  tool: {
-    background: "var(--mantine-color-orange-9)",
-    text: "var(--mantine-color-gray-0)",
-  },
-  other: {
-    background: "var(--mantine-color-gray-7)",
-    text: "var(--mantine-color-gray-0)",
-  },
-};
-
-const DEFAULT_BREAKDOWN_COLOR: BreakdownColor = {
-  background: "var(--mantine-color-gray-7)",
-  text: "var(--mantine-color-gray-0)",
+const BREAKDOWN_COLORS: Record<string, string> = {
+  system: "violet.7",
+  user: "green.8",
+  assistant: "blue.8",
+  tool: "orange.9",
+  other: "gray.7",
 };
 
 const PROMPT_SOURCE_COLORS: Record<string, string> = {
@@ -137,8 +112,8 @@ function sourceColor(source: string): string {
   return PROMPT_SOURCE_COLORS[source] ?? "gray";
 }
 
-function breakdownColor(key: string): BreakdownColor {
-  return BREAKDOWN_COLORS[key] ?? DEFAULT_BREAKDOWN_COLOR;
+function breakdownColor(key: string): string {
+  return BREAKDOWN_COLORS[key] ?? "gray.7";
 }
 
 function metadataEntries(
@@ -229,8 +204,7 @@ export function SessionContextPresentation({
                     <Progress.Section
                       key={segment.key}
                       value={segment.percent}
-                      color={color.background}
-                      style={{ backgroundColor: color.background }}
+                      color={color}
                     />
                   );
                 })}
@@ -239,14 +213,7 @@ export function SessionContextPresentation({
                 {context.breakdown.map((segment) => {
                   const color = breakdownColor(segment.key);
                   return (
-                    <Badge
-                      key={segment.key}
-                      variant="filled"
-                      style={{
-                        backgroundColor: color.background,
-                        color: color.text,
-                      }}
-                    >
+                    <Badge key={segment.key} color={color}>
                       {t(`breakdown.${segment.key}`)}:{" "}
                       {t("characters", {
                         count: segment.tokens.toLocaleString(),

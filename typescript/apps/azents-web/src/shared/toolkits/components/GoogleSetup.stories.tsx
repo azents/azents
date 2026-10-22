@@ -1,7 +1,8 @@
 import { NextIntlClientProvider } from "next-intl";
 import { useState } from "react";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import koreanMessages from "@/i18n/ko-KR-messages";
+import { expectReadableContrast } from "@/shared/storybook/contrast";
 import { googlePresetGroups } from "../google-access";
 import {
   googleFixtureScopes,
@@ -371,6 +372,26 @@ export const SavedReconnectRequired: Story = {
       detail: { ...saved, status: "reconnect_required" },
     },
   },
+};
+export const SavedLightContrast: Story = {
+  globals: { colorScheme: "light" },
+  args: {
+    ...SavedReconnectRequired.args,
+    saved: { type: "READY", detail: saved },
+  },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => {
+      const badges = canvasElement.querySelectorAll(".mantine-Badge-root");
+      await expect(badges.length).toBeGreaterThan(0);
+      for (const badge of badges) {
+        await expectReadableContrast(badge);
+      }
+    });
+  },
+};
+export const SavedDarkContrast: Story = {
+  ...SavedLightContrast,
+  globals: { colorScheme: "dark" },
 };
 export const DisconnectConfirmation: Story = {
   args: { ...SavedReconnectRequired.args, disconnectConfirmation: true },
