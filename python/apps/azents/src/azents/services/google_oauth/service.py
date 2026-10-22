@@ -31,6 +31,7 @@ from azents.core.google_system_setting import (
     GoogleApplicationUnavailable,
     GooglePreparation,
 )
+from azents.core.google_tool_groups import group_request_scopes
 from azents.core.google_workspace_policy import (
     IDENTITY_SCOPES,
     drive_access,
@@ -123,7 +124,8 @@ class GoogleOAuthService:
             oidc_nonce=secrets.token_urlsafe(32),
             code_verifier=pkce.code_verifier,
             services=desired.services,
-            oauth_request_scopes=desired.oauth_request_scopes,
+            tool_groups=desired.tool_groups,
+            oauth_request_scopes=group_request_scopes(desired.tool_groups),
             timeout=desired.timeout,
             target=None,
         )
@@ -278,7 +280,7 @@ class GoogleOAuthService:
         ):
             raise GoogleOAuthError("stale", "Google account is not ready for review.")
         scopes = candidate.tokens.granted_scopes
-        accesses = service_accesses(setup.services, scopes)
+        accesses = service_accesses(setup.services, scopes, setup.tool_groups)
         usable = any(item.permitted_tools for item in accesses)
         result: Literal["full", "partial", "none", "unknown"]
         if scopes is None:
@@ -306,6 +308,7 @@ class GoogleOAuthService:
             if setup.target is None
             else setup.target.toolkit_id,
             services=setup.services,
+            tool_groups=setup.tool_groups,
             oauth_request_scopes=setup.oauth_request_scopes,
             granted_scopes=scopes,
             timeout=setup.timeout,
@@ -384,6 +387,7 @@ class GoogleOAuthService:
             toolkit_id=toolkit_id,
             expected_revision=desired.expected_revision,
             services=desired.services,
+            tool_groups=desired.tool_groups,
         )
         return await self.status(subject, toolkit_id)
 
@@ -427,6 +431,7 @@ class GoogleOAuthService:
             status=status,
             identity=None if connection is None else connection.candidate.identity,
             services=saved.services,
+            tool_groups=saved.tool_groups,
             oauth_request_scopes=saved.oauth_request_scopes,
             granted_scopes=None
             if connection is None
@@ -437,6 +442,7 @@ class GoogleOAuthService:
                 None
                 if connection is None
                 else connection.candidate.tokens.granted_scopes,
+                saved.tool_groups,
             ),
             drive_access=drive_access(
                 saved.services,

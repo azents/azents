@@ -38,6 +38,9 @@ class TestGoogleServicesUpdateInput(unittest.TestCase):
                 expected_revision = 0.0,
                 services = [
                     'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
                     ]
             )
         else:
@@ -45,6 +48,9 @@ class TestGoogleServicesUpdateInput(unittest.TestCase):
                 expected_revision = 0.0,
                 services = [
                     'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
                     ],
         )
         """

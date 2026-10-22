@@ -39,6 +39,9 @@ class TestGoogleConfirmRequest(unittest.TestCase):
                     services = [
                         'calendar'
                         ], 
+                    tool_groups = [
+                        'gmail_read'
+                        ], 
                     oauth_request_scopes = [
                         ''
                         ], 
@@ -55,6 +58,9 @@ class TestGoogleConfirmRequest(unittest.TestCase):
                 settings = azentspublicclient.models.google_final_settings.GoogleFinalSettings(
                     services = [
                         'calendar'
+                        ], 
+                    tool_groups = [
+                        'gmail_read'
                         ], 
                     oauth_request_scopes = [
                         ''

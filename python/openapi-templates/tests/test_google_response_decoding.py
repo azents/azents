@@ -25,6 +25,7 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "client_id": "test-client",
                 "callback_url": "https://app.example.invalid/oauth/google/callback",
                 "picker_status": "not_configured",
+                "tool_group_catalog": [],
                 "service_access_verified": False,
             }
         )
@@ -40,6 +41,7 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "client_id": "test-client",
                 "callback_url": "https://app.example.invalid/oauth/google/callback",
                 "picker_status": "not_configured",
+                "tool_group_catalog": [],
                 "service_access_verified": False,
                 "section": "google_oauth",
                 "schema_version": 1,
@@ -72,6 +74,7 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "ownership": "workspace_shared",
                 "reconnect_toolkit_id": None,
                 "services": ["calendar"],
+                "tool_groups": ["calendar_read"],
                 "oauth_request_scopes": ["openid", "email"],
                 "granted_scopes": [
                     "https://www.googleapis.com/auth/calendar.events.readonly"
@@ -107,6 +110,7 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "status": "not_connected",
                 "identity": None,
                 "services": [],
+                "tool_groups": [],
                 "oauth_request_scopes": ["openid", "email"],
                 "granted_scopes": None,
                 "drive_access": _NO_DRIVE,

@@ -49,28 +49,39 @@ paths, authorization headers or arbitrary request bodies.
 
 ## Service Selection and Actual Access
 
-Canonical configuration contains `services`, `oauth_request_scopes` and `timeout`.
-Managers choose local service switches. Main Web automatically derives the supported
-scope set for enabled services when starting explicit connect/reconnect, including
-read and write alternatives. Users select permissions at Google consent; supported
-tools are determined automatically from actual returned scopes. Main Web has no
-per-permission request editor or mutable scope-selection state. Saved grants and
-already-reviewed attempts are not broadened by this request construction.
-A local switch can enable or disable a service without reconnecting,
+Canonical configuration contains `services`, `tool_groups`,
+`oauth_request_scopes` and `timeout`. Managers choose service-specific groups
+directly or edit the read-only, assistant, full or clear presets. New connections
+start without selected groups. The backend-owned closed catalog describes each
+group's operations and sufficient SDK method scopes. Connect/reconnect derives
+request scopes from selected groups, including internal prerequisites, and removes
+only scopes redundant under the compiled policy. Client scope strings are not
+authorization authority.
+
+Selected groups are an execution ceiling independent of actual Google grants.
+Final review shows the usable count and unavailable operations for every selected
+group; partial consent cannot enable an unavailable member. Confirmation may narrow
+the reviewed groups but cannot add unreviewed groups. Saved status, reconnect and
+publication retain explicit selections. Preset names are not persisted authority.
+A local change can enable or disable a service or selected group without reconnecting,
 adding authorization, changing the connected account or revoking remote effects.
 An empty enabled-service set is valid for a saved connection.
 
 The compiled operation policy maps each typed operation to supported SDK methods
 and sufficient scope alternatives. It projects permitted/unavailable tool names,
 actual grant evidence and Drive extent separately. Partial grants can publish when
-at least one selected service has a durable usable capability. Unknown scope
-receipts do not become requested-scope evidence. There is no task-group ceiling.
+at least one selected group has a durable usable capability. Unknown scope
+receipts do not become requested-scope evidence. Broad returned grants never expose
+unselected operations.
 
 Drive distinguishes whole-Drive read/write, metadata-only access and Google-limited
 app-file access. `drive.file` does not grant arbitrary known-ID access or whole-Drive
 search. With mixed whole-read and app-file grants, whole-Drive readability does not
 imply whole-Drive writability. Google still enforces per-resource ACLs, protected
-resources and app-file eligibility.
+resources and app-file eligibility. New Drive write, sharing and ownership groups
+request sufficient `drive.file` permission; whole-Drive reads are selected
+separately. This does not manufacture whole-Drive write authority or narrow an
+existing broader grant.
 
 ## Management and Ownership
 
@@ -123,7 +134,7 @@ Cancellation, denial and expiry remove only unpublished local credentials.
 
 Runtime authority uses canonical active/running `SessionExecutionOwner`, PostgreSQL
 `owner_generation`, Agent/Workspace/root identity, effective Toolkit/source revision,
-current client, local service selection and actual grants. A manager is not the
+current client, local service and group selection and actual grants. A manager is not the
 execution principal; private and Team runs use the stored connected account.
 Personal tools additionally require the User root, current access policy and exact
 source admission. Discovery is authorization-filtered; captured handlers repeat
@@ -131,7 +142,7 @@ current checks before provider effects and file resolution/publication.
 
 Lazy refresh performs SDK I/O outside database transactions and finalizes under an
 exact-current compare-and-set fence. Changed credentials, ownership, client,
-services or source authority defeat stale success and failure. Same-current-grant
+services, groups or source authority defeat stale success and failure. Same-current-grant
 omissions retain existing renewal/scope evidence. Matching-current credential
 rejection marks only that grant reconnect-required. Resource ACL/policy and
 transient failures do not globally revoke the connection. Uncertain writes are
@@ -244,6 +255,17 @@ rows fail atomically with nonsecret diagnostics. There is no runtime legacy deco
 After commit, rollback requires the matching operator checkpoint, not a downgrade
 that invents old authorization state. No operational migration is implied by local
 migration tests.
+
+The stopped `f512e037a843` conversion adds all existing groups for each formerly
+enabled service to saved configurations, encrypted setup and nested saved targets,
+and published create/reconnect settings. It preserves the previous effective
+operation set for every actual grant, rather than inferring capabilities from
+requested scopes. Existing credentials, actual grants, connection identities,
+revisions and metadata remain unchanged. Pending setup requires the deployment
+encryption key and is re-encrypted without changing candidate credentials. A
+malformed row or wrong key aborts the transaction with identifier-only diagnostics.
+No permanent missing-group runtime fallback is provided; downgrade requires the
+pre-migration checkpoint to avoid turning narrow selections into broader authority.
 
 ## Verification Limits
 

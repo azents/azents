@@ -49,7 +49,18 @@ class TestGoogleApplicationDetail(unittest.TestCase):
                 picker_api_key = '',
                 picker_app_id = '',
                 picker_api_key_source = 'admin',
-                picker_app_id_source = 'admin'
+                picker_app_id_source = 'admin',
+                tool_group_catalog = [
+                    azentsadminclient.models.google_group_definition.GoogleGroupDefinition(
+                        group = 'gmail_read', 
+                        service = 'calendar', 
+                        operations = [
+                            'gmail_search_messages'
+                            ], 
+                        request_scopes = [
+                            ''
+                            ], )
+                    ]
             )
         else:
             return GoogleApplicationDetail(
@@ -68,6 +79,17 @@ class TestGoogleApplicationDetail(unittest.TestCase):
                 picker_app_id = '',
                 picker_api_key_source = 'admin',
                 picker_app_id_source = 'admin',
+                tool_group_catalog = [
+                    azentsadminclient.models.google_group_definition.GoogleGroupDefinition(
+                        group = 'gmail_read', 
+                        service = 'calendar', 
+                        operations = [
+                            'gmail_search_messages'
+                            ], 
+                        request_scopes = [
+                            ''
+                            ], )
+                    ],
         )
         """
 

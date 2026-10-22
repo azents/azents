@@ -16,6 +16,7 @@ from azents.core.google_oauth import (
 from azents.core.google_policy import GoogleService
 from azents.core.google_runtime import GoogleExecutionState
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import GoogleToolkitConfig
@@ -62,6 +63,7 @@ def _harness(*, expired: bool) -> Harness:
                 "https://www.googleapis.com/auth/calendar.events",
             ),
             timeout=30.0,
+            tool_groups=groups_for_services((GoogleService.CALENDAR,)),
         ),
         GoogleConnection(
             "connection",

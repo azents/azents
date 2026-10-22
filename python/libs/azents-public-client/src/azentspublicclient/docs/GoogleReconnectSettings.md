@@ -7,6 +7,7 @@ Reconnect changes reviewed request intent, not unrelated saved metadata.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
 **oauth_request_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
 

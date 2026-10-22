@@ -21,6 +21,7 @@ Name | Type | Description | Notes
 **picker_app_id** | **str** |  | 
 **picker_api_key_source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  | 
 **picker_app_id_source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  | 
+**tool_group_catalog** | [**List[GoogleGroupDefinition]**](GoogleGroupDefinition.md) | Expose nonsecret supported capabilities from the canonical catalog. | 
 
 ## Example
 

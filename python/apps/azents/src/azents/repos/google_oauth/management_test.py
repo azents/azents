@@ -22,12 +22,13 @@ from azents.core.google_oauth import (
     GoogleSubject,
     GoogleTokens,
 )
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
 from azents.core.google_system_setting import (
     GoogleApplicationConfig,
     GoogleApplicationRegistration,
     GoogleApplicationSecrets,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingFieldSource,
@@ -117,6 +118,7 @@ async def _google(manager: SessionManager[WriteSession]) -> Harness:
         ),
         timeout=30.0,
         target=None,
+        tool_groups=groups_for_services((GoogleService.CALENDAR, GoogleService.GMAIL)),
     )
     return Harness(repo, subject, registration, setup)
 
@@ -154,6 +156,7 @@ def _settings() -> GoogleFinalSettings:
             "https://www.googleapis.com/auth/calendar.events.readonly",
         ),
         timeout=30.0,
+        tool_groups=groups_for_services((GoogleService.CALENDAR,)),
     )
 
 
@@ -196,6 +199,7 @@ async def test_service_save_preserves_grant_and_request_intent(
         toolkit_id=publication.toolkit_id,
         expected_revision=before.revision,
         services=(),
+        tool_groups=groups_for_services(("calendar", "drive", "gmail")),
     )
     inactive = await h.repo.saved(h.subject, publication.toolkit_id)
     assert inactive.services == () and inactive.revision == before.revision + 1
@@ -207,6 +211,7 @@ async def test_service_save_preserves_grant_and_request_intent(
         toolkit_id=publication.toolkit_id,
         expected_revision=inactive.revision,
         services=(GoogleService.CALENDAR,),
+        tool_groups=groups_for_services((GoogleService.CALENDAR,)),
     )
     resumed = await h.repo.saved(h.subject, publication.toolkit_id)
     assert resumed.services == (GoogleService.CALENDAR,)
@@ -218,6 +223,67 @@ async def test_service_save_preserves_grant_and_request_intent(
         )
         assert toolkit is not None and toolkit.name == "Google reviewed"
         assert toolkit.enabled
+
+
+async def test_group_selection_survives_review_publication_and_local_narrowing(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    h = await _google(rdb_session_manager)
+    groups = (GoogleToolGroup.CALENDAR_READ,)
+    h = h._replace(setup=h.setup.model_copy(update={"tool_groups": groups}))
+    attempt = await _review(h, None)
+    assert attempt.setup is not None and attempt.setup.tool_groups == groups
+    settings = _settings().model_copy(update={"tool_groups": groups})
+    publication = await h.repo.confirm(
+        h.subject,
+        attempt_id=attempt.id,
+        registration=h.registration,
+        settings=settings,
+    )
+    before = await h.repo.saved(h.subject, publication.toolkit_id)
+    assert before.tool_groups == groups
+    await h.repo.update_services(
+        h.subject,
+        toolkit_id=publication.toolkit_id,
+        expected_revision=before.revision,
+        services=before.services,
+        tool_groups=(),
+    )
+    after = await h.repo.saved(h.subject, publication.toolkit_id)
+    assert after.tool_groups == () and after.connection == before.connection
+    assert after.oauth_request_scopes == before.oauth_request_scopes
+    stored = await h.repo.load(h.subject, attempt.id)
+    assert stored.final_settings is not None
+    assert stored.final_settings.tool_groups == groups
+
+
+async def test_confirmation_cannot_add_an_unreviewed_group(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    h = await _google(rdb_session_manager)
+    h = h._replace(
+        setup=h.setup.model_copy(
+            update={
+                "tool_groups": (GoogleToolGroup.CALENDAR_READ,),
+            }
+        )
+    )
+    attempt = await _review(h, None)
+    with pytest.raises(GoogleOAuthError) as error:
+        await h.repo.confirm(
+            h.subject,
+            attempt_id=attempt.id,
+            registration=h.registration,
+            settings=_settings().model_copy(
+                update={
+                    "tool_groups": (
+                        GoogleToolGroup.CALENDAR_READ,
+                        GoogleToolGroup.CALENDAR_EVENTS,
+                    )
+                }
+            ),
+        )
+    assert error.value.code == "invalid_selection"
 
 
 async def test_stale_service_save_cannot_overwrite_newer_switches(
@@ -237,6 +303,7 @@ async def test_stale_service_save_cannot_overwrite_newer_switches(
         toolkit_id=publication.toolkit_id,
         expected_revision=before.revision,
         services=(),
+        tool_groups=groups_for_services(("calendar", "drive", "gmail")),
     )
     with pytest.raises(GoogleOAuthError) as error:
         await h.repo.update_services(
@@ -244,6 +311,7 @@ async def test_stale_service_save_cannot_overwrite_newer_switches(
             toolkit_id=publication.toolkit_id,
             expected_revision=before.revision,
             services=(GoogleService.CALENDAR,),
+            tool_groups=groups_for_services((GoogleService.CALENDAR,)),
         )
     assert error.value.code == "stale"
     saved = await h.repo.saved(h.subject, publication.toolkit_id)
@@ -321,6 +389,7 @@ async def test_reconnect_missing_renewal_cannot_borrow_saved_token(
                     "https://www.googleapis.com/auth/calendar.events.readonly",
                 ),
                 timeout=30.0,
+                tool_groups=groups_for_services((GoogleService.CALENDAR,)),
             ),
         )
     assert caught.value.code == "no_usable_capability"
@@ -469,6 +538,7 @@ async def test_reconnect_replaces_identity_but_preserves_concurrent_metadata(
                 "https://www.googleapis.com/auth/calendar.events.readonly",
             ),
             timeout=12.0,
+            tool_groups=groups_for_services((GoogleService.CALENDAR,)),
         ),
     )
     assert changed.connection_id != published.connection_id
@@ -504,6 +574,7 @@ async def test_disconnect_defeats_pending_reconnect(
                     "https://www.googleapis.com/auth/calendar.events.readonly",
                 ),
                 timeout=30.0,
+                tool_groups=groups_for_services((GoogleService.CALENDAR,)),
             ),
         )
     async with rdb_session_manager() as session:
@@ -580,6 +651,7 @@ async def test_explicit_new_reconnect_after_disconnect_is_allowed(
                 "https://www.googleapis.com/auth/calendar.events.readonly",
             ),
             timeout=30.0,
+            tool_groups=groups_for_services((GoogleService.CALENDAR,)),
         ),
     )
     assert published.current and published.toolkit_id == old.toolkit_id
@@ -605,6 +677,7 @@ async def test_sibling_reconnect_cannot_replace_new_publication(
             "https://www.googleapis.com/auth/calendar.events.readonly",
         ),
         timeout=30.0,
+        tool_groups=groups_for_services((GoogleService.CALENDAR,)),
     )
     await h.repo.confirm(
         h.subject, attempt_id=sibling_a.id, registration=h.registration, settings=final

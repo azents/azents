@@ -123,6 +123,7 @@ void test("the shared Admin shell renders all destinations and settings in a sin
 });
 
 const detail: GoogleApplicationDetail = {
+  tool_group_catalog: [],
   status: "not_configured",
   client_id: null,
   callback_url: "https://azents.example.invalid/oauth/google/callback",

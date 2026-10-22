@@ -16,7 +16,7 @@
   "operatorRequired": "Configuration administrateur requise",
   "operatorDescription": "Demandez à un administrateur système de configurer l’application Google OAuth. Aucun secret d’application n’est saisi ici.",
   "preparationUnverified": "L’application est configurée localement. L’accès réel aux services Google n’a pas été vérifié.",
-  "selectDescription": "Choisissez les autorisations sur l’écran de consentement Google. Les outils sont déterminés automatiquement selon les droits accordés.",
+  "selectDescription": "Choisissez les groupes d’outils par service. OAuth demande les droits nécessaires et chaque préréglage reste personnalisable.",
   "timeout": "Délai maximal des requêtes d’outil (secondes)",
   "authorize": "Continuer vers Google",
   "authorizeAgain": "Autoriser la connexion de remplacement",
@@ -28,7 +28,7 @@
   "agentOwnership": "Cette connexion appartient uniquement à cet Agent. Les exécutions utilisent ce compte enregistré, pas celui d’un participant.",
   "sharedOwnership": "Connexion partagée du Workspace : les utilisateurs et Agents autorisés peuvent agir avec ce compte enregistré.",
   "personalOwnership": "Cette connexion appartient à votre compte. Seules vos Sessions personnelles avec les Agents autorisés peuvent l’utiliser.",
-  "actualPermissions": "Les outils des services activés sont déterminés automatiquement selon les droits réellement accordés par Google.",
+  "actualPermissions": "Seuls les outils sélectionnés et autorisés par les droits réellement accordés par Google seront activés.",
   "missingRenewal": "Aucun identifiant renouvelable n’a été retourné. Ce candidat ne peut pas être enregistré ; démarrez une nouvelle autorisation explicite.",
   "name": "Nom du Toolkit",
   "slug": "Espace de noms des outils (facultatif)",
@@ -108,5 +108,33 @@
   "pickerSelected": "{count, plural, one {# fichier sélectionné dans Google} other {# fichiers sélectionnés dans Google}}. Google contrôle l’éligibilité ; aucune liste locale d’accès n’est créée.",
   "pickerCancelled": "Sélecteur fermé sans conserver de sélection.",
   "pickerFailed": "Sélection Google indisponible. Actualisez la connexion et vérifiez la configuration administrateur avant de réessayer.",
-  "pickerExpired": "L’identifiant temporaire du sélecteur a expiré. Rouvrez-le pour obtenir un nouvel identifiant."
+  "pickerExpired": "L’identifiant temporaire du sélecteur a expiré. Rouvrez-le pour obtenir un nouvel identifiant.",
+  "groups": {
+    "gmail_read": "Lire les messages et pièces jointes",
+    "gmail_labels": "Gérer les libellés",
+    "gmail_drafts": "Créer et gérer les brouillons",
+    "gmail_send": "Envoyer, répondre et transférer",
+    "gmail_organize": "Organiser, supprimer et restaurer les messages",
+    "gmail_filters": "Gérer les filtres et les appliquer aux messages existants",
+    "calendar_read": "Lire les calendriers et événements",
+    "calendar_availability": "Consulter et suggérer des disponibilités",
+    "calendar_events": "Créer, modifier et répondre aux événements",
+    "calendar_status": "Gérer les événements de concentration et d’absence",
+    "calendar_create": "Créer des calendriers",
+    "drive_read": "Lire et exporter les fichiers Drive",
+    "drive_files": "Créer et modifier les fichiers Drive",
+    "drive_sharing": "Gérer le partage et les accès",
+    "drive_ownership": "Transférer la propriété des fichiers"
+  },
+  "presets": {
+    "read_only": "Lecture seule",
+    "assistant": "Assistant quotidien",
+    "full": "Tous les outils",
+    "clear": "Effacer la sélection"
+  },
+  "presetsTitle": "Appliquer un préréglage ou choisir les groupes d’outils",
+  "groupResult": "{available} outils disponibles sur {total}",
+  "groupUnavailable": "Les outils sans autorisation suffisante accordée par Google ne seront pas activés.",
+  "groupTools": "Examiner les {count} outils inclus",
+  "finalGroupsTitle": "Groupes d’outils définitifs"
 }

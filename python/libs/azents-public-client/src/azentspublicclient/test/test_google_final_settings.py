@@ -38,6 +38,9 @@ class TestGoogleFinalSettings(unittest.TestCase):
                 services = [
                     'calendar'
                     ],
+                tool_groups = [
+                    'gmail_read'
+                    ],
                 oauth_request_scopes = [
                     ''
                     ],
@@ -53,6 +56,9 @@ class TestGoogleFinalSettings(unittest.TestCase):
             return GoogleFinalSettings(
                 services = [
                     'calendar'
+                    ],
+                tool_groups = [
+                    'gmail_read'
                     ],
                 oauth_request_scopes = [
                     ''

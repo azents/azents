@@ -23,6 +23,7 @@ from azentspublicclient.models.google_drive_access import GoogleDriveAccess
 from azentspublicclient.models.google_identity import GoogleIdentity
 from azentspublicclient.models.google_service import GoogleService
 from azentspublicclient.models.google_service_access import GoogleServiceAccess
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
 from typing import List, Optional, Set
 from typing_extensions import Self
 
@@ -36,6 +37,7 @@ class GoogleConnectionOutput(BaseModel):
     status: StrictStr
     identity: Optional[GoogleIdentity]
     services: List[GoogleService]
+    tool_groups: List[GoogleToolGroup]
     oauth_request_scopes: List[StrictStr]
     granted_scopes: Optional[List[StrictStr]]
     timeout: Union[StrictFloat, StrictInt]
@@ -44,7 +46,7 @@ class GoogleConnectionOutput(BaseModel):
     renewable: StrictBool
     service_access_verified: StrictBool = Field(description="Saved grant metadata is not a live access probe.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["toolkit_id", "revision", "connection_id", "status", "identity", "services", "oauth_request_scopes", "granted_scopes", "timeout", "accesses", "drive_access", "renewable", "service_access_verified"]
+    __properties: ClassVar[List[str]] = ["toolkit_id", "revision", "connection_id", "status", "identity", "services", "tool_groups", "oauth_request_scopes", "granted_scopes", "timeout", "accesses", "drive_access", "renewable", "service_access_verified"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
@@ -155,6 +157,7 @@ class GoogleConnectionOutput(BaseModel):
             "status": obj.get("status"),
             "identity": GoogleIdentity.from_dict(obj["identity"]) if obj.get("identity") is not None else None,
             "services": obj.get("services"),
+            "tool_groups": obj.get("tool_groups"),
             "oauth_request_scopes": obj.get("oauth_request_scopes"),
             "granted_scopes": obj.get("granted_scopes"),
             "timeout": obj.get("timeout"),

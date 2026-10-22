@@ -279,6 +279,7 @@ from azentspublicclient.models.google_connection_output import GoogleConnectionO
 from azentspublicclient.models.google_drive_access import GoogleDriveAccess
 from azentspublicclient.models.google_exchange_request import GoogleExchangeRequest
 from azentspublicclient.models.google_final_settings import GoogleFinalSettings
+from azentspublicclient.models.google_group_definition import GoogleGroupDefinition
 from azentspublicclient.models.google_identity import GoogleIdentity
 from azentspublicclient.models.google_picker_token_input import GooglePickerTokenInput
 from azentspublicclient.models.google_picker_token_output import GooglePickerTokenOutput
@@ -290,6 +291,7 @@ from azentspublicclient.models.google_review import GoogleReview
 from azentspublicclient.models.google_service import GoogleService
 from azentspublicclient.models.google_service_access import GoogleServiceAccess
 from azentspublicclient.models.google_services_update_input import GoogleServicesUpdateInput
+from azentspublicclient.models.google_tool_group import GoogleToolGroup
 from azentspublicclient.models.google_workspace_operation import GoogleWorkspaceOperation
 from azentspublicclient.models.http_validation_error import HTTPValidationError
 from azentspublicclient.models.health_status import HealthStatus

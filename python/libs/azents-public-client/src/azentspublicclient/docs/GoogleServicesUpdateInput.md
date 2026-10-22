@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **expected_revision** | **int** |  | 
 **services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
 
 ## Example
 

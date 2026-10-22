@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **ownership** | **str** |  | 
 **reconnect_toolkit_id** | **str** |  | 
 **services** | [**List[GoogleService]**](GoogleService.md) |  | 
+**tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
 **oauth_request_scopes** | **List[str]** |  | 
 **granted_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 

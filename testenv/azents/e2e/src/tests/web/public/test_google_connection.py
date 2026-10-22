@@ -121,9 +121,12 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     )
     check(browser_driver, "Calendar")
     check(browser_driver, "Gmail")
+    _click_button(browser_driver, "Read only")
+    check(browser_driver, "Create, edit and respond to events")
     original_window = browser_driver.current_window_handle
     _click_button(browser_driver, "Continue to Google")
     _assert_visible_text(browser_driver, "2. Review account and permissions")
+    _assert_visible_text(browser_driver, "Final tool groups")
     _assert_visible_text(browser_driver, "connected-account@example.invalid")
     assert browser_driver.current_window_handle == original_window
     assert browser_driver.current_url == azents_main_web_url + path
@@ -179,6 +182,7 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     _fill_text_input(browser_driver, "Tool request timeout (seconds)", "12")
     _click_button(browser_driver, "Authorize replacement connection")
     _assert_visible_text(browser_driver, "2. Review account and permissions")
+    _assert_visible_text(browser_driver, "Final tool groups")
     _click_button(browser_driver, "Replace saved connection")
     _assert_visible_text(browser_driver, "Connection saved")
     _fill_text_input(browser_driver, "Name", "Renamed after reconnect")
@@ -257,7 +261,12 @@ def test_google_picker_browser_lifetime(
             workspace.token,
             "POST",
             "/google/connect",
-            {"services": ["drive"], "oauth_request_scopes": scopes, "timeout": 30},
+            {
+                "services": ["drive"],
+                "tool_groups": ["drive_read", "drive_files"],
+                "oauth_request_scopes": scopes,
+                "timeout": 30,
+            },
         ).text
     )
     assert prepared is not None
@@ -280,9 +289,10 @@ def test_google_picker_browser_lifetime(
             "/google/attempts/" + review.attempt_id + "/confirm",
             {
                 "settings": {
-                    **final_settings("google_picker"),
+                    **final_settings("google_picker", review),
                     "services": ["drive"],
-                    "oauth_request_scopes": scopes,
+                    "tool_groups": ["drive_read", "drive_files"],
+                    "oauth_request_scopes": review.oauth_request_scopes,
                 }
             },
         ).text

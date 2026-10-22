@@ -2,7 +2,11 @@ import { NextIntlClientProvider } from "next-intl";
 import { useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import koreanMessages from "@/i18n/ko-KR-messages";
-import { googleScopesForServices } from "../google-access";
+import { googlePresetGroups } from "../google-access";
+import {
+  googleFixtureScopes,
+  googleGroupCatalog,
+} from "../google-group-fixtures";
 import { canPublishGoogleReview } from "../google-types";
 import { GoogleSetup } from "./GoogleSetup";
 import type { GoogleSetupProps } from "../google-types";
@@ -32,7 +36,8 @@ const review: GoogleReview = {
   ownership: "workspace_shared",
   reconnect_toolkit_id: null,
   services: ["calendar", "gmail"],
-  oauth_request_scopes: googleScopesForServices(["calendar", "gmail"]),
+  tool_groups: ["calendar_read", "gmail_read"],
+  oauth_request_scopes: googleFixtureScopes(["calendar", "gmail"]),
   granted_scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"],
   timeout: 30,
   accesses: [
@@ -71,6 +76,7 @@ const saved: GoogleConnectionOutput = {
   status: "connected",
   identity: review.identity,
   services: review.services,
+  tool_groups: review.tool_groups,
   oauth_request_scopes: review.oauth_request_scopes,
   granted_scopes: review.granted_scopes,
   timeout: 30,
@@ -85,6 +91,7 @@ const props: GoogleSetupProps = {
     detail: {
       status: "configured_unverified",
       client_id: "client",
+      tool_group_catalog: googleGroupCatalog,
       callback_url: "https://app.example.invalid/oauth/google/callback",
       picker_status: "not_configured",
       service_access_verified: false,
@@ -93,6 +100,7 @@ const props: GoogleSetupProps = {
   saved: { type: "NEW" },
   flow: { type: "SELECT" },
   services: [],
+  toolGroups: [],
   timeout: 30,
   metadata: {
     name: "",
@@ -116,6 +124,8 @@ const props: GoogleSetupProps = {
   rootRef: { current: null },
   embedded: false,
   onServiceChange: fn(),
+  onGroupChange: fn(),
+  onPresetChange: fn(),
   onSaveServices: fn(() => Promise.resolve()),
   onOpenPicker: fn(),
   onClosePicker: fn(),
@@ -154,7 +164,7 @@ export const ExplicitSelection: Story = {
   },
 };
 export const SelectedServices: Story = {
-  args: { services: ["drive"] },
+  args: { services: ["drive"], toolGroups: ["drive_read"] },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("switch", { name: "Drive" })).toBeChecked();
@@ -164,6 +174,56 @@ export const SelectedServices: Story = {
     await expect(args.onAuthorize).toHaveBeenCalled();
   },
 };
+function SelectionFixture(args: GoogleSetupProps): React.ReactElement {
+  const [groups, setGroups] = useState(args.toolGroups);
+  return (
+    <GoogleSetup
+      {...args}
+      toolGroups={groups}
+      onGroupChange={(group, selected) =>
+        setGroups((current) =>
+          selected
+            ? [...current, group]
+            : current.filter((item) => item !== group),
+        )
+      }
+      onPresetChange={(preset) =>
+        setGroups(googlePresetGroups(preset, args.services, googleGroupCatalog))
+      }
+    />
+  );
+}
+export const EditablePresets: Story = {
+  args: { services: ["gmail", "calendar", "drive"], toolGroups: [] },
+  render: (args) => <SelectionFixture {...args} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const authorize = canvas.getByRole("button", {
+      name: "Continue to Google",
+    });
+    await expect(authorize).toBeDisabled();
+    await userEvent.click(canvas.getByRole("button", { name: /^Read only$/ }));
+    const read = canvas.getByRole("checkbox", {
+      name: "Read mail and attachments",
+    });
+    const send = canvas.getByRole("checkbox", {
+      name: "Send, reply and forward mail",
+    });
+    await expect(read).toBeChecked();
+    await expect(send).not.toBeChecked();
+    await userEvent.click(send);
+    await expect(send).toBeChecked();
+    await userEvent.click(read);
+    await expect(read).not.toBeChecked();
+    await userEvent.click(authorize);
+    await expect(args.onAuthorize).toHaveBeenCalled();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Clear selection" }),
+    );
+    await expect(authorize).toBeDisabled();
+  },
+};
+
 function ReviewFixture(args: GoogleSetupProps): React.ReactElement {
   const [services, setServices] = useState(args.services);
   const current = args.flow.type === "REVIEW" ? args.flow.review : review;
@@ -187,6 +247,7 @@ export const PartialGrantReview: Story = {
   args: {
     flow: { type: "REVIEW", review },
     services: ["calendar", "gmail"],
+    toolGroups: review.tool_groups,
   },
   render: (args) => <ReviewFixture {...args} />,
   play: async ({ canvasElement, args }) => {
@@ -196,6 +257,12 @@ export const PartialGrantReview: Story = {
     ).toBeVisible();
     await expect(
       canvas.getByText("Not granted", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: "Final tool groups" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText("1 of 4 tools available", { exact: true }),
     ).toBeVisible();
     const save = canvas.getByRole("button", { name: "Save Google Toolkit" });
     await expect(save).toBeEnabled();
@@ -262,6 +329,7 @@ export const MissingOperator: Story = {
       detail: {
         status: "not_configured",
         client_id: null,
+        tool_group_catalog: googleGroupCatalog,
         callback_url: null,
         picker_status: "not_configured",
         service_access_verified: false,
@@ -297,6 +365,7 @@ export const SavedReconnectRequired: Story = {
   args: {
     reconnect: true,
     services: saved.services,
+    toolGroups: saved.tool_groups,
     saved: {
       type: "READY",
       detail: { ...saved, status: "reconnect_required" },
@@ -456,8 +525,8 @@ export const FullGrantReview: Story = {
         ...review,
         services: ["calendar"],
         grant_result: "full",
-        oauth_request_scopes: googleScopesForServices(["calendar"]),
-        granted_scopes: googleScopesForServices(["calendar"]),
+        oauth_request_scopes: googleFixtureScopes(["calendar"]),
+        granted_scopes: googleFixtureScopes(["calendar"]),
       },
     },
   },
@@ -475,6 +544,7 @@ export const BroaderScopeReceipt: Story = {
   args: {
     ...PartialGrantReview.args,
     services: ["gmail"],
+    toolGroups: ["gmail_read", "gmail_send"],
     publishingAllowed: true,
     flow: {
       type: "REVIEW",
@@ -502,12 +572,19 @@ export const BroaderScopeReceipt: Story = {
     await expect(
       canvas.getByText("Google returned different scope values"),
     ).toBeVisible();
-    await userEvent.click(canvas.getByText("Inspect exact tool permissions"));
+    const groups = within(
+      canvas.getByRole("group", { name: "Final tool groups" }),
+    );
+    for (const details of groups.getAllByText(
+      "Inspect exact tool permissions",
+    )) {
+      await userEvent.click(details);
+    }
     await expect(
-      canvas.getByText("gmail_get_message", { exact: true }),
+      groups.getByText("gmail_get_message", { exact: true }),
     ).toBeVisible();
     await expect(
-      canvas.getByText("gmail_send_message", { exact: true }),
+      groups.getByText("gmail_send_message", { exact: true }),
     ).toBeVisible();
     await expect(
       canvas.getByRole("button", { name: "Save Google Toolkit" }),

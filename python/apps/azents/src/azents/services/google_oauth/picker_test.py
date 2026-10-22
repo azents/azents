@@ -20,6 +20,7 @@ from azents.core.google_system_setting import (
     GoogleApplicationUnavailable,
     GooglePickerApplication,
 )
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GOOGLE_PICKER_SCOPE
 from azents.core.tools import GoogleToolkitConfig
 from azents.repos.google_oauth.management import GoogleOAuthRepository
@@ -78,6 +79,7 @@ def _harness() -> Harness:
             services=(GoogleService.DRIVE, GoogleService.GMAIL),
             oauth_request_scopes=(GOOGLE_PICKER_SCOPE,),
             timeout=30.0,
+            tool_groups=groups_for_services((GoogleService.DRIVE, GoogleService.GMAIL)),
         ),
         GoogleConnection(
             "connection",

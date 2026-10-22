@@ -3,6 +3,7 @@
 import pytest
 
 from azents.core.google_policy import GoogleService
+from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
 from azents.core.google_workspace_policy import drive_access
 from azents.services.google_oauth.workspace_projection import service_accesses
@@ -16,7 +17,11 @@ def _scope(value: str) -> str:
 def test_unknown_and_empty_receipts_never_invent_capabilities(
     actual: tuple[str, ...] | None,
 ) -> None:
-    accesses = service_accesses(tuple(GoogleService), actual)
+    accesses = service_accesses(
+        tuple(GoogleService),
+        actual,
+        tool_groups=groups_for_services(tuple(GoogleService)),
+    )
     assert len(accesses) == 3
     assert all(item.enabled for item in accesses)
     assert all(not item.permitted_tools and item.unavailable_tools for item in accesses)
@@ -26,7 +31,11 @@ def test_unknown_and_empty_receipts_never_invent_capabilities(
 
 
 def test_broad_gmail_grant_exposes_supported_sending_without_request_ceiling() -> None:
-    accesses = service_accesses((GoogleService.GMAIL,), (_scope("gmail.modify"),))
+    accesses = service_accesses(
+        (GoogleService.GMAIL,),
+        (_scope("gmail.modify"),),
+        tool_groups=groups_for_services((GoogleService.GMAIL,)),
+    )
     gmail = next(item for item in accesses if item.service is GoogleService.GMAIL)
     assert gmail.enabled and Op.GMAIL_SEND_MESSAGE in gmail.permitted_tools
     assert Op.GMAIL_GET_MESSAGE in gmail.permitted_tools
@@ -35,14 +44,22 @@ def test_broad_gmail_grant_exposes_supported_sending_without_request_ceiling() -
 
 
 def test_saved_all_off_retains_visible_inactive_services() -> None:
-    accesses = service_accesses((), (_scope("drive"), _scope("calendar")))
+    accesses = service_accesses(
+        (),
+        (_scope("drive"), _scope("calendar")),
+        tool_groups=groups_for_services(tuple(GoogleService)),
+    )
     assert {item.service for item in accesses} == set(GoogleService)
     assert all(item.status == "disabled" and not item.enabled for item in accesses)
     assert all(not item.permitted_tools and item.unavailable_tools for item in accesses)
 
 
 def test_service_off_is_independent_of_a_sufficient_actual_grant() -> None:
-    accesses = service_accesses((GoogleService.CALENDAR,), (_scope("drive"),))
+    accesses = service_accesses(
+        (GoogleService.CALENDAR,),
+        (_scope("drive"),),
+        tool_groups=groups_for_services((GoogleService.CALENDAR,)),
+    )
     drive = next(item for item in accesses if item.service is GoogleService.DRIVE)
     calendar = next(item for item in accesses if item.service is GoogleService.CALENDAR)
     assert drive.status == "disabled" and not drive.permitted_tools
@@ -54,7 +71,9 @@ def test_mixed_drive_capabilities_preserve_actual_resource_extent() -> None:
     scopes = (_scope("drive.readonly"), _scope("drive.file"))
     access = next(
         item
-        for item in service_accesses(services, scopes)
+        for item in service_accesses(
+            services, scopes, tool_groups=groups_for_services(services)
+        )
         if item.service is GoogleService.DRIVE
     )
     extent = drive_access(services, scopes)

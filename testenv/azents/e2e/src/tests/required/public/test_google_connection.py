@@ -153,6 +153,7 @@ def connect(
             path,
             {
                 "services": ["calendar", "gmail"],
+                "tool_groups": ["calendar_read", "calendar_events", "gmail_read"],
                 "oauth_request_scopes": [
                     "openid",
                     "email",
@@ -187,7 +188,7 @@ def connect(
     return reviewed
 
 
-def final_settings(slug: str) -> dict[str, object]:
+def final_settings(slug: str, review: GoogleReview) -> dict[str, object]:
     return {
         "name": "Google product fixture",
         "slug": slug,
@@ -196,11 +197,8 @@ def final_settings(slug: str) -> dict[str, object]:
         "enabled": True,
         "always_expose_tools": True,
         "services": ["calendar"],
-        "oauth_request_scopes": [
-            "openid",
-            "email",
-            "https://www.googleapis.com/auth/calendar.events.readonly",
-        ],
+        "tool_groups": ["calendar_read", "calendar_events"],
+        "oauth_request_scopes": review.oauth_request_scopes,
         "timeout": 30,
     }
 
@@ -270,14 +268,14 @@ def test_google_review_publication_reconnect_and_exact_outcome(
         workspace.handle, _headers={"Authorization": "Bearer " + workspace.token}
     )
     assert len(before.items) == len(staged.items)
-    body = {"settings": final_settings("google_product")}
+    body = {"settings": final_settings("google_product", review)}
     path = "/google/attempts/" + review.attempt_id + "/confirm"
     denied = requests.post(
         base + path,
         headers={"Authorization": "Bearer " + workspace.token},
         json={
             "settings": {
-                **final_settings("google_product"),
+                **final_settings("google_product", review),
                 "services": ["drive"],
             }
         },
@@ -312,11 +310,8 @@ def test_google_review_publication_reconnect_and_exact_outcome(
             {
                 "settings": {
                     "services": ["calendar"],
-                    "oauth_request_scopes": [
-                        "openid",
-                        "email",
-                        "https://www.googleapis.com/auth/calendar.events.readonly",
-                    ],
+                    "tool_groups": ["calendar_read", "calendar_events"],
+                    "oauth_request_scopes": replacement.oauth_request_scopes,
                     "timeout": 12,
                 }
             },
@@ -376,7 +371,7 @@ def test_google_verified_partial_grant_reaches_worker_and_blocks_write(
     )
     base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
     review = connect(fixture, base, workspace.token)
-    worker_settings = final_settings("google_product")
+    worker_settings = final_settings("google_product", review)
     published = GooglePublishedOutput.from_json(
         response(
             base,
@@ -509,6 +504,15 @@ def test_google_gmail_drive_runtime_file_roundtrip(
             setup_path + "/connect",
             {
                 "services": ["calendar", "gmail", "drive"],
+                "tool_groups": [
+                    "gmail_read",
+                    "gmail_send",
+                    "gmail_filters",
+                    "calendar_events",
+                    "drive_read",
+                    "drive_files",
+                    "drive_sharing",
+                ],
                 "oauth_request_scopes": scopes,
                 "timeout": 30,
             },
@@ -534,9 +538,18 @@ def test_google_gmail_drive_runtime_file_roundtrip(
             setup_path + "/attempts/" + review.attempt_id + "/confirm",
             {
                 "settings": {
-                    **final_settings("google_product"),
+                    **final_settings("google_product", review),
                     "services": ["calendar", "gmail", "drive"],
-                    "oauth_request_scopes": scopes,
+                    "tool_groups": [
+                        "gmail_read",
+                        "gmail_send",
+                        "gmail_filters",
+                        "calendar_events",
+                        "drive_read",
+                        "drive_files",
+                        "drive_sharing",
+                    ],
+                    "oauth_request_scopes": review.oauth_request_scopes,
                 }
             },
         ).text
@@ -675,6 +688,7 @@ def test_google_gmail_drive_runtime_file_roundtrip(
                 {
                     "expected_revision": current.revision,
                     "services": [],
+                    "tool_groups": current.tool_groups,
                 },
             ).text
         )

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { googleScopesForServices } from "../../shared/toolkits/google-access.ts";
+import {
+  googlePresetGroups,
+  googleScopesForGroups,
+} from "../../shared/toolkits/google-access.ts";
+import { googleGroupCatalog } from "../../shared/toolkits/google-group-fixtures.ts";
 import {
   decodeGoogleResume,
   deserializeGoogleResume,
@@ -117,7 +121,11 @@ void test("Google service and request contracts preserve explicit reconnect inte
   assert.equal(
     googleDesiredSchema.safeParse({
       services: ["drive"],
-      oauth_request_scopes: googleScopesForServices(["drive"]),
+      tool_groups: ["drive_read"],
+      oauth_request_scopes: googleScopesForGroups(
+        ["drive_read"],
+        googleGroupCatalog,
+      ),
       timeout: 30,
     }).success,
     true,
@@ -141,38 +149,35 @@ void test("Google service and request contracts preserve explicit reconnect inte
   assert.equal(
     googleReconnectSettingsSchema.safeParse({
       services: [],
+      tool_groups: [],
       oauth_request_scopes: [],
       timeout: 30,
     }).success,
     true,
   );
 });
-void test("consent offers supported service permissions without local action selection", () => {
-  assert.deepEqual(googleScopesForServices(["drive"]), [
+void test("editable presets request only the selected tool groups' permissions", () => {
+  const selected = googlePresetGroups(
+    "read_only",
+    ["drive", "gmail"],
+    googleGroupCatalog,
+  );
+  assert.deepEqual(selected, ["drive_read", "gmail_read"]);
+  assert.deepEqual(googleScopesForGroups(selected, googleGroupCatalog), [
     "email",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.metadata",
-    "https://www.googleapis.com/auth/drive.metadata.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/gmail.readonly",
     "openid",
   ]);
-  assert.deepEqual(
-    googleScopesForServices(["drive", "gmail", "drive"]),
-    Array.from(
-      new Set([
-        ...googleScopesForServices(["drive"]),
-        ...googleScopesForServices(["gmail"]),
-      ]),
-    ).sort(),
-  );
+  selected.push("gmail_send");
   assert.ok(
-    new Set(googleScopesForServices(["gmail"])).has("https://mail.google.com/"),
-  );
-  assert.ok(
-    new Set(googleScopesForServices(["calendar"])).has(
-      "https://www.googleapis.com/auth/calendar.events",
+    new Set(googleScopesForGroups(selected, googleGroupCatalog)).has(
+      "https://www.googleapis.com/auth/gmail.compose",
     ),
+  );
+  assert.deepEqual(
+    googlePresetGroups("clear", ["gmail"], googleGroupCatalog),
+    [],
   );
 });
 void test("publication requires a renewable reviewed service with actual usable evidence", () => {
@@ -188,6 +193,7 @@ void test("publication requires a renewable reviewed service with actual usable 
     ownership: "workspace_shared",
     reconnect_toolkit_id: null,
     services: ["calendar", "gmail"],
+    tool_groups: ["calendar_read", "gmail_read"],
     oauth_request_scopes: ["openid", "email"],
     granted_scopes: [
       "https://www.googleapis.com/auth/calendar.events.readonly",

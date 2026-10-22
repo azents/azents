@@ -1,9 +1,11 @@
+import type { GoogleGroupPreset } from "./google-access";
 import type {
   GoogleConnectionOutput,
   GooglePreparation,
   GooglePublishedOutput,
   GoogleReview,
   GoogleService,
+  GoogleToolGroup,
 } from "@azents/public-client";
 import type { RefObject } from "react";
 
@@ -45,6 +47,7 @@ export interface GoogleSetupProps {
   saved: GoogleSavedState;
   flow: GoogleFlowState;
   services: GoogleService[];
+  toolGroups: GoogleToolGroup[];
   timeout: number;
   metadata: GoogleMetadata;
   publishingAllowed: boolean;
@@ -61,6 +64,8 @@ export interface GoogleSetupProps {
   rootRef: RefObject<HTMLDivElement | null>;
   embedded: boolean;
   onServiceChange: (service: GoogleService, selected: boolean) => void;
+  onGroupChange: (group: GoogleToolGroup, selected: boolean) => void;
+  onPresetChange: (preset: GoogleGroupPreset) => void;
   onSaveServices: () => Promise<void>;
   onOpenPicker: () => void;
   onClosePicker: () => void;
