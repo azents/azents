@@ -362,17 +362,11 @@ export function SessionBrowserPanel({
                 </ActionIcon>
               </Tooltip>
             )}
-            <Badge
-              variant="filled"
-              autoContrast
-              color={connected ? "teal.9" : "gray.7"}
-              role="status"
-              size="sm"
-            >
+            <Badge color={connected ? "teal" : "gray"} role="status" size="sm">
               {t(state.connection)}
             </Badge>
             {!state.canInput && !state.canClose && (
-              <Badge variant="filled" autoContrast color="gray.7" size="sm">
+              <Badge color="gray" size="sm">
                 {t("readOnly")}
               </Badge>
             )}

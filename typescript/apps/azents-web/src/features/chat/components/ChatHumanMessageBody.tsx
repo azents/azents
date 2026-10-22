@@ -14,8 +14,7 @@ export function ChatHumanMessageBody({
       px="sm"
       py="2xs"
       radius="lg"
-      bg="blue.6"
-      c="white"
+      variant="message"
       style={{
         width: "fit-content",
         maxWidth: "100%",

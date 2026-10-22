@@ -3,6 +3,25 @@
 from scripts.ci.observability import JUnitSummary
 
 STORIES = {
+    "src/shared/session-context/SessionContextView.stories.tsx": (
+        "Unavailable Counters",
+        "Usage Counters",
+        "Breakdown Light",
+        "Breakdown Dark",
+    ),
+    "src/features/workspace/components/WorkspaceHome.stories.tsx": (
+        "Theme Light",
+        "Theme Dark",
+    ),
+    "src/features/chat/components/ChatHumanMessageBody.stories.tsx": ("Light", "Dark"),
+    "src/shared/ThemeContrast.stories.tsx": (
+        "Light",
+        "Dark",
+        "Overrides Light",
+        "Overrides Dark",
+        "Hover Light",
+        "Hover Dark",
+    ),
     "src/shared/toolkits/components/GoogleSetup.stories.tsx": (
         "Explicit Selection",
         "Selected Services",
@@ -18,6 +37,8 @@ STORIES = {
         "Failed",
         "Unknown Publication",
         "Saved Reconnect Required",
+        "Saved Light Contrast",
+        "Saved Dark Contrast",
         "Disconnect Confirmation",
         "All Services Off",
         "Local Service Changes",

@@ -200,8 +200,8 @@ export function ModelMetadataView({
       <Popover.Dropdown
         px="xs"
         py={rem(5)}
-        bg="gray.9"
-        c="white"
+        bg="var(--azents-color-inverse)"
+        c="var(--azents-color-on-inverse)"
         style={{
           border: 0,
           maxWidth: `min(80vw, ${rem(360)})`,
@@ -209,25 +209,33 @@ export function ModelMetadataView({
         data-message-metadata-popover
       >
         <Group gap={rem(4)} wrap="nowrap">
-          <Text size="sm" c="white" truncate>
+          <Text size="sm" truncate>
             {profile.model_target_label}
           </Text>
           {actualModel !== null && (
             <>
-              <Text component="span" size="sm" c="gray.5" aria-hidden="true">
+              <Text
+                component="span"
+                size="sm"
+                c="var(--azents-color-inverse-muted)"
+                aria-hidden="true"
+              >
                 ·
               </Text>
-              <Text size="sm" c="white" truncate>
+              <Text size="sm" truncate>
                 {actualModel}
               </Text>
             </>
           )}
-          <Text component="span" size="sm" c="gray.5" aria-hidden="true">
+          <Text
+            component="span"
+            size="sm"
+            c="var(--azents-color-inverse-muted)"
+            aria-hidden="true"
+          >
             ·
           </Text>
-          <Text size="sm" c="white">
-            {effort}
-          </Text>
+          <Text size="sm">{effort}</Text>
         </Group>
       </Popover.Dropdown>
     </Popover>

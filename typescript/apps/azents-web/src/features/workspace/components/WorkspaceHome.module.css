@@ -1,59 +1,34 @@
-/* Surface layer dedicated to Workspace Home.
- *
- * Separates canvas, panel, card, muted text in both light/dark modes
- * to prevent theme changes from improving only one mode.
- */
 .root {
   flex: 1;
-  background: var(--workspace-canvas);
-
-  --workspace-canvas: var(--mantine-color-mono-1);
-  --workspace-surface: var(--mantine-color-white);
-  --workspace-surface-raised: var(--mantine-color-white);
-  --workspace-surface-hover: var(--mantine-color-mono-0);
-  --workspace-border: var(--mantine-color-mono-3);
-  --workspace-border-strong: var(--mantine-color-mono-5);
-  --workspace-muted: var(--mantine-color-mono-7);
-  --workspace-subtle: var(--mantine-color-mono-8);
-}
-
-:global([data-mantine-color-scheme="dark"]) .root {
-  --workspace-canvas: var(--mantine-color-dark-8);
-  --workspace-surface: var(--mantine-color-dark-6);
-  --workspace-surface-raised: var(--mantine-color-dark-5);
-  --workspace-surface-hover: var(--mantine-color-dark-4);
-  --workspace-border: var(--mantine-color-dark-4);
-  --workspace-border-strong: var(--mantine-color-dark-3);
-  --workspace-muted: var(--mantine-color-dark-1);
-  --workspace-subtle: var(--mantine-color-dark-2);
+  background: var(--azents-color-canvas);
 }
 
 .header {
-  background: var(--workspace-surface-raised);
-  border-bottom: rem(1px) solid var(--workspace-border);
+  background: var(--azents-color-surface-raised);
+  border-bottom: rem(1px) solid var(--azents-color-border);
 }
 
 .mutedText {
-  color: var(--workspace-muted);
+  color: var(--azents-color-muted);
 }
 
 .sectionCount,
 .tabCount {
   border-radius: var(--mantine-radius-xl);
-  background: var(--workspace-surface-raised);
-  color: var(--workspace-subtle);
+  background: var(--azents-color-surface-raised);
+  color: var(--azents-color-subtle);
 }
 
 .emptyCard,
 .statCard {
-  background: var(--workspace-surface-raised);
-  border: rem(1px) solid var(--workspace-border);
+  background: var(--azents-color-surface-raised);
+  border: rem(1px) solid var(--azents-color-border);
 }
 
 .emptyCard {
   border-style: dashed;
   border-radius: var(--mantine-radius-md);
-  color: var(--workspace-muted);
+  color: var(--azents-color-muted);
 }
 
 .statCard {
@@ -64,7 +39,7 @@
 .statSubtitle,
 .statTotal,
 .rowDescription {
-  color: var(--workspace-muted);
+  color: var(--azents-color-muted);
 }
 
 .tabs {
@@ -76,7 +51,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--mantine-spacing-2xs);
-  color: var(--workspace-muted);
+  color: var(--azents-color-muted);
   border-bottom: rem(2px) solid transparent;
   font-weight: 500;
 }
@@ -93,32 +68,32 @@
 }
 
 .searchInput {
-  background: var(--workspace-surface-raised);
-  border-color: var(--workspace-border-strong);
+  background: var(--azents-color-surface-raised);
+  border-color: var(--azents-color-border-strong);
   color: var(--mantine-color-text);
 }
 
 .noticeAlert {
-  background: var(--workspace-surface-raised);
-  border: rem(1px) solid var(--workspace-border);
-  color: var(--workspace-muted);
+  background: var(--azents-color-surface-raised);
+  border: rem(1px) solid var(--azents-color-border);
+  color: var(--azents-color-muted);
 }
 
 .noticeAlert :global(.mantine-Alert-message) {
-  color: var(--workspace-muted);
+  color: var(--azents-color-muted);
 }
 
 .teamCard {
-  background: var(--workspace-surface-raised);
-  border-color: var(--workspace-border);
+  background: var(--azents-color-surface-raised);
+  border-color: var(--azents-color-border);
 }
 
 .teamCard:hover:hover {
-  background: var(--workspace-surface-hover);
-  border-color: var(--workspace-border-strong);
+  background: var(--azents-color-surface-hover);
+  border-color: var(--azents-color-border-strong);
 }
 
 .teamCardFooter {
-  border-top: rem(1px) solid var(--workspace-border);
-  color: var(--workspace-muted);
+  border-top: rem(1px) solid var(--azents-color-border);
+  color: var(--azents-color-muted);
 }
