@@ -64,6 +64,7 @@ RUN apt-get update \
         bc \
         sqlite3 \
         graphviz \
+        xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 ARG PIXI_VERSION=0.78.0
@@ -153,7 +154,7 @@ COPY python/apps/azents-runtime-runner/src ./src
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/azents-browsers
 RUN uv sync --frozen --no-dev \
-    && uv run --no-dev playwright install --with-deps chromium \
+    && uv run --no-dev patchright install --with-deps chromium \
     && chmod -R a+rX /opt/azents-browsers
 
 COPY python/apps/azents-runtime-runner/docker/azents-git-credential.sh /usr/local/bin/azents-git-credential

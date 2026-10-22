@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 
 import pytest
-from playwright.async_api import Page, async_playwright
+from patchright.async_api import Page, async_playwright
 
 from azents_runtime_runner.browser_editables import BrowserEditableRegions
 

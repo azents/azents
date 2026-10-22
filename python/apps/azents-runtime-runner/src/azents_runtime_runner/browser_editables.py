@@ -10,7 +10,7 @@ from azents_runtime_control.browser_viewer_contract import (
     decode_viewer_editables,
     decode_viewer_field_attributes,
 )
-from playwright.async_api import Error, Frame, JSHandle, Page
+from patchright.async_api import Error, Frame, JSHandle, Page
 
 _PROBE = r"""() => {
     const ids = new WeakMap(); let sequence = 0;

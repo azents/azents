@@ -18,7 +18,7 @@ from azents_runtime_control.browser_contract import (
     BrowserResult,
     BrowserTarget,
 )
-from playwright.async_api import Error, Playwright
+from patchright.async_api import Error, Playwright
 
 import azents_runtime_runner.browser as browser_module
 from azents_runtime_runner.browser import (
@@ -619,9 +619,7 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
         await manager.close()
     assert not list(tmp_path.iterdir())
     for call in driver.chromium.launch.call_args_list:
-        assert call.kwargs["args"] == ["--disable-blink-features=AutomationControlled"]
-        assert call.kwargs["ignore_default_args"] == ["--enable-automation"]
-        assert call.kwargs["headless"] is True
+        assert call.kwargs["headless"] is False
         assert call.kwargs["channel"] == "chromium"
 
 
@@ -779,7 +777,7 @@ async def test_rejected_open_does_not_allocate_native_resources(
     current = target(opened)
     await manager.execute(BrowserOpenCommand(a, current.task_id, site, None))
     context = manager.contexts[a.session_id]
-    assert len(context.pages) == 2
+    assert len(context.pages) == 3
     for _ in range(3):
         with pytest.raises(BrowserFailure, match="page limit"):
             await manager.execute(BrowserOpenCommand(a, current.task_id, site, None))
@@ -787,7 +785,7 @@ async def test_rejected_open_does_not_allocate_native_resources(
             await manager.execute(
                 BrowserOpenCommand(authority(tmp_path, "session-b"), None, site, None)
             )
-        assert len(context.pages) == 2
+        assert len(context.pages) == 3
         assert len(manager.tasks) == 1 and len(manager.contexts) == 1
 
 
@@ -826,7 +824,8 @@ async def test_final_close_reclaims_task_quota_and_preserves_profile(
         )
         old = target(opened)
         await manager.execute(BrowserActCommand(a, old, _action("close_page")))
-        assert not manager.tasks and not manager.contexts[a.session_id].pages
+        assert not manager.tasks
+        assert [p.url for p in manager.contexts[a.session_id].pages] == ["about:blank"]
         with pytest.raises(BrowserFailure, match="closed"):
             await observe(manager, a, old, "status")
     assert any(

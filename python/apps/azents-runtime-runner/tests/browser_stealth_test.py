@@ -1,15 +1,13 @@
-"""Real browser checks for pre-navigation marker reduction and Session isolation."""
+"""Real headed Chromium checks for native identity and Session isolation."""
 
 import re
 from collections.abc import AsyncIterator
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
 from azents_runtime_control.browser_contract import BrowserAuthority, BrowserOpenCommand
 
-import azents_runtime_runner.browser as browser_module
 from azents_runtime_runner.browser import RunnerBrowserManager
 from azents_runtime_runner.browser_input import BrowserInputKey
 
@@ -57,7 +55,7 @@ window.firstFingerprint = {
         await runner.cleanup()
 
 
-async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
+async def test_native_identity_covers_navigation_frames_popups_and_session_isolation(
     tmp_path: Path, fingerprint_site: str
 ) -> None:
     manager = RunnerBrowserManager(
@@ -70,8 +68,8 @@ async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
         )
         assert opened.page is not None
         context = manager.contexts[authority.session_id]
-        page = context.pages[0]
-        first = await page.evaluate("window.firstFingerprint")
+        page = manager.tasks[opened.page.task_id].pages[opened.page.id].page
+        first = await page.evaluate("window.firstFingerprint", isolated_context=False)
         assert first["webdriver"] is False
         assert "HeadlessChrome" not in first["ua"]
         assert "HeadlessChrome" not in first["appVersion"]
@@ -79,7 +77,11 @@ async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
         if "Linux" in first["ua"]:
             assert "Linux" in first["platform"]
         frame = page.frames[1]
-        await frame.wait_for_function("window.firstWebdriver === false")
+        await frame.wait_for_load_state("load")
+        assert (
+            await frame.evaluate("window.firstWebdriver", isolated_context=False)
+            is False
+        )
         response = await page.reload(wait_until="load")
         assert response is not None
         headers = await response.all_headers()
@@ -96,10 +98,20 @@ async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
             await page.evaluate("window.open(location.origin + '/popup')")
         popup = await popup_info.value
         await popup.wait_for_load_state()
-        assert await popup.evaluate("window.firstFingerprint.webdriver") is False
-        assert await popup.evaluate("window.firstFingerprint.ua") == first["ua"]
         assert (
-            await popup.evaluate("window.firstFingerprint.appVersion")
+            await popup.evaluate(
+                "window.firstFingerprint.webdriver", isolated_context=False
+            )
+            is False
+        )
+        assert (
+            await popup.evaluate("window.firstFingerprint.ua", isolated_context=False)
+            == first["ua"]
+        )
+        assert (
+            await popup.evaluate(
+                "window.firstFingerprint.appVersion", isolated_context=False
+            )
             == first["appVersion"]
         )
         await context.add_cookies(
@@ -114,24 +126,5 @@ async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
             )
         )
         assert not await manager.contexts["session-b"].cookies()
-    finally:
-        await manager.close()
-
-
-async def test_failed_stealth_setup_closes_unpublished_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manager = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
-    )
-    failed = AsyncMock(side_effect=RuntimeError("Synthetic stealth setup failure"))
-    monkeypatch.setattr(browser_module, "prepare_browser_stealth", failed)
-    authority = BrowserAuthority("failed-session", str(tmp_path / "failed"))
-    try:
-        with pytest.raises(RuntimeError, match="Synthetic stealth setup failure"):
-            await manager.execute(BrowserOpenCommand(authority, None, None, None))
-        assert authority.session_id not in manager.contexts
-        context = failed.call_args.args[0]
-        assert not context.pages
     finally:
         await manager.close()

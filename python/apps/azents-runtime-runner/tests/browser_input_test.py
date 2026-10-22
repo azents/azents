@@ -20,7 +20,7 @@ from browser_test import (
     target,
 )
 from nacl.public import PublicKey, SealedBox
-from playwright.async_api import Error
+from patchright.async_api import Error
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey

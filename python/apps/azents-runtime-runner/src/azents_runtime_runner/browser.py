@@ -31,7 +31,7 @@ from azents_runtime_control.browser_contract import (
 from azents_runtime_control.browser_viewer_contract import ViewerTarget
 from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 from markdownify import markdownify
-from playwright.async_api import (
+from patchright.async_api import (
     BrowserContext,
     Dialog,
     Download,
@@ -42,18 +42,13 @@ from playwright.async_api import (
     Playwright,
     async_playwright,
 )
-from playwright.async_api import (
+from patchright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
+from azents_runtime_runner.browser_display import BrowserDisplay, BrowserDisplayError
 from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey
 from azents_runtime_runner.browser_popups import BrowserPopupTracker
-from azents_runtime_runner.browser_stealth import (
-    BROWSER_ARGS,
-    BROWSER_CHANNEL,
-    BROWSER_IGNORE_DEFAULT_ARGS,
-    prepare_browser_stealth,
-)
 
 _MAX_TASKS = 64
 _MAX_PAGES = 8
@@ -194,7 +189,8 @@ class RunnerBrowserManager:
         self.tasks: dict[str, _Task] = {}
         self.session_directories: dict[str, Path] = {}
         self.sandbox: bool | None = None
-        self.user_agent: str | None = None
+        self.display = BrowserDisplay()
+        self.browser_environment: dict[str, str | float] | None = None
         self.start_lock = asyncio.Lock()
         self.session_locks: dict[str, asyncio.Lock] = {}
         self.closed = False
@@ -284,51 +280,48 @@ class RunnerBrowserManager:
         async with self.start_lock:
             if self.driver is not None:
                 return self.driver
-            driver = await async_playwright().start()
+            driver: Playwright | None = None
             try:
-                probe = await driver.chromium.launch(
-                    channel=BROWSER_CHANNEL,
-                    headless=True,
-                    chromium_sandbox=True,
-                    args=BROWSER_ARGS,
-                    ignore_default_args=BROWSER_IGNORE_DEFAULT_ARGS,
-                )
-                self.sandbox = True
-            except Error as exc:
-                # Only known native containment startup diagnostics permit downgrade.
-                if not _sandbox_unavailable(str(exc)):
-                    await driver.stop()
-                    raise BrowserFailure(
-                        "browser_unavailable", "Product browser startup failed"
-                    ) from None
-                self.sandbox = False
+                self.browser_environment = await self.display.start()
+                driver = await async_playwright().start()
                 try:
                     probe = await driver.chromium.launch(
-                        channel=BROWSER_CHANNEL,
-                        headless=True,
+                        channel="chromium",
+                        headless=False,
+                        chromium_sandbox=True,
+                        env=self.browser_environment,
+                    )
+                    self.sandbox = True
+                except Error as exc:
+                    # Only known native containment diagnostics permit downgrade.
+                    if not _sandbox_unavailable(str(exc)):
+                        raise
+                    self.sandbox = False
+                    probe = await driver.chromium.launch(
+                        channel="chromium",
+                        headless=False,
                         chromium_sandbox=False,
-                        args=BROWSER_ARGS,
-                        ignore_default_args=BROWSER_IGNORE_DEFAULT_ARGS,
+                        env=self.browser_environment,
                     )
-                except Error:
-                    await driver.stop()
-                    raise BrowserFailure(
-                        "browser_unavailable", "Product browser startup failed"
-                    ) from None
-            try:
-                try:
-                    page = await probe.new_page()
-                    native_user_agent: str = await page.evaluate("navigator.userAgent")
-                    self.user_agent = native_user_agent.replace(
-                        "HeadlessChrome/", "Chrome/"
-                    )
-                finally:
-                    await probe.close()
-            except BaseException:
-                await driver.stop()
-                raise
-            self.driver = driver
-            return driver
+                await probe.close()
+                self.driver = driver
+                return driver
+            except BrowserDisplayError:
+                raise BrowserFailure(
+                    "browser_unavailable", "Product browser display could not start"
+                ) from None
+            except Error:
+                raise BrowserFailure(
+                    "browser_unavailable", "Product browser startup failed"
+                ) from None
+            finally:
+                if self.driver is None:
+                    try:
+                        if driver is not None:
+                            await driver.stop()
+                    finally:
+                        await self.display.close()
+                        self.browser_environment = None
 
     async def _context(self, authority: BrowserAuthority) -> BrowserContext:
         lock = self.session_locks.setdefault(authority.session_id, asyncio.Lock())
@@ -337,7 +330,6 @@ class RunnerBrowserManager:
             if existing is not None:
                 return existing
             driver = await self._initialize()
-            assert self.user_agent is not None
             token = hashlib.sha256(authority.session_id.encode()).hexdigest()
             path = self.workspace_root / ".azents" / "browser-state" / token
             if path.resolve() != path or path.is_symlink():
@@ -353,11 +345,9 @@ class RunnerBrowserManager:
             try:
                 context = await driver.chromium.launch_persistent_context(
                     path,
-                    channel=BROWSER_CHANNEL,
-                    headless=True,
-                    user_agent=self.user_agent,
-                    args=BROWSER_ARGS,
-                    ignore_default_args=BROWSER_IGNORE_DEFAULT_ARGS,
+                    channel="chromium",
+                    headless=False,
+                    env=self.browser_environment,
                     chromium_sandbox=self.sandbox is True,
                     proxy=None
                     if self.proxy is None
@@ -370,8 +360,14 @@ class RunnerBrowserManager:
                     "browser_unavailable", "Product browser context could not start"
                 ) from None
             try:
-                await prepare_browser_stealth(context, self.user_agent)
-                for initial in context.pages:
+                # Headed Chromium exits when its final native tab closes. Retain
+                # one internal blank tab, outside task/page projection and quota.
+                initial_pages = context.pages
+                if initial_pages:
+                    await initial_pages[0].goto("about:blank")
+                else:
+                    await context.new_page()
+                for initial in initial_pages[1:]:
                     await initial.close()
             except BaseException:
                 # Never retain an incompletely configured Session context.
@@ -990,14 +986,28 @@ class RunnerBrowserManager:
                     wait_until="domcontentloaded",
                     timeout=action.timeout_ms,
                 )
-            case "back":
-                await page.page.go_back(
-                    wait_until="domcontentloaded", timeout=action.timeout_ms
-                )
-            case "forward":
-                await page.page.go_forward(
-                    wait_until="domcontentloaded", timeout=action.timeout_ms
-                )
+            case "back" | "forward":
+                # BFCache restores commit without a new DOMContentLoaded event.
+                # Wait for the committed document's readiness for both cached
+                # restores and history entries that require a fresh response.
+                try:
+                    async with asyncio.timeout(action.timeout_ms / 1000):
+                        if action.kind == "back":
+                            await page.page.go_back(
+                                wait_until="commit", timeout=action.timeout_ms
+                            )
+                        else:
+                            await page.page.go_forward(
+                                wait_until="commit", timeout=action.timeout_ms
+                            )
+                        await page.page.wait_for_function(
+                            "document.readyState !== 'loading'",
+                            timeout=action.timeout_ms,
+                        )
+                except TimeoutError:
+                    raise PlaywrightTimeoutError(
+                        "Browser history navigation deadline reached"
+                    ) from None
             case "reload":
                 await page.page.reload(
                     wait_until="domcontentloaded", timeout=action.timeout_ms
@@ -1147,14 +1157,17 @@ class RunnerBrowserManager:
         finally:
             self.contexts.clear()
             self.tasks.clear()
-            if self.driver is not None:
-                driver, self.driver = self.driver, None
-                try:
-                    await driver.stop()
-                except asyncio.CancelledError:
-                    raise
-                except Error:
-                    cleanup_failed = True
+            try:
+                if self.driver is not None:
+                    driver, self.driver = self.driver, None
+                    try:
+                        await driver.stop()
+                    except asyncio.CancelledError:
+                        raise
+                    except Error:
+                        cleanup_failed = True
+            finally:
+                await self.display.close()
         if cleanup_failed:
             raise BrowserFailure(
                 "browser_cleanup_failed", "Browser resource cleanup failed"

@@ -4,7 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from playwright.async_api import CDPSession, Page
+from patchright.async_api import CDPSession, Page
 
 from azents_runtime_runner.browser_popups import BrowserPopupTracker
 
