@@ -47,7 +47,11 @@ class GmailMailbox(GmailInput):
             ) from None
         if value != value.strip() or not parsed.username or not parsed.domain:
             raise ValueError("Mailbox address must have a local part and domain.")
-        return parsed.addr_spec
+        try:
+            domain = parsed.domain.encode("idna").decode("ascii")
+        except UnicodeError:
+            raise ValueError("Mailbox domain must be a valid IDNA domain.") from None
+        return Address(username=parsed.username, domain=domain).addr_spec
 
 
 class GmailCompose(GmailInput):

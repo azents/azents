@@ -35,8 +35,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
   - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
   - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
-last_verified_at: 2026-10-22
-spec_version: 1
+last_verified_at: 2026-10-23
+spec_version: 2
 ---
 
 # Google Connection
@@ -178,11 +178,23 @@ semantics. Applying an existing filter to historical mail changes labels only;
 future automatic forwarding remains a persistent Gmail rule. Deleting or locally
 disabling a connection does not undo an existing remote filter.
 
+Composed MIME uses CRLF and ASCII-compatible RFC 2047 encoded words for
+non-ASCII subjects and address display names, plus RFC 2231 attachment filename
+parameters. Accepted internationalized mailbox domains normalize to ASCII IDNA;
+non-ASCII local parts remain unsupported. Original encoded-word subjects decode
+before reply-title comparison and inheritance. Quoted source headers and parsed
+recipient display names decode for presentation, while original provider headers,
+Message-ID and References retain their independent contracts. Invalid encoded
+bytes, charsets or decoded control characters fail explicitly; no heuristic
+mojibake repair or automatic resend is performed.
+
 Drive includes metadata/search/link, content read/download/export, blob creation,
 folders/copy/content/metadata changes, permissions and supported native imports.
 Native format conversion is explicit. Shortcuts have bounded traversal and do not
 transfer writability from the readable target. Outputs distinguish confirmed
 results, bounded omissions, extraction status and partial multi-step completion.
+UTF-8 text prepend keeps an existing BOM at the start of the output rather than
+moving it into the text. Append/prepend retain byte limits and ETag preconditions.
 
 ## Canonical Files and Bounded Content
 

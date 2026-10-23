@@ -603,26 +603,32 @@ async def test_content_update_targets_resolved_shortcut_content() -> None:
     assert requests[-1].content == b"replacement"
 
 
-async def test_append_utf8_text_is_conditional_and_preserves_existing_bytes() -> None:
+@pytest.mark.parametrize("position", ["append", "prepend"])
+@pytest.mark.parametrize("bom", [b"", b"\xef\xbb\xbf"])
+async def test_append_utf8_text_is_conditional_and_preserves_existing_bytes(
+    position: str, bom: bytes
+) -> None:
     value = m.DriveAppendInput(
         file_id="file",
         resource_key=None,
         follow_shortcuts=False,
         acknowledge_abuse=False,
-        text=" world",
-        position="append",
+        text="추가",
+        position="append" if position == "append" else "prepend",
     )
     requests: list[httpx.Request] = []
+    original = bom + "원본".encode()
     await _run(
         lambda s: drive.append_text(s, value, maximum_bytes=1024),
         (
-            _Reply(200, _metadata(), {"etag": '"v1"'}),
-            _Reply(200, b"hello"),
+            _Reply(200, _metadata(content=original), {"etag": '"v1"'}),
+            _Reply(200, original),
             *_upload_replies({"id": "file"}),
         ),
         requests,
     )
-    assert requests[-1].content == b"hello world"
+    expected = "원본추가" if position == "append" else "추가원본"
+    assert requests[-1].content == bom + expected.encode()
     assert requests[-2].headers["if-match"] == '"v1"'
 
 
