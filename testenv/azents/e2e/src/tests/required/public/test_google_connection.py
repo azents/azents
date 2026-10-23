@@ -507,6 +507,7 @@ def test_google_gmail_drive_runtime_file_roundtrip(
         SCOPE + "gmail.send",
         SCOPE + "gmail.settings.basic",
         SCOPE + "calendar.events",
+        SCOPE + "drive.readonly",
         SCOPE + "drive.file",
     ]
     prepared = GoogleConnectOutput.from_json(
@@ -543,6 +544,15 @@ def test_google_gmail_drive_runtime_file_roundtrip(
         ).text
     )
     assert review is not None and review.grant_result == "full"
+    assert review.granted_scopes is not None
+    assert {SCOPE + "drive.readonly", SCOPE + "drive.file"} <= set(
+        review.granted_scopes
+    )
+    assert SCOPE + "drive" not in review.granted_scopes
+    assert review.drive_access.whole_content_read
+    assert review.drive_access.app_file_write
+    assert not review.drive_access.whole_content_write
+    assert not review.drive_access.whole_metadata_write
     published = GooglePublishedOutput.from_json(
         response(
             base,
@@ -636,10 +646,21 @@ def test_google_gmail_drive_runtime_file_roundtrip(
         if event.kind == "client_tool_result"
         for item in [ToolResultObservation.model_validate(event.payload)]
     }
-    for stage in ("calendar", "mail", "send", "filter", "download", "import", "upload"):
+    for stage in (
+        "calendar",
+        "mail",
+        "send",
+        "filter",
+        "whole_read",
+        "download",
+        "import",
+        "upload",
+    ):
         result = results["call_google_direct_" + stage]
         assert result.status == "completed", result.model_dump_json()
-    assert results["call_google_direct_denied"].status == "failed"
+    denied = results["call_google_direct_denied"]
+    assert denied.status == "failed", denied.model_dump_json()
+    assert "resource_rejected" in denied.model_dump_json()
     calendar_output = TypeAdapter(list[GoogleTextOutput]).validate_python(
         results["call_google_direct_calendar"].output
     )
@@ -666,7 +687,8 @@ def test_google_gmail_drive_runtime_file_roundtrip(
     assert state.downloads == len(FILE_BYTES)
     assert state.uploaded_bytes > len(FILE_BYTES)
     assert "gmail.get_message" in state.calls
-    assert state.calls.count("drive.get_metadata") == 1
+    # Whole-resource read plus the app-file download's metadata prerequisite.
+    assert state.calls.count("drive.get_metadata") == 2
     if personal:
         # Exercise the browser credential boundary without a live Picker/Google
         # session. The access token is consumed only by this manager test client.

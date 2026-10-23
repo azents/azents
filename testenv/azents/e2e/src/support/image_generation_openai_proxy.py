@@ -3314,9 +3314,20 @@ class _Handler(BaseHTTPRequestHandler):
                     },
                 ),
                 (
-                    "denied",
+                    "whole_read",
                     "google_product__drive_get_metadata",
                     {"file_id": "whole-only", "resource_key": None},
+                ),
+                (
+                    "denied",
+                    "google_product__drive_update_metadata",
+                    {
+                        "file_id": "whole-only",
+                        "resource_key": None,
+                        "changes": {"name": "Must not be renamed"},
+                        "add_parent_id": None,
+                        "remove_parent_ids": [],
+                    },
                 ),
                 (
                     "download",
