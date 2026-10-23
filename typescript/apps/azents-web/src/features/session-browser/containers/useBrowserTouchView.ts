@@ -8,7 +8,9 @@ import {
   useState,
 } from "react";
 import { browserPoint, browserReleaseFrame } from "../input";
+import { useBrowserDirectTouch } from "./useBrowserDirectTouch";
 import type { BrowserCoordinateAction, BrowserFrame } from "../types";
+import type { BrowserDirectTouchControls } from "./useBrowserDirectTouch";
 import type { PointerEventHandler, RefObject } from "react";
 
 interface Point {
@@ -46,6 +48,8 @@ export interface BrowserTouchHandlers {
 interface Options {
   enabled: boolean;
   canInput: boolean;
+  pendingInputs: number;
+  interrupted: boolean;
   frame: BrowserFrame | null;
   zoom: number;
   onZoomChange: (zoom: number) => void;
@@ -56,6 +60,7 @@ interface Options {
 
 export interface BrowserTouchView {
   frame: BrowserFrame | null;
+  direct: BrowserDirectTouchControls;
   cancel: () => void;
   viewWindowRef: RefObject<HTMLDivElement | null>;
   touch: BrowserTouchHandlers;
@@ -67,8 +72,17 @@ function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-/** Touch gestures are local until a single stationary tap completes; pinch never presses a remote pointer. */
+/** Preserve local browsing gestures unless direct touch was explicitly enabled. */
 export function useBrowserTouchView(options: Options): BrowserTouchView {
+  const direct = useBrowserDirectTouch({
+    enabled: options.enabled && options.canInput,
+    frame: options.frame,
+    pendingInputs: options.pendingInputs,
+    interrupted: options.interrupted,
+    keyboardRef: options.keyboardRef,
+    onAction: options.onAction,
+    cancelInput: options.cancelInput,
+  });
   const latest = useRef(options);
   latest.current = options;
   const viewWindowRef = useRef<HTMLDivElement>(null);
@@ -330,9 +344,19 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
   };
   return {
     frame: options.frame,
-    cancel: clear,
+    direct: {
+      ...direct.controls,
+      onToggle: () => {
+        clear();
+        direct.controls.onToggle();
+      },
+    },
+    cancel: () => {
+      clear();
+      direct.cancel();
+    },
     viewWindowRef,
-    touch,
+    touch: direct.controls.active ? direct.touch : touch,
     touchFeedback,
     onTouchFeedbackEnd: () => setTouchFeedback(null),
   };

@@ -23,6 +23,8 @@ import {
   IconArrowRight,
   IconClipboard,
   IconDots,
+  IconHandMove,
+  IconHandStop,
   IconKeyboard,
   IconMaximize,
   IconMinimize,
@@ -314,6 +316,12 @@ export function SessionBrowserPanel({
     state.dialog === null;
   const handlers = inputEnabled && focused ? interaction : null;
   const touch = focused ? touchView?.touch : null;
+  const direct = focused ? (touchView?.direct ?? null) : null;
+  const directLabel = direct?.pressed
+    ? direct.sending
+      ? t("directTouchSending")
+      : t("directTouchRelease")
+    : t("directTouchDisable");
   const image = state.image;
   const editableFrame = touchView?.frame ?? null;
   const imageCurrent =
@@ -587,6 +595,23 @@ export function SessionBrowserPanel({
               </ActionIcon>
             </Tooltip>
           )}
+          {direct?.active && (
+            <Tooltip label={directLabel}>
+              <ActionIcon
+                variant="light"
+                aria-label={directLabel}
+                aria-pressed
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={direct.pressed ? direct.onRelease : direct.onToggle}
+              >
+                {direct.pressed ? (
+                  <IconHandStop size={16} aria-hidden />
+                ) : (
+                  <IconHandMove size={16} aria-hidden />
+                )}
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Menu
             withinPortal
             position="bottom-end"
@@ -604,21 +629,38 @@ export function SessionBrowserPanel({
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
+              {direct !== null && (
+                <>
+                  <Menu.Item
+                    disabled={!direct.active && !direct.available}
+                    onClick={direct.onToggle}
+                    leftSection={<IconHandMove size={14} aria-hidden />}
+                  >
+                    {direct.active
+                      ? t("directTouchDisable")
+                      : t("directTouchEnable")}
+                  </Menu.Item>
+                  <Menu.Divider />
+                </>
+              )}
               <Menu.Item
-                disabled={zoom <= 1}
+                disabled={zoom <= 1 || direct?.pressed}
                 onClick={() => onZoomChange(Math.max(1, zoom - 0.25))}
                 leftSection={<IconZoomOut size={14} aria-hidden />}
               >
                 {t("zoomOut")}
               </Menu.Item>
               <Menu.Item
-                disabled={zoom >= 3}
+                disabled={zoom >= 3 || direct?.pressed}
                 onClick={() => onZoomChange(Math.min(3, zoom + 0.25))}
                 leftSection={<IconZoomIn size={14} aria-hidden />}
               >
                 {t("zoomIn")}
               </Menu.Item>
-              <Menu.Item onClick={() => onZoomChange(1)}>
+              <Menu.Item
+                disabled={direct?.pressed}
+                onClick={() => onZoomChange(1)}
+              >
                 {t("resetZoom", { percent: Math.round(zoom * 100) })}
               </Menu.Item>
               <Menu.Divider />

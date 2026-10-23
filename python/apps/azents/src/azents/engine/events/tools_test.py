@@ -186,6 +186,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
     catalog = _prepare_json_catalog(catalog)
 
     assert list(catalog.tools) == ["demo__echo"]
+    assert catalog.entries["demo__echo"].original_tool_name == "echo"
     assert catalog.static_prompt_fragment_inputs[0].label == "demo"
     assert catalog.static_prompt_fragment_inputs[0].content == "tool prompt"
     assert catalog.dynamic_prompt_fragment_inputs == []

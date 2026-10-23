@@ -49,6 +49,7 @@ def _entry(
     slug: str = "azents",
     toolkit_type: str | None = "github",
     input_schema: dict[str, object] | None = None,
+    original_tool_name: str | None = None,
 ) -> CatalogTool:
     return CatalogTool(
         tool=FunctionTool(
@@ -69,6 +70,7 @@ def _entry(
             routing_metadata=(("account", slug),),
         ),
         exposure=exposure,
+        original_tool_name=original_tool_name,
     )
 
 
@@ -496,9 +498,204 @@ async def test_tool_search_schema_and_handler_activate_ranked_results() -> None:
     assert payload["activated_tools"][0]["name"] == "github__create_issue"
     assert state.tool_names[0] == "github__create_issue"
     assert tool.spec.name == "tool_search"
+    assert tool.spec.description == (
+        "Find tools for the task. Matching deferred tools become available on the next "
+        "model call. Results are ranked candidates, not a complete capability "
+        "inventory; refine the query when they do not match the task."
+    )
     properties = tool.spec.input_schema["properties"]
     assert is_string_object_dict(properties)
+    query_schema = properties["query"]
+    assert is_string_object_dict(query_schema)
+    assert query_schema["description"] == (
+        "An exact tool name, or short English keywords describing the service, "
+        "action, and object."
+    )
     limit_schema = properties["limit"]
     assert is_string_object_dict(limit_schema)
     assert limit_schema["default"] == 5
     assert limit_schema["maximum"] == 10
+    assert limit_schema["description"] == (
+        "Maximum results to return. Default: 5. Maximum: 10."
+    )
+
+
+@pytest.mark.parametrize("query", ["google__gmail_create_draft", "gmail_create_draft"])
+async def test_exact_gmail_draft_beats_short_competing_tools(query: str) -> None:
+    repository = _MemoryToolkitStateRepository()
+    store = _working_set_store(repository)
+    index = DeferredToolSearchIndex(
+        [
+            _entry(
+                "google__gmail_create_draft",
+                "Create a draft with authorized files.",
+                original_tool_name="gmail_create_draft",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "body": {
+                            "type": "string",
+                            "description": "Message composition and attachments. "
+                            * 200,
+                        }
+                    },
+                },
+            ),
+            _entry("google__gmail_delete_draft", "Delete a Gmail draft."),
+            _entry("google__gmail_send_draft", "Send an existing Gmail draft."),
+        ]
+    )
+    tool = make_tool_search_tool(
+        index=index,
+        store=store,
+        agent_id="agent-1",
+        session_id="session-1",
+        activation_capacity=None,
+    )
+
+    output = await tool.handler(json.dumps({"query": query, "limit": 1}))
+
+    assert isinstance(output, str)
+    assert [item["name"] for item in json.loads(output)["activated_tools"]] == [
+        "google__gmail_create_draft"
+    ]
+    assert (await store.load("agent-1", "session-1")).tool_names == [
+        "google__gmail_create_draft"
+    ]
+
+
+def test_exact_final_name_precedes_original_name_collision() -> None:
+    index = DeferredToolSearchIndex(
+        [
+            _entry("create_issue", "Direct operation."),
+            _entry(
+                "github__create_issue",
+                "Other operation.",
+                original_tool_name="create_issue",
+            ),
+        ]
+    )
+
+    assert [item.name for item in index.search(" create_issue ", limit=1)] == [
+        "create_issue"
+    ]
+
+
+async def test_ambiguous_original_name_does_not_activate_arbitrary_source() -> None:
+    repository = _MemoryToolkitStateRepository()
+    store = _working_set_store(repository)
+    index = DeferredToolSearchIndex(
+        [
+            _entry(
+                f"{source}__create_issue",
+                "Create an issue.",
+                slug=source,
+                original_tool_name="create_issue",
+            )
+            for source in ["work", "personal"]
+        ]
+    )
+    tool = make_tool_search_tool(
+        index=index,
+        store=store,
+        agent_id="agent-1",
+        session_id="session-1",
+        activation_capacity=None,
+    )
+
+    output = await tool.handler('{"query":"create_issue","limit":1}')
+
+    assert isinstance(output, str)
+    payload = json.loads(output)
+    assert payload["activated_tools"] == []
+    assert payload["total_exact_matches"] == 2
+    assert payload["ambiguous_tools"][0]["name"] == "personal__create_issue"
+    assert (await store.load("agent-1", "session-1")).tool_names == []
+    resolved = await tool.handler('{"query":"work__create_issue","limit":1}')
+    assert isinstance(resolved, str)
+    assert json.loads(resolved)["activated_tools"][0]["name"] == "work__create_issue"
+
+
+@pytest.mark.parametrize("capacity", [None, 0, 1])
+async def test_exact_direct_lookup_does_not_use_activation_capacity(
+    capacity: int | None,
+) -> None:
+    repository = _MemoryToolkitStateRepository()
+    store = _working_set_store(repository)
+    direct = _entry(
+        "google__gmail_create_draft",
+        "Current direct description.",
+        original_tool_name="gmail_create_draft",
+        exposure=ToolExposure.DIRECT,
+    )
+    tool = make_tool_search_tool(
+        index=DeferredToolSearchIndex([direct]),
+        store=store,
+        agent_id="agent-1",
+        session_id="session-1",
+        activation_capacity=capacity,
+    )
+
+    output = await tool.handler('{"query":"gmail_create_draft","limit":1}')
+
+    assert isinstance(output, str)
+    payload = json.loads(output)
+    assert payload["activated_tools"] == []
+    assert payload["already_available_tools"][0]["name"] == direct.tool.spec.name
+    assert payload["already_available_tools"][0]["description"] == (
+        "Current direct description."
+    )
+    assert repository.record is None
+
+
+@pytest.mark.parametrize("capacity", [0, 1])
+async def test_exact_deferred_lookup_respects_activation_capacity(
+    capacity: int,
+) -> None:
+    repository = _MemoryToolkitStateRepository()
+    store = _working_set_store(repository)
+    tool = make_tool_search_tool(
+        index=DeferredToolSearchIndex([_entry("service__target", "Target operation.")]),
+        store=store,
+        agent_id="agent-1",
+        session_id="session-1",
+        activation_capacity=capacity,
+    )
+
+    output = await tool.handler('{"query":"service__target","limit":1}')
+
+    assert isinstance(output, str)
+    payload = json.loads(output)
+    assert len(payload["activated_tools"]) == capacity
+    assert payload["limit_reduced"] is (capacity == 0)
+    assert len((await store.load("agent-1", "session-1")).tool_names) == capacity
+
+
+def test_exact_lookup_uses_only_current_catalog_and_explicit_original_names() -> None:
+    current = _entry(
+        "selected__target",
+        "Currently authorized operation.",
+        original_tool_name="target",
+    )
+    index = DeferredToolSearchIndex([current])
+
+    assert index.lookup("hidden__target") == ()
+    assert index.lookup("target") == (current,)
+    assert DeferredToolSearchIndex([]).lookup("selected__target") == ()
+    assert (
+        DeferredToolSearchIndex(
+            [_entry("selected__target", "No original name metadata.")]
+        ).lookup("target")
+        == ()
+    )
+
+
+def test_catalog_hash_tracks_original_lookup_metadata() -> None:
+    original = DeferredToolSearchIndex(
+        [_entry("service__tool", "Operation.", original_tool_name="before")]
+    )
+    changed = DeferredToolSearchIndex(
+        [_entry("service__tool", "Operation.", original_tool_name="after")]
+    )
+
+    assert original.catalog_hash != changed.catalog_hash
