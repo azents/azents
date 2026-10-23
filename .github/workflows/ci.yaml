@@ -210,6 +210,7 @@ jobs:
         env:
           PLAYWRIGHT_LEGACY_SCREENSHOT: "1"
           AZ_CAPTURE_TRACE: ${{ matrix.project == 'python/apps/azents-runtime-runner' && format('{0}/ci-tests/capture-phases.jsonl', runner.temp) || '' }}
+          AZ_CAPTURE_STARTUP_TRACE: ${{ matrix.project == 'python/apps/azents-runtime-runner' && format('{0}/capture-startup-raw.json', runner.temp) || '' }}
         run: |
           pytest_execution=()
           if [ "${{ matrix.project }}" = 'python/apps/azents' ]; then
@@ -220,6 +221,7 @@ jobs:
             mkdir -p "${RUNNER_TEMP}/ci-tests"
             bundle="$("${{ matrix.project }}/.venv/bin/python" -c 'from pathlib import Path; import patchright; print(Path(patchright.__file__).parent / "driver/package/lib/coreBundle.js")')"
             python scripts/ci/diagnose_browser_capture.py "$bundle"
+            trap 'status=$?; python scripts/ci/diagnose_browser_capture.py --sanitize-startup "$AZ_CAPTURE_STARTUP_TRACE" "${RUNNER_TEMP}/ci-tests/startup-events.json" || echo "Diagnostic startup trace unavailable"; rm -f "$AZ_CAPTURE_STARTUP_TRACE" || echo "Diagnostic startup trace cleanup failed"; exit "$status"' EXIT
           fi
           python scripts/ci/run_pytest.py \
             --project "${{ matrix.project }}" \

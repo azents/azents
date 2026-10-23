@@ -2,12 +2,134 @@
 
 import hashlib
 import json
+import math
 import os
 import sys
 from pathlib import Path
 
 
+def sanitize_startup(raw_path: Path, output: Path) -> None:
+    """Export reviewed engine event names and numeric fields, never trace args."""
+    if raw_path.stat().st_size > 32 * 1024 * 1024:
+        raise RuntimeError("Diagnostic startup trace exceeds extraction bound")
+    events = json.loads(raw_path.read_text())["traceEvents"]
+    allowed = {
+        "Collect Graphics Info",
+        "CommandBufferProxyImpl::Initialize",
+        "CopyOutputRequest",
+        "Create GpuWatchdog",
+        "Damage not visible.",
+        "DirectRenderer::DrawFrame",
+        "Display::DrawAndSwap",
+        "DisplayScheduler::DrawAndSwap",
+        "DriverEGL::InitializeClientExtensionSettings",
+        "DriverEGL::InitializeExtensionSettings",
+        "DriverEGL::InitializeStaticBindings",
+        "DriverGL::InitializeStaticBindings",
+        "GLContextEGL::MakeCurrent",
+        "Gpu::EstablishGpuChannelSync",
+        "GpuChannel::CreateCommandBuffer",
+        "GpuChannelHost::CreateViewCommandBuffer",
+        "GpuHostImpl::ConnectFrameSinkManager",
+        "GpuHostImpl::DidInitialize",
+        "GpuHostImpl::EstablishGpuChannel",
+        "GpuHostImpl::OnChannelEstablished",
+        "GpuMain",
+        "ImplementationBase::Initialize",
+        "Initialize sandbox",
+        "LaunchGpuProcess",
+        "LayerTreeHost::InitializeForReal",
+        "LayerTreeHost::SetLayerTreeFrameSink",
+        "LayerTreeHost::WaitForCommitCompletion",
+        "LayerTreeHostImpl::ActivateSyncTree",
+        "LayerTreeHostImpl::BeginCommit",
+        "LayerTreeHostImpl::CommitComplete",
+        "LayerTreeHostImpl::DidNotProduceFrame",
+        "LayerTreeHostImpl::InitializeFrameSink",
+        "LayerTreeHostImpl::PrepareToDraw",
+        "LayerTreeHostImpl::SetVisible",
+        "PipelineReporter",
+        "ProxyMain::BeginMainFrame",
+        "ProxyMain::RequestNewLayerTreeFrameSink",
+        "RasterBufferStub::Initialize",
+        "RasterDecoderImpl::Initialize",
+        "RasterImplementation::Initialize",
+        "RenderThreadImpl::EstablishGpuChannel",
+        "RenderThreadImpl::EstablishGpuChannel callback",
+        "RenderThreadImpl::EstablishGpuChannelSync",
+        "Scheduler::BeginFrame",
+        "Scheduler::BeginImplFrame",
+        "Scheduler::OnBeginImplFrameDeadline",
+        "SkiaOutputSurfaceImpl::Reshape",
+        "SkiaOutputSurfaceImplOnGpu::Initialize",
+        "Surface deadline passed",
+        "SurfaceSynchronizationEvent",
+        "Warm up rand",
+        "WidgetBase::DidCommitAndDrawCompositorFrame",
+        "WidgetBase::WillBeginMainFrame",
+        "eglInitializeFn display",
+        "gl::GLDisplayEGL::InitializeCommon",
+        "gl::GLDisplayEGL::InitializeDisplay",
+        "gl::init::CreateGLContext",
+        "gl::init::CreateOffscreenGLSurface",
+        "gl::init::InitializeGLOneOffPlatformHelper",
+        "gl::init::InitializeNoExtensionsOneOff",
+        "gl::init::InitializeStaticGLBindingsOneOff",
+        "gl_display::GetPlatformANGLEDisplay",
+        "gl_display_initializer::GetEGLInitDisplays",
+        "gpu::GpuInit::InitializeAndStartSandbox",
+        "gpu_info_collector::CollectBasicGraphicsInfo",
+        "gpu_info_collector::CollectGpuExtraInfo",
+        "gpu_info_collector::CollectGraphicsInfo",
+        "gpu_info_collector::CollectGraphicsInfoGL",
+        "gpu_info_collector::InitializeGLContext",
+        "gpu_init::InitializeDawnProcs",
+        "gpu_main::EnsureSandboxInitialized",
+        "gpu_main::InitializeSkia",
+        "gpu_main::PreSandboxStartup",
+        "gpu_util::ComputeGpuFeatureInfo",
+        "ui::OzonePlatform::InitializeForGPU",
+    }
+    selected = []
+    for event in events:
+        if event.get("name") not in allowed:
+            continue
+        if not {"gpu", "viz", "cc"}.intersection(event.get("cat", "").split(",")):
+            continue
+        phase = event.get("ph")
+        if phase not in {"B", "E", "X", "I", "b", "e", "n", "s", "t", "f"}:
+            continue
+        record = {"name": event["name"], "ph": phase}
+        for field in ("ts", "dur", "pid", "tid"):
+            value = event.get(field)
+            if value is None:
+                continue
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise RuntimeError("Invalid diagnostic numeric trace field")
+            record[field] = value
+        args = event.get("args", {})
+        success = args.get("success")
+        if type(success) is bool:
+            record["success"] = success
+        selected.append(record)
+    if not selected:
+        raise RuntimeError("Diagnostic startup trace has no reviewed events")
+    output.write_text(
+        json.dumps(
+            {
+                "diagnostic_only": True,
+                "source_events": len(events),
+                "selected_events": len(selected),
+                "events": selected,
+            }
+        )
+    )
+
+
 def main() -> None:
+    if sys.argv[1] == "--sanitize-startup":
+        sanitize_startup(Path(sys.argv[2]), Path(sys.argv[3]))
+        return
     bundle = Path(sys.argv[1])
     source = bundle.read_text()
     trace_path = os.environ.get("AZ_CAPTURE_TRACE")
@@ -25,6 +147,9 @@ def main() -> None:
                     "experiment_sdk_legacy_surface": (
                         os.environ.get("PLAYWRIGHT_LEGACY_SCREENSHOT") == "1"
                     ),
+                    "experiment_startup_trace": bool(
+                        os.environ.get("AZ_CAPTURE_STARTUP_TRACE")
+                    ),
                 }
             )
         )
@@ -41,6 +166,30 @@ def main() -> None:
         if source.count(old) != 1:
             raise RuntimeError("Pinned Chromium feature argument mismatch")
         source = source.replace(old, new)
+    if os.environ.get("AZ_CAPTURE_STARTUP_TRACE"):
+        old = """        const chromeArguments = this._innerDefaultArgs(options);
+        chromeArguments.push(`--user-data-dir=${userDataDir}`);"""
+        new = """        const chromeArguments = this._innerDefaultArgs(options);
+        // Diagnostic scope: the first synthetic field test, not the sandbox probe.
+        if (isPersistent && process.env.AZ_CAPTURE_STARTUP_TRACE &&
+            process.env.PYTEST_CURRENT_TEST?.startsWith(
+              "tests/browser_field_viewer_test.py::"+
+              "test_private_field_read_and_single_replace[<input>-text-Changed value]"
+            )) {
+          chromeArguments.push(
+            "--trace-startup=viz,cc,gpu,benchmark,disabled-by-default-viz.debug,disabled-by-default-gpu.service",
+            "--trace-startup-duration=15",
+            "--trace-startup-format=json",
+            "--trace-startup-file="+process.env.AZ_CAPTURE_STARTUP_TRACE
+          );
+        }
+        chromeArguments.push(`--user-data-dir=${userDataDir}`);"""
+        chromium = source.index("Chromium = class extends BrowserType")
+        method_end = source.index("      _innerDefaultArgs(options) {", chromium)
+        scoped = source[chromium:method_end]
+        if scoped.count(old) != 1:
+            raise RuntimeError("Pinned Chromium startup-trace anchor mismatch")
+        source = source[:chromium] + scoped.replace(old, new) + source[method_end:]
     helper = """
 let azCaptureOrdinal = 0;
 const azCaptureOrdinals = new WeakMap();
