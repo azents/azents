@@ -18,7 +18,7 @@ from azents_runtime_control.browser_contract import (
     BrowserResult,
     BrowserTarget,
 )
-from patchright.async_api import Error, Playwright
+from patchright.async_api import BrowserContext, CDPSession, Error, Playwright
 
 import azents_runtime_runner.browser as browser_module
 from azents_runtime_runner.browser import (
@@ -621,6 +621,127 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
     for call in driver.chromium.launch.call_args_list:
         assert call.kwargs["headless"] is False
         assert call.kwargs["channel"] == "chromium"
+
+
+async def test_context_admission_waits_for_initial_graphics_information(
+    manager: RunnerBrowserManager,
+    site: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+    sessions: list[CDPSession] = []
+    send = CDPSession.send
+
+    async def delayed(session: CDPSession, method: str) -> object:
+        assert method == "SystemInfo.getInfo"
+        sessions.append(session)
+        entered.set()
+        await release.wait()
+        return await send(session, method)
+
+    monkeypatch.setattr(CDPSession, "send", delayed)
+    actor = authority(tmp_path)
+    opening = asyncio.create_task(
+        manager.execute(BrowserOpenCommand(actor, None, site, None))
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        assert not opening.done() and not manager.contexts
+        assert all(not task.pages for task in manager.tasks.values())
+    finally:
+        release.set()
+        opened = await asyncio.wait_for(opening, 5)
+    assert opened.page is not None
+    assert len(sessions) == 1
+    with pytest.raises(Error):
+        await send(sessions[0], "SystemInfo.getInfo")
+    await manager.execute(BrowserOpenCommand(actor, None, site, None))
+    assert len(sessions) == 1  # Reused contexts do not repeat startup work.
+
+
+@pytest.mark.parametrize("failure_kind", ["protocol", "deadline"])
+async def test_failed_graphics_startup_closes_unpublished_context(
+    manager: RunnerBrowserManager,
+    site: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+) -> None:
+    deadlines: list[asyncio.Timeout] = []
+    closed: list[BrowserContext] = []
+    timeout, close = asyncio.timeout, BrowserContext.close
+
+    def observed_timeout(delay: float | None) -> asyncio.Timeout:
+        assert delay == 180
+        value = timeout(delay)
+        deadlines.append(value)
+        return value
+
+    async def failed(session: CDPSession, method: str) -> object:
+        del session
+        assert method == "SystemInfo.getInfo"
+        if failure_kind == "protocol":
+            raise Error("Synthetic native startup failure")
+        deadlines[0].reschedule(asyncio.get_running_loop().time())
+        await asyncio.Event().wait()
+        raise AssertionError("The context startup deadline must expire")
+
+    async def observed_close(context: BrowserContext) -> None:
+        await close(context)
+        closed.append(context)
+
+    monkeypatch.setattr(asyncio, "timeout", observed_timeout)
+    monkeypatch.setattr(CDPSession, "send", failed)
+    monkeypatch.setattr(BrowserContext, "close", observed_close)
+    with pytest.raises(BrowserFailure) as error:
+        await manager.execute(BrowserOpenCommand(authority(tmp_path), None, site, None))
+    assert error.value.code == "browser_unavailable"
+    assert not manager.contexts and not manager.tasks
+    assert len(closed) == 1 and closed[0].browser is not None
+    assert not closed[0].browser.is_connected()
+    assert len(deadlines) == 1
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+async def test_cancelled_graphics_startup_preserves_cancellation_and_closes_context(
+    manager: RunnerBrowserManager,
+    site: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_failure: bool,
+) -> None:
+    entered = asyncio.Event()
+    closed: list[BrowserContext] = []
+    close = BrowserContext.close
+
+    async def stalled(session: CDPSession, method: str) -> object:
+        del session
+        assert method == "SystemInfo.getInfo"
+        entered.set()
+        await asyncio.Event().wait()
+        raise AssertionError("Cancelled startup must not finish")
+
+    async def observed_close(context: BrowserContext) -> None:
+        await close(context)
+        closed.append(context)
+        if cleanup_failure:
+            raise Error("Synthetic private cleanup details")
+
+    monkeypatch.setattr(CDPSession, "send", stalled)
+    monkeypatch.setattr(BrowserContext, "close", observed_close)
+    opening = asyncio.create_task(
+        manager.execute(BrowserOpenCommand(authority(tmp_path), None, site, None))
+    )
+    await asyncio.wait_for(entered.wait(), 5)
+    opening.cancel()
+    with pytest.raises(asyncio.CancelledError) as error:
+        await opening
+    assert not manager.contexts and not manager.tasks
+    assert len(closed) == 1 and closed[0].browser is not None
+    assert not closed[0].browser.is_connected()
+    if cleanup_failure:
+        assert error.value.__notes__ == ["Native browser context cleanup also failed."]
 
 
 async def test_open_navigation_dialog_returns_current_resources_without_deadlock(

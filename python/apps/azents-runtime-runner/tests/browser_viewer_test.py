@@ -5,6 +5,8 @@ import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
+from functools import partial
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -26,6 +28,7 @@ from azents_runtime_control.runtime_stream_session import (
 )
 from browser_test import _action
 from patchright.async_api import Error
+from PIL import Image
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_editables import BrowserEditableRegions
@@ -242,6 +245,57 @@ async def test_invalidated_capture_discards_frame_before_navigation_event(
     await source.capture_once()
     assert source.sequence == 2
     source.clear()
+    assert budget.bytes == 0
+
+
+@pytest.mark.parametrize("backgrounded", [False, True])
+async def test_capture_pixels_stay_current_without_changing_tab_visibility(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    site: str,
+    backgrounded: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = await manager._initialize()
+    # Use the SDK's public focus-control option to expose real tab visibility.
+    # Production focus emulation otherwise reports every tab as visible.
+    monkeypatch.setattr(
+        driver.chromium,
+        "launch_persistent_context",
+        partial(driver.chromium.launch_persistent_context, focus_control=True),
+    )
+    authority = await scope(manager, tmp_path, site)
+    page = manager.tasks[authority.task_id].pages[authority.page_id]
+    native = page.page
+    await native.set_content(
+        "<body style='margin:0;min-height:2000px;background:rgb(20,40,200)'>"
+    )
+    if backgrounded:
+        other = await native.context.new_page()
+        await other.goto(site + "/foreground")
+        await other.bring_to_front()
+        await native.wait_for_function("document.visibilityState === 'hidden'")
+    expected_visibility = "hidden" if backgrounded else "visible"
+    budget = Budget()
+    source = _LatestPage(page, budget)
+    try:
+        await source.capture_once()
+        assert source.latest is not None
+        with Image.open(BytesIO(source.latest.data)) as image:
+            assert image.size == (1280, 800)
+            assert image.getpixel((16, 16)) == pytest.approx((20, 40, 200), abs=4)
+        await native.evaluate("document.body.style.background='rgb(200,40,20)'")
+        await native.set_viewport_size({"width": 640, "height": 480})
+        await source.capture_once()
+        assert source.sequence == 2 and source.latest is not None
+        assert (source.latest.source.width, source.latest.source.height) == (640, 480)
+        with Image.open(BytesIO(source.latest.data)) as image:
+            assert image.size == (640, 480)
+            assert image.getpixel((16, 16)) == pytest.approx((200, 40, 20), abs=4)
+        assert await native.evaluate("document.visibilityState") == expected_visibility
+        assert budget.bytes > 0
+    finally:
+        await source.close()
     assert budget.bytes == 0
 
 
