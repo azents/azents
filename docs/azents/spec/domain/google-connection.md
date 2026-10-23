@@ -36,7 +36,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
   - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
 last_verified_at: 2026-10-23
-spec_version: 2
+spec_version: 3
 ---
 
 # Google Connection
@@ -55,7 +55,10 @@ directly or edit the read-only, assistant, full or clear presets. New connection
 start without selected groups. The backend-owned closed catalog describes each
 group's operations and sufficient SDK method scopes. Connect/reconnect derives
 request scopes from selected groups, including internal prerequisites, and removes
-only scopes redundant under the compiled policy. Client scope strings are not
+only scopes covered by an explicitly known same-resource superset while retaining
+SDK-method prerequisites. Method eligibility alone is insufficient for scope
+reduction: app-file or app-created access cannot replace selected whole-resource
+access. Client scope strings are not
 authorization authority.
 
 Selected groups are an execution ceiling independent of actual Google grants.
@@ -82,6 +85,17 @@ resources and app-file eligibility. New Drive write, sharing and ownership group
 request sufficient `drive.file` permission; whole-Drive reads are selected
 separately. This does not manufacture whole-Drive write authority or narrow an
 existing broader grant.
+
+Selecting `drive_read` together with file creation/modification, sharing or
+ownership requests both `drive.readonly` and `drive.file`; it does not request
+whole-Drive writes. Calendar event read/write scopes likewise remain alongside
+`calendar.app.created` when existing-calendar capabilities are selected. Known
+same-resource reductions such as Gmail modify covering mail read/compose/labels
+and Calendar events covering event reads remain supported.
+
+Corrected request derivation applies to new connect/reconnect attempts. Existing
+saved grants remain unchanged and require explicit reconnect and actual Google
+consent to gain missing scopes; selected groups never fabricate granted access.
 
 ## Management and Ownership
 

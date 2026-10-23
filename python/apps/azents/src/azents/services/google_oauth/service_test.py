@@ -23,7 +23,7 @@ from azents.core.google_oauth import (
     GoogleSetup,
     GoogleSubject,
 )
-from azents.core.google_policy import GoogleService
+from azents.core.google_policy import GoogleService, GoogleToolGroup
 from azents.core.google_system_setting import GoogleApplicationRegistration
 from azents.core.google_tool_groups import groups_for_services
 from azents.core.google_workspace_policy import GoogleWorkspaceOperation as Op
@@ -436,6 +436,40 @@ async def test_start_returns_ciphertext_and_distinct_oidc_nonce() -> None:
     decoded = h.service._state(h.subject, encrypted)
     assert decoded.nonce == captured[0].state_nonce
     assert decoded.nonce != captured[0].oidc_nonce
+
+
+@pytest.mark.parametrize("target", [None, "existing-toolkit"])
+async def test_connect_and_reconnect_request_whole_drive_read_with_app_file_writes(
+    target: str | None,
+) -> None:
+    h = _harness()
+    h.repo.start.return_value = dataclasses.replace(
+        h.attempt, status=GoogleAttemptStatus.PENDING
+    )
+    h.provider.authorization_url.return_value = "https://accounts.google.com/authorize"
+    await h.service.connect(
+        h.subject,
+        GoogleConnectInput(
+            services=(GoogleService.DRIVE,),
+            tool_groups=(GoogleToolGroup.DRIVE_READ, GoogleToolGroup.DRIVE_FILES),
+            # The caller's old app-file-only intent is not scope authority.
+            oauth_request_scopes=("https://www.googleapis.com/auth/drive.file",),
+            timeout=30.0,
+        ),
+        target_toolkit_id=target,
+    )
+    setup = h.repo.start.call_args.kwargs["setup"]
+    assert set(setup.oauth_request_scopes) == {
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.file",
+    }
+    assert h.repo.start.call_args.kwargs["target_toolkit_id"] == target
+    sent_setup = h.provider.authorization_url.call_args.args[0]
+    assert sent_setup.oauth_request_scopes == setup.oauth_request_scopes
+    h.provider.exchange.assert_not_awaited()
+    h.provider.refresh.assert_not_awaited()
 
 
 @pytest.mark.asyncio

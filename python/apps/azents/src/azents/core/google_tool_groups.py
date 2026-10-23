@@ -206,6 +206,20 @@ GOOGLE_GROUP_PRESETS = MappingProxyType(
     }
 )
 
+# Only same-resource coverage permits consent-scope reduction. Method eligibility
+# alone cannot distinguish app-created/per-file access from whole-service access.
+_REQUEST_SCOPE_COVERAGE = MappingProxyType(
+    {
+        "https://www.googleapis.com/auth/gmail.modify": frozenset(
+            "https://www.googleapis.com/auth/" + name
+            for name in ("gmail.readonly", "gmail.compose", "gmail.labels")
+        ),
+        "https://www.googleapis.com/auth/calendar.events": frozenset(
+            {"https://www.googleapis.com/auth/calendar.events.readonly"}
+        ),
+    }
+)
+
 
 def group_operations(groups: tuple[GoogleToolGroup, ...]) -> frozenset[Op]:
     return frozenset(
@@ -233,13 +247,19 @@ def group_prerequisites(groups: tuple[GoogleToolGroup, ...]) -> frozenset[Op]:
 
 
 def group_request_scopes(groups: tuple[GoogleToolGroup, ...]) -> tuple[str, ...]:
-    """Remove redundant requests while retaining every selected SDK method."""
+    """Retain selected resource scope and SDK methods when reducing requests."""
     operations = group_operations(groups) | group_prerequisites(groups)
     scopes = {
         scope for group in groups for scope in GOOGLE_TOOL_GROUPS[group].request_scopes
     }
     for scope in sorted(scopes):
         remaining = frozenset(scopes - {scope})
-        if all(GOOGLE_WORKSPACE_OPERATIONS[op].permits(remaining) for op in operations):
+        covered = any(
+            scope in _REQUEST_SCOPE_COVERAGE.get(other, frozenset())
+            for other in remaining
+        )
+        if covered and all(
+            GOOGLE_WORKSPACE_OPERATIONS[op].permits(remaining) for op in operations
+        ):
             scopes.remove(scope)
     return tuple(sorted(scopes | {"openid", "email"}))
