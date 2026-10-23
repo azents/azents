@@ -137,8 +137,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-22
-spec_version: 153
+last_verified_at: 2026-10-23
+spec_version: 154
 ---
 
 # Toolkit
@@ -1121,7 +1121,8 @@ Each ToolkitConfig also stores an `always_expose_tools` boolean that defaults to
 `false`. Workspace managers can change it through the common Toolkit create/edit API
 and UI. When Tool Search is enabled and the value is `true`, every executable tool
 from that attached ToolkitConfig is classified as direct, remains model-visible on
-every prepared call, and is excluded from the deferred search index. The policy
+every prepared call, and is excluded from lexical deferred search. Exact-name
+lookup can still identify it as already available. The policy
 applies to all Agents attached to that ToolkitConfig and to future tools produced by
 its current runtime snapshot. Directly exposed tools continue to count against the
 existing pinned declaration compatibility budget. When the value is `false`, the
@@ -1135,7 +1136,26 @@ External Channel turn or continuation and tells the model to use Tool Search onl
 when the capability is enabled. When Tool Search is disabled, the complete catalog
 remains directly visible and the static prompt omits the search instruction.
 
-When at least one deferred tool exists, the engine adds the unprefixed direct `tool_search` function. Its schema and description are stable rather than embedding the current Toolkit list. Input contains a non-empty capability `query` and an optional result `limit` with default 5 and maximum 10. Search uses deterministic in-memory BM25 over the current deferred catalog. Documents include final-name tokens, Toolkit slug/type/class/display name, description, parameter names and descriptions, and routing metadata. Positive-score results are ordered by relevance and then final name.
+When at least one deferred tool exists, the engine adds the unprefixed direct
+`tool_search` function. Its stable description explains discovery, next-call
+activation and ranked rather than exhaustive results. The `query` accepts an
+exact tool name or short English service/action/object keywords. The optional
+`limit` defaults to 5 and has a maximum of 10.
+
+Lookup first checks the trimmed, case-sensitive final name against the current
+authorized, model-compatible catalog, then the explicitly retained original
+operation name. A unique deferred match bypasses lexical ranking but retains
+the activation budget. An exact direct match returns `already_available_tools`
+without activating it or changing recency, even with zero deferred capacity.
+Multiple original-name matches return bounded `ambiguous_tools`, the
+`total_exact_matches` count and a final-name selection hint; they do not
+arbitrarily activate a source when the result limit is small.
+
+Queries without an exact match use deterministic in-memory BM25 over the current
+deferred catalog. Documents include final-name tokens, Toolkit slug/type/class/
+display name, description, parameter names and descriptions, and routing metadata.
+Positive-score results are ordered by relevance and then final name. Exact lookup
+does not search unavailable tools, infer prefixes or introduce filter syntax.
 
 Calling `tool_search` activates the returned names for the immediately following prepared model call. Search activation moves results to the front of shared recency in relevance order; searching for an already-active tool refreshes it. Invoking a deferred tool also moves it to the most-recent position before runtime-hook denial, handler execution, or tool-level failure, because invocation itself is the relevance signal.
 
@@ -1839,6 +1859,10 @@ idle continuation hooks preserve incomplete admitted objectives without
 introducing an independent Routine execution owner.
 
 ## Changelog
+
+- **2026-10-23** (spec_version 154) — Prioritize exact current-catalog tool names,
+  distinguish ambiguous original names and already-direct matches, and replace
+  Tool Search guidance with a concise discovery contract.
 
 - 2026-10-19: Add auto-bound Session Routine tools, independent work context and
   semantic requested-versus-observed presentation.

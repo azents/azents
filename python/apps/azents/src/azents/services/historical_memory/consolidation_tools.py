@@ -288,7 +288,7 @@ def _catalog(
         wire_dialects=MappingProxyType({}),
         entries=MappingProxyType(
             {
-                name: CatalogTool(tool, source, ToolExposure.DIRECT)
+                name: CatalogTool(tool, source, ToolExposure.DIRECT, name)
                 for name, tool in by_name.items()
             }
         ),

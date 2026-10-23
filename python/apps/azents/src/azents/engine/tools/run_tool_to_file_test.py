@@ -968,6 +968,7 @@ def _catalog(tools: Mapping[str, FunctionTool]) -> ToolCatalog:
                     tool=tool,
                     source=source,
                     exposure=ToolExposure.DIRECT,
+                    original_tool_name=name,
                 )
                 for name, tool in typed_tools.items()
             }

@@ -335,6 +335,7 @@ def extend_tool_catalog_candidates(
             tool=tool,
             source=source,
             exposure=ToolExposure.DIRECT,
+            original_tool_name=name,
         )
     return ToolCatalog(
         tools=MappingProxyType(tools),
@@ -383,6 +384,7 @@ def extend_prepared_tool_catalog_with_json_functions(
             tool=tool,
             source=source,
             exposure=ToolExposure.DIRECT,
+            original_tool_name=name,
         )
     return ToolCatalog(
         tools=MappingProxyType(tools),
@@ -498,6 +500,7 @@ async def build_tool_catalog(
             entries[bound.spec.name] = CatalogTool(
                 tool=bound,
                 source=source,
+                original_tool_name=tool.spec.name,
                 exposure=classify_tool_exposure(
                     source=source,
                     original_tool_name=tool.spec.name,
