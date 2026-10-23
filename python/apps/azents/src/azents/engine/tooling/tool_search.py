@@ -28,8 +28,9 @@ _BM25_K1 = 1.5
 _BM25_B = 0.75
 _DIRECT_REGISTERED_TOOLS = frozenset({("github", "switch_installation")})
 _TOOL_SEARCH_DESCRIPTION = (
-    "Search deferred tools by capability and activate matching tools for the next "
-    "model call. Use a concise query describing the capability you need."
+    "Find tools for the task. Matching deferred tools become available on the next "
+    "model call. Results are ranked candidates, not a complete capability inventory; "
+    "refine the query when they do not match the task."
 )
 
 
@@ -68,6 +69,7 @@ class CatalogTool:
     tool: FunctionTool
     source: ToolCatalogSource
     exposure: ToolExposure
+    original_tool_name: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -101,9 +103,10 @@ class _IndexedTool:
 
 
 class DeferredToolSearchIndex:
-    """Deterministic in-memory BM25 index over deferred executable tools."""
+    """Exact catalog lookup and deterministic BM25 search of deferred tools."""
 
     def __init__(self, entries: Sequence[CatalogTool]) -> None:
+        self._catalog = tuple(sorted(entries, key=lambda entry: entry.tool.spec.name))
         deferred = sorted(
             (entry for entry in entries if entry.exposure == ToolExposure.DEFERRED),
             key=lambda entry: entry.tool.spec.name,
@@ -118,13 +121,35 @@ class DeferredToolSearchIndex:
             else 0.0
         )
 
+    def lookup(self, query: str) -> tuple[CatalogTool, ...]:
+        """Resolve exact final names first, then original names without guessing."""
+        name = query.strip()
+        final = tuple(entry for entry in self._catalog if entry.tool.spec.name == name)
+        if final:
+            return final
+        return tuple(
+            entry for entry in self._catalog if entry.original_tool_name == name
+        )
+
     def search(self, query: str, *, limit: int) -> list[ToolSearchMatch]:
-        """Return positive-score matches ordered by relevance then final name."""
+        """Return exact deferred matches, otherwise positive-score lexical matches."""
         if limit < 1 or limit > TOOL_SEARCH_MAX_RESULT_LIMIT:
             raise ValueError(
                 "Tool Search limit must be between 1 and "
                 f"{TOOL_SEARCH_MAX_RESULT_LIMIT}"
             )
+        exact = self.lookup(query)
+        if exact:
+            return [
+                ToolSearchMatch(
+                    name=entry.tool.spec.name,
+                    description=entry.tool.spec.description,
+                    source_label=entry.source.label,
+                    score=math.inf,
+                )
+                for entry in exact
+                if entry.exposure == ToolExposure.DEFERRED
+            ][:limit]
         query_terms = _tokenize(query)
         if not query_terms or not self._documents:
             return []
@@ -178,13 +203,16 @@ class ToolSearchInput(BaseModel):
     query: str = Field(
         min_length=1,
         max_length=500,
-        description="Concise description of the capability to find",
+        description=(
+            "An exact tool name, or short English keywords describing the service, "
+            "action, and object."
+        ),
     )
     limit: int = Field(
         default=TOOL_SEARCH_DEFAULT_RESULT_LIMIT,
         ge=1,
         le=TOOL_SEARCH_MAX_RESULT_LIMIT,
-        description="Maximum tools to activate",
+        description="Maximum results to return. Default: 5. Maximum: 10.",
     )
 
 
@@ -246,6 +274,43 @@ def make_tool_search_tool(
 
     async def tool_search(input: ToolSearchInput) -> str:
         """Search and activate deferred tools for the next prepared call."""
+        exact = index.lookup(input.query)
+        if len(exact) > 1:
+            return json.dumps(
+                {
+                    "activated_tools": [],
+                    "ambiguous_tools": [
+                        {
+                            "name": entry.tool.spec.name,
+                            "description": entry.tool.spec.description,
+                            "source": entry.source.label,
+                        }
+                        for entry in exact[: input.limit]
+                    ],
+                    "total_exact_matches": len(exact),
+                    "hint": (
+                        "Multiple tools share this name. Query an exact final name."
+                    ),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        if exact and exact[0].exposure == ToolExposure.DIRECT:
+            entry = exact[0]
+            return json.dumps(
+                {
+                    "activated_tools": [],
+                    "already_available_tools": [
+                        {
+                            "name": entry.tool.spec.name,
+                            "description": entry.tool.spec.description,
+                            "source": entry.source.label,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
         effective_limit = (
             input.limit
             if activation_capacity is None
@@ -363,6 +428,7 @@ def _deferred_catalog_hash(entries: Sequence[CatalogTool]) -> str:
             "description": entry.tool.spec.description,
             "input_schema": entry.tool.spec.input_schema,
             "source": dataclasses.asdict(entry.source),
+            "original_tool_name": entry.original_tool_name,
         }
         for entry in entries
     ]
