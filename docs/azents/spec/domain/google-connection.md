@@ -180,12 +180,14 @@ disabling a connection does not undo an existing remote filter.
 
 Composed MIME uses CRLF and ASCII-compatible RFC 2047 encoded words for
 non-ASCII subjects and address display names, plus RFC 2231 attachment filename
-parameters. Accepted internationalized mailbox domains normalize to ASCII IDNA;
+parameters. Accepted internationalized mailbox domains normalize to ASCII IDNA2008
+using non-transitional UTS 46 processing, preserving deviation-character identity;
 non-ASCII local parts remain unsupported. Original encoded-word subjects decode
 before reply-title comparison and inheritance. Quoted source headers and parsed
 recipient display names decode for presentation, while original provider headers,
 Message-ID and References retain their independent contracts. Invalid encoded
-bytes, charsets or decoded control characters fail explicitly; no heuristic
+bytes, charsets, malformed Base64/Q encoded words or decoded control characters
+fail explicitly; no heuristic
 mojibake repair or automatic resend is performed.
 
 Drive includes metadata/search/link, content read/download/export, blob creation,

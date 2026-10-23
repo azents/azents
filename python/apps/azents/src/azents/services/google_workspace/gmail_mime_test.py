@@ -287,6 +287,11 @@ def test_encoded_original_headers_compare_and_quote_as_unicode(
         "=?not-a-charset?b?YWJj?=",
         "=?utf-8?b?/w==?=",
         "=?unknown-8bit?b?/w==?=",
+        "=?utf-8?b?%%%%?=",
+        "=?utf-8?q?=ZZ?=",
+        "=?utf-8?b?YWJj",
+        "=?utf-8?x?abc?=",
+        "=?utf-8?b??=",
     ],
 )
 def test_encoded_original_header_controls_and_invalid_bytes_are_rejected(
@@ -320,6 +325,8 @@ def test_encoded_original_header_controls_and_invalid_bytes_are_rejected(
     "address,expected",
     [
         ("user@한글.test", "user@xn--bj0bj06e.test"),
+        ("user@faß.de", "user@xn--fa-hia.de"),
+        ("user@βόλος.test", "user@xn--nxasmm1c.test"),
         ('"given family"@example.test', '"given family"@example.test'),
         ("user@[127.0.0.1]", "user@[127.0.0.1]"),
     ],
@@ -340,6 +347,20 @@ def test_display_header_decodes_declared_charset_without_mutating_source(
 
     assert gmail_mime._display_header(part, "Subject") == text
     assert gmail_mime.source_header(part, "Subject") == encoded
+
+
+def test_encoded_word_q_and_adjacent_folded_words_are_decoded() -> None:
+    value = "=?utf-8?q?caf=C3=A9?=\r\n =?utf-8?b?IO2VnOq4gA==?="
+    part = GmailPart(headers=(GmailHeader(name="Subject", value=value),))
+    assert gmail_mime._display_header(part, "Subject") == "café 한글"
+
+
+@pytest.mark.parametrize("address", ["user@a\u200db.test", "한글@example.test"])
+def test_unsupported_idna_domains_and_unicode_local_parts_are_rejected(
+    address: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        GmailMailbox(email=address, display_name=None)
 
 
 def test_binary_attachment_is_preserved_without_inline_base64_in_result(

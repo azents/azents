@@ -4,6 +4,7 @@ from email.errors import HeaderParseError
 from email.headerregistry import Address
 from typing import Annotated, Literal, Self, TypedDict
 
+import idna
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -48,8 +49,14 @@ class GmailMailbox(GmailInput):
         if value != value.strip() or not parsed.username or not parsed.domain:
             raise ValueError("Mailbox address must have a local part and domain.")
         try:
-            domain = parsed.domain.encode("idna").decode("ascii")
-        except UnicodeError:
+            domain = (
+                parsed.domain
+                if parsed.domain.isascii()
+                else idna.encode(parsed.domain, uts46=True, transitional=False).decode(
+                    "ascii"
+                )
+            )
+        except idna.IDNAError:
             raise ValueError("Mailbox domain must be a valid IDNA domain.") from None
         return Address(username=parsed.username, domain=domain).addr_spec
 

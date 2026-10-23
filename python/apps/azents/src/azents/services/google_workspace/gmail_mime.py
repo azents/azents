@@ -81,6 +81,17 @@ def source_header(part: GmailPart, name: str) -> str | None:
 def _decoded_header(value: str) -> str:
     """Decode display text without repairing malformed bytes or header controls."""
     try:
+        cursor = 0
+        while (start := value.find("=?", cursor)) >= 0:
+            word = re.match(r"=\?([^?\s]+)\?([bBqQ])\?([^?\s]+)\?=", value[start:])
+            if word is None or not word.group().isascii():
+                raise ValueError("Malformed encoded word.")
+            cursor = start + len(word[0])
+            payload = word[3]
+            if word[2].casefold() == "b":
+                base64.b64decode(payload, validate=True)
+            elif re.search(r"=(?![0-9A-Fa-f]{2})", payload):
+                raise ValueError("Malformed Q escape.")
         parts = [
             (
                 part.decode(charset or "ascii") if isinstance(part, bytes) else part,
