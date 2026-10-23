@@ -160,3 +160,41 @@ def test_discovery_classification_does_not_change_tool_execution_retries() -> No
     failure = _mcp_throttle()
     assert discovery_rate_limit_delay(failure) == 0
     assert _extract_rate_limit_delay(failure) is None
+
+
+@pytest.mark.parametrize("operation", ["discovery", "tool", "connection"])
+async def test_cancelled_transport_does_not_fallback_retry_or_report_failure(
+    monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    """Cancellation crosses each transport error boundary without side effects."""
+    failure = asyncio.CancelledError()
+    session = AsyncMock()
+    session.__aenter__.side_effect = failure
+    factory_calls: list[object] = []
+
+    def session_factory(*args: object, **kwargs: object) -> AsyncMock:
+        factory_calls.append((args, kwargs))
+        return session
+
+    monkeypatch.setattr(mcp_transport, "_mcp_session", session_factory)
+    sleep = AsyncMock()
+    monkeypatch.setattr(mcp_transport.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError) as caught:
+        if operation == "discovery":
+            await mcp_transport.list_tools("https://example.invalid/mcp", {}, 30)
+        elif operation == "tool":
+            await mcp_transport.call_tool(
+                "https://example.invalid/mcp",
+                {},
+                30,
+                "example",
+                {},
+                use_streamable_http=True,
+            )
+        else:
+            await mcp_transport.test_mcp_transport(
+                "https://example.invalid/mcp", {}, 30
+            )
+    assert caught.value is failure
+    assert len(factory_calls) == 1
+    sleep.assert_not_awaited()

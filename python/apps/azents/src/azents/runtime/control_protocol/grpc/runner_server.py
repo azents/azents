@@ -364,6 +364,8 @@ class RuntimeRunnerControlGrpcServicer(
                     runtime_configuration=registration.runtime_configuration,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.warning(
                 "Failed to persist Runtime Runner stream close state",

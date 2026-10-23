@@ -67,7 +67,7 @@ export function AgentSidebarSectionView({
           onClick={onNavigate}
           title={t("newAgent")}
         >
-          <IconPlus size={14} />
+          <IconPlus size={rem(14)} />
         </ActionIcon>
       </Group>
       <Box px="xs">
@@ -76,7 +76,7 @@ export function AgentSidebarSectionView({
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
           placeholder={t("searchAgents")}
-          leftSection={<IconSearch size={12} />}
+          leftSection={<IconSearch size={rem(12)} />}
         />
       </Box>
       <Box>
@@ -113,7 +113,7 @@ export function AgentSidebarSectionView({
             borderRadius: "var(--mantine-radius-sm)",
           }}
         >
-          <IconLayoutGrid size={13} />
+          <IconLayoutGrid size={rem(13)} />
           <Text size="xs" c="dimmed">
             {t("viewAllAgents", { count: state.totalCount })}
           </Text>

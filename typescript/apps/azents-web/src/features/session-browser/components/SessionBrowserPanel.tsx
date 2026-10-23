@@ -261,7 +261,7 @@ export function SessionBrowserPanel({
           <Group p="xs" justify="flex-end">
             <Button
               variant="subtle"
-              leftSection={<IconMinimize size={16} />}
+              leftSection={<IconMinimize size={rem(16)} />}
               onClick={onToggleFocus}
             >
               {t("exitFocus")}
@@ -282,7 +282,7 @@ export function SessionBrowserPanel({
             disabled={!canCreate}
             loading={creating}
             onClick={onCreatePage}
-            leftSection={<IconPlus size={16} />}
+            leftSection={<IconPlus size={rem(16)} />}
           >
             {t("newTab")}
           </Button>
@@ -353,7 +353,7 @@ export function SessionBrowserPanel({
               <Button
                 size="xs"
                 variant="subtle"
-                leftSection={<IconMinimize size={16} aria-hidden />}
+                leftSection={<IconMinimize size={rem(16)} aria-hidden />}
                 onClick={onToggleFocus}
               >
                 {t("exitFocus")}
@@ -366,7 +366,7 @@ export function SessionBrowserPanel({
                   aria-label={t("focusBrowser")}
                   onClick={onToggleFocus}
                 >
-                  <IconMaximize size={16} aria-hidden />
+                  <IconMaximize size={rem(16)} aria-hidden />
                 </ActionIcon>
               </Tooltip>
             )}
@@ -448,7 +448,7 @@ export function SessionBrowserPanel({
                       disabled={!state.canClose}
                       onClick={() => onClosePage(page.target)}
                     >
-                      <IconX size={14} aria-hidden />
+                      <IconX size={rem(14)} aria-hidden />
                     </ActionIcon>
                   </div>
                 ))}
@@ -465,7 +465,7 @@ export function SessionBrowserPanel({
               loading={creating}
               onClick={onCreatePage}
             >
-              <IconPlus size={18} aria-hidden />
+              <IconPlus size={rem(18)} aria-hidden />
             </ActionIcon>
           </Tooltip>
         </div>
@@ -487,7 +487,7 @@ export function SessionBrowserPanel({
                   onNavigate({ kind: "navigation", action: "back", url: null })
                 }
               >
-                <IconArrowLeft size={16} aria-hidden />
+                <IconArrowLeft size={rem(16)} aria-hidden />
               </ActionIcon>
             </Tooltip>
             <Tooltip label={t("forward")}>
@@ -504,7 +504,7 @@ export function SessionBrowserPanel({
                   })
                 }
               >
-                <IconArrowRight size={16} aria-hidden />
+                <IconArrowRight size={rem(16)} aria-hidden />
               </ActionIcon>
             </Tooltip>
             <Tooltip label={t("reloadPage")}>
@@ -521,7 +521,7 @@ export function SessionBrowserPanel({
                   })
                 }
               >
-                <IconReload size={16} aria-hidden />
+                <IconReload size={rem(16)} aria-hidden />
               </ActionIcon>
             </Tooltip>
           </Group>
@@ -536,7 +536,7 @@ export function SessionBrowserPanel({
             className={classes.address}
             aria-label={t("address")}
             placeholder={t("addressPlaceholder")}
-            leftSection={<IconWorld size={14} aria-hidden />}
+            leftSection={<IconWorld size={rem(14)} aria-hidden />}
             value={addressValue}
             readOnly={!(navigationEnabled && inputEnabled)}
             aria-invalid={addressError}
@@ -575,7 +575,7 @@ export function SessionBrowserPanel({
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={paste?.onPaste}
                 >
-                  <IconClipboard size={16} aria-hidden />
+                  <IconClipboard size={rem(16)} aria-hidden />
                 </ActionIcon>
               </span>
             </Tooltip>
@@ -591,7 +591,7 @@ export function SessionBrowserPanel({
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={manualKeyboard.onOpen}
               >
-                <IconKeyboard size={16} aria-hidden />
+                <IconKeyboard size={rem(16)} aria-hidden />
               </ActionIcon>
             </Tooltip>
           )}
@@ -625,7 +625,7 @@ export function SessionBrowserPanel({
                 color="gray"
                 aria-label={t("keyboardActions")}
               >
-                <IconDots size={16} aria-hidden />
+                <IconDots size={rem(16)} aria-hidden />
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
@@ -646,14 +646,14 @@ export function SessionBrowserPanel({
               <Menu.Item
                 disabled={zoom <= 1 || direct?.pressed}
                 onClick={() => onZoomChange(Math.max(1, zoom - 0.25))}
-                leftSection={<IconZoomOut size={14} aria-hidden />}
+                leftSection={<IconZoomOut size={rem(14)} aria-hidden />}
               >
                 {t("zoomOut")}
               </Menu.Item>
               <Menu.Item
                 disabled={zoom >= 3 || direct?.pressed}
                 onClick={() => onZoomChange(Math.min(3, zoom + 0.25))}
-                leftSection={<IconZoomIn size={14} aria-hidden />}
+                leftSection={<IconZoomIn size={rem(14)} aria-hidden />}
               >
                 {t("zoomIn")}
               </Menu.Item>
@@ -667,7 +667,7 @@ export function SessionBrowserPanel({
               <Menu.Item
                 onClick={onRetry}
                 disabled={readOnly}
-                leftSection={<IconRefresh size={14} aria-hidden />}
+                leftSection={<IconRefresh size={rem(14)} aria-hidden />}
               >
                 {t("refreshConnection")}
               </Menu.Item>
