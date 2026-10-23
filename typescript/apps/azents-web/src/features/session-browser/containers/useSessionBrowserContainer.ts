@@ -407,6 +407,8 @@ export function useSessionBrowserContainer(
       live.state.connection === "connected" &&
       status.dialog === null,
     canInput: interaction.interaction !== null,
+    pendingInputs: live.state.pendingInputs,
+    interrupted: live.state.conflict || live.state.outcomeUnknown,
     frame: source,
     zoom,
     onZoomChange: setZoom,
@@ -486,6 +488,7 @@ export function useSessionBrowserContainer(
     currentState.type === "READY" &&
     currentState.canInput &&
     currentState.dialog === null &&
+    !touchView.direct.pressed &&
     source !== null &&
     status !== null &&
     browserFrameMatchesStatus(source, status) &&

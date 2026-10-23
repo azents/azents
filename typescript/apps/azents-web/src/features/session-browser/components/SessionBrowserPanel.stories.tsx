@@ -216,6 +216,7 @@ function BrowserFixture(
   const [zoom, setZoom] = useState(props.zoom);
   const [counts, setCounts] = useState({
     down: 0,
+    move: 0,
     up: 0,
     cancel: 0,
     wheel: 0,
@@ -227,7 +228,7 @@ function BrowserFixture(
   ): boolean => {
     props.onInputAction?.(action);
     if (props.reportActions) {
-      if (action.kind === "pointer" && action.phase !== "move") {
+      if (action.kind === "pointer") {
         const phase = action.phase;
         setCounts((value) => ({ ...value, [phase]: value[phase] + 1 }));
       } else if (action.kind === "wheel") {
@@ -277,6 +278,8 @@ function BrowserFixture(
       browserFrameMatchesStatus(props.state.image.frame, props.state.status) &&
       props.state.dialog === null,
     canInput: active,
+    pendingInputs: 0,
+    interrupted: false,
     frame:
       props.state.type === "READY" ? (props.state.image?.frame ?? null) : null,
     zoom,
@@ -339,6 +342,7 @@ function BrowserFixture(
           data-zoom={zoom}
           data-focused={focused}
           data-down={counts.down}
+          data-move={counts.move}
           data-up={counts.up}
           data-cancel={counts.cancel}
           data-wheel={counts.wheel}
@@ -1582,6 +1586,287 @@ export const MobileReadOnlyTouchGestures = {
   parameters: { viewport: { defaultViewport: "mobile1" } },
 } satisfies Story;
 
+async function enableDirectTouch(
+  canvasElement: HTMLElement,
+): Promise<HTMLElement> {
+  const canvas = within(canvasElement.ownerDocument.body);
+  await userEvent.click(
+    canvas.getByRole("button", { name: "Browser actions" }),
+  );
+  await userEvent.click(
+    await canvas.findByRole("menuitem", { name: "Enable direct touch" }),
+  );
+  await expect(
+    canvas.getByRole("button", { name: "Direct touch active — turn off" }),
+  ).toBeVisible();
+  const surface = canvas.getByRole("region", { name: "Remote browser page" });
+  // Synthetic component events do not establish native pointer capture.
+  surface.setPointerCapture = fn();
+  surface.hasPointerCapture = (): boolean => false;
+  return surface;
+}
+
+export const MobileDirectTouchHoldAndDrag = {
+  tags: ["ci-contract"],
+  render: (props) => <BrowserFixture {...props} />,
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+  play: async ({ canvasElement }) => {
+    const surface = await enableDirectTouch(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
+    const keyboard = canvas.getByRole("textbox", {
+      name: "Remote browser keyboard",
+    });
+    keyboard.focus({ preventScroll: true });
+    await expect(keyboard).toHaveFocus();
+    const rect = surface.getBoundingClientRect();
+    const start = {
+      pointerType: "touch",
+      pointerId: 41,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    };
+    actions.mockClear();
+    await fireEvent.pointerDown(surface, start);
+    await waitFor(() =>
+      expect(actions).toHaveBeenLastCalledWith(
+        frame,
+        expect.objectContaining({
+          kind: "pointer",
+          phase: "down",
+          button: "left",
+        }),
+      ),
+    );
+    await expect(actions).toHaveBeenCalledTimes(1);
+    await expect(keyboard).toHaveFocus();
+    await expect(
+      canvas.getByRole("button", { name: "Touch held — release" }),
+    ).toBeVisible();
+    await fireEvent.pointerMove(surface, {
+      ...start,
+      clientX: start.clientX + 12,
+    });
+    await expect(actions).toHaveBeenLastCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "move" }),
+    );
+    await fireEvent.pointerUp(surface, {
+      ...start,
+      clientX: start.clientX + 12,
+    });
+    await expect(actions).toHaveBeenLastCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "up" }),
+    );
+    await expect(actions).toHaveBeenCalledTimes(3);
+    await expect(keyboard).not.toHaveFocus();
+
+    keyboard.focus({ preventScroll: true });
+    actions.mockClear();
+    await fireEvent.pointerDown(surface, start);
+    await fireEvent.pointerDown(surface, { ...start, pointerId: 42 });
+    await expect(keyboard).toHaveFocus();
+    await expect(actions).toHaveBeenLastCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "cancel" }),
+    );
+    await fireEvent.pointerMove(surface, { ...start, pointerId: 42 });
+    await fireEvent.pointerUp(surface, { ...start, pointerId: 42 });
+    await fireEvent.pointerUp(surface, start);
+    await expect(actions).toHaveBeenCalledTimes(2);
+
+    for (const reason of ["outside", "capture", "cancel", "release"] as const) {
+      actions.mockClear();
+      await fireEvent.pointerDown(surface, start);
+      if (reason === "outside") {
+        await fireEvent.pointerMove(surface, {
+          ...start,
+          clientX: rect.left - 1,
+        });
+      } else if (reason === "capture") {
+        await fireEvent.lostPointerCapture(surface, start);
+      } else if (reason === "cancel") {
+        await fireEvent.pointerCancel(surface, start);
+      } else {
+        await userEvent.click(
+          canvas.getByRole("button", { name: "Touch held — release" }),
+        );
+      }
+      await expect(actions).toHaveBeenLastCalledWith(
+        frame,
+        expect.objectContaining({ kind: "pointer", phase: "cancel" }),
+      );
+      if (reason === "capture") {
+        await fireEvent.pointerUp(window, start);
+      } else {
+        await fireEvent.pointerUp(surface, start);
+      }
+      await expect(actions).toHaveBeenCalledTimes(2);
+    }
+    actions.mockClear();
+    await fireEvent.pointerDown(surface, start);
+    await fireEvent(window, new Event("blur"));
+    await expect(actions).toHaveBeenLastCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "cancel" }),
+    );
+    await expect(
+      canvas.queryByRole("button", { name: "Direct touch active — turn off" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+function DirectTouchScopeFixture(
+  props: SessionBrowserPanelProps,
+): ReactElement {
+  const [current, setCurrent] = useState(ready);
+  const image = ready.image;
+  if (image === null) {
+    throw new Error("The scope fixture requires an initial image");
+  }
+  const updateFrame = (navigation: string, sequence: number): void => {
+    setCurrent({
+      ...ready,
+      image: {
+        url: image.url,
+        frame: {
+          ...frame,
+          navigation_id: navigation,
+          frame_sequence: sequence,
+        },
+      },
+      status:
+        ready.status === null
+          ? null
+          : { ...ready.status, navigation_id: navigation },
+    });
+  };
+  return (
+    <>
+      <Button onClick={() => updateFrame(frame.navigation_id, 8)}>
+        Advance displayed frame
+      </Button>
+      <Button onClick={() => updateFrame("next-document", 9)}>
+        Change native document
+      </Button>
+      <Button onClick={() => setCurrent({ ...current, connection: "stale" })}>
+        Disconnect fixture
+      </Button>
+      <BrowserFixture {...props} state={current} />
+    </>
+  );
+}
+
+export const MobileDirectTouchSourceLifetime = {
+  tags: ["ci-contract"],
+  render: (props) => <DirectTouchScopeFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const surface = await enableDirectTouch(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
+    const rect = surface.getBoundingClientRect();
+    const start = {
+      pointerType: "touch",
+      pointerId: 21,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    };
+    actions.mockClear();
+    await fireEvent.pointerDown(surface, start);
+    // Fixture controls change source metadata; they are not part of the modal UI.
+    await fireEvent.click(
+      canvas.getByRole("button", { name: "Advance displayed frame" }),
+    );
+    await expect(
+      canvas.getByRole("button", { name: "Touch held — release" }),
+    ).toBeVisible();
+    await fireEvent.pointerUp(surface, start);
+    await expect(actions).toHaveBeenLastCalledWith(
+      { ...frame, frame_sequence: 8 },
+      expect.objectContaining({ kind: "pointer", phase: "up" }),
+    );
+    await fireEvent.pointerDown(surface, start);
+    await fireEvent.click(
+      canvas.getByRole("button", { name: "Change native document" }),
+    );
+    await expect(actions).toHaveBeenLastCalledWith(
+      { ...frame, frame_sequence: 8 },
+      expect.objectContaining({ kind: "pointer", phase: "cancel" }),
+    );
+    await expect(
+      canvas.queryByRole("button", { name: "Direct touch active — turn off" }),
+    ).toBeNull();
+    await fireEvent.pointerUp(surface, start);
+    await enableDirectTouch(canvasElement);
+    await fireEvent.pointerDown(surface, start);
+    await fireEvent.click(
+      canvas.getByRole("button", { name: "Disconnect fixture" }),
+    );
+    await expect(actions).toHaveBeenLastCalledWith(
+      { ...frame, navigation_id: "next-document", frame_sequence: 9 },
+      expect.objectContaining({ kind: "pointer", phase: "cancel" }),
+    );
+    await expect(
+      canvas.queryByRole("button", { name: "Direct touch active — turn off" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const MobileDirectTouchReadOnly = {
+  tags: ["ci-contract"],
+  args: {
+    state: { ...ready, canInput: false, canClose: false },
+    canCreate: false,
+    navigationEnabled: false,
+  },
+  render: (props) => <BrowserFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Browser actions" }),
+    );
+    await expect(
+      await canvas.findByRole("menuitem", { name: "Enable direct touch" }),
+    ).toHaveAttribute("data-disabled", "true");
+    await expect(actions).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const MobileDirectTouchSending = {
+  tags: ["ci-contract"],
+  render: (props) => <SessionBrowserPanel {...props} />,
+  args: {
+    touchView: {
+      frame,
+      direct: {
+        active: true,
+        pressed: true,
+        sending: true,
+        available: false,
+        onToggle: fn(),
+        onRelease: fn(),
+      },
+      cancel: fn(),
+      viewWindowRef: { current: null },
+      touch: {
+        onPointerDown: fn(),
+        onPointerMove: fn(),
+        onPointerUp: fn(),
+        onPointerCancel: fn(),
+        onLostPointerCapture: fn(),
+      },
+      touchFeedback: null,
+      onTouchFeedbackEnd: fn(),
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Sending touch — release" }),
+    );
+    await expect(args.touchView?.direct.onRelease).toHaveBeenCalledTimes(1);
+  },
+} satisfies Story;
+
 export const BrowserTabs = {
   args: {
     state: {
@@ -1740,6 +2025,14 @@ export const PreciseTouchMarker = {
   args: {
     touchView: {
       frame,
+      direct: {
+        active: false,
+        pressed: false,
+        sending: false,
+        available: true,
+        onToggle: fn(),
+        onRelease: fn(),
+      },
       cancel: fn(),
       viewWindowRef: { current: null },
       touch: {
