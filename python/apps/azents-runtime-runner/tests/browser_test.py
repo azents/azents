@@ -501,12 +501,11 @@ async def test_closing_manager_drains_outstanding_dialog_task(
     tmp_path: Path,
 ) -> None:
     a = authority(tmp_path)
-    opened = await manager.execute(BrowserOpenCommand(a, None, site, None))
-    current = target(opened)
-    pending = await act(
-        manager, a, current, await observe(manager, a, current), "Alert"
+    pending = await manager.execute(
+        BrowserOpenCommand(a, None, site + "/initial-dialog", None)
     )
     assert pending.dialog is not None
+    current = target(pending)
     _, resource, _ = manager.target(a, current)
     outstanding = resource.pending
     assert outstanding is not None
