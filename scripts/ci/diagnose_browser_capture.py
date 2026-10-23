@@ -4,8 +4,93 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
+import time
 from pathlib import Path
+
+
+def sample_gpu(marker: Path, output: Path) -> None:
+    """Observe startup CPU/state; sampling delays never gate browser behavior."""
+    deadline = time.monotonic() + 300
+    while not marker.exists():
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.05)
+    deadline = time.monotonic() + 15
+    with output.open("w") as stream:
+        stream.write(
+            json.dumps(
+                {
+                    "stage": "sampler_started",
+                    "monotonic_ms": time.monotonic_ns() / 1_000_000,
+                    "ticks_per_second": os.sysconf("SC_CLK_TCK"),
+                }
+            )
+            + "\n"
+        )
+        while time.monotonic() < deadline:
+            observed = 0
+            for proc in Path("/proc").glob("[0-9]*"):
+                try:
+                    arguments = (proc / "cmdline").read_bytes()
+                    # Chromium rewrites argv into one space-delimited title.
+                    if not re.search(
+                        rb"(?:^|[\0\s])--type=gpu-process(?:[\0\s]|$)", arguments
+                    ):
+                        continue
+                    fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
+                    state = fields[0] if fields[0] in "RSDTZtWXPI" else "unknown"
+                    try:
+                        wait = (proc / "wchan").read_text().strip()
+                    except PermissionError:
+                        wait = "unavailable"
+                    if "futex" in wait:
+                        wait_kind = "futex"
+                    elif "poll" in wait:
+                        wait_kind = "poll"
+                    elif wait == "0":
+                        wait_kind = "running_or_unavailable"
+                    elif wait == "unavailable":
+                        wait_kind = "unavailable"
+                    else:
+                        wait_kind = "other"
+                    record = {
+                        "stage": "gpu_cpu_sample",
+                        "monotonic_ms": time.monotonic_ns() / 1_000_000,
+                        "pid": int(proc.name),
+                        "ppid": int(fields[1]),
+                        "state": state,
+                        "user_ticks": int(fields[11]),
+                        "system_ticks": int(fields[12]),
+                        "wait_kind": wait_kind,
+                    }
+                    stream.write(json.dumps(record) + "\n")
+                    observed += 1
+                except FileNotFoundError, ProcessLookupError, PermissionError:
+                    # Process churn/containment is missing diagnostic evidence.
+                    continue
+            stream.write(
+                json.dumps(
+                    {
+                        "stage": "sampler_tick",
+                        "monotonic_ms": time.monotonic_ns() / 1_000_000,
+                        "gpu_processes": observed,
+                    }
+                )
+                + "\n"
+            )
+            stream.flush()
+            time.sleep(0.05)
+        stream.write(
+            json.dumps(
+                {
+                    "stage": "sampler_finished",
+                    "monotonic_ms": time.monotonic_ns() / 1_000_000,
+                }
+            )
+            + "\n"
+        )
 
 
 def sanitize_startup(raw_path: Path, output: Path) -> None:
@@ -127,6 +212,9 @@ def sanitize_startup(raw_path: Path, output: Path) -> None:
 
 
 def main() -> None:
+    if sys.argv[1] == "--sample-gpu":
+        sample_gpu(Path(sys.argv[2]), Path(sys.argv[3]))
+        return
     if sys.argv[1] == "--sanitize-startup":
         sanitize_startup(Path(sys.argv[2]), Path(sys.argv[3]))
         return
@@ -176,6 +264,10 @@ def main() -> None:
               "tests/browser_field_viewer_test.py::"+
               "test_private_field_read_and_single_replace[<input>-text-Changed value]"
             )) {
+          try {
+            require("node:fs").writeFileSync(
+              process.env.AZ_CAPTURE_STARTUP_TRACE+".selected", "1");
+          } catch {}
           chromeArguments.push(
             "--trace-startup=viz,cc,gpu,benchmark,disabled-by-default-viz.debug,disabled-by-default-gpu.service",
             "--trace-startup-duration=15",
@@ -206,6 +298,28 @@ function azCaptureTrace(stage, elapsed, outcome, ordinal, requestId) {
     })+'\\n');
   } catch {
     // Missing diagnostic evidence invalidates the experiment, not the SDK call.
+  }
+}
+function azCaptureGpuFacts(info) {
+  try {
+    const gpu = info.gpu || {};
+    const device = gpu.devices?.[0] || {};
+    const renderer = gpu.auxAttributes?.glRenderer || "";
+    const implementation = gpu.auxAttributes?.displayType || "";
+    const allowed = new Set(["ANGLE_OPENGL", "ANGLE_VULKAN", "ANGLE_SWIFTSHADER",
+      "ANGLE_OPENGLES", "ANGLE_D3D11", "ANGLE_METAL"]);
+    const version = device.driverVersion || "";
+    require("node:fs").appendFileSync(process.env.AZ_CAPTURE_TRACE,
+      JSON.stringify({
+        diagnostic_only:true, stage:"gpu_facts_after_capture", pid:process.pid,
+        monotonic_ms:Number(process.hrtime.bigint())/1000000,
+        renderer:renderer.toLowerCase().includes("llvmpipe") ? "llvmpipe" :
+          renderer.toLowerCase().includes("swiftshader") ? "swiftshader" : "other",
+        implementation:allowed.has(implementation) ? implementation : "other",
+        driver_version:/^[0-9.]{1,40}$/.test(version) ? version : "unknown"
+      })+"\\n");
+  } catch {
+    // No raw response or error text belongs in the diagnostic artifact.
   }
 }
 function azNativeTraceEvent(message) {
@@ -316,6 +430,17 @@ function azClaimNativeTrace() {
           if (traced) azCaptureTrace(method2+"_complete",
             Number(process.hrtime.bigint())/1000000-started,
             outcome, ordinal, id);
+          if (method2 === "Page.captureScreenshot" && ordinal === 1 &&
+              process.env.AZ_CAPTURE_STARTUP_TRACE &&
+              process.env.PYTEST_CURRENT_TEST?.startsWith(
+                "tests/browser_field_viewer_test.py::"+
+                "test_private_field_read_and_single_replace[<input>-text-Changed value]"
+              )) {
+            // Observe graphics facts after settlement; never initialize it early.
+            void this._connection.rootSession.send("SystemInfo.getInfo")
+              .then(azCaptureGpuFacts)
+              .catch(() => azCaptureTrace("gpu_facts_unavailable"));
+          }
         }
       }
 """
