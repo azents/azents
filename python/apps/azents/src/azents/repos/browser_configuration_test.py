@@ -33,6 +33,7 @@ from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.runtime.control_protocol.grpc.state_sinks_test import _create_runtime
+from azents.testing.historical_agent_fixture import create_historical_agent
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,32 @@ async def fixture(manager: SessionManager[WriteSession]) -> Fixture:
         runtime_id,
         now + timedelta(seconds=1),
     )
+
+
+async def test_sql_agent_creation_receives_distinct_initial_browser_intents(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    item = await fixture(rdb_session_manager)
+    async with rdb_session_manager() as session:
+        identifiers = [
+            await create_historical_agent(
+                session, workspace_id=item.workspace_id, name=f"sql-browser-{index}"
+            )
+            for index in range(2)
+        ]
+        intents = (
+            (
+                await session.read_session.execute(
+                    sa.select(RDBAgent.browser_configuration_intent_id).where(
+                        RDBAgent.id.in_(identifiers)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(set(intents)) == 2
+        assert all(len(intent) == 32 for intent in intents)
 
 
 async def test_browser_writes_preserve_unrelated_agent_policy_evidence(

@@ -216,7 +216,7 @@ and unchanged discovery, judgment and notification semantics.
 | `terminal_enabled` | Agent-owned default-true browser Terminal policy. It is independently editable from Runtime capability and never gates Worker Runtime Toolkit access |
 | `browser_enabled` | Agent-owned opt-in Session Browser setting, default false for existing and new Agents. Runtime settings can enable tools and live-panel access independently of Terminal and other Runtime features. Disabling preserves native profile bytes. |
 | `browser_implementation` | Agent-owned PostgreSQL enum: `patchright` by default, or experimental opt-in `camoufox`. Existing Agents migrate to Patchright without changing profile bytes or Runtime identity. |
-| `browser_configuration_intent_id` | Opaque current replacement/CAS identity; no ordered browser version counter. |
+| `browser_configuration_intent_id` | Opaque current replacement/CAS identity. ORM and database creation paths generate a fresh 32-character identity; replacement uses exact-current intent checks. |
 | `browser_application_state` | PostgreSQL enum `applying`, `ready`, `failed`; the API derives `offline` from current Runtime/control evidence. |
 | `browser_observed_runtime_id`, `browser_observed_runner_generation` | Nullable non-owning last application evidence, not foreign keys. Only the exact current Runtime/generation can admit browser work; replacement does not delete Agent settings. |
 | `browser_application_claim_id`, `browser_application_lease_until`, `browser_application_next_at`, `browser_application_reason` | Bounded durable application claim, retry timing and failure evidence owned by Agent lifecycle. |

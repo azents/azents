@@ -167,6 +167,7 @@ class RDBAgent(RDBModel):
         init=False,
         nullable=False,
         default_factory=lambda: uuid7().hex,
+        server_default=sa.text("replace(gen_random_uuid()::text, '-', '')"),
     )
     browser_application_state: Mapped[AgentBrowserApplicationState] = mapped_column(
         ENUM(

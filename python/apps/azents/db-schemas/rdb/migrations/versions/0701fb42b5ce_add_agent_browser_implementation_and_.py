@@ -50,7 +50,6 @@ def upgrade() -> None:
             server_default=sa.text("replace(gen_random_uuid()::text, '-', '')"),
         ),
     )
-    op.alter_column("agents", "browser_configuration_intent_id", server_default=None)
     op.add_column(
         "agents",
         sa.Column(
