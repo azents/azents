@@ -22,6 +22,9 @@ def main() -> None:
                     "experiment_surface_deadline_zero": (
                         os.environ.get("AZ_CAPTURE_SURFACE_DEADLINE_ZERO") == "1"
                     ),
+                    "experiment_sdk_legacy_surface": (
+                        os.environ.get("PLAYWRIGHT_LEGACY_SCREENSHOT") == "1"
+                    ),
                 }
             )
         )
