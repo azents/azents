@@ -38,12 +38,24 @@ class ConventionIndex:
     convention_paths: tuple[str, ...]
 
 
+class ChangeCheckpoint(TypedDict):
+    checked_at: str | None
+    checked_through_commit: str | None
+    checked_ruleset_revisions: list[str]
+
+
+class RangeCheckpoint(TypedDict):
+    checked_at: str | None
+    checked_through_commit: str | None
+    checked_ruleset_revision: str | None
+
+
 class AuditState(TypedDict):
     """Validated persisted convention-audit state."""
 
     schema_version: int
-    change_checkpoint: dict[str, Any]
-    ranges: dict[str, dict[str, Any]]
+    change_checkpoint: ChangeCheckpoint
+    ranges: dict[str, RangeCheckpoint]
     rulesets: dict[str, list[str]]
 
 
@@ -111,8 +123,27 @@ def empty_state() -> AuditState:
     }
 
 
+def _checkpoint_fields(value: object, fields: set[str]) -> dict[str, Any]:
+    """Validate the exact persisted checkpoint shape at ingress."""
+    if not isinstance(value, dict) or set(value) != fields:
+        raise AuditStateError("Audit checkpoint has unknown or missing fields")
+    for field in ("checked_at", "checked_through_commit"):
+        item = value[field]
+        if item is not None and (not isinstance(item, str) or not item.strip()):
+            raise AuditStateError(f"Audit checkpoint has invalid {field}")
+    timestamp = value["checked_at"]
+    if timestamp is not None:
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise AuditStateError("Audit checkpoint has invalid checked_at") from exc
+        if parsed.tzinfo is None:
+            raise AuditStateError("Audit checkpoint checked_at must include timezone")
+    return value
+
+
 def load_state(state_path: Path) -> AuditState:
-    """Load and minimally validate the state file."""
+    """Decode the complete persisted state without coercion or unknown fields."""
     if not state_path.exists():
         return empty_state()
     try:
@@ -123,7 +154,10 @@ def load_state(state_path: Path) -> AuditState:
         raise AuditStateError("Audit state must be a JSON object")
     if set(state) != {"schema_version", "change_checkpoint", "ranges", "rulesets"}:
         raise AuditStateError("Audit state has unknown or missing fields")
-    if state.get("schema_version") != SCHEMA_VERSION:
+    if (
+        type(state.get("schema_version")) is not int
+        or state["schema_version"] != SCHEMA_VERSION
+    ):
         raise AuditStateError(
             f"Unsupported audit state schema: {state.get('schema_version')!r}"
         )
@@ -133,37 +167,67 @@ def load_state(state_path: Path) -> AuditState:
         raise AuditStateError("Audit state is missing ranges")
     if not isinstance(state.get("rulesets"), dict):
         raise AuditStateError("Audit state is missing rulesets")
-    checked_ruleset_revisions = state["change_checkpoint"].get(
-        "checked_ruleset_revisions"
+    checkpoint = _checkpoint_fields(
+        state["change_checkpoint"],
+        {"checked_at", "checked_through_commit", "checked_ruleset_revisions"},
     )
+    checked_ruleset_revisions = checkpoint["checked_ruleset_revisions"]
     if not isinstance(checked_ruleset_revisions, list) or any(
-        not isinstance(revision, str) for revision in checked_ruleset_revisions
+        not isinstance(revision, str) or not revision
+        for revision in checked_ruleset_revisions
     ):
         raise AuditStateError(
             "Audit state change_checkpoint has invalid checked_ruleset_revisions"
         )
+    rulesets: dict[str, list[str]] = {}
     for revision, conventions in state["rulesets"].items():
         if (
             not isinstance(revision, str)
+            or not revision
             or not isinstance(conventions, list)
             or any(not isinstance(path, str) for path in conventions)
             or conventions != sorted(set(conventions))
         ):
             raise AuditStateError(f"Audit state has an invalid ruleset: {revision!r}")
+        rulesets[revision] = conventions
+    ranges: dict[str, RangeCheckpoint] = {}
     for range_name, checkpoint in state["ranges"].items():
-        if not isinstance(range_name, str) or not isinstance(checkpoint, dict):
+        if not isinstance(range_name, str) or not range_name:
             raise AuditStateError("Audit state has an invalid range checkpoint")
-        checked_revision = checkpoint.get("checked_ruleset_revision")
+        checkpoint = _checkpoint_fields(
+            checkpoint,
+            {"checked_at", "checked_through_commit", "checked_ruleset_revision"},
+        )
+        checked_revision = checkpoint["checked_ruleset_revision"]
+        if checked_revision is not None and (
+            not isinstance(checked_revision, str) or not checked_revision
+        ):
+            raise AuditStateError("Range checkpoint has invalid ruleset revision")
         if checked_revision is not None and checked_revision not in state["rulesets"]:
             raise AuditStateError(
                 f"Range checkpoint references a missing ruleset: {range_name}"
             )
+        ranges[range_name] = RangeCheckpoint(
+            checked_at=checkpoint["checked_at"],
+            checked_through_commit=checkpoint["checked_through_commit"],
+            checked_ruleset_revision=checked_revision,
+        )
     for revision in checked_ruleset_revisions:
         if revision not in state["rulesets"]:
             raise AuditStateError(
                 f"Change checkpoint references a missing ruleset: {revision}"
             )
-    return cast(AuditState, state)
+    change = state["change_checkpoint"]
+    return AuditState(
+        schema_version=SCHEMA_VERSION,
+        change_checkpoint=ChangeCheckpoint(
+            checked_at=change["checked_at"],
+            checked_through_commit=change["checked_through_commit"],
+            checked_ruleset_revisions=checked_ruleset_revisions,
+        ),
+        ranges=ranges,
+        rulesets=rulesets,
+    )
 
 
 def load_plan(plan_path: Path) -> AuditPlan:
@@ -424,7 +488,7 @@ def discover_ranges(repo_root: Path) -> dict[str, dict[str, Any]]:
     return ranges
 
 
-def empty_range_checkpoint() -> dict[str, Any]:
+def empty_range_checkpoint() -> RangeCheckpoint:
     """Return an unchecked range checkpoint."""
     return {
         "checked_at": None,
@@ -559,7 +623,7 @@ def changed_files_since(
 
 
 def legacy_reason(
-    checkpoint: dict[str, Any], current_range: dict[str, Any]
+    checkpoint: Mapping[str, Any], current_range: dict[str, Any]
 ) -> tuple[int, str]:
     """Return sort priority and reason for a full-range incremental check."""
     checked_at = checkpoint.get("checked_at")

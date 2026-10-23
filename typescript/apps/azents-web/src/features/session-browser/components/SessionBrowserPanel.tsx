@@ -605,9 +605,9 @@ export function SessionBrowserPanel({
                 onClick={direct.pressed ? direct.onRelease : direct.onToggle}
               >
                 {direct.pressed ? (
-                  <IconHandStop size={16} aria-hidden />
+                  <IconHandStop size={rem(16)} aria-hidden />
                 ) : (
-                  <IconHandMove size={16} aria-hidden />
+                  <IconHandMove size={rem(16)} aria-hidden />
                 )}
               </ActionIcon>
             </Tooltip>
@@ -634,7 +634,7 @@ export function SessionBrowserPanel({
                   <Menu.Item
                     disabled={!direct.active && !direct.available}
                     onClick={direct.onToggle}
-                    leftSection={<IconHandMove size={14} aria-hidden />}
+                    leftSection={<IconHandMove size={rem(14)} aria-hidden />}
                   >
                     {direct.active
                       ? t("directTouchDisable")
