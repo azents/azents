@@ -1,7 +1,5 @@
 ---
-title: Natural technical-term localization
-impact: MEDIUM
-tags: typescript, i18n, localization, ux
+title: "Localize user-facing copy naturally while preserving recognizable technical terms and keeping translation keys aligned across locales."
 ---
 
 ## Rule
