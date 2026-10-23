@@ -292,6 +292,8 @@ def test_encoded_original_headers_compare_and_quote_as_unicode(
         "=?utf-8?b?YWJj",
         "=?utf-8?x?abc?=",
         "=?utf-8?b??=",
+        "=??b?%%%%?=",
+        "=? utf-8?b?YWJj?=",
     ],
 )
 def test_encoded_original_header_controls_and_invalid_bytes_are_rejected(
@@ -353,6 +355,44 @@ def test_encoded_word_q_and_adjacent_folded_words_are_decoded() -> None:
     value = "=?utf-8?q?caf=C3=A9?=\r\n =?utf-8?b?IO2VnOq4gA==?="
     part = GmailPart(headers=(GmailHeader(name="Subject", value=value),))
     assert gmail_mime._display_header(part, "Subject") == "café 한글"
+    mixed = GmailPart(
+        headers=(
+            GmailHeader(name="Subject", value="Regex =? and =?utf-8?b?7ZWc6riA?="),
+        )
+    )
+    assert gmail_mime._display_header(mixed, "Subject") == "Regex =? and 한글"
+
+
+def test_literal_encoded_word_marker_is_preserved_in_reply_and_recipient(
+    compose: GmailCompose,
+) -> None:
+    envelope = _original()
+    assert envelope.payload is not None
+    headers = tuple(
+        header
+        for header in envelope.payload.headers
+        if header.name not in {"Subject", "Reply-To"}
+    ) + (
+        GmailHeader(name="Subject", value="Regex operator =?"),
+        GmailHeader(name="Reply-To", value='"Who =?" <reply@example.com>'),
+    )
+    envelope = envelope.model_copy(
+        update={"payload": envelope.payload.model_copy(update={"headers": headers})}
+    )
+    original = decode_message(envelope, character_limit=1000, read_body=_read_body)
+    parsed = _parsed(
+        prepare_message(
+            dataclasses.replace(
+                _context(_change(compose, to=[], subject=None)),
+                original=original,
+                mode="reply",
+                quote_original=True,
+            )
+        )
+    )
+    assert str(parsed["Subject"]) == "Re: Regex operator =?"
+    assert parsed["To"].addresses[0].display_name == "Who =?"
+    assert "Subject: Regex operator =?" in parsed.get_content()
 
 
 @pytest.mark.parametrize("address", ["user@a\u200db.test", "한글@example.test"])

@@ -36,6 +36,8 @@ from azents.services.google_workspace.transport import GoogleSdkError
 
 GMAIL_MESSAGE_MAXIMUM_BYTES = 35 * 1024 * 1024
 GMAIL_ATTACHMENT_MAXIMUM_BYTES = 25 * 1024 * 1024
+_ENCODED_WORD_PREFIX = re.compile(r"=\?[^?]*\?[bBqQ]\?|=\?[^?\s]+\?[^?\s]+\?")
+_ENCODED_WORD = re.compile(r"=\?([^?\s]+)\?([bBqQ])\?([^?\s]+)\?=")
 
 
 def decode_gmail_bytes(
@@ -83,10 +85,13 @@ def _decoded_header(value: str) -> str:
     try:
         cursor = 0
         while (start := value.find("=?", cursor)) >= 0:
-            word = re.match(r"=\?([^?\s]+)\?([bBqQ])\?([^?\s]+)\?=", value[start:])
+            if _ENCODED_WORD_PREFIX.match(value, start) is None:
+                cursor = start + 2
+                continue
+            word = _ENCODED_WORD.match(value, start)
             if word is None or not word.group().isascii():
                 raise ValueError("Malformed encoded word.")
-            cursor = start + len(word[0])
+            cursor = word.end()
             payload = word[3]
             if word[2].casefold() == "b":
                 base64.b64decode(payload, validate=True)
