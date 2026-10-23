@@ -1,16 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-23T03:19:59Z",
+    "checked_at": "2026-10-23T22:36:33Z",
     "checked_ruleset_revisions": [
-      "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
       "27090dfbb643163110b41d91462c4d2455bb024416896d88067d8bdb05b520f5",
-      "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
       "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
       "b9f009be613e18995fd1682258d28cf43fb88bd37c7c301f0117008a2338fb4a",
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "5840eec9de2e26decb92a9ee2c32a73f2a374889"
+    "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -64,39 +62,39 @@
       "checked_through_commit": "5840eec9de2e26decb92a9ee2c32a73f2a374889"
     },
     ".claude/**::bucket-2-of-8": {
-      "checked_at": "2026-09-20T22:20:54Z",
-      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
+      "checked_at": "2026-10-23T22:36:33Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
     },
     ".claude/**::bucket-3-of-8": {
-      "checked_at": "2026-09-20T22:20:54Z",
-      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
+      "checked_at": "2026-10-23T22:36:33Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
     },
     ".claude/**::bucket-4-of-8": {
-      "checked_at": "2026-09-20T22:20:54Z",
-      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
+      "checked_at": "2026-10-23T22:36:33Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
     },
     ".claude/**::bucket-5-of-8": {
-      "checked_at": "2026-09-20T22:20:54Z",
-      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
+      "checked_at": "2026-10-23T22:36:33Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
     },
     ".claude/**::bucket-6-of-8": {
-      "checked_at": "2026-09-20T22:20:54Z",
-      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
+      "checked_at": "2026-10-23T22:36:33Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
     },
     ".claude/**::bucket-7-of-8": {
-      "checked_at": "2026-09-20T22:20:54Z",
-      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "checked_through_commit": "22516a813d0380f97d77856363e958c30431fae7"
+      "checked_at": "2026-10-23T22:36:33Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
     },
     ".claude/**::bucket-8-of-8": {
-      "checked_at": "2026-09-21T22:16:02Z",
-      "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
-      "checked_through_commit": "242ed8c4367d1f6bbf5876e3013987f019bba28e"
+      "checked_at": "2026-10-23T22:36:33Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "98ead7a0cfb957b5b049e8ff1c88b879e30e9213"
     },
     ".codex/**::bucket-1-of-8": {
       "checked_at": "2026-09-22T22:13:54Z",
