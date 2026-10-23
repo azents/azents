@@ -49,12 +49,31 @@ def sample_gpu(marker: Path, output: Path) -> None:
                         wait_kind = "futex"
                     elif "poll" in wait:
                         wait_kind = "poll"
+                    elif any(
+                        name in wait
+                        for name in ("folio_wait", "filemap", "wait_on_page")
+                    ):
+                        wait_kind = "page_io"
+                    elif "io_schedule" in wait or "wait_on_buffer" in wait:
+                        wait_kind = "io_schedule"
                     elif wait == "0":
                         wait_kind = "running_or_unavailable"
                     elif wait == "unavailable":
                         wait_kind = "unavailable"
                     else:
                         wait_kind = "other"
+                    read_bytes = None
+                    read_calls = None
+                    try:
+                        for line in (proc / "io").read_text().splitlines():
+                            key, value = line.split(":", 1)
+                            if key == "read_bytes":
+                                read_bytes = int(value)
+                            elif key == "syscr":
+                                read_calls = int(value)
+                    except PermissionError:
+                        # Preserve missing evidence instead of assuming zero I/O.
+                        pass
                     record = {
                         "stage": "gpu_cpu_sample",
                         "monotonic_ms": time.monotonic_ns() / 1_000_000,
@@ -63,6 +82,10 @@ def sample_gpu(marker: Path, output: Path) -> None:
                         "state": state,
                         "user_ticks": int(fields[11]),
                         "system_ticks": int(fields[12]),
+                        "minor_faults": int(fields[7]),
+                        "major_faults": int(fields[9]),
+                        "read_bytes": read_bytes,
+                        "read_calls": read_calls,
                         "wait_kind": wait_kind,
                     }
                     stream.write(json.dumps(record) + "\n")
