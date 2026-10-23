@@ -1,7 +1,7 @@
 ---
 title: "Main Web Theme and Contrast"
 created: 2026-10-22
-updated: 2026-10-22
+updated: 2026-10-23
 tags: [web, theme, accessibility, contrast]
 spec_type: domain
 domain: web-theme
@@ -15,7 +15,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/workspace/components/WorkspaceHome.module.css
   - typescript/apps/azents-web/src/shared/toolkits/components/GoogleSetup.stories.tsx
   - scripts/ci/component_portfolio.py
-last_verified_at: 2026-10-22
+last_verified_at: 2026-10-23
 spec_version: 1
 ---
 
@@ -43,10 +43,13 @@ explicit icon color or outline variant owns that choice. A checked, enabled
 Switch uses the same rule for track text and thumb; unchecked and disabled
 styling remains library-owned.
 
-Human message Paper uses the shared `message` variant with a paired blue-8
-background and white foreground in both color schemes. This surface preserves
-white message text while meeting the 4.5:1 minimum contrast independently of
-the filled-control foreground selector. Session Context badges provide semantic
+Human message Paper uses the shared `message` variant with blue-6 in light mode,
+blue-8 in dark mode, and a white foreground in both schemes. This explicit
+requester-selected message palette preserves the brighter light-mode background
+and white message text independently of the filled-control foreground selector.
+The light pair has approximately 3.22:1 contrast and is not claimed to meet the
+4.5:1 normal-text minimum; the dark pair retains that minimum.
+Session Context badges provide semantic
 fills without maintaining their own foreground/background pairs. Browser and
 GitHub badges rely on the shared defaults.
 
@@ -68,12 +71,15 @@ Required component CI includes light/dark theme contrast stories, explicit
 caller override/variant preservation stories, and saved Google connection
 stories. Theme stories measure computed browser colors for Badge, Button,
 ActionIcon, ThemeIcon, selected Chip, checked Checkbox/Radio, checked Switch,
-human-message and inverse surfaces, and secondary text. Human-message stories
-also assert that the bubble and its inherited text use the theme white foreground.
+inverse surfaces, and secondary text. Dedicated human-message stories assert the
+exact light/dark backgrounds and that the bubble and its inherited text use the
+theme white foreground; they also retain the dark pair's contrast assertion.
 Text and checked icon
 contrast must be at least 4.5:1 for the covered palette matrix. Theme stories
 also fail on accessibility violations rather than using the global Storybook
-`todo` policy. Explicit caller override fixtures instead verify preservation.
+`todo` policy. Only the light human-message story excludes the color-contrast
+accessibility rule for its requested palette; other accessibility rules remain
+enabled. Explicit caller override fixtures instead verify preservation.
 
 This is shared-control regression protection, not a claim that every possible
 custom color, translucent background, media surface, or existing product screen

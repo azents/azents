@@ -6,7 +6,6 @@ import {
   Checkbox,
   Chip,
   Group,
-  Paper,
   Radio,
   Stack,
   Switch,
@@ -71,9 +70,6 @@ function ThemeContrast(): React.ReactElement {
           <Switch color={color} label="Switch" onLabel="ON" defaultChecked />
         </Group>
       ))}
-      <Paper variant="message" data-contrast>
-        Human message
-      </Paper>
       <Box
         bg="var(--azents-color-inverse)"
         c="var(--azents-color-on-inverse)"
@@ -107,7 +103,8 @@ async function assertContrast(
       mode,
     );
     const controls = canvasElement.querySelectorAll("[data-contrast]");
-    await expect(controls).toHaveLength(colors.length * 4 + 2);
+    // Human messages have a caller-requested palette, covered by their own stories.
+    await expect(controls).toHaveLength(colors.length * 4 + 1);
     for (const control of controls) {
       await expectReadableContrast(control);
     }
