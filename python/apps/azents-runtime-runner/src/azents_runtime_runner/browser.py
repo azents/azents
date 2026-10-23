@@ -56,6 +56,7 @@ _MAX_SESSION_TASKS = 8
 _MAX_FRAMES = 16
 _MAX_REFS = 1000
 _MAX_CAPTURE_BYTES = 20 * 1024 * 1024
+_CONTEXT_STARTUP_SECONDS = 180
 
 
 class BrowserFailure(RuntimeError):
@@ -342,40 +343,62 @@ class RunnerBrowserManager:
             # unlink only these process markers, retaining all native site state.
             for marker in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
                 (path / marker).unlink(missing_ok=True)
+            context: BrowserContext | None = None
+
+            async def close_failed_context(failure: BaseException) -> None:
+                if context is not None:
+                    try:
+                        await context.close()
+                    except Error:
+                        failure.add_note("Native browser context cleanup also failed.")
+
             try:
-                context = await driver.chromium.launch_persistent_context(
-                    path,
-                    channel="chromium",
-                    headless=False,
-                    # Pinned Chromium's new-surface path can stall its first capture.
-                    # Keep native redraw-ack capture and every other driver default.
-                    ignore_default_args=["--enable-features=CDPScreenshotNewSurface"],
-                    env=self.browser_environment,
-                    chromium_sandbox=self.sandbox is True,
-                    proxy=None
-                    if self.proxy is None
-                    else {"server": self.proxy, "bypass": "<-loopback>"},
-                    viewport={"width": 1280, "height": 800},
-                    accept_downloads=True,
-                )
-            except Error:
-                raise BrowserFailure(
-                    "browser_unavailable", "Product browser context could not start"
-                ) from None
-            try:
-                # Headed Chromium exits when its final native tab closes. Retain
-                # one internal blank tab, outside task/page projection and quota.
-                initial_pages = context.pages
-                if initial_pages:
-                    await initial_pages[0].goto("about:blank")
-                else:
-                    await context.new_page()
-                for initial in initial_pages[1:]:
-                    await initial.close()
-            except BaseException:
-                # Never retain an incompletely configured Session context.
-                await context.close()
+                # Share the pinned SDK's 180-second launch budget with initialization.
+                async with asyncio.timeout(_CONTEXT_STARTUP_SECONDS):
+                    context = await driver.chromium.launch_persistent_context(
+                        path,
+                        channel="chromium",
+                        headless=False,
+                        env=self.browser_environment,
+                        chromium_sandbox=self.sandbox is True,
+                        proxy=None
+                        if self.proxy is None
+                        else {"server": self.proxy, "bypass": "<-loopback>"},
+                        viewport={"width": 1280, "height": 800},
+                        accept_downloads=True,
+                    )
+                    browser = context.browser
+                    if browser is None:
+                        raise BrowserFailure(
+                            "browser_unavailable",
+                            "Product browser context has no native browser",
+                        )
+                    # Chromium can expose pages while EGL still waits on storage pages.
+                    # This waits for initial GPU information, not a warming capture.
+                    graphics = await browser.new_browser_cdp_session()
+                    await graphics.send("SystemInfo.getInfo")
+                    await graphics.detach()
+                    # Retain one internal blank tab outside page projection/quota.
+                    initial_pages = context.pages
+                    if initial_pages:
+                        await initial_pages[0].goto("about:blank")
+                    else:
+                        await context.new_page()
+                    for initial in initial_pages[1:]:
+                        await initial.close()
+            except asyncio.CancelledError as failure:
+                await close_failed_context(failure)
                 raise
+            except Error, TimeoutError:
+                failure = BrowserFailure(
+                    "browser_unavailable", "Product browser context could not start"
+                )
+                await close_failed_context(failure)
+                raise failure from None
+            except BaseException as failure:
+                await close_failed_context(failure)
+                raise
+            assert context is not None
             self.contexts[authority.session_id] = context
             return context
 

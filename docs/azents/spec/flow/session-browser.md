@@ -107,13 +107,19 @@ Read-only presentation never starts or recreates a Runtime merely for inspection
 ## Browser Automation Markers
 
 Managed Session contexts use pinned Patchright with installed full Chromium in
-headed mode, retaining the existing sandbox/proxy policy. The Runner omits only
-the pinned driver's `CDPScreenshotNewSurface` launch feature: its immediate
-surface-copy path can stall on the first headed capture. Native redraw-ack
-capture preserves the SDK font preparation, the two-second live deadline,
-current viewport pixels, and background-tab visibility without a warm-up capture.
-All other driver defaults and reduced Runtime/Console instrumentation remain
-Patchright-owned. The Runner uses the
+headed mode, retaining the existing sandbox/proxy policy and driver defaults.
+Before admitting a newly launched persistent context, the Runner awaits Chromium's
+initial GPU-information completion through the SDK's public browser CDP session
+and detaches that session. Launch and initialization share the pinned SDK's
+180-second launch budget;
+native watchdogs or disconnection can fail earlier. Startup failure closes the
+unpublished context and reports `browser_unavailable`; cancellation remains
+cancellation. The response is discarded, not logged or used as a fingerprint.
+This startup barrier is not a warming screenshot or a guarantee about later GPU
+restarts and new surfaces. SDK font preparation, the two-second live capture
+deadline, fresh pixels, background visibility, and explicit capture failures remain
+unchanged. Reduced Runtime/Console instrumentation remains Patchright-owned.
+The Runner uses the
 browser's native User-Agent, client hints, language and GPU identity rather than
 injecting fingerprint overrides. Product DOM observation and private field
 geometry/editing scripts remain separate browser functionality.
