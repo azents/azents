@@ -42,13 +42,18 @@ def main() -> None:
             raise RuntimeError("Pinned Chromium feature argument mismatch")
         source = source.replace(old, new)
     helper = """
-function azCaptureTrace(stage, elapsed) {
+let azCaptureOrdinal = 0;
+const azCaptureOrdinals = new WeakMap();
+function azCaptureTrace(stage, elapsed, outcome, ordinal, requestId) {
   if (!process.env.AZ_CAPTURE_TRACE) return;
   try {
     require('node:fs').appendFileSync(process.env.AZ_CAPTURE_TRACE, JSON.stringify({
       diagnostic_only:true, pid:process.pid, stage,
       monotonic_ms:Number(process.hrtime.bigint())/1000000,
-      elapsed_ms:elapsed === undefined ? null : elapsed
+      elapsed_ms:elapsed === undefined ? null : elapsed,
+      outcome:outcome === undefined ? null : outcome,
+      capture_ordinal:ordinal === undefined ? null : ordinal,
+      request_id:requestId === undefined ? null : requestId
     })+'\\n');
   } catch {
     // Missing diagnostic evidence invalidates the experiment, not the SDK call.
@@ -101,18 +106,29 @@ function azClaimNativeTrace() {
     replacements = {
         "      async screenshotPage(progress2, options) {": (
             "      async screenshotPage(progress2, options) {\n"
-            '        azCaptureTrace("sdk_screenshot_enter");'
+            "        const azOrdinal = ++azCaptureOrdinal;\n"
+            "        azCaptureOrdinals.set(progress2, azOrdinal);\n"
+            '        azCaptureTrace("sdk_screenshot_enter", undefined,\n'
+            "          undefined, azOrdinal);\n"
+            '        progress2.signal.addEventListener("abort", () => {\n'
+            '          azCaptureTrace("sdk_capture_abort", undefined,\n'
+            "            progress2.signal.reason instanceof TimeoutError ?\n"
+            '              "timeout" : "aborted", azOrdinal);\n'
+            "        }, {once:true});"
         ),
         '          progress2.log("taking page screenshot");': (
             '          progress2.log("taking page screenshot");\n'
-            '          azCaptureTrace("sdk_queue_enter");'
+            '          azCaptureTrace("sdk_queue_enter", undefined,\n'
+            "            undefined, azCaptureOrdinals.get(progress2));"
         ),
         '            progress2.log("waiting for fonts to load...");': (
-            '            azCaptureTrace("sdk_font_wait_start");\n'
+            '            azCaptureTrace("sdk_font_wait_start", undefined,\n'
+            "              undefined, azCaptureOrdinals.get(progress2));\n"
             '            progress2.log("waiting for fonts to load...");'
         ),
         '            progress2.log("fonts loaded");': (
-            '            azCaptureTrace("sdk_font_wait_end");\n'
+            '            azCaptureTrace("sdk_font_wait_end", undefined,\n'
+            "              undefined, azCaptureOrdinals.get(progress2));\n"
             '            progress2.log("fonts loaded");'
         ),
     }
@@ -134,16 +150,23 @@ function azClaimNativeTrace() {
         const traced = method2 === "Page.captureScreenshot" ||
           method2 === "Page.getLayoutMetrics";
         const started = Number(process.hrtime.bigint())/1000000;
-        if (traced) azCaptureTrace(method2+"_send");
+        // Snapshot the latest entry, not a concurrent-capture ownership claim.
+        const ordinal = azCaptureOrdinal;
         const id = this._connection._rawSend(this._sessionId, method2, params2);
+        if (traced) azCaptureTrace(method2+"_send", undefined,
+          undefined, ordinal, id);
+        let outcome = "rejected";
         try {
-          return await new Promise((resolve, reject) => {
+          const result = await new Promise((resolve, reject) => {
             this._callbacks.set(id, { resolve, reject,
               error: new ProtocolError("error", method2) });
           });
+          outcome = "resolved";
+          return result;
         } finally {
           if (traced) azCaptureTrace(method2+"_complete",
-            Number(process.hrtime.bigint())/1000000-started);
+            Number(process.hrtime.bigint())/1000000-started,
+            outcome, ordinal, id);
         }
       }
 """
@@ -177,7 +200,7 @@ function azClaimNativeTrace() {
 """
             + old,
         )
-        old = "            Number(process.hrtime.bigint())/1000000-started);"
+        old = "            outcome, ordinal, id);"
         source = source.replace(
             old,
             old
