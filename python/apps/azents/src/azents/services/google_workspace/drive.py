@@ -2,6 +2,7 @@
 
 import dataclasses
 import io
+from codecs import BOM_UTF8
 from collections.abc import Buffer
 from typing import TYPE_CHECKING
 
@@ -574,11 +575,12 @@ def append_text(
             "append_requires_utf8_text", dispatched=True, status=None
         ) from None
     addition = value.text.encode("utf-8")
-    content = (
-        original.content + addition
-        if value.position == "append"
-        else addition + original.content
-    )
+    if value.position == "append":
+        content = original.content + addition
+    elif original.content.startswith(BOM_UTF8):
+        content = BOM_UTF8 + addition + original.content[len(BOM_UTF8) :]
+    else:
+        content = addition + original.content
     if len(content) > min(maximum_bytes, GENERAL_FILE_MAXIMUM_BYTES):
         raise GoogleSdkError("file_upload_limit", dispatched=True, status=None)
     return _replace_blob(session, resolved, content, media_type, require_etag=True)

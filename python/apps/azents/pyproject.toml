@@ -28,6 +28,7 @@ dependencies = [
     "pytz==2026.3.post1",
     "tzdata==2026.3",
     "python-dateutil==2.9.0.post0",
+    "idna==3.20",
     # Monitoring
     "sentry-sdk[fastapi]==2.68.1",
     # CLI

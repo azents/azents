@@ -335,6 +335,12 @@ async def test_send_only_cannot_borrow_alias_verification_read(
 async def test_draft_create_update_use_mime_without_hidden_reads(
     compose: m.GmailCompose, update: bool
 ) -> None:
+    compose = _change(
+        compose,
+        subject="초안 검토 📄",
+        to=[{"email": "recipient@example.com", "display_name": "수신인"}],
+        text="한글 본문",
+    )
     requests: list[httpx.Request] = []
 
     def operation(session: GoogleSdkSession) -> m.GmailDraftSummary:
@@ -363,7 +369,13 @@ async def test_draft_create_update_use_mime_without_hidden_reads(
     )
     assert result.id == "draft" and len(requests) == 1
     assert requests[0].method == ("PUT" if update else "POST")
-    assert _parsed(requests[0], draft=True).get_content().strip() == "Message body."
+    payload = json.loads(requests[0].content)
+    raw = base64.urlsafe_b64decode(payload["message"]["raw"])
+    assert raw.split(b"\r\n\r\n", 1)[0].isascii()
+    parsed = _parsed(requests[0], draft=True)
+    assert str(parsed["Subject"]) == "초안 검토 📄"
+    assert parsed["To"].addresses[0].display_name == "수신인"
+    assert parsed.get_content().strip() == "한글 본문"
 
 
 async def test_get_draft_raw_works_with_compose_without_attachment_api() -> None:

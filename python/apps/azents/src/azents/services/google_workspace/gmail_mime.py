@@ -8,6 +8,7 @@ import re
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from email import policy
+from email.header import decode_header, make_header
 from email.headerregistry import Address
 from email.message import EmailMessage, Message
 from email.parser import BytesParser
@@ -35,6 +36,8 @@ from azents.services.google_workspace.transport import GoogleSdkError
 
 GMAIL_MESSAGE_MAXIMUM_BYTES = 35 * 1024 * 1024
 GMAIL_ATTACHMENT_MAXIMUM_BYTES = 25 * 1024 * 1024
+_ENCODED_WORD_PREFIX = re.compile(r"=\?[^?]*\?[bBqQ]\?|=\?[^?\s]+\?[^?\s]+\?")
+_ENCODED_WORD = re.compile(r"=\?([^?\s]+)\?([bBqQ])\?([^?\s]+)\?=")
 
 
 def decode_gmail_bytes(
@@ -75,6 +78,45 @@ def source_header(part: GmailPart, name: str) -> str | None:
     if "\r" in value or "\n" in value or "\x00" in value:
         raise GoogleSdkError("invalid_mail_header", dispatched=True, status=None)
     return value
+
+
+def _decoded_header(value: str) -> str:
+    """Decode display text without repairing malformed bytes or header controls."""
+    try:
+        cursor = 0
+        while (start := value.find("=?", cursor)) >= 0:
+            if _ENCODED_WORD_PREFIX.match(value, start) is None:
+                cursor = start + 2
+                continue
+            word = _ENCODED_WORD.match(value, start)
+            if word is None or not word.group().isascii():
+                raise ValueError("Malformed encoded word.")
+            cursor = word.end()
+            payload = word[3]
+            if word[2].casefold() == "b":
+                base64.b64decode(payload, validate=True)
+            elif re.search(r"=(?![0-9A-Fa-f]{2})", payload):
+                raise ValueError("Malformed Q escape.")
+        parts = [
+            (
+                part.decode(charset or "ascii") if isinstance(part, bytes) else part,
+                None,
+            )
+            for part, charset in decode_header(value)
+        ]
+        decoded = str(make_header(parts))
+    except LookupError, UnicodeError, ValueError:
+        raise GoogleSdkError(
+            "invalid_mail_header_encoding", dispatched=True, status=None
+        ) from None
+    if any(ord(character) < 32 or ord(character) == 127 for character in decoded):
+        raise GoogleSdkError("invalid_mail_header", dispatched=True, status=None)
+    return decoded
+
+
+def _display_header(part: GmailPart, name: str) -> str | None:
+    value = source_header(part, name)
+    return None if value is None else _decoded_header(value)
 
 
 def message_parts(payload: GmailPart) -> Iterator[GmailPart]:
@@ -204,7 +246,7 @@ def _mailboxes(value: str | None) -> tuple[GmailMailbox, ...]:
     try:
         parsed = getaddresses([value], strict=True)
         return tuple(
-            GmailMailbox(email=email, display_name=name or None)
+            GmailMailbox(email=email, display_name=_decoded_header(name) or None)
             for name, email in parsed
         )
     except ValueError:
@@ -307,7 +349,7 @@ def prepare_message(value: GmailMimeContext) -> GmailPreparedMessage:
         else:
             text = file_body
     unquoted_text = text
-    result = EmailMessage(policy=policy.SMTPUTF8)
+    result = EmailMessage(policy=policy.SMTP)
     if sender is not None:
         result["From"] = _addresses((sender,))
     original = value.original
@@ -319,7 +361,7 @@ def prepare_message(value: GmailMimeContext) -> GmailPreparedMessage:
             )
         source = original.value
         headers = GmailPart(headers=source.headers)
-        original_subject = source_header(headers, "Subject") or ""
+        original_subject = _display_header(headers, "Subject") or ""
         if subject is None:
             prefix = "Re:" if value.mode == "reply" else "Fwd:"
             subject = (
@@ -400,7 +442,7 @@ def prepare_message(value: GmailMimeContext) -> GmailPreparedMessage:
             quoted_headers = "\n".join(
                 f"{name}: {header}"
                 for name in ("From", "Date", "Subject", "To", "Cc")
-                if (header := source_header(headers, name)) is not None
+                if (header := _display_header(headers, name)) is not None
             )
             original_plain = original.plain_text or ""
             if original.plain_text is not None:
