@@ -52,6 +52,10 @@ function azCaptureTrace(stage, elapsed) {
   }
 }
 function azNativeTraceEvent(message) {
+  if (message.method === "Tracing.tracingComplete") {
+    azCaptureTrace("native_trace_complete");
+    return;
+  }
   if (message.method !== "Tracing.dataCollected") return;
   const allowed = new Set([
     "Surface deadline passed", "SurfaceSynchronizationEvent",
