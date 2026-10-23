@@ -52,6 +52,7 @@ azentspublicclient/docs/AddAgentRuntimeRequest.md
 azentspublicclient/docs/AgentAdminAddRequest.md
 azentspublicclient/docs/AgentAdminListResponse.md
 azentspublicclient/docs/AgentAdminResponse.md
+azentspublicclient/docs/AgentBrowserConfiguration.md
 azentspublicclient/docs/AgentCreateGitWorktreeAction.md
 azentspublicclient/docs/AgentCreateRequest.md
 azentspublicclient/docs/AgentDecommissionResponse.md
@@ -161,8 +162,10 @@ azentspublicclient/docs/AwsConfig.md
 azentspublicclient/docs/AwsSecrets.md
 azentspublicclient/docs/Body.md
 azentspublicclient/docs/BrowserClosePageRequest.md
+azentspublicclient/docs/BrowserConfigurationReplaceRequest.md
 azentspublicclient/docs/BrowserCreatePageResponse.md
 azentspublicclient/docs/BrowserFrameResponse.md
+azentspublicclient/docs/BrowserImplementation.md
 azentspublicclient/docs/BrowserPageResponse.md
 azentspublicclient/docs/BrowserProjectionResponse.md
 azentspublicclient/docs/BrowserTaskResponse.md
@@ -733,6 +736,7 @@ azentspublicclient/models/add_agent_runtime_request.py
 azentspublicclient/models/agent_admin_add_request.py
 azentspublicclient/models/agent_admin_list_response.py
 azentspublicclient/models/agent_admin_response.py
+azentspublicclient/models/agent_browser_configuration.py
 azentspublicclient/models/agent_create_git_worktree_action.py
 azentspublicclient/models/agent_create_request.py
 azentspublicclient/models/agent_decommission_response.py
@@ -839,8 +843,10 @@ azentspublicclient/models/aws_config.py
 azentspublicclient/models/aws_secrets.py
 azentspublicclient/models/body.py
 azentspublicclient/models/browser_close_page_request.py
+azentspublicclient/models/browser_configuration_replace_request.py
 azentspublicclient/models/browser_create_page_response.py
 azentspublicclient/models/browser_frame_response.py
+azentspublicclient/models/browser_implementation.py
 azentspublicclient/models/browser_page_response.py
 azentspublicclient/models/browser_projection_response.py
 azentspublicclient/models/browser_task_response.py
@@ -1380,6 +1386,7 @@ azentspublicclient/test/test_add_agent_runtime_request.py
 azentspublicclient/test/test_agent_admin_add_request.py
 azentspublicclient/test/test_agent_admin_list_response.py
 azentspublicclient/test/test_agent_admin_response.py
+azentspublicclient/test/test_agent_browser_configuration.py
 azentspublicclient/test/test_agent_create_git_worktree_action.py
 azentspublicclient/test/test_agent_create_request.py
 azentspublicclient/test/test_agent_decommission_response.py
@@ -1489,8 +1496,10 @@ azentspublicclient/test/test_aws_config.py
 azentspublicclient/test/test_aws_secrets.py
 azentspublicclient/test/test_body.py
 azentspublicclient/test/test_browser_close_page_request.py
+azentspublicclient/test/test_browser_configuration_replace_request.py
 azentspublicclient/test/test_browser_create_page_response.py
 azentspublicclient/test/test_browser_frame_response.py
+azentspublicclient/test/test_browser_implementation.py
 azentspublicclient/test/test_browser_page_response.py
 azentspublicclient/test/test_browser_projection_response.py
 azentspublicclient/test/test_browser_task_response.py

@@ -47,7 +47,6 @@ from azents_runtime_control.runtime_stream_session import (
     BrowserStreamAuthority,
     WebSocketOpcode,
 )
-from patchright.async_api import Error, Page
 
 from azents_runtime_runner.browser import (
     BrowserFailure,
@@ -62,6 +61,12 @@ from azents_runtime_runner.browser_editables import (
     EditableFieldSnapshot,
 )
 from azents_runtime_runner.browser_popups import BrowserPopupTracker
+from azents_runtime_runner.browser_sdk import (
+    BROWSER_SDK_ERRORS,
+    BrowserSDKError,
+    ChromiumPage,
+    Page,
+)
 
 
 class BrowserFrameBudget(Protocol):
@@ -75,7 +80,7 @@ type ViewerSend = Callable[[WebSocketOpcode, bytes], Awaitable[None]]
 type ViewerReceive = Callable[[], Awaitable[bytes | None]]
 
 
-def _capture_error_code(error: Error) -> str:
+def _capture_error_code(error: BrowserSDKError) -> str:
     """Classify fixed native failure signatures without logging page content."""
     message = error.message.lower()
     for signature, code in (
@@ -119,19 +124,24 @@ class _LatestPage:
         self.changed = asyncio.Condition()
         self.task: asyncio.Task[None] | None = None
         self.editables = BrowserEditableRegions(page.page)
-        self.popups = BrowserPopupTracker(page.page, lambda: page.popup_owner)
+        self.popups = (
+            BrowserPopupTracker(page.page, lambda: page.popup_owner)
+            if isinstance(page.page, ChromiumPage)
+            else None
+        )
 
     async def capture(self) -> None:
         try:
-            await self.popups.start()
-            self.page.popup_tracker = self.popups
+            if self.popups is not None:
+                await self.popups.start()
+                self.page.popup_tracker = self.popups
             while not self.page.page.is_closed():
                 if self.page.dialog is None:
                     await self.capture_once()
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             raise
-        except (Error, BrowserFailure) as error:
+        except (*BROWSER_SDK_ERRORS, BrowserFailure) as error:
             self.failed = True
             logging.getLogger(__name__).warning(
                 "Browser live capture stopped",
@@ -202,7 +212,7 @@ class _LatestPage:
                 full_page=False,
                 timeout=2000,
             )
-        except Error as error:
+        except BROWSER_SDK_ERRORS as error:
             # Native documents can change before framenavigated is delivered.
             # Discard that capture; the next frame observes the current document.
             if (
@@ -232,7 +242,8 @@ class _LatestPage:
         await self.editables.close()
         if self.page.popup_tracker is self.popups:
             self.page.popup_tracker = None
-        await self.popups.close()
+        if self.popups is not None:
+            await self.popups.close()
 
 
 class _Viewport(NamedTuple):
@@ -262,6 +273,21 @@ def _target(authority: BrowserStreamAuthority) -> BrowserTarget:
     return BrowserTarget(
         authority.task_id, authority.page_id, authority.resource_incarnation, None
     )
+
+
+class BrowserViewer(Protocol):
+    """Viewer boundary independent of the current backend's lifetime."""
+
+    def validate(self, authority: BrowserStreamAuthority) -> None: ...
+
+    async def run(
+        self,
+        authority: BrowserStreamAuthority,
+        receive: ViewerReceive,
+        send: ViewerSend,
+    ) -> None: ...
+
+    async def close(self) -> None: ...
 
 
 class RunnerBrowserViewer:
@@ -550,7 +576,7 @@ class _Attachment:
                 ViewerInputReason.STALE_GENERATION,
             }:
                 await self.cleanup()
-        except Error:
+        except BROWSER_SDK_ERRORS:
             reason, outcome = ViewerInputReason.OUTCOME_UNKNOWN, "outcome_unknown"
             await self.cleanup()
         ack = ViewerInputAck(self.id, request.sequence, accepted, reason, outcome)
@@ -686,7 +712,8 @@ class _Attachment:
                 isinstance(action, ViewerKey) and action.phase == "up"
             ):
                 self.page.popup_owner = None
-                self.source.popups.clear()
+                if self.source.popups is not None:
+                    self.source.popups.clear()
             match action:
                 case ViewerPointer():
                     if action.phase != "cancel":
@@ -703,7 +730,8 @@ class _Attachment:
                             )
                         self.buttons.add(action.button)
                         self.page.popup_selection = None
-                        self.source.popups.clear()
+                        if self.source.popups is not None:
+                            self.source.popups.clear()
                         self.page.popup_owner = (
                             self.id
                             if action.button == "left"
@@ -953,7 +981,8 @@ class _Attachment:
         await self.discard_field_edit()
         if self.page.popup_owner == self.id:
             self.page.popup_owner = None
-        self.source.popups.discard(self.id)
+        if self.source.popups is not None:
+            self.source.popups.discard(self.id)
         # Never release another attachment's pressed state or guard.
         owns = self.task.guard.actor == self.id or self.task.guard.actor is None
         try:
@@ -963,7 +992,7 @@ class _Attachment:
                         await self.page.page.mouse.up(button=button)
                     for key in tuple(self.keys):
                         await self.page.page.keyboard.up(key)
-        except (Error, TimeoutError) as error:
+        except (*BROWSER_SDK_ERRORS, TimeoutError) as error:
             logging.getLogger(__name__).info(
                 "Browser attachment cleanup outcome is unconfirmed",
                 exc_info=BrowserFailure(

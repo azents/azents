@@ -21,6 +21,7 @@ import {
   agentV1GetAgentHistoricalMemory,
   agentV1GetAgentMemory,
   agentV1GetAutomaticSessionProjects,
+  agentV1GetBrowserConfiguration,
   agentV1ListAgentAdmins,
   agentV1ListAgentHistoricalMemories,
   agentV1ListAgentMemories,
@@ -28,6 +29,7 @@ import {
   agentV1RemoveAgentAdmin,
   agentV1RemoveAvatar,
   agentV1ReplaceAutomaticSessionProjects,
+  agentV1ReplaceBrowserConfiguration,
   agentV1RequestAvatarUpload,
   agentV1UpdateAgent,
   agentV1UpdateAgentMemory,
@@ -44,6 +46,58 @@ const memoryScopeEnum = z.enum(["agent", "user"]);
 const historicalMemoryScopeEnum = z.enum(["team", "user"]);
 
 export const agentRouter = router({
+  getBrowserConfiguration: publicProcedure
+    .input(z.object({ handle: z.string().min(1), agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1GetBrowserConfiguration({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  replaceBrowserConfiguration: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        expectedIntentId: z.string().length(32),
+        implementation: z.enum(["patchright", "camoufox"]),
+        retry: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1ReplaceBrowserConfiguration({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: {
+            expected_intent_id: input.expectedIntentId,
+            implementation: input.implementation,
+            retry: input.retry,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
   getRuntimeEnvironment: publicProcedure
     .input(z.object({ handle: z.string().min(1), agentId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {

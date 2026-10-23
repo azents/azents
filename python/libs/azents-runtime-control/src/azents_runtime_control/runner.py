@@ -318,7 +318,9 @@ _DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER = 100
 _DEFAULT_MAX_PENDING_OPERATIONS = 1000
 _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS = 4
 _SYSTEM_METRICS_INTERVAL_SECONDS = 60.0
-_CONTROL_OPERATION_TYPES = frozenset({"process.terminate_session"})
+_CONTROL_OPERATION_TYPES = frozenset(
+    {"process.terminate_session", "browser.configure", "browser.configuration_status"}
+)
 
 
 @dataclasses.dataclass(frozen=True)

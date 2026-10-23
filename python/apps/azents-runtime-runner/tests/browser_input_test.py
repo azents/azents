@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from azents_runtime_control.browser_contract import (
     BrowserActCommand,
     BrowserOpenCommand,
@@ -19,11 +20,14 @@ from browser_test import (
     observe,
     target,
 )
+from browser_viewer_test import Budget
 from nacl.public import PublicKey, SealedBox
 from patchright.async_api import Error
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
+from azents_runtime_runner.browser_controller import RunnerBrowserController
 from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey
+from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.workspace import Workspace
@@ -109,11 +113,18 @@ def test_command_injection_is_last_and_manager_recreation_reuses_key(
     key = BrowserInputKey()
     for _ in range(2):
         manager = RunnerBrowserManager(
-            workspace_root=tmp_path, proxy=None, input_key=key
+            workspace_root=tmp_path,
+            proxy=None,
+            input_key=key,
+            implementation=BrowserImplementation.PATCHRIGHT,
         )
         operations = RunnerOperations(
             client=AsyncMock(),
-            browser_manager=manager,
+            browser_manager=RunnerBrowserController(
+                lambda _, manager=manager: manager,
+                lambda native: RunnerBrowserViewer(native, Budget()),
+                key,
+            ),
             workspace=Workspace(str(tmp_path)),
             execution_backend=DirectExecutionBackend(
                 inherited_environment={"AZENTS_BROWSER_INPUT_PUBLIC_KEY": "stale"}

@@ -14,9 +14,9 @@ from azents_runtime_control.browser_contract import (
     BrowserOpenCommand,
     BrowserResult,
     BrowserTarget,
-    encode_browser_command,
     encode_browser_result,
 )
+from azents_runtime_control.browser_runner_wire import encode_configured_browser_command
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
@@ -71,6 +71,13 @@ from azents.testing.runtime_coordination import (
 )
 
 
+class _BrowserConfiguration:
+    async def current_intent(
+        self, runtime_id: str, runner_generation: int, *, require_ready: bool
+    ) -> str | None:
+        return "intent"
+
+
 async def test_browser_command_preserves_concrete_session_and_typed_result() -> None:
     """Scheduling scope cannot replace the command's concrete browser Session."""
     harness = await _make_harness()
@@ -92,7 +99,9 @@ async def test_browser_command_preserves_concrete_session_and_typed_result() -> 
     request = await harness.claim()
     assert request.operation_type == "browser.open"
     assert request.payload["owner_session_id"] == "scheduling-root"
-    assert request.payload["payload"] == encode_browser_command(command)
+    assert request.payload["payload"] == encode_configured_browser_command(
+        "intent", command
+    )
     expected = BrowserResult(
         (), None, "Created", False, (), None, None, None, None, "none"
     )
@@ -1699,6 +1708,7 @@ async def _make_harness(
         coordination_store=store,
         metrics=metrics,
         body_chunk_size_bytes=body_chunk_size_bytes,
+        browser_configuration=_BrowserConfiguration(),
     )
     return _Harness(
         store=store,

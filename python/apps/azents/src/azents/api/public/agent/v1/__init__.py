@@ -61,6 +61,7 @@ from azents.services.memory.data import (
 )
 from azents.utils.fastapi.route import RouteMounter
 
+from .browser_configuration import router as browser_configuration_router
 from .data import (
     AgentAdminAddRequest,
     AgentAdminListResponse,
@@ -88,6 +89,7 @@ from .data import (
 )
 
 router = APIRouter()
+router.include_router(browser_configuration_router)
 
 
 # --- Agent CRUD ---

@@ -6,6 +6,19 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, session, toolkit, runtime]
 code_paths:
+  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_configuration.py
+  - python/apps/azents/src/azents/core/browser_configuration.py
+  - python/apps/azents/src/azents/repos/browser_configuration.py
+  - python/apps/azents/src/azents/services/browser_configuration.py
+  - python/apps/azents/src/azents/api/public/agent/v1/browser_configuration.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_controller.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_camoufox.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_install.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_sdk.py
+  - typescript/apps/azents-web/src/features/agents/AgentBrowserChoiceSection.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentBrowserChoice.ts
+  - typescript/apps/azents-web/src/features/agents/components/AgentBrowserChoice.tsx
+  - testenv/azents/e2e/src/tests/required/public/test_browser_configuration.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_contract.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_runner_wire.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_runner_client.py
@@ -85,6 +98,40 @@ against arbitrary Runtime shell access.
 
 Runtime capability guards enforce process/workspace availability, and image observation additionally requires current transfer authority. Projection without current execution authority omits these tools. Each call revalidates access and resolves its actual Session working folder independently of any scheduling/root alias.
 
+## Per-Agent Browser Engine
+
+Agent Runtime settings offer Patchright (default) and Camoufox (experimental,
+explicit opt-in). Both engines ship in the Runtime image. The choice applies to
+every Session of the Agent and does not change `browser_enabled`, Runtime identity,
+Runner generation, infrastructure configuration authority, or Runtime capability.
+
+GET and PUT `/agent/v1/workspaces/{handle}/agents/{agent_id}/browser-configuration`
+return the opaque current intent, requested/applied engine, current Runtime and
+Runner generation, and `offline`, `applying`, `ready` or `failed` state with a
+bounded reason. PUT accepts a closed replacement with `expected_intent_id`,
+`implementation` and explicit `retry`. Existing Agent access checks protect reads;
+Agent administrators manage the choice. Stale-intent replacement is rejected.
+The UI confirms browser retirement before saving, distinguishes requested from
+applied state, and exposes explicit retry without promising site compatibility.
+
+Saving first persists Agent-owned intent, then immediately attempts browser-only
+application. A durable leased reconciliation task and current Runner state reports
+resume pending work after offline periods or control loss. Application queries
+current Runner status before deciding whether configuration is still needed;
+a lost response does not replay website actions or restart an already-applied
+browser. Claims and admission are fenced by exact intent and current Runtime,
+infrastructure configuration and Runner evidence, not a new browser version
+counter. Browser operations cannot start until the exact intent is ready.
+
+The Runner serializes transitions, revokes live viewer sources and transient
+inputs, retires task/page/frame identities and pending browser work, closes old
+contexts/display/driver resources, and starts only the requested engine. Shells,
+PTYs, unrelated jobs and Runtime files continue unchanged. New native startup
+failure is visible and does not fall back to Patchright. Existing browser profile
+bytes remain; each engine has a separate per-Session profile and no cross-engine
+profile migration. Switching back can reuse that engine's cookies, never its old
+live tab identities.
+
 ## Public Session Projection and Tabs
 
 The public Browser v1 domain exposes a GET projection and POST tab creation/closure beneath `/browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}`. Posting an empty closed request to `/pages` creates one blank tab through the existing Runner open command and returns its exact page identity with the current projection. It creates a task labelled Browser, consumes ordinary task/page capacity, accepts no URL or authority override, and never starts a stopped Runtime. Closing `/pages/{page_id}/close` requires the exact `task_id` and `resource_incarnation`. There is no profile/reset API.
@@ -106,7 +153,7 @@ Read-only presentation never starts or recreates a Runtime merely for inspection
 
 ## Browser Automation Markers
 
-Managed Session contexts use pinned Patchright with installed full Chromium in
+Default Patchright Session contexts use installed full Chromium in
 headed mode, retaining the existing sandbox/proxy policy and driver defaults.
 Before admitting a newly launched persistent context, the Runner awaits Chromium's
 initial GPU-information completion through the SDK's public browser CDP session
@@ -123,6 +170,14 @@ The Runner uses the
 browser's native User-Agent, client hints, language and GPU identity rather than
 injecting fingerprint overrides. Product DOM observation and private field
 geometry/editing scripts remain separate browser functionality.
+
+Experimental Camoufox contexts use the pinned Camoufox SDK and official
+Firefox-based distribution through the native Playwright boundary, including the
+SDK's packaged fingerprint-generation model. Explicit viewport/window geometry
+matches the viewer coordinate plane. This backend neither runs the Chromium GPU
+startup query nor constructs a Chromium popup tracker. The product does not add
+page-world interception, infer popup ownership from URLs or promise successful
+access to a particular site.
 
 On Linux without a supplied DISPLAY, the browser manager starts one owned Xvfb,
 waits for its bounded displayfd readiness record and passes that display only to
@@ -177,7 +232,7 @@ Pointer coordinates are transformed against the displayed image and its acknowle
 
 Focused viewing provides a Show keyboard action independently of native editable membership. In the explicit trusted click/touch gesture it synchronously focuses the local generic receiver with textual input mode; it does not click, refind or move remote focus. Subsequent text follows the existing source-fenced direct-input stream to the remote page's current focus. A separate stable generic receiver reference avoids activating a previously selected field overlay by mistake. Local blur, target/document/attachment change, hidden page, access loss, disconnect and unmount reset its mode and contents; streaming frame-sequence changes alone do not. Existing input authority, active-dialog and stale-image checks govern activation. The action does not grant unrecognized targets private Edit/Paste eligibility, read values, retain a preference or repair direct multilingual IME. Native software keyboard availability remains browser/OS controlled.
 
-Plain unmodified viewer clicks nominate only their initiating attachment for a one-shot native popup selection hint. Other attachments/reconnections do not receive that preference. Modifier/middle-click background intent does not nominate a foreground selection. The web refreshes projection and selects the opened tab only while the originating tab remains selected; explicit user tab choice cancels pending preference.
+With Patchright, plain unmodified viewer clicks nominate only their initiating attachment for a one-shot native popup selection hint. Other attachments/reconnections do not receive that preference. Modifier/middle-click background intent does not nominate a foreground selection. The web refreshes projection and selects the opened tab only while the originating tab remains selected; explicit user tab choice cancels pending preference. Camoufox registers native popup tabs but leaves foreground selection to the user; it does not construct the Chromium popup tracker. Explicit Agent `expect=popup` still associates the popup with its trigger.
 
 Native target-creation IDs correlate only popups created during the active pointer operation with their later SDK popup event, including a slow initial response. The private source-owned SDK CDP session filters the exact managed opener; it exposes no public CDP interface. Pointer eligibility ends at mouseup/cancel, and bounded one-shot target records retire on destruction, new manipulation, navigation and cleanup. A later unrelated script popup cannot inherit an old click. Pending web preference also requires the same current resource, attachment, navigation and hint when projection refresh completes.
 
@@ -300,7 +355,7 @@ Runner final failures map to typed, non-secret tool errors. The Engine validates
 
 One RunnerBrowserManager belongs to the current Runner connection lifecycle. Registration advertises `browser.v1` only when product browser initialization succeeds; browser unavailability does not stop independent Runner capabilities. Commands validate the current Runtime and accepted Runner generation before resource execution.
 
-Each concrete Session has a separate native persistent BrowserContext/profile under the current Runner Workspace. Tasks within that Session reuse its site state. Session working-folder association cannot change during a live manager's identity. Task-owned pages/popups and frames remain in a live registry with exact resource incarnations, not a durable help/task ownership table.
+Each concrete Session and selected engine has a separate native persistent BrowserContext/profile under the current Runner Workspace. Tasks within that Session/engine reuse its site state. Existing Patchright profiles retain their location; Camoufox uses a distinct engine-specific location. Session working-folder association cannot change during a live manager's identity. Task-owned pages/popups and frames remain in a live registry with exact resource incarnations, not a durable help/task ownership table.
 
 Native profile bytes remain under existing Runtime persistence; manager/Runner shutdown closes live contexts and invalidates handles without deleting those bytes. Normal Run completion is not profile cleanup. No backup, profile export/replay, retention sweeper or restoration of old live pages exists. Task/page close affects only the intended task resources, not all contexts or other Sessions.
 
@@ -318,13 +373,22 @@ Each context retains one internal blank tab so headed Chromium remains alive
 after its final task tab closes. The blank tab is outside task/page projection
 and task quotas, has no site navigation, and closes with the context.
 
-The Runner application declares a locked Patchright dependency. Image provisioning
-installs matching Chromium through that environment into the product browser path
-and supplies Xvfb for displayless Linux execution. System pip/Agent-installed
-drivers are not product availability evidence. Engine launch preserves the trusted
-Runner proxy route when configured and does not add a direct-network alternative.
+The Runner application locks Patchright and Camoufox SDK dependencies. Image
+provisioning installs matching Chromium and a pinned Camoufox/browser/fingerprint
+model pairing, verifies the browser archive SHA-256, and supplies Xvfb and native
+dependencies for displayless Linux execution. Runtime startup checks packaged
+assets without downloading browsers, models or addons. Missing assets fail the
+selected engine explicitly. System pip/Agent-installed drivers are not product
+availability evidence. Both launchers preserve the trusted Runner proxy route,
+including loopback destinations, without a direct-network alternative.
 
-Required Runner host tests also install the matching Chromium/native prerequisites before pytest in CI; the product image does not supply the separate host test environment.
+Required Runner host tests install both matching engines, model and native
+prerequisites before pytest in CI; the product image does not supply the separate
+host test environment. Browser-native and common contract tests exercise both SDK
+boundaries; the representative product E2E covers browser-only switching,
+source retirement, a new-engine page and preservation of the existing shell and
+Runtime/Runner identity. Profile return and restart reconciliation stay in narrower
+Runner and backend tests rather than expanding the E2E flow.
 
 ## Supported Observation and Interaction
 

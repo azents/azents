@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from azents_runtime_control.browser_contract import (
     BrowserActCommand,
     BrowserAuthority,
@@ -33,6 +34,7 @@ from PIL import Image
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_editables import BrowserEditableRegions
 from azents_runtime_runner.browser_input import BrowserInputKey
+from azents_runtime_runner.browser_sdk import ChromiumDriver
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     _capture_error_code,
@@ -173,10 +175,17 @@ onkeydown="if(event.key==='Enter') document.body.dataset.answer=prompt('Key ques
     await runner.cleanup()
 
 
-@pytest.fixture
-async def manager(tmp_path: Path) -> AsyncIterator[RunnerBrowserManager]:
+@pytest.fixture(params=[BrowserImplementation.PATCHRIGHT])
+async def manager(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> AsyncIterator[RunnerBrowserManager]:
+    implementation = request.param
+    assert isinstance(implementation, BrowserImplementation)
     value = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=implementation,
     )
     value.bind_runtime("runtime", lambda: 7)
     yield value
@@ -257,6 +266,7 @@ async def test_capture_pixels_stay_current_without_changing_tab_visibility(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     driver = await manager._initialize()
+    assert isinstance(driver, ChromiumDriver)
     # Use the SDK's public focus-control option to expose real tab visibility.
     # Production focus emulation otherwise reports every tab as visible.
     monkeypatch.setattr(
@@ -323,6 +333,7 @@ async def stop(task: asyncio.Task[None], transport: Transport) -> None:
         await task
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -361,6 +372,7 @@ async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
     assert authority.task_id in manager.tasks
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_unfocused_iframe_navigation_preserves_main_view_and_text_input(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -402,6 +414,7 @@ async def test_unfocused_iframe_navigation_preserves_main_view_and_text_input(
         await stop(running, transport)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_keys_composition_conflict_sequence_and_disconnect_cleanup(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -469,7 +482,18 @@ async def test_keys_composition_conflict_sequence_and_disconnect_cleanup(
     assert await page.locator("body").get_attribute("data-up") == "yes"
 
 
-@pytest.mark.parametrize("change", ["navigation", "viewport"])
+# Camoufox pins the product's fixed CSS viewport for Juggler. The product has no
+# resize action; preserve Chromium SDK resize fault injection and prove the
+# reachable navigation/source transition on both native implementations.
+@pytest.mark.parametrize(
+    ("manager", "change"),
+    [
+        (BrowserImplementation.PATCHRIGHT, "navigation"),
+        (BrowserImplementation.PATCHRIGHT, "viewport"),
+        (BrowserImplementation.CAMOUFOX, "navigation"),
+    ],
+    indirect=["manager"],
+)
 async def test_inflight_image_retires_when_display_scope_changes(
     manager: RunnerBrowserManager, tmp_path: Path, site: str, change: str
 ) -> None:
@@ -510,6 +534,7 @@ async def test_inflight_image_retires_when_display_scope_changes(
         await stop(running, transport)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_viewer_address_history_and_reload_use_native_page(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -584,6 +609,7 @@ async def test_viewer_navigation_denies_readonly_and_other_active_actor(
         await stop(tasks[1], active)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_navigation_readonly_and_generation_fences(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -622,6 +648,7 @@ async def test_navigation_readonly_and_generation_fences(
     assert "session-b" not in manager.contexts
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_dialog_continuation_and_budget_failure(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -685,6 +712,7 @@ async def test_dialog_continuation_and_budget_failure(
     assert authority.task_id in manager.tasks
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_editable_geometry_is_stable_content_free_and_document_local(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -731,6 +759,7 @@ async def test_editable_geometry_is_stable_content_free_and_document_local(
 
 
 @pytest.mark.parametrize("destination", ["password", "textarea", "shadow", "iframe"])
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_native_plaintext_paste_uses_current_focused_editable(
     manager: RunnerBrowserManager, tmp_path: Path, site: str, destination: str
 ) -> None:
@@ -796,6 +825,7 @@ async def test_native_plaintext_paste_uses_current_focused_editable(
         await stop(running, transport)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_rotated_shadow_host_cannot_project_child_frame_input(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -822,6 +852,7 @@ async def test_rotated_shadow_host_cannot_project_child_frame_input(
         await regions.close()
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_paste_does_not_bypass_readonly_or_navigation(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -989,7 +1020,9 @@ async def test_slow_popup_is_exactly_correlated_after_pointer_eligibility_ends(
                 await slow_popup_site.entered.wait()
             assert resource.popup_owner is None
             assert resource.popup_selection is None
-            assert len(viewer.sources[authority.page_id].popups.pending) == 1
+            popups = viewer.sources[authority.page_id].popups
+            assert popups is not None
+            assert len(popups.pending) == 1
             slow_popup_site.release.set()
         await (await opened.value).wait_for_load_state()
         async with asyncio.timeout(5):
@@ -997,7 +1030,7 @@ async def test_slow_popup_is_exactly_correlated_after_pointer_eligibility_ends(
                 pass
         assert resource.popup_selection is not None
         assert resource.popup_selection.owner == transport.attachment
-        assert not viewer.sources[authority.page_id].popups.pending
+        assert not popups.pending
         # An unrelated later script popup is not attributed to the completed click.
         for sequence, phase in enumerate(["down", "up"], 3):
             await transport.input(
@@ -1033,6 +1066,7 @@ async def test_native_page_close_releases_source_and_private_popup_session(
     )
     await transport.frame()
     source = viewer.sources[authority.page_id]
+    assert source.popups is not None
     assert source.popups.session is not None
     await resource.page.close()
     async with asyncio.timeout(5):

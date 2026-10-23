@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 from aiohttp import web
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from azents_runtime_control.browser_contract import BrowserAuthority, BrowserOpenCommand
+from patchright.async_api import BrowserContext, Page
 
 from azents_runtime_runner.browser import RunnerBrowserManager
 from azents_runtime_runner.browser_input import BrowserInputKey
@@ -59,7 +61,10 @@ async def test_native_identity_covers_navigation_frames_popups_and_session_isola
     tmp_path: Path, fingerprint_site: str
 ) -> None:
     manager = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=BrowserImplementation.PATCHRIGHT,
     )
     authority = BrowserAuthority("session-a", str(tmp_path / "a"))
     try:
@@ -69,6 +74,8 @@ async def test_native_identity_covers_navigation_frames_popups_and_session_isola
         assert opened.page is not None
         context = manager.contexts[authority.session_id]
         page = manager.tasks[opened.page.task_id].pages[opened.page.id].page
+        assert isinstance(context, BrowserContext)
+        assert isinstance(page, Page)
         first = await page.evaluate("window.firstFingerprint", isolated_context=False)
         assert first["webdriver"] is False
         assert "HeadlessChrome" not in first["ua"]

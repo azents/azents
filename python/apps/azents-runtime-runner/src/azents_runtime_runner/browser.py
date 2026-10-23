@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal, NamedTuple, assert_never
 from urllib.parse import urlsplit, urlunsplit
 
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from azents_runtime_control.browser_contract import (
     BrowserActCommand,
     BrowserAction,
@@ -32,23 +33,32 @@ from azents_runtime_control.browser_viewer_contract import ViewerTarget
 from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 from markdownify import markdownify
 from patchright.async_api import (
-    BrowserContext,
-    Dialog,
-    Download,
-    ElementHandle,
-    Error,
-    Frame,
-    Page,
-    Playwright,
-    async_playwright,
-)
-from patchright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
+from patchright.async_api import async_playwright
+from playwright.async_api import async_playwright as firefox_playwright
 
+from azents_runtime_runner.browser_camoufox import (
+    CamoufoxInstallationError,
+    open_camoufox_context,
+    probe_camoufox,
+)
 from azents_runtime_runner.browser_display import BrowserDisplay, BrowserDisplayError
 from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey
 from azents_runtime_runner.browser_popups import BrowserPopupTracker
+from azents_runtime_runner.browser_sdk import (
+    BROWSER_SDK_ERRORS,
+    BROWSER_SDK_TIMEOUTS,
+    BrowserContext,
+    BrowserDriver,
+    ChromiumPage,
+    Dialog,
+    Download,
+    ElementHandle,
+    FirefoxDriver,
+    Frame,
+    Page,
+)
 
 _MAX_TASKS = 64
 _MAX_PAGES = 8
@@ -180,12 +190,18 @@ class RunnerBrowserManager:
     """Own product browser contexts, identities and every supported input path."""
 
     def __init__(
-        self, *, workspace_root: Path, proxy: str | None, input_key: BrowserInputKey
+        self,
+        *,
+        workspace_root: Path,
+        proxy: str | None,
+        input_key: BrowserInputKey,
+        implementation: BrowserImplementation,
     ) -> None:
         self.workspace_root = workspace_root.resolve()
         self.input_key = input_key
         self.proxy = proxy
-        self.driver: Playwright | None = None
+        self.implementation = implementation
+        self.driver: BrowserDriver | None = None
         self.contexts: dict[str, BrowserContext] = {}
         self.tasks: dict[str, _Task] = {}
         self.session_directories: dict[str, Path] = {}
@@ -248,7 +264,7 @@ class RunnerBrowserManager:
         """Establish product engine availability without opening a Session page."""
         try:
             await self._initialize()
-        except Error:
+        except BROWSER_SDK_ERRORS:
             raise BrowserFailure(
                 "browser_unavailable", "Product browser initialization failed"
             ) from None
@@ -277,41 +293,53 @@ class RunnerBrowserManager:
         self.session_directories[authority.session_id] = resolved
         return resolved
 
-    async def _initialize(self) -> Playwright:
+    async def _initialize(self) -> BrowserDriver:
         async with self.start_lock:
             if self.driver is not None:
                 return self.driver
-            driver: Playwright | None = None
+            driver: BrowserDriver | None = None
             try:
                 self.browser_environment = await self.display.start()
-                driver = await async_playwright().start()
-                try:
-                    probe = await driver.chromium.launch(
-                        channel="chromium",
-                        headless=False,
-                        chromium_sandbox=True,
-                        env=self.browser_environment,
-                    )
-                    self.sandbox = True
-                except Error as exc:
-                    # Only known native containment diagnostics permit downgrade.
-                    if not _sandbox_unavailable(str(exc)):
-                        raise
-                    self.sandbox = False
-                    probe = await driver.chromium.launch(
-                        channel="chromium",
-                        headless=False,
-                        chromium_sandbox=False,
-                        env=self.browser_environment,
-                    )
-                await probe.close()
+                match self.implementation:
+                    case BrowserImplementation.PATCHRIGHT:
+                        chromium = await async_playwright().start()
+                        driver = chromium
+                        try:
+                            probe = await chromium.chromium.launch(
+                                channel="chromium",
+                                headless=False,
+                                chromium_sandbox=True,
+                                env=self.browser_environment,
+                            )
+                            self.sandbox = True
+                        except BROWSER_SDK_ERRORS as exc:
+                            if not _sandbox_unavailable(str(exc)):
+                                raise
+                            self.sandbox = False
+                            probe = await chromium.chromium.launch(
+                                channel="chromium",
+                                headless=False,
+                                chromium_sandbox=False,
+                                env=self.browser_environment,
+                            )
+                        await probe.close()
+                    case BrowserImplementation.CAMOUFOX:
+                        firefox = await firefox_playwright().start()
+                        driver = firefox
+                        await probe_camoufox(
+                            firefox,
+                            self.browser_environment,
+                            None if self.proxy is None else {"server": self.proxy},
+                        )
+                    case _:
+                        assert_never(self.implementation)
                 self.driver = driver
                 return driver
             except BrowserDisplayError:
                 raise BrowserFailure(
                     "browser_unavailable", "Product browser display could not start"
                 ) from None
-            except Error:
+            except (*BROWSER_SDK_ERRORS, CamoufoxInstallationError):
                 raise BrowserFailure(
                     "browser_unavailable", "Product browser startup failed"
                 ) from None
@@ -333,6 +361,10 @@ class RunnerBrowserManager:
             driver = await self._initialize()
             token = hashlib.sha256(authority.session_id.encode()).hexdigest()
             path = self.workspace_root / ".azents" / "browser-state" / token
+            if self.implementation is BrowserImplementation.CAMOUFOX:
+                path = (
+                    self.workspace_root / ".azents" / "browser-state-camoufox" / token
+                )
             if path.resolve() != path or path.is_symlink():
                 raise BrowserFailure(
                     "browser_invalid_authority", "Native browser state path is invalid"
@@ -341,47 +373,64 @@ class RunnerBrowserManager:
             # The fenced Runner owns this profile and has no live Session context.
             # Container removal can leave Chromium's former host/PID/socket links;
             # unlink only these process markers, retaining all native site state.
-            for marker in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
-                (path / marker).unlink(missing_ok=True)
+            if self.implementation is BrowserImplementation.PATCHRIGHT:
+                for marker in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                    (path / marker).unlink(missing_ok=True)
             context: BrowserContext | None = None
 
             async def close_failed_context(failure: BaseException) -> None:
                 if context is not None:
                     try:
                         await context.close()
-                    except Error:
+                    except BROWSER_SDK_ERRORS:
                         failure.add_note("Native browser context cleanup also failed.")
 
             try:
                 # Share the pinned SDK's 180-second launch budget with initialization.
                 async with asyncio.timeout(_CONTEXT_STARTUP_SECONDS):
-                    context = await driver.chromium.launch_persistent_context(
-                        path,
-                        channel="chromium",
-                        headless=False,
-                        env=self.browser_environment,
-                        chromium_sandbox=self.sandbox is True,
-                        proxy=None
-                        if self.proxy is None
-                        else {"server": self.proxy, "bypass": "<-loopback>"},
-                        viewport={"width": 1280, "height": 800},
-                        accept_downloads=True,
-                    )
-                    browser = context.browser
-                    if browser is None:
-                        raise BrowserFailure(
-                            "browser_unavailable",
-                            "Product browser context has no native browser",
+                    if isinstance(driver, FirefoxDriver):
+                        context = await open_camoufox_context(
+                            driver,
+                            profile=path,
+                            environment=self.browser_environment,
+                            proxy=None
+                            if self.proxy is None
+                            else {"server": self.proxy},
                         )
-                    # Chromium can expose pages while EGL still waits on storage pages.
-                    # This waits for initial GPU information, not a warming capture.
-                    graphics = await browser.new_browser_cdp_session()
-                    await graphics.send("SystemInfo.getInfo")
-                    await graphics.detach()
+                    else:
+                        context = await driver.chromium.launch_persistent_context(
+                            path,
+                            channel="chromium",
+                            headless=False,
+                            env=self.browser_environment,
+                            chromium_sandbox=self.sandbox is True,
+                            proxy=None
+                            if self.proxy is None
+                            else {"server": self.proxy, "bypass": "<-loopback>"},
+                            viewport={"width": 1280, "height": 800},
+                            accept_downloads=True,
+                        )
+                        browser = context.browser
+                        if browser is None:
+                            raise BrowserFailure(
+                                "browser_unavailable",
+                                "Product browser context has no native browser",
+                            )
+                        # Chromium can expose pages while EGL waits on storage pages.
+                        # Initial GPU information is not a warming capture.
+                        graphics = await browser.new_browser_cdp_session()
+                        await graphics.send("SystemInfo.getInfo")
+                        await graphics.detach()
                     # Retain one internal blank tab outside page projection/quota.
                     initial_pages = context.pages
                     if initial_pages:
-                        await initial_pages[0].goto("about:blank")
+                        if (
+                            self.implementation is BrowserImplementation.CAMOUFOX
+                            and initial_pages[0].url == "about:blank"
+                        ):
+                            await initial_pages[0].wait_for_load_state("load")
+                        else:
+                            await initial_pages[0].goto("about:blank")
                     else:
                         await context.new_page()
                     for initial in initial_pages[1:]:
@@ -389,7 +438,7 @@ class RunnerBrowserManager:
             except asyncio.CancelledError as failure:
                 await close_failed_context(failure)
                 raise
-            except Error, TimeoutError:
+            except (*BROWSER_SDK_ERRORS, TimeoutError):
                 failure = BrowserFailure(
                     "browser_unavailable", "Product browser context could not start"
                 )
@@ -500,6 +549,7 @@ class RunnerBrowserManager:
             owner = (
                 await resource.popup_tracker.consume(value)
                 if resource.popup_tracker is not None
+                and isinstance(value, ChromiumPage)
                 else None
             )
             if owner is not None:
@@ -614,13 +664,13 @@ class RunnerBrowserManager:
             raise
         except BrowserFailure:
             raise
-        except PlaywrightTimeoutError:
+        except BROWSER_SDK_TIMEOUTS:
             raise BrowserFailure(
                 "browser_deadline",
                 "Browser operation deadline reached; "
                 "reobserve before deciding another action",
             ) from None
-        except Error:
+        except BROWSER_SDK_ERRORS:
             raise BrowserFailure(
                 "browser_outcome_unknown",
                 "Browser operation failed; its site outcome is not confirmed "
@@ -1053,7 +1103,7 @@ class RunnerBrowserManager:
                         ) from None
                     try:
                         await handle.fill(value, timeout=action.timeout_ms)
-                    except Error:
+                    except BROWSER_SDK_ERRORS:
                         raise BrowserFailure(
                             "browser_encrypted_input_failed",
                             "Confidential Browser fill failed; reobserve before "
@@ -1178,7 +1228,7 @@ class RunnerBrowserManager:
                     await context.close()
                 except asyncio.CancelledError:
                     raise
-                except Error:
+                except BROWSER_SDK_ERRORS:
                     cleanup_failed = True
         finally:
             self.contexts.clear()
@@ -1190,7 +1240,7 @@ class RunnerBrowserManager:
                         await driver.stop()
                     except asyncio.CancelledError:
                         raise
-                    except Error:
+                    except BROWSER_SDK_ERRORS:
                         cleanup_failed = True
             finally:
                 await self.display.close()

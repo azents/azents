@@ -126,6 +126,8 @@ def _servicer(
         owner_replica_id="control-report-test",
         consumer_id="runner-report-test",
         runner_authenticator=authenticator,
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=RecordingTransferResultSink(),
         stream_session_offer_provider=_NoStreamOfferProvider(),
         operation_block_ms=1,
@@ -176,6 +178,8 @@ async def test_actual_grpc_report_and_heartbeat_have_closed_database_boundaries(
                 authentication=authenticator.credential,
                 runtime_id=fixture.runtime_id,
                 generation=1,
+                browser_intents={},
+                browser_reconcile_event=None,
                 active_transfer_dispatches={},
             )
         fixture.boundary.closed()
@@ -188,6 +192,8 @@ async def test_actual_grpc_report_and_heartbeat_have_closed_database_boundaries(
             authentication=authenticator.credential,
             runtime_id=fixture.runtime_id,
             generation=1,
+            browser_intents={},
+            browser_reconcile_event=None,
             active_transfer_dispatches={},
         )
         fixture.boundary.closed()

@@ -4,6 +4,7 @@
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { AgentSettingsLayout } from "../../shared/agent-session/AgentSettingsLayout";
+import { AgentBrowserChoiceSection } from "./AgentBrowserChoiceSection";
 import { AgentRuntimeEnvironmentVariablesSection } from "./AgentRuntimeEnvironmentVariablesSection";
 import { AgentWorkspaceEnvironmentSection } from "./AgentWorkspaceEnvironmentSection";
 import { AgentRuntimeSettings } from "./components/AgentRuntimeSettings";
@@ -21,6 +22,16 @@ function AgentRuntimeSettingsWithHeader(
     >
       <AgentRuntimeSettings
         {...props}
+        browserConfiguration={
+          <AgentBrowserChoiceSection
+            handle={props.handle}
+            agentId={props.agent.id}
+            disabled={
+              props.state.type !== "READY" ||
+              props.state.runtime.capability === "removing"
+            }
+          />
+        }
         environmentVariables={
           <>
             <AgentRuntimeEnvironmentVariablesSection

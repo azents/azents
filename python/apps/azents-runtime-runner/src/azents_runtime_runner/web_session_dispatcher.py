@@ -63,7 +63,7 @@ from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
 from azents_runtime_runner.browser import BrowserFailure
-from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
+from azents_runtime_runner.browser_viewer import BrowserViewer
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
     runner_exception_diagnostic,
@@ -699,7 +699,7 @@ class RunnerStreamSessionDispatcher:
         *,
         resources: RunnerWebResourceTracker,
         monotonic_clock: Callable[[], float],
-        browser: RunnerBrowserViewer | None,
+        browser: BrowserViewer | None,
     ) -> None:
         self.browser = browser
         self.manager = manager

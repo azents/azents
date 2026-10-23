@@ -24,10 +24,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar, assert_never
 
+from azents_runtime_control.browser_configuration import (
+    decode_browser_configuration,
+    encode_browser_configuration_status,
+)
 from azents_runtime_control.browser_contract import (
     BrowserContractError,
-    decode_browser_command,
     encode_browser_result,
+)
+from azents_runtime_control.browser_runner_wire import (
+    decode_configured_browser_command,
 )
 from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
@@ -51,7 +57,8 @@ from azents_runtime_runner.apply_patch import (
     ApplyPatchResult,
     execute_apply_patch,
 )
-from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
+from azents_runtime_runner.browser import BrowserFailure
+from azents_runtime_runner.browser_controller import RunnerBrowserController
 from azents_runtime_runner.browser_input import PUBLIC_KEY_ENV
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
@@ -279,7 +286,7 @@ class RunnerOperations:
         self,
         *,
         client: RunnerEventSink,
-        browser_manager: RunnerBrowserManager | None,
+        browser_manager: RunnerBrowserController | None,
         workspace: Workspace,
         execution_backend: ExecutionBackend,
         process_max_unread_bytes: int = _DEFAULT_PROCESS_MAX_UNREAD_BYTES,
@@ -334,6 +341,8 @@ class RunnerOperations:
                 "browser.observe",
                 "browser.act",
                 "browser.list",
+                "browser.configure",
+                "browser.configuration_status",
             }:
                 if self.browser_manager is None:
                     raise BrowserFailure(
@@ -342,10 +351,33 @@ class RunnerOperations:
                 self.browser_manager.validate_operation(
                     operation.runtime_id, operation.runner_generation
                 )
-                command = decode_browser_command(
+                if operation.operation_type == "browser.configure":
+                    status = await self.browser_manager.configure(
+                        decode_browser_configuration(operation.payload)
+                    )
+                    configuration = encode_browser_configuration_status(status)
+                    await self._final_success(
+                        operation,
+                        {"browser_configuration": configuration},
+                    )
+                    return
+                if operation.operation_type == "browser.configuration_status":
+                    if operation.payload:
+                        raise BrowserContractError("Browser status has no fields")
+                    configuration = encode_browser_configuration_status(
+                        self.browser_manager.status
+                    )
+                    await self._final_success(
+                        operation,
+                        {"browser_configuration": configuration},
+                    )
+                    return
+                configured = decode_configured_browser_command(
                     operation.operation_type, operation.payload
                 )
-                result = await self.browser_manager.execute(command)
+                result = await self.browser_manager.execute(
+                    configured.intent_id, configured.command
+                )
                 await self._final_success(operation, encode_browser_result(result))
                 return
             request = payloads.decode_operation_payload(

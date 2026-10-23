@@ -13,7 +13,11 @@ from typing import Protocol
 
 import grpc
 from azcommon.logging import bind_extra
-from azents_runtime_control.browser_runner_wire import browser_command_to_wire
+from azents_runtime_control.browser_configuration import decode_browser_configuration
+from azents_runtime_control.browser_runner_wire import (
+    browser_command_to_wire,
+    decode_configured_browser_command,
+)
 from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
     runner_runtime_configuration_evidence_from_message,
@@ -53,6 +57,10 @@ from azents_runtime_control.system_metrics import (
 )
 from google.protobuf import timestamp_pb2
 
+from azents.core.browser_configuration import (
+    BrowserConfigurationIntentReader,
+    BrowserConfigurationReconciler,
+)
 from azents.core.runtime_connection_registration import (
     RuntimeConnectionRegistrationUnavailable,
 )
@@ -149,6 +157,12 @@ class RuntimeStreamSessionOfferProvider(Protocol):
     ) -> RunnerSessionOffer | None: ...
 
 
+@dataclasses.dataclass(frozen=True)
+class _BrowserOperationFence:
+    intent_id: str
+    require_ready: bool
+
+
 class RuntimeRunnerControlGrpcServicer(
     runtime_runner_control_pb2_grpc.RuntimeRunnerControlServicer
 ):
@@ -166,6 +180,8 @@ class RuntimeRunnerControlGrpcServicer(
         connection_registrar: RuntimeRunnerConnectionRegistrar,
         transfer_result_sink: RuntimeRunnerTransferResultSink,
         stream_session_offer_provider: RuntimeStreamSessionOfferProvider,
+        browser_configuration: BrowserConfigurationIntentReader | None,
+        browser_reconciler: BrowserConfigurationReconciler | None,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -179,6 +195,8 @@ class RuntimeRunnerControlGrpcServicer(
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self.transfer_result_sink = transfer_result_sink
         self.stream_session_offer_provider = stream_session_offer_provider
+        self.browser_configuration = browser_configuration
+        self.browser_reconciler = browser_reconciler
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -248,6 +266,15 @@ class RuntimeRunnerControlGrpcServicer(
             extra={"owner_replica_id": self._owner_replica_id},
         )
         outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue(maxsize=1)
+        browser_intents: dict[str, _BrowserOperationFence] = {}
+        browser_reconcile_event = asyncio.Event()
+        browser_task = asyncio.create_task(
+            self._reconcile_browser(
+                browser_reconcile_event,
+                runtime_id=accepted.runtime_id,
+                generation=accepted.generation,
+            )
+        )
         active_transfer_dispatches: dict[
             tuple[str, str, str, int],
             tuple[str, str, str, bytes],
@@ -260,6 +287,8 @@ class RuntimeRunnerControlGrpcServicer(
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
                 active_transfer_dispatches=active_transfer_dispatches,
+                browser_intents=browser_intents,
+                browser_reconcile_event=browser_reconcile_event,
             )
         )
         operation_task = asyncio.create_task(
@@ -269,6 +298,7 @@ class RuntimeRunnerControlGrpcServicer(
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
                 active_transfer_dispatches=active_transfer_dispatches,
+                browser_intents=browser_intents,
             )
         )
         offer_task = asyncio.create_task(
@@ -304,7 +334,7 @@ class RuntimeRunnerControlGrpcServicer(
             L.info(
                 "Runtime Runner stream closing",
             )
-            for task in (inbound_task, operation_task, offer_task):
+            for task in (inbound_task, operation_task, offer_task, browser_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
@@ -317,6 +347,26 @@ class RuntimeRunnerControlGrpcServicer(
             else:
                 L.info(
                     "Runtime Runner stream close ignored for stale generation",
+                )
+
+    async def _reconcile_browser(
+        self, changed: asyncio.Event, *, runtime_id: str, generation: int
+    ) -> None:
+        if self.browser_reconciler is None:
+            return
+        while True:
+            await changed.wait()
+            changed.clear()
+            try:
+                await self.browser_reconciler.reconcile_runtime(runtime_id, generation)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # The durable application lease can be reclaimed by the next
+                # Runner report or scheduler pass without interrupting shells.
+                _LOGGER.exception(
+                    "Browser configuration reconciliation failed",
+                    extra={"runtime_id": runtime_id, "runner_generation": generation},
                 )
 
     async def _relay_stream_session_offers(
@@ -387,6 +437,8 @@ class RuntimeRunnerControlGrpcServicer(
             tuple[str, str, str, int],
             tuple[str, str, str, bytes],
         ],
+        browser_intents: dict[str, _BrowserOperationFence],
+        browser_reconcile_event: asyncio.Event | None,
     ) -> None:
         stream_logger = bind_extra(
             _LOGGER, {"runtime_id": runtime_id, "runner_generation": generation}
@@ -465,6 +517,8 @@ class RuntimeRunnerControlGrpcServicer(
                     return
                 report = runner_state_report_from_message(message.state_report)
                 await self.state_sink.record_runner_state(report)
+                if browser_reconcile_event is not None:
+                    browser_reconcile_event.set()
                 stream_logger.info(
                     "Runtime Runner state report persisted",
                     extra={
@@ -529,6 +583,8 @@ class RuntimeRunnerControlGrpcServicer(
                     )
                 continue
             if payload == "operation_event":
+                if message.operation_event.final:
+                    browser_intents.pop(f"operation:{message.request_id}", None)
                 if message.operation_event.runtime_id != runtime_id:
                     await outbound.put(
                         _error(message.request_id, "RUNNER_IDENTITY_MISMATCH")
@@ -577,19 +633,35 @@ class RuntimeRunnerControlGrpcServicer(
                 start_operation = (
                     self.coordination_store.try_start_operation_if_connection_current
                 )
-                started = await start_operation(
-                    connection_kind=RuntimeConnectionKind.RUNNER,
-                    connection_subject_id=runtime_id,
-                    connection_generation=generation,
-                    operation_id=message.operation_start.operation_id,
-                    expected_runtime_id=runtime_id,
-                    expected_target=RuntimeCoordinationTarget.RUNNER,
-                    updated_at=datetime.now(UTC),
-                )
-                allowed = (
-                    started.status is RuntimeFencedMutationStatus.APPLIED
-                    and started.value is not None
-                )
+                operation_id = message.operation_start.operation_id
+                metadata = await self.coordination_store.get_operation(operation_id)
+                allowed = True
+                if metadata is not None and metadata.operation_type.startswith(
+                    "browser."
+                ):
+                    fence = browser_intents.pop(operation_id, None)
+                    allowed = (
+                        fence is not None
+                        and self.browser_configuration is not None
+                        and await self.browser_configuration.current_intent(
+                            runtime_id, generation, require_ready=fence.require_ready
+                        )
+                        == fence.intent_id
+                    )
+                if allowed:
+                    started = await start_operation(
+                        connection_kind=RuntimeConnectionKind.RUNNER,
+                        connection_subject_id=runtime_id,
+                        connection_generation=generation,
+                        operation_id=operation_id,
+                        expected_runtime_id=runtime_id,
+                        expected_target=RuntimeCoordinationTarget.RUNNER,
+                        updated_at=datetime.now(UTC),
+                    )
+                    allowed = (
+                        started.status is RuntimeFencedMutationStatus.APPLIED
+                        and started.value is not None
+                    )
                 await outbound.put(
                     runtime_runner_control_pb2.RunnerControlMessage(
                         request_id=message.request_id,
@@ -630,6 +702,7 @@ class RuntimeRunnerControlGrpcServicer(
             tuple[str, str, str, int],
             tuple[str, str, str, bytes],
         ],
+        browser_intents: dict[str, _BrowserOperationFence],
     ) -> None:
         stream_logger = bind_extra(
             _LOGGER, {"runtime_id": runtime_id, "runner_generation": generation}
@@ -772,6 +845,17 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 await self.control_protocol.ack_claimed_request(envelope)
                 continue
+            if envelope.operation_type.startswith("browser."):
+                fence = await self._browser_fence(envelope)
+                if fence is None:
+                    await self._reject_browser_operation(envelope)
+                    await self.control_protocol.ack_claimed_request(envelope)
+                    continue
+                if len(browser_intents) >= 4096:
+                    raise RuntimeError(
+                        "Runner pending browser admission capacity exhausted"
+                    )
+                browser_intents[f"operation:{envelope.request_id}"] = fence
             L.info(
                 "Runtime Runner operation routed",
                 extra={
@@ -787,6 +871,59 @@ class RuntimeRunnerControlGrpcServicer(
                     ack_envelope=envelope,
                 )
             )
+
+    async def _browser_fence(
+        self, envelope: RuntimeRequestEnvelope
+    ) -> _BrowserOperationFence | None:
+        if self.browser_configuration is None:
+            return None
+        control = envelope.operation_type in {
+            "browser.configure",
+            "browser.configuration_status",
+        }
+        intent = await self.browser_configuration.current_intent(
+            envelope.runtime_id, envelope.generation, require_ready=not control
+        )
+        if intent is None:
+            return None
+        payload = envelope.payload.get("payload")
+        if envelope.operation_type == "browser.configure":
+            if envelope.payload.get("owner_session_id") is not None:
+                return None
+            if decode_browser_configuration(payload).intent_id != intent:
+                return None
+        elif envelope.operation_type == "browser.configuration_status":
+            if payload != {} or envelope.payload.get("owner_session_id") is not None:
+                return None
+        elif (
+            decode_configured_browser_command(
+                envelope.operation_type, payload
+            ).intent_id
+            != intent
+        ):
+            return None
+        return _BrowserOperationFence(intent, not control)
+
+    async def _reject_browser_operation(self, envelope: RuntimeRequestEnvelope) -> None:
+        await self.control_protocol.append_reply_event(
+            RuntimeReplyEvent(
+                request_id=envelope.request_id,
+                runtime_id=envelope.runtime_id,
+                generation=envelope.generation,
+                event_type=RuntimeReplyEventType.FINAL_ERROR,
+                payload={
+                    "success": False,
+                    "error_code": "browser_stale_configuration",
+                    "error_message": "Browser configuration admission is stale",
+                },
+                created_at=datetime.now(UTC),
+                final=True,
+            ),
+            reply_stream_id=envelope.reply_stream_id,
+            operation_id=f"operation:{envelope.request_id}",
+            expected_target=RuntimeCoordinationTarget.RUNNER,
+            expected_subject_id=envelope.runtime_id,
+        )
 
     async def _runner_terminal_capable(
         self,
@@ -992,6 +1129,8 @@ def add_runtime_runner_control_servicer(
     connection_registrar: RuntimeRunnerConnectionRegistrar,
     transfer_result_sink: RuntimeRunnerTransferResultSink,
     stream_session_offer_provider: RuntimeStreamSessionOfferProvider,
+    browser_configuration: BrowserConfigurationIntentReader | None,
+    browser_reconciler: BrowserConfigurationReconciler | None,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -1006,6 +1145,8 @@ def add_runtime_runner_control_servicer(
             connection_registrar=connection_registrar,
             transfer_result_sink=transfer_result_sink,
             stream_session_offer_provider=stream_session_offer_provider,
+            browser_configuration=browser_configuration,
+            browser_reconciler=browser_reconciler,
             operation_block_ms=operation_block_ms,
         ),
         server,

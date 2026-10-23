@@ -1312,6 +1312,26 @@
       "unknown": "La configuration d’exécution actuelle est indisponible."
     },
     "runtimeSettings": {
+      "browserChoice": {
+        "label": "Moteur du navigateur",
+        "patchright": "Patchright (par défaut)",
+        "camoufox": "Camoufox (expérimental)",
+        "experimental": "Camoufox est expérimental. Sélectionnez les onglets des fenêtres contextuelles manuellement.",
+        "loadError": "Paramètres du navigateur indisponibles",
+        "refresh": "Actualiser l’état",
+        "saving": "Enregistrement du choix du navigateur…",
+        "applying": "Application de {browser}…",
+        "offline": "Le choix enregistré sera appliqué au prochain démarrage valide du Runtime.",
+        "failedTitle": "Échec du changement de navigateur",
+        "unsupported": "Ce Runtime nécessite une image Runner prenant en charge le choix du navigateur. Le choix enregistré sera appliqué lorsqu’un Runner compatible se connectera.",
+        "failedDescription": "Le navigateur est indisponible. Réessayez ou choisissez explicitement un autre moteur. Les autres tâches du Runtime ne sont pas affectées.",
+        "retry": "Réessayer le changement",
+        "confirmTitle": "Changer de moteur de navigateur ?",
+        "confirmDescription": "Appliquer {browser} maintenant ? Tous les onglets et toutes les opérations du navigateur de cet Agent seront fermés. Les terminaux et les autres tâches du Runtime continueront.",
+        "profiles": "Chaque moteur conserve ses propres connexions aux sites. L’état des sites n’est pas copié entre les moteurs.",
+        "cancel": "Annuler",
+        "confirm": "Appliquer le choix du navigateur"
+      },
       "browserLabel": "Navigateur de session",
       "browserDescription": "Autoriser les outils navigateur de l'Agent et le panneau en direct. La désactivation conserve l'état des sites et laisse les autres fonctions du Runtime disponibles.",
       "environmentVariables": {

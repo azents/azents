@@ -97,6 +97,7 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_get_agent_historical_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_historical_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id} | Get Agent Historical Memory
 *AgentV1Api* | [**agent_v1_get_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 *AgentV1Api* | [**agent_v1_get_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
+*AgentV1Api* | [**agent_v1_get_browser_configuration**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_browser_configuration) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/browser-configuration | Get Browser Configuration
 *AgentV1Api* | [**agent_v1_list_agent_admins**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
 *AgentV1Api* | [**agent_v1_list_agent_historical_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_historical_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories | List Agent Historical Memories
 *AgentV1Api* | [**agent_v1_list_agent_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
@@ -104,6 +105,7 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_remove_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
 *AgentV1Api* | [**agent_v1_remove_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_avatar) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar | Remove Avatar
 *AgentV1Api* | [**agent_v1_replace_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_replace_automatic_session_projects) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Replace Automatic Session Projects
+*AgentV1Api* | [**agent_v1_replace_browser_configuration**](azentspublicclient/docs/AgentV1Api.md#agent_v1_replace_browser_configuration) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/browser-configuration | Replace Browser Configuration
 *AgentV1Api* | [**agent_v1_request_avatar_upload**](azentspublicclient/docs/AgentV1Api.md#agent_v1_request_avatar_upload) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/upload-url | Request Avatar Upload
 *AgentV1Api* | [**agent_v1_update_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_update_agent) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id} | Update Agent
 *AgentV1Api* | [**agent_v1_update_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_update_agent_memory) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Update Agent Memory
@@ -496,6 +498,7 @@ Class | Method | HTTP request | Description
  - [AgentAdminAddRequest](azentspublicclient/docs/AgentAdminAddRequest.md)
  - [AgentAdminListResponse](azentspublicclient/docs/AgentAdminListResponse.md)
  - [AgentAdminResponse](azentspublicclient/docs/AgentAdminResponse.md)
+ - [AgentBrowserConfiguration](azentspublicclient/docs/AgentBrowserConfiguration.md)
  - [AgentCreateGitWorktreeAction](azentspublicclient/docs/AgentCreateGitWorktreeAction.md)
  - [AgentCreateRequest](azentspublicclient/docs/AgentCreateRequest.md)
  - [AgentDecommissionResponse](azentspublicclient/docs/AgentDecommissionResponse.md)
@@ -602,8 +605,10 @@ Class | Method | HTTP request | Description
  - [AwsSecrets](azentspublicclient/docs/AwsSecrets.md)
  - [Body](azentspublicclient/docs/Body.md)
  - [BrowserClosePageRequest](azentspublicclient/docs/BrowserClosePageRequest.md)
+ - [BrowserConfigurationReplaceRequest](azentspublicclient/docs/BrowserConfigurationReplaceRequest.md)
  - [BrowserCreatePageResponse](azentspublicclient/docs/BrowserCreatePageResponse.md)
  - [BrowserFrameResponse](azentspublicclient/docs/BrowserFrameResponse.md)
+ - [BrowserImplementation](azentspublicclient/docs/BrowserImplementation.md)
  - [BrowserPageResponse](azentspublicclient/docs/BrowserPageResponse.md)
  - [BrowserProjectionResponse](azentspublicclient/docs/BrowserProjectionResponse.md)
  - [BrowserTaskResponse](azentspublicclient/docs/BrowserTaskResponse.md)

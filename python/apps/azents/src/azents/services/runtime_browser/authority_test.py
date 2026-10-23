@@ -9,6 +9,7 @@ import pytest
 from azcommon.types import JSONValue
 
 from azents.core.agent_session_data import AgentSession
+from azents.core.browser_configuration import BrowserConfigurationIntentReader
 from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionKind,
@@ -134,6 +135,7 @@ class _Harness(NamedTuple):
     authority_repository: AsyncMock
     runtime_coordination: AsyncMock
     working_folder_service: AsyncMock
+    browser_configuration: AsyncMock
 
 
 def _resolver() -> _Harness:
@@ -151,11 +153,16 @@ def _resolver() -> _Harness:
             3,
         )
     )
+    configuration = AsyncMock(spec=BrowserConfigurationIntentReader)
+    configuration.current_intent.return_value = "intent"
     return _Harness(
-        DatabaseRuntimeBrowserAuthorityResolver(repository, coordination, folders),
+        DatabaseRuntimeBrowserAuthorityResolver(
+            repository, coordination, folders, configuration
+        ),
         repository,
         coordination,
         folders,
+        configuration,
     )
 
 

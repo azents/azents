@@ -1,12 +1,16 @@
 ---
 title: "Agent Domain Spec"
 created: 2026-04-20
-updated: 2026-10-20
+updated: 2026-10-23
 tags: [backend, engine]
 spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/browser_configuration.py
+  - python/apps/azents/src/azents/repos/browser_configuration.py
+  - python/apps/azents/src/azents/services/browser_configuration.py
+  - python/apps/azents/src/azents/api/public/agent/v1/browser_configuration.py
   - python/apps/azents/src/azents/repos/subagent_tool_operations.py
   - python/apps/azents/src/azents/repos/hierarchy_contention.py
   - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
@@ -154,7 +158,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-20
+last_verified_at: 2026-10-23
 spec_version: 99
 ---
 
@@ -211,6 +215,25 @@ and unchanged discovery, judgment and notification semantics.
 | `toolkit_management_available` | requester-relative true only for a Workspace Owner or explicit AgentAdmin of this active Agent; grants the enhanced saved-Agent Toolkit management flow but does not disclose any Toolkit state itself |
 | `terminal_enabled` | Agent-owned default-true browser Terminal policy. It is independently editable from Runtime capability and never gates Worker Runtime Toolkit access |
 | `browser_enabled` | Agent-owned opt-in Session Browser setting, default false for existing and new Agents. Runtime settings can enable tools and live-panel access independently of Terminal and other Runtime features. Disabling preserves native profile bytes. |
+| `browser_implementation` | Agent-owned PostgreSQL enum: `patchright` by default, or experimental opt-in `camoufox`. Existing Agents migrate to Patchright without changing profile bytes or Runtime identity. |
+| `browser_configuration_intent_id` | Opaque current replacement/CAS identity; no ordered browser version counter. |
+| `browser_application_state` | PostgreSQL enum `applying`, `ready`, `failed`; the API derives `offline` from current Runtime/control evidence. |
+| `browser_observed_runtime_id`, `browser_observed_runner_generation` | Nullable non-owning last application evidence, not foreign keys. Only the exact current Runtime/generation can admit browser work; replacement does not delete Agent settings. |
+| `browser_application_claim_id`, `browser_application_lease_until`, `browser_application_next_at`, `browser_application_reason` | Bounded durable application claim, retry timing and failure evidence owned by Agent lifecycle. |
+
+Browser configuration lives on the existing `agents` row keyed by Agent ID and
+inherits its Workspace ownership and deletion ordering; no new owning relationship
+or independent cleanup resource is introduced. Agent deletion removes these fields
+with the row. Runtime removal/replacement retains requested engine intent and
+invalidates stale application authority through current Runtime/generation checks.
+The coordinator owns leased application and status reconciliation. Browser-only
+switching does not alter Runtime infrastructure configuration, destroy profile
+bytes or stop shells. Dedicated browser intent, claim and result writes preserve
+the general Agent policy timestamp so they do not revoke unrelated live Terminal
+authority; their own exact intent/current-Runner evidence fences browser access.
+The [Session Browser flow](../flow/session-browser.md)
+defines the dedicated settings API, authorization, source retirement and profile
+separation.
 | `memory_enabled` | gates Saved/Historical automatic context, preparation, mutation tools, and model-facing live Memory VFS access; retained human settings inspection remains available |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |

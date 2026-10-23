@@ -190,10 +190,13 @@ jobs:
         run: |
           cd "${{ matrix.project }}"
           uv sync
-      - name: Install Runner browser engine
+      - name: Install Runner browser engines
         if: matrix.project == 'python/apps/azents-runtime-runner'
         working-directory: python/apps/azents-runtime-runner
-        run: uv run patchright install --with-deps chromium
+        run: |
+          uv run patchright install --with-deps chromium
+          uv run playwright install-deps firefox
+          uv run python -m azents_runtime_runner.browser_install
       - name: Ruff check
         run: |
           cd "${{ matrix.project }}"
