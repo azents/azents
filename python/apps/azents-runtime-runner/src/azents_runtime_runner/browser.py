@@ -347,6 +347,9 @@ class RunnerBrowserManager:
                     path,
                     channel="chromium",
                     headless=False,
+                    # Pinned Chromium's new-surface path can stall its first capture.
+                    # Keep native redraw-ack capture and every other driver default.
+                    ignore_default_args=["--enable-features=CDPScreenshotNewSurface"],
                     env=self.browser_environment,
                     chromium_sandbox=self.sandbox is True,
                     proxy=None
