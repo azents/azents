@@ -18,6 +18,13 @@ const meta = {
           data-white-reference
           style={{ color: "var(--mantine-color-white)" }}
         />
+        <span
+          data-background-reference
+          style={{
+            backgroundColor:
+              "light-dark(var(--mantine-color-blue-6), var(--mantine-color-blue-8))",
+          }}
+        />
       </>
     ),
   ],
@@ -26,24 +33,54 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+async function assertMessagePalette(
+  canvasElement: HTMLElement,
+  mode: "light" | "dark",
+): Promise<void> {
+  await waitFor(async () => {
+    await expect(canvasElement.ownerDocument.documentElement).toHaveAttribute(
+      "data-mantine-color-scheme",
+      mode,
+    );
+    const bubble = canvasElement.querySelector(".mantine-Paper-root");
+    const text = canvasElement.querySelector("[data-message-text]");
+    const reference = canvasElement.querySelector("[data-white-reference]");
+    const background = canvasElement.querySelector(
+      "[data-background-reference]",
+    );
+    if (
+      bubble == null ||
+      text == null ||
+      reference == null ||
+      background == null
+    ) {
+      throw new Error("Missing human message palette fixture");
+    }
+    const white = getComputedStyle(reference).color;
+    await expect(getComputedStyle(bubble).color).toBe(white);
+    await expect(getComputedStyle(text).color).toBe(white);
+    await expect(getComputedStyle(bubble).backgroundColor).toBe(
+      getComputedStyle(background).backgroundColor,
+    );
+    if (mode === "dark") {
+      await expectReadableContrast(text, bubble);
+    }
+  });
+}
+
 export const Light: Story = {
   globals: { colorScheme: "light" },
-  play: async ({ canvasElement }) => {
-    await waitFor(async () => {
-      const bubble = canvasElement.querySelector(".mantine-Paper-root");
-      const text = canvasElement.querySelector("[data-message-text]");
-      const reference = canvasElement.querySelector("[data-white-reference]");
-      if (bubble == null || text == null || reference == null) {
-        throw new Error("Missing human message contrast fixture");
-      }
-      const white = getComputedStyle(reference).color;
-      await expect(getComputedStyle(bubble).color).toBe(white);
-      await expect(getComputedStyle(text).color).toBe(white);
-      await expectReadableContrast(text, bubble);
-    });
+  // The requested blue-6/white palette is explicit, not automatic AA contrast.
+  parameters: {
+    a11y: {
+      config: { rules: [{ id: "color-contrast", enabled: false }] },
+    },
   },
+  play: async ({ canvasElement }) =>
+    assertMessagePalette(canvasElement, "light"),
 };
 export const Dark: Story = {
-  ...Light,
   globals: { colorScheme: "dark" },
+  play: async ({ canvasElement }) =>
+    assertMessagePalette(canvasElement, "dark"),
 };

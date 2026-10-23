@@ -228,7 +228,8 @@ export const theme = createTheme({
         root:
           props.variant === "message"
             ? {
-                backgroundColor: "var(--mantine-color-blue-8)",
+                backgroundColor:
+                  "light-dark(var(--mantine-color-blue-6), var(--mantine-color-blue-8))",
                 color: "var(--mantine-color-white)",
               }
             : {},
