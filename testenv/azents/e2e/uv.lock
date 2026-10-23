@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [options]
@@ -338,7 +338,7 @@ requires-dist = [
     { name = "requests", specifier = "==2.34.2" },
     { name = "selenium", specifier = "==4.48.0" },
     { name = "testcontainers", extras = ["postgres"], specifier = "==4.15.0" },
-    { name = "types-boto3", extras = ["s3"], specifier = "==1.43.103" },
+    { name = "types-boto3", extras = ["s3"], specifier = "==1.43.114" },
     { name = "types-docker", specifier = "==7.2.0.20260923" },
     { name = "types-requests", specifier = "==2.33.0.20260906" },
     { name = "websockets", specifier = "==16.1.1" },
@@ -2168,15 +2168,15 @@ wheels = [
 
 [[package]]
 name = "types-boto3"
-version = "1.43.103"
+version = "1.43.114"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/a5/170745f6cc2013f962c7d5da88ee8aaa753cbc28a187fe8a27bba05c0421/types_boto3-1.43.103.tar.gz", hash = "sha256:f9eec065da1872fcbb43601ebe92daae3db5f32605e26cb62eaa5dcfee8bcbdf", size = 105508, upload-time = "2026-09-25T20:44:14.735Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4c/3b/20968d4364bc0a41b6b75bc500146329d5e82667975e183a2bf60bd41e64/types_boto3-1.43.114.tar.gz", hash = "sha256:36f347f47cffaba02a69dcf8e310962b07d218f75a8b6de860002afddc4af951", size = 106098, upload-time = "2026-10-14T19:39:44.613Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/81/569117cbb074d48dfb73b27f71255b90b70700a520d1502f95511d316e38/types_boto3-1.43.103-py3-none-any.whl", hash = "sha256:c64897bf7cff2cda49640661ddf6e8188aeda9072dd0fec3bd135b9a7dbc840b", size = 71754, upload-time = "2026-09-25T20:44:10.939Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/b5/40e1c2efb6943ace51d3ae39b47b0555ac7b79411ebf826df3a50f31e8d1/types_boto3-1.43.114-py3-none-any.whl", hash = "sha256:475109c4e9cce0ec42bfe8e6a5bc0019e578800dac062f84a53d388f97db6557", size = 72086, upload-time = "2026-10-14T19:39:39.716Z" },
 ]
 
 [package.optional-dependencies]
