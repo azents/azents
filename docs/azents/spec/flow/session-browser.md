@@ -28,7 +28,6 @@ code_paths:
   - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_browser_source_client.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_viewer.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_editables.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_popups.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_input.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_display.py
@@ -175,10 +174,10 @@ geometry/editing scripts remain separate browser functionality.
 Experimental Camoufox contexts use the pinned Camoufox SDK and official
 Firefox-based distribution through the native Playwright boundary, including the
 SDK's packaged fingerprint-generation model. Explicit viewport/window geometry
-matches the viewer coordinate plane. This backend neither runs the Chromium GPU
-startup query nor constructs a Chromium popup tracker. The product does not add
-page-world interception, infer popup ownership from URLs or promise successful
-access to a particular site.
+matches the viewer coordinate plane. This backend does not run the Chromium GPU
+startup query. Both backends use native opener-scoped popup events. The product
+does not add page-world interception, infer popup ownership from URLs or promise
+successful access to a particular site.
 
 On Linux without a supplied DISPLAY, the browser manager starts one owned Xvfb,
 waits for its bounded displayfd readiness record and passes that display only to
@@ -262,9 +261,11 @@ Pointer coordinates are transformed against the displayed image and its acknowle
 
 Focused viewing provides a Show keyboard action independently of native editable membership. In the explicit trusted click/touch gesture it synchronously focuses the local generic receiver with textual input mode; it does not click, refind or move remote focus. Subsequent text follows the existing source-fenced direct-input stream to the remote page's current focus. A separate stable generic receiver reference avoids activating a previously selected field overlay by mistake. Local blur, target/document/attachment change, hidden page, access loss, disconnect and unmount reset its mode and contents; streaming frame-sequence changes alone do not. Existing input authority, active-dialog and stale-image checks govern activation. The action does not grant unrecognized targets private Edit/Paste eligibility, read values or retain a preference. Native software keyboard availability remains browser/OS controlled.
 
-With Patchright, plain unmodified viewer clicks nominate only their initiating attachment for a one-shot native popup selection hint. Other attachments/reconnections do not receive that preference. Modifier/middle-click background intent does not nominate a foreground selection. The web refreshes projection and selects the opened tab only while the originating tab remains selected; explicit user tab choice cancels pending preference. Camoufox registers native popup tabs but leaves foreground selection to the user; it does not construct the Chromium popup tracker. Explicit Agent `expect=popup` still associates the popup with its trigger.
+Patchright and Camoufox share the same popup-follow policy through the native page's `popup` event. An input-capable live attachment expresses interest in its observed page; subsequent ordinary foreground human input renews that interest. Popups from that exact opener nominate the interested attachment for selection, including script-opened tabs and slow initial responses arriving after mouseup. This is a viewing preference, not proof that a click caused the popup. No Chromium target-creation session, URL matching, elapsed-time heuristic or page-world interception is used for selection. Explicit Agent `expect=popup` still associates its popup with its trigger independently.
 
-Native target-creation IDs correlate only popups created during the active pointer operation with their later SDK popup event, including a slow initial response. The private source-owned SDK CDP session filters the exact managed opener; it exposes no public CDP interface. Pointer eligibility ends at mouseup/cancel, and bounded one-shot target records retire on destruction, new manipulation, navigation and cleanup. A later unrelated script popup cannot inherit an old click. Pending web preference also requires the same current resource, attachment, navigation and hint when projection refresh completes.
+Modified/middle-button background intent suppresses follow until ordinary foreground input resumes. Agent effects retire that page's human interest and existing hint, so their immediate or later scripted popups cannot reuse it until human input resumes. Another source page has independent interest and cannot publish a hint for this attachment. Input cancellation/disconnect and document changes retire interest; a new attachment never receives a previous attachment's hint. Human toolbar navigation renews interest after its own cleanup.
+
+The web refreshes projection and selects a hinted live tab only while the originating resource/page/incarnation, attachment, navigation and hint are current. Explicit user tab choice synchronously dismisses hints for the old attachment before routing completes, including a hint that arrives after that choice. Fresh foreground input can resume follow, without replaying a dismissed hint. Popups that open after human input resumes follow the current viewing preference; native popup events do not distinguish script provenance or prove ownership by an earlier action.
 
 Direct input remains the default. Selecting a current native editable exposes one compact lower floating Paste/Edit pair; the connected panel removes the duplicate upper Paste control. Paste invokes a feature-detected clipboard read directly in the trusted gesture; browser/OS consent remains native. Local keyboard/callout `paste` consumes only authorized `text/plain`, clears the receiver, prevents duplicate local insertion and does not forward Ctrl/Cmd+V to the remote clipboard. Both direct routes submit a typed paste action with the editable ID and unchanged text on the existing Browser stream. Runner verifies acknowledged-region membership, current native focus through the frame/shadow chain and existing input authority immediately before `keyboard.insert_text`. A delayed read cannot follow a changed receiver, document, attachment or target. Clipboard text is absent from telemetry, files, Agent events and history; only the explicit native editor can retain pasted text in its transient draft. Empty/oversized/denied/unsupported/stale outcomes do not fabricate successful insertion. Routine clipboard/completion/cancellation banners are not shown. The existing 32,768-character and 64-KiB whole-message bounds apply without truncation. Native insertion emits input rather than a custom remote paste event; rich clipboard/editor semantics and remote-to-local copy are not implemented.
 

@@ -45,13 +45,11 @@ from azents_runtime_runner.browser_camoufox import (
 )
 from azents_runtime_runner.browser_display import BrowserDisplay, BrowserDisplayError
 from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey
-from azents_runtime_runner.browser_popups import BrowserPopupTracker
 from azents_runtime_runner.browser_sdk import (
     BROWSER_SDK_ERRORS,
     BROWSER_SDK_TIMEOUTS,
     BrowserContext,
     BrowserDriver,
-    ChromiumPage,
     Dialog,
     Download,
     ElementHandle,
@@ -157,9 +155,8 @@ class _PopupSelection:
 class _Page:
     id: str
     page: Page
-    popup_owner: str | None
+    popup_interest: str | None
     popup_selection: _PopupSelection | None
-    popup_tracker: BrowserPopupTracker | None
     frames: dict[str, Frame] = field(default_factory=dict)
     refs: dict[str, _Reference] = field(default_factory=dict)
     dialog: Dialog | None = None
@@ -497,7 +494,7 @@ class RunnerBrowserManager:
             raise BrowserFailure(
                 "browser_resource_exhausted", "Browser task page limit reached"
             )
-        resource = _Page(uuid.uuid4().hex, page, None, None, None)
+        resource = _Page(uuid.uuid4().hex, page, None, None)
         task.pages[resource.id] = resource
         for frame in page.frames[:_MAX_FRAMES]:
             resource.frames[uuid.uuid4().hex] = frame
@@ -519,10 +516,8 @@ class RunnerBrowserManager:
         def navigated(frame: Frame) -> None:
             if frame == page.main_frame:
                 resource.navigation_id = uuid.uuid4().hex
-                resource.popup_owner = None
+                resource.popup_interest = None
                 resource.popup_selection = None
-                if resource.popup_tracker is not None:
-                    resource.popup_tracker.clear()
             resource.refs = {
                 key: value
                 for key, value in resource.refs.items()
@@ -546,12 +541,9 @@ class RunnerBrowserManager:
                 await value.close()
                 return
             opened = self._register(task, value)
-            owner = (
-                await resource.popup_tracker.consume(value)
-                if resource.popup_tracker is not None
-                and isinstance(value, ChromiumPage)
-                else None
-            )
+            # The native popup event identifies this exact opener on both engines.
+            # Follow current viewer interest, not a Chromium-only click proof.
+            owner = resource.popup_interest
             if owner is not None:
                 resource.popup_selection = _PopupSelection(
                     owner,
@@ -937,6 +929,8 @@ class RunnerBrowserManager:
                     "browser_stale_dialog", "Browser dialog is no longer current"
                 )
             async with task.guard.interaction(uuid.uuid4().hex):
+                page.popup_interest = None
+                page.popup_selection = None
                 dialog = page.dialog
                 page.dialog = None
                 page.dialog_id = None
@@ -987,9 +981,8 @@ class RunnerBrowserManager:
         actor = uuid.uuid4().hex
         async with task.guard.interaction(actor):
             self.target(command.authority, command.target)
-            page.popup_owner = None
-            if page.popup_tracker is not None:
-                page.popup_tracker.clear()
+            page.popup_interest = None
+            page.popup_selection = None
             outcome = await self._dispatch_or_dialog(task, page, frame, action)
         return await self._result(
             command.authority,
