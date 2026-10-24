@@ -415,6 +415,72 @@ async def test_unfocused_iframe_navigation_preserves_main_view_and_text_input(
 
 
 @pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+async def test_native_korean_text_tail_replacement(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.locator("#text").focus()
+    viewer, transport = RunnerBrowserViewer(manager, Budget()), Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        await transport.frame()
+        actions = [
+            {"kind": "composition", "phase": "start", "text": None},
+            {"kind": "composition", "phase": "commit", "text": "ㅇ"},
+            {"kind": "text_edit", "delete_before": 1, "text": "아"},
+            {"kind": "text_edit", "delete_before": 1, "text": "안"},
+            {"kind": "composition", "phase": "start", "text": None},
+            {"kind": "composition", "phase": "commit", "text": "ㄴ"},
+            {"kind": "text_edit", "delete_before": 1, "text": "녕"},
+        ]
+        for sequence, action in enumerate(actions, 1):
+            assert (await transport.input(sequence, action))["accepted"] is True
+        assert await native.locator("#text").input_value() == "안녕"
+        assert (
+            await transport.input(
+                8, {"kind": "text_edit", "delete_before": 2, "text": ""}
+            )
+        )["accepted"] is True
+        assert await native.locator("#text").input_value() == ""
+        await native.locator("#text").fill("a👨‍👩‍👧‍👦")
+        assert (
+            await transport.input(
+                9, {"kind": "text_edit", "delete_before": 1, "text": "b"}
+            )
+        )["accepted"] is True
+        assert await native.locator("#text").input_value() == "ab"
+        await native.locator("#text").fill("x" * 80)
+        assert (
+            await transport.input(
+                10, {"kind": "text_edit", "delete_before": 80, "text": "한"}
+            )
+        )["accepted"] is True
+        assert await native.locator("#text").input_value() == "한"
+        assert (
+            await transport.input(
+                11, {"kind": "composition", "phase": "start", "text": None}
+            )
+        )["accepted"] is True
+        assert (
+            await transport.input(
+                12, {"kind": "text_edit", "delete_before": 1, "text": ""}
+            )
+        )["reason_code"] == "browser_input_conflict"
+        assert await native.locator("#text").input_value() == "한"
+        assert (
+            await transport.input(
+                13, {"kind": "composition", "phase": "cancel", "text": None}
+            )
+        )["accepted"] is True
+        assert manager.tasks[authority.task_id].guard.actor is None
+    finally:
+        await stop(running, transport)
+
+
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_keys_composition_conflict_sequence_and_disconnect_cleanup(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:

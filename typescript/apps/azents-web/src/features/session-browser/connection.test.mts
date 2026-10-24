@@ -612,3 +612,150 @@ void test("only bounded ordinary observation reconnects; denial and closure neve
     assert.equal(browserReconnectDelay(code, 0), null);
   }
 });
+
+void test("DOM pointer events use displayed pixels across a React render boundary", () => {
+  const { connection, sent } = fixture();
+  connection.receiveText(JSON.stringify(status));
+  connection.receiveFrame(binary(frame));
+  const initial = connection.snapshot().image;
+  assert.ok(initial);
+  connection.displayed(initial);
+  // An image load ACK is synchronous; the containing React render can lag it.
+  const displayed = { ...frame, frame_sequence: 2 };
+  connection.receiveFrame(binary(displayed));
+  assert.equal(
+    connection.coordinateFromEvent(displayed, {
+      kind: "pointer",
+      phase: "down",
+      x: 400,
+      y: 300,
+      button: "left",
+    }),
+    false,
+  );
+  const next = connection.snapshot().image;
+  assert.ok(next);
+  connection.displayed(next);
+  const down = {
+    kind: "pointer",
+    phase: "down",
+    x: 400,
+    y: 300,
+    button: "left",
+  } as const;
+  assert.equal(connection.coordinate(frame, down), false);
+  assert.equal(connection.coordinateFromEvent(frame, down), true);
+  assert.match(sent.at(-1) ?? "", /"frame_sequence":2/u);
+  assert.match(sent.at(-1) ?? "", /"x":400,"y":300/u);
+  assert.equal(
+    connection.coordinateFromEvent(frame, { ...down, phase: "up" }),
+    true,
+  );
+  for (const stale of [
+    { ...frame, navigation_id: "previous" },
+    { ...frame, width: 640 },
+    { ...frame, attachment_id: "previous" },
+    { ...frame, target: { ...target, page_id: "previous" } },
+  ]) {
+    assert.equal(connection.coordinateFromEvent(stale, down), false);
+  }
+});
+
+void test("DOM cleanup cannot silently retain an attachment after its source scope is lost", () => {
+  const { connection } = fixture();
+  connection.receiveText(JSON.stringify(status));
+  connection.receiveFrame(binary(frame));
+  const image = connection.snapshot().image;
+  assert.ok(image);
+  connection.displayed(image);
+  assert.equal(
+    connection.coordinateFromEvent(
+      { ...frame, navigation_id: "previous" },
+      { kind: "composition", phase: "cancel", text: null },
+    ),
+    false,
+  );
+  assert.equal(connection.snapshot().connection, "stale");
+});
+
+void test("one explicit navigation drains sent typing without blinking or replay", () => {
+  const { connection, sent } = fixture();
+  connection.receiveText(JSON.stringify(status));
+  connection.receiveFrame(binary(frame));
+  const image = connection.snapshot().image;
+  assert.ok(image);
+  connection.displayed(image);
+  const key = { kind: "key", phase: "down", key: "Enter" } as const;
+  connection.coordinate(frame, key);
+  assert.equal(connection.snapshot().navigationPending, false);
+  const navigation = {
+    kind: "navigation",
+    action: "reload",
+    url: null,
+  } as const;
+  assert.equal(connection.coordinate(frame, navigation), true);
+  assert.equal(sent.length, 2); // frame ACK + key, navigation has not been sent
+  assert.equal(connection.snapshot().navigationPending, true);
+  assert.equal(connection.coordinate(frame, navigation), false);
+  assert.equal(connection.coordinate(frame, key), false);
+  assert.equal(connection.coordinate(frame, { ...key, phase: "up" }), true);
+  const ack = (sequence: number): void => {
+    connection.receiveText(
+      JSON.stringify({
+        type: "input_ack",
+        attachment_id: frame.attachment_id,
+        sequence,
+        accepted: true,
+        reason_code: null,
+        outcome: "dispatched",
+      }),
+    );
+  };
+  ack(1);
+  assert.equal(sent.length, 3);
+  ack(2);
+  assert.equal(sent.length, 4);
+  assert.match(sent.at(-1) ?? "", /"kind":"navigation"/u);
+  ack(3);
+  assert.equal(connection.snapshot().navigationPending, false);
+  assert.equal(connection.snapshot().pendingInputs, 0);
+  ack(3);
+  assert.equal(sent.length, 4);
+});
+
+void test("a rejected input or changed document cancels unsent navigation", () => {
+  for (const interruption of ["rejected", "document", "disconnect"]) {
+    const { connection, sent } = fixture();
+    connection.receiveText(JSON.stringify(status));
+    connection.receiveFrame(binary(frame));
+    const image = connection.snapshot().image;
+    assert.ok(image);
+    connection.displayed(image);
+    connection.coordinate(frame, { kind: "key", phase: "down", key: "Enter" });
+    connection.coordinate(frame, {
+      kind: "navigation",
+      action: "reload",
+      url: null,
+    });
+    if (interruption === "document") {
+      connection.receiveText(
+        JSON.stringify({ ...status, navigation_id: "next" }),
+      );
+    } else if (interruption === "disconnect") {
+      connection.disconnect(false);
+    }
+    connection.receiveText(
+      JSON.stringify({
+        type: "input_ack",
+        attachment_id: frame.attachment_id,
+        sequence: 1,
+        accepted: interruption !== "rejected",
+        reason_code:
+          interruption === "rejected" ? "browser_input_conflict" : null,
+        outcome: interruption === "rejected" ? "rejected" : "dispatched",
+      }),
+    );
+    assert.equal(connection.snapshot().navigationPending, false);
+    assert.equal(sent.length, 2);
+  }
+});
