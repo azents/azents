@@ -77,7 +77,9 @@ export const ConfirmCamoufox: Story = {
     await expect(
       dialog.getByText(/Terminals and unrelated Runtime jobs will continue/),
     ).toBeVisible();
-    await expect(dialog.getByText(/Select popup tabs manually/)).toBeVisible();
+    await expect(
+      dialog.getByText(/Each engine keeps its own saved sign-ins/),
+    ).toBeVisible();
     await userEvent.click(
       dialog.getByRole("button", { name: "Apply browser choice" }),
     );

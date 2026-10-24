@@ -206,6 +206,19 @@ The source uses existing Owner/relay routing, flow control, capacity, lease/fing
 
 ## Live Panel and Input
 
+Routine Browser status stays compact. While the connected page is waiting for
+current pixels, a small noninteractive loading indicator replaces explanatory
+text over the image; its accessible name announces the update. Stale/disconnected
+images retain their existing input fences and dimming. The header reports
+connection/read-only state without repeating a status paragraph over or below
+the image. A missing image shows one concise connection/loading status. Actual
+failures and unconfirmed action outcomes remain visible with a short next action.
+Empty pages rely on the New tab control instead of instructional copy.
+The private editor explains only that Apply commits the change, without repeating
+direct-input or single-field implementation details. Browser-engine controls retain
+the experimental option label and disruptive-switch/profile warnings, without
+duplicating an experimental/popup-selection helper paragraph.
+
 Local keyboard receivers retain only their own transient typed text tail while
 focused. Ordinary input is reconciled against that tail rather than clearing the
 textarea after every event. This preserves native Korean replacement on iOS,

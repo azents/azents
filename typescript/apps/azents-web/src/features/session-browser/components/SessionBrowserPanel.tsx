@@ -16,7 +16,6 @@ import {
   Text,
   TextInput,
   Tooltip,
-  VisuallyHidden,
 } from "@mantine/core";
 import {
   IconArrowLeft,
@@ -37,7 +36,6 @@ import {
   IconZoomOut,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useId } from "react";
 import {
   browserAddress,
   browserFrameMatchesStatus,
@@ -210,7 +208,6 @@ export function SessionBrowserPanel({
       ? { ...observedState, canInput: false, canClose: false }
       : observedState;
   const t = useTranslations("chat.browser");
-  const descriptionId = useId();
   if (state.type === "LOADING") {
     return (
       <Stack align="center" justify="center" h="100%" p="md">
@@ -270,9 +267,7 @@ export function SessionBrowserPanel({
         )}
         <Stack p="md" align="center" justify="center" flex={1}>
           <Text fw={600}>{t("emptyTitle")}</Text>
-          <Text size="sm">
-            {canCreate ? t("emptyDescription") : t("readOnlyDescription")}
-          </Text>
+          {!canCreate && <Text size="sm">{t("readOnly")}</Text>}
           {createError && (
             <Alert color="yellow" role="alert">
               {t("createFailed")}
@@ -328,14 +323,6 @@ export function SessionBrowserPanel({
     image !== null &&
     status !== null &&
     browserFrameMatchesStatus(image.frame, status);
-  const showDescription =
-    state.connection === "unavailable" || (!state.canInput && !state.canClose);
-  const description =
-    state.connection === "unavailable"
-      ? t("transportUnavailable")
-      : !state.canInput && !state.canClose
-        ? t("readOnlyDescription")
-        : t("inputDescription");
   return (
     <BrowserShell
       focused={focused}
@@ -800,7 +787,6 @@ export function SessionBrowserPanel({
             data-focused={focused}
             role="region"
             aria-label={t("viewport")}
-            aria-describedby={descriptionId}
             tabIndex={-1}
             onPointerDown={(event) =>
               event.pointerType === "touch"
@@ -864,11 +850,18 @@ export function SessionBrowserPanel({
                 onError={() => onFrameError(image)}
               />
             )}
-            {image !== null && (!connected || !imageCurrent) && (
-              <Text size="sm" className={classes.overlay} role="status">
-                {connected ? t("oldImageDescription") : t("staleDescription")}
-              </Text>
-            )}
+            {image !== null &&
+              connected &&
+              !imageCurrent &&
+              state.dialog === null && (
+                <Box
+                  className={classes.overlay}
+                  role="status"
+                  aria-label={t("waitingFrame")}
+                >
+                  <Loader size="xs" />
+                </Box>
+              )}
             {!focused && (
               <button
                 type="button"
@@ -939,7 +932,6 @@ export function SessionBrowserPanel({
                 rows={1}
                 tabIndex={0}
                 aria-label={t("keyboard")}
-                aria-describedby={descriptionId}
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="off"
@@ -971,18 +963,6 @@ export function SessionBrowserPanel({
         </Alert>
       )}
       {fieldEditor !== null && <BrowserFieldEditor controls={fieldEditor} />}
-      {showDescription ? (
-        <Text
-          id={descriptionId}
-          size="xs"
-          c="dimmed"
-          className={classes.footer}
-        >
-          {description}
-        </Text>
-      ) : (
-        <VisuallyHidden id={descriptionId}>{description}</VisuallyHidden>
-      )}
     </BrowserShell>
   );
 }

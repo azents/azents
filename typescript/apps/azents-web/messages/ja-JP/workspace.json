@@ -1316,7 +1316,6 @@
         "label": "ブラウザーエンジン",
         "patchright": "Patchright（既定）",
         "camoufox": "Camoufox（実験的）",
-        "experimental": "Camoufoxは実験的な機能です。ポップアップのタブは手動で選択してください。",
         "loadError": "ブラウザー設定を読み込めません",
         "refresh": "状態を更新",
         "saving": "ブラウザーの選択を保存中…",

@@ -2130,16 +2130,26 @@ export const ReadOnly = {
 } satisfies Story;
 
 export const Disconnected = {
+  tags: ["ci-contract"],
   args: { state: { ...ready, connection: "stale", canClose: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
-    await expect(canvas.getByText(/last received image/)).toBeVisible();
+    await expect(canvas.getByText("Disconnected")).toBeVisible();
+    await expect(canvas.getByRole("img")).toBeVisible();
     await expect(
       canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeDisabled();
     await expect(
       canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
     ).toBeNull();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Browser actions" }),
+    );
+    await expect(
+      await canvas.findByRole("menuitem", {
+        name: "Refresh browser connection",
+      }),
+    ).toBeEnabled();
   },
 } satisfies Story;
 
@@ -2244,22 +2254,48 @@ export const ReadOnlyDialogBeforeImage = {
   },
 } satisfies Story;
 export const StaleCoordinates = {
+  tags: ["ci-contract"],
   args: {
     state: { ...ready, status: { ...initialDialogStatus, dialog: null } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const surface = canvas.getByRole("region", { name: "Remote browser page" });
+    const updating = canvas.getByRole("status", { name: "Updating page…" });
+    await expect(updating).toBeVisible();
+    await expect(updating).toHaveTextContent("");
+    await expect(canvas.getByRole("img")).toBeVisible();
+    await expect(
+      canvas.getByRole("textbox", { name: "Remote browser keyboard" }),
+    ).toHaveAttribute("readonly");
     await expect(surface).toHaveAttribute("tabindex", "-1");
     await fireEvent.keyDown(surface, { key: "Enter" });
     await expect(actions).not.toHaveBeenCalled();
   },
 } satisfies Story;
 export const Conflict = {
+  tags: ["ci-contract"],
   args: { state: { ...ready, conflict: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await expect(
+      canvas.getByText(
+        "Another interaction is in progress. Try again when it finishes.",
+      ),
+    ).toBeVisible();
+  },
 } satisfies Story;
 export const UnknownOutcome = {
+  tags: ["ci-contract"],
   args: { state: { ...ready, outcomeUnknown: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await expect(
+      canvas.getByText(
+        "Input result unconfirmed. Check the page before retrying.",
+      ),
+    ).toBeVisible();
+  },
 } satisfies Story;
 export const CloseFailed = { args: { closeError: true } } satisfies Story;
 export const Loading = { args: { state: { type: "LOADING" } } } satisfies Story;
@@ -2276,6 +2312,7 @@ export const Connecting = {
   args: { state: { ...ready, connection: "connecting", image: null } },
 } satisfies Story;
 export const LiveTransportUnavailable = {
+  tags: ["ci-contract"],
   args: {
     state: {
       ...ready,
@@ -2291,8 +2328,13 @@ export const LiveTransportUnavailable = {
       canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeEnabled();
     await expect(
-      canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
-    ).toBeNull();
+      canvas.getByRole("textbox", { name: "Remote browser keyboard" }),
+    ).toHaveAttribute("readonly");
+    await expect(
+      canvas.getByText(
+        "Browser connection unavailable. Reconnect from the Browser menu.",
+      ),
+    ).toBeVisible();
   },
 } satisfies Story;
 export const Mobile = {

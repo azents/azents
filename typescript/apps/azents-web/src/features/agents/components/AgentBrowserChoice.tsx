@@ -43,7 +43,6 @@ export function AgentBrowserChoice({
       );
     case "READY": {
       const { configuration, readOnly, saving, confirmation } = state;
-      const chosen = confirmation ?? configuration.requested;
       return (
         <>
           <Paper withBorder radius="lg" p="lg">
@@ -63,11 +62,6 @@ export function AgentBrowserChoice({
                   }
                 }}
               />
-              {chosen === "camoufox" ? (
-                <Text c="dimmed" size="sm">
-                  {t("experimental")}
-                </Text>
-              ) : null}
               {saving ? (
                 <Text size="sm" role="status">
                   {t("saving")}
@@ -136,9 +130,6 @@ export function AgentBrowserChoice({
               <Text c="dimmed" size="sm">
                 {t("profiles")}
               </Text>
-              {confirmation === "camoufox" ? (
-                <Text size="sm">{t("experimental")}</Text>
-              ) : null}
               <Group justify="flex-end">
                 <Button variant="default" disabled={saving} onClick={onCancel}>
                   {t("cancel")}
