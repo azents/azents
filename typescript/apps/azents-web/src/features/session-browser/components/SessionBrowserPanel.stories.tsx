@@ -545,7 +545,7 @@ function PastePreviewFixture(
   );
 }
 
-/** Synthetic remote values; actual clipboard text stays in transient UI state. */
+/** Synthetic remote values and paste text; never read the device clipboard. */
 function FieldEditorPreviewFixture(
   props: SessionBrowserPanelProps & {
     multiline?: boolean;
@@ -739,13 +739,7 @@ function FieldEditorPreviewFixture(
           const field = selected;
           const originalValue =
             field === "search" ? searchValue : passwordValue;
-          if (
-            typeof navigator.clipboard === "undefined" ||
-            typeof navigator.clipboard.readText !== "function"
-          ) {
-            return;
-          }
-          void navigator.clipboard.readText().then(
+          void Promise.resolve("Synthetic paste only").then(
             (text) => {
               if (
                 document.activeElement !== receiver ||
@@ -775,13 +769,7 @@ function FieldEditorPreviewFixture(
             return;
           }
           const original = draft;
-          if (
-            typeof navigator.clipboard === "undefined" ||
-            typeof navigator.clipboard.readText !== "function"
-          ) {
-            return;
-          }
-          void navigator.clipboard.readText().then(
+          void Promise.resolve("Synthetic paste only").then(
             (text) => {
               if (
                 latestDraft.current !== original ||
@@ -1052,6 +1040,7 @@ export const FieldEditorFloatingLowerInputVisibility = {
 
 export const FieldEditorPreviewInteraction = {
   ...FieldEditorPreview,
+  tags: ["ci-contract"],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const open = (): HTMLElement =>
@@ -1077,9 +1066,9 @@ export const FieldEditorPreviewInteraction = {
     await userEvent.click(
       within(toolbar).getByRole("button", { name: "Edit" }),
     );
-    await expect(
-      canvas.getByRole("dialog", { name: "Edit input" }),
-    ).toBeVisible();
+    await waitFor(() =>
+      expect(canvas.getByRole("dialog", { name: "Edit input" })).toBeVisible(),
+    );
     const input = canvas.getByRole("textbox", { name: "검색어" });
     await expect(input).toHaveValue("서울 날씨");
     await waitFor(() => expect(input).toHaveFocus());
@@ -1105,6 +1094,10 @@ export const FieldEditorPreviewInteraction = {
     await userEvent.click(open());
     await expect(canvas.getByRole("textbox", { name: "검색어" })).toHaveValue(
       "서울 날씨",
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    await expect(canvas.getByRole("textbox", { name: "검색어" })).toHaveValue(
+      "서울 날씨Synthetic paste only",
     );
     await userEvent.clear(canvas.getByRole("textbox", { name: "검색어" }));
     await userEvent.type(

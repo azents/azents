@@ -1522,6 +1522,8 @@ async def _run_reconciler(
                     "Runtime lifecycle reconcile dispatched commands",
                     extra={"dispatched": dispatched},
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Runtime lifecycle reconciler iteration failed")
         try:
@@ -1555,6 +1557,8 @@ async def _run_transfer_repair(
                     "Runtime transfer repair observed records",
                     extra={"observed": observed},
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Runtime transfer repair iteration failed")
         try:
@@ -1618,6 +1622,8 @@ async def _run_workspace_upload_repair(
                         "source_failed_cleanups": orphans.failed_cleanups,
                     },
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Workspace upload repair iteration failed")
         try:
@@ -1664,6 +1670,8 @@ async def _run_terminal_repair(
                     "Runtime Terminal repair requested termination",
                     extra={"terminal_count": len(repaired.terminal_ids)},
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Runtime Terminal repair iteration failed")
         try:

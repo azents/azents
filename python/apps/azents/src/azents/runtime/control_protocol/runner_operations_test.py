@@ -401,7 +401,8 @@ async def test_new_operation_observation_ignores_retained_history(
 
 
 @pytest.mark.asyncio
-async def test_resume_bash_filters_recorded_shared_reply_stream() -> None:
+@pytest.mark.parametrize("exit_code", [0, 7, -15])
+async def test_resume_bash_filters_recorded_shared_reply_stream(exit_code: int) -> None:
     """A recorded pre-cutover stream still filters another request's replies."""
     harness = await _make_harness()
     reply_stream_id = "runner:runtime-1:generation:0000000000000000001:replies"
@@ -434,7 +435,7 @@ async def test_resume_bash_filters_recorded_shared_reply_stream() -> None:
             request_id="req-target",
             generation=harness.runner_generation,
             event_type=RuntimeReplyEventType.FINAL_SUCCESS,
-            payload={"exit_code": 0},
+            payload={"exit_code": exit_code},
             final=True,
         ),
         reply_stream_id=reply_stream_id,
@@ -451,8 +452,47 @@ async def test_resume_bash_filters_recorded_shared_reply_stream() -> None:
     )
 
     assert result.stdout == "target"
+    assert result.exit_code == exit_code
     assert result.final_cursor == "3"
     assert harness.metrics.snapshot().filtered_reply_count == 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"exit_code": "0"},
+        {"exit_code": True},
+        {"exit_code": None},
+        {"exit_code": 0, "unexpected": 1},
+    ],
+)
+async def test_resume_bash_rejects_malformed_completion(
+    payload: dict[str, JsonValue],
+) -> None:
+    harness = await _make_harness()
+    stream = "runner:runtime-1:generation:0000000000000000001:replies"
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-target",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.FINAL_SUCCESS,
+            payload=payload,
+            final=True,
+        ),
+        reply_stream_id=stream,
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await harness.client.resume_bash(
+            reply_stream_id=stream,
+            after_cursor=None,
+            request_id="req-target",
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    assert error.value.code == "invalid_bash_completion"
 
 
 @pytest.mark.asyncio
