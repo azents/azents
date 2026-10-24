@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import web
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from azents_runtime_control.browser_contract import (
     BrowserActCommand,
     BrowserAction,
@@ -131,12 +132,24 @@ async def site() -> AsyncIterator[str]:
 
 
 @pytest.fixture
-async def manager(tmp_path: Path) -> AsyncIterator[RunnerBrowserManager]:
+async def manager(
+    tmp_path: Path, implementation: BrowserImplementation
+) -> AsyncIterator[RunnerBrowserManager]:
     manager = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=implementation,
     )
     yield manager
     await manager.close()
+
+
+@pytest.fixture(params=tuple(BrowserImplementation))
+def implementation(request: pytest.FixtureRequest) -> BrowserImplementation:
+    value = request.param
+    assert isinstance(value, BrowserImplementation)
+    return value
 
 
 def authority(tmp_path: Path, name: str = "session-a") -> BrowserAuthority:
@@ -205,7 +218,10 @@ async def test_session_state_reuse_isolation_and_persistence(
         await observe(manager, b, target(first))
     await manager.close()
     fresh = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=manager.implementation,
     )
     try:
         await fresh.execute(BrowserOpenCommand(a, None, site, None))
@@ -219,6 +235,7 @@ async def test_session_state_reuse_isolation_and_persistence(
         await fresh.close()
 
 
+@pytest.mark.parametrize("implementation", [BrowserImplementation.PATCHRIGHT])
 async def test_replaced_runtime_reopens_profile_with_stale_process_markers(
     manager: RunnerBrowserManager, site: str, tmp_path: Path
 ) -> None:
@@ -236,7 +253,10 @@ async def test_replaced_runtime_reopens_profile_with_stale_process_markers(
     (profile / "SingletonSocket").symlink_to(socket_target)
     (profile / "SingletonCookie").symlink_to(cookie_target)
     fresh = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=BrowserImplementation.PATCHRIGHT,
     )
     try:
         await fresh.execute(BrowserOpenCommand(actor, None, site, None))
@@ -481,12 +501,11 @@ async def test_closing_manager_drains_outstanding_dialog_task(
     tmp_path: Path,
 ) -> None:
     a = authority(tmp_path)
-    opened = await manager.execute(BrowserOpenCommand(a, None, site, None))
-    current = target(opened)
-    pending = await act(
-        manager, a, current, await observe(manager, a, current), "Alert"
+    pending = await manager.execute(
+        BrowserOpenCommand(a, None, site + "/initial-dialog", None)
     )
     assert pending.dialog is not None
+    current = target(pending)
     _, resource, _ = manager.target(a, current)
     outstanding = resource.pending
     assert outstanding is not None
@@ -496,7 +515,10 @@ async def test_closing_manager_drains_outstanding_dialog_task(
 
 def test_transport_generation_is_bound_separately_from_session(tmp_path: Path) -> None:
     manager = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=BrowserImplementation.PATCHRIGHT,
     )
     generation = 7
     manager.bind_runtime("runtime", lambda: generation)
@@ -602,7 +624,10 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
     factory.start = AsyncMock(return_value=driver)
     monkeypatch.setattr(browser_module, "async_playwright", lambda: factory)
     manager = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=BrowserImplementation.PATCHRIGHT,
     )
     if expected_sandbox is None:
         with pytest.raises(BrowserFailure, match="startup"):
@@ -623,6 +648,7 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
         assert call.kwargs["channel"] == "chromium"
 
 
+@pytest.mark.parametrize("implementation", [BrowserImplementation.PATCHRIGHT])
 async def test_context_admission_waits_for_initial_graphics_information(
     manager: RunnerBrowserManager,
     site: str,
@@ -661,6 +687,7 @@ async def test_context_admission_waits_for_initial_graphics_information(
 
 
 @pytest.mark.parametrize("failure_kind", ["protocol", "deadline"])
+@pytest.mark.parametrize("implementation", [BrowserImplementation.PATCHRIGHT])
 async def test_failed_graphics_startup_closes_unpublished_context(
     manager: RunnerBrowserManager,
     site: str,
@@ -704,6 +731,7 @@ async def test_failed_graphics_startup_closes_unpublished_context(
 
 
 @pytest.mark.parametrize("cleanup_failure", [False, True])
+@pytest.mark.parametrize("implementation", [BrowserImplementation.PATCHRIGHT])
 async def test_cancelled_graphics_startup_preserves_cancellation_and_closes_context(
     manager: RunnerBrowserManager,
     site: str,

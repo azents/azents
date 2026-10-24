@@ -4,21 +4,28 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from azents_runtime_control.browser_configuration import (
+    BrowserConfigurationRequest,
+    BrowserImplementation,
+)
 from azents_runtime_control.browser_contract import (
     BrowserAuthority,
     BrowserCommand,
     BrowserOpenCommand,
     BrowserResult,
-    encode_browser_command,
 )
+from azents_runtime_control.browser_runner_wire import encode_configured_browser_command
 from azents_runtime_control.runner import (
     RunnerOperationEnvelope,
     RunnerOperationEvent,
     RuntimeRunnerEventType,
 )
+from browser_viewer_test import Budget
 
 from azents_runtime_runner.browser import RunnerBrowserManager
+from azents_runtime_runner.browser_controller import RunnerBrowserController
 from azents_runtime_runner.browser_input import BrowserInputKey
+from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.workspace import Workspace
@@ -34,7 +41,12 @@ class Sink:
 
 class Manager(RunnerBrowserManager):
     def __init__(self, root: Path) -> None:
-        super().__init__(workspace_root=root, proxy=None, input_key=BrowserInputKey())
+        super().__init__(
+            workspace_root=root,
+            proxy=None,
+            input_key=BrowserInputKey(),
+            implementation=BrowserImplementation.PATCHRIGHT,
+        )
         self.received: list[BrowserCommand] = []
         self.bind_runtime("runtime", lambda: 7)
 
@@ -42,15 +54,32 @@ class Manager(RunnerBrowserManager):
         self.received.append(command)
         return BrowserResult((), None, None, False, (), None, None, None, None, "none")
 
+    async def initialize(self) -> None:
+        return
+
+
+async def configured_manager(manager: Manager) -> RunnerBrowserController:
+    controller = RunnerBrowserController(
+        lambda _: manager,
+        lambda native: RunnerBrowserViewer(native, Budget()),
+        manager.input_key,
+    )
+    controller.bind_runtime("runtime", lambda: 7)
+    await controller.configure(
+        BrowserConfigurationRequest("intent", None, BrowserImplementation.PATCHRIGHT)
+    )
+    return controller
+
 
 def operation(root: Path, generation: int) -> RunnerOperationEnvelope:
-    payload = encode_browser_command(
+    payload = encode_configured_browser_command(
+        "intent",
         BrowserOpenCommand(
             BrowserAuthority("concrete-session", str(root / "concrete-session")),
             None,
             None,
             None,
-        )
+        ),
     )
     return RunnerOperationEnvelope(
         request_id="command",
@@ -71,7 +100,7 @@ async def test_concrete_browser_authority_not_scheduling_owner(tmp_path: Path) -
     manager = Manager(tmp_path)
     operations = RunnerOperations(
         client=sink,
-        browser_manager=manager,
+        browser_manager=await configured_manager(manager),
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
     )
@@ -89,7 +118,7 @@ async def test_stale_generation_rejected_before_browser_command(
     manager = Manager(tmp_path)
     operations = RunnerOperations(
         client=sink,
-        browser_manager=manager,
+        browser_manager=await configured_manager(manager),
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
     )
@@ -104,7 +133,7 @@ async def test_unknown_browser_fields_fail_typed_ingress(tmp_path: Path) -> None
     manager = Manager(tmp_path)
     operations = RunnerOperations(
         client=sink,
-        browser_manager=manager,
+        browser_manager=await configured_manager(manager),
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
     )

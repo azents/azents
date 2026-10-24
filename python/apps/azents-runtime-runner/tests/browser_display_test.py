@@ -5,7 +5,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from azents_runtime_control.browser_contract import BrowserAuthority, BrowserOpenCommand
+from patchright.async_api import Error
 
 import azents_runtime_runner.browser as browser_module
 import azents_runtime_runner.browser_display as display_module
@@ -125,7 +127,10 @@ async def test_failed_browser_initialization_releases_owned_display(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, display_failure: bool
 ) -> None:
     manager = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=BrowserImplementation.PATCHRIGHT,
     )
     start = AsyncMock(
         side_effect=(
@@ -137,9 +142,7 @@ async def test_failed_browser_initialization_releases_owned_display(
     monkeypatch.setattr(manager.display, "start", start)
     monkeypatch.setattr(manager.display, "close", close)
     driver = MagicMock()
-    driver.chromium.launch = AsyncMock(
-        side_effect=browser_module.Error("Synthetic launch failure")
-    )
+    driver.chromium.launch = AsyncMock(side_effect=Error("Synthetic launch failure"))
     driver.stop = AsyncMock()
     entrypoint = MagicMock()
     entrypoint.start = AsyncMock(return_value=driver)

@@ -150,12 +150,19 @@ WORKDIR /workspace/python/apps/azents-runtime-runner
 COPY python/apps/azents-runtime-runner/pyproject.toml ./
 COPY python/apps/azents-runtime-runner/uv.lock ./
 COPY python/libs/azents-runtime-control /workspace/python/libs/azents-runtime-control
-COPY python/apps/azents-runtime-runner/src ./src
+COPY python/apps/azents-runtime-runner/src/azents_runtime_runner/__init__.py \
+     python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_camoufox.py \
+     python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_install.py \
+     ./src/azents_runtime_runner/
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/azents-browsers
 RUN uv sync --frozen --no-dev \
     && uv run --no-dev patchright install --with-deps chromium \
-    && chmod -R a+rX /opt/azents-browsers
+    && uv run --no-dev playwright install-deps firefox \
+    && uv run --no-dev python -m azents_runtime_runner.browser_install \
+    && chmod -R a+rX /opt/azents-browsers .venv/share/azents-browsers
+
+COPY python/apps/azents-runtime-runner/src ./src
 
 COPY python/apps/azents-runtime-runner/docker/azents-git-credential.sh /usr/local/bin/azents-git-credential
 RUN chmod +x /usr/local/bin/azents-git-credential \

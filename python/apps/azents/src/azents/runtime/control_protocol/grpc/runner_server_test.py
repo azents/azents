@@ -402,6 +402,8 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
         owner_replica_id="control-a",
         consumer_id="consumer-1",
         runner_authenticator=FakeRunnerAuthenticator(),
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=sink,
         stream_session_offer_provider=_NoStreamOfferProvider(),
     )
@@ -452,6 +454,8 @@ async def test_transfer_result_rejects_unbounded_identity_before_store_lookup() 
         owner_replica_id="control-a",
         consumer_id="consumer-1",
         runner_authenticator=FakeRunnerAuthenticator(),
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=sink,
         stream_session_offer_provider=_NoStreamOfferProvider(),
     )
@@ -827,6 +831,8 @@ async def test_runner_grpc_isolates_metrics_store_failure_from_heartbeat() -> No
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
         runner_authenticator=FakeRunnerAuthenticator(),
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=RecordingTransferResultSink(),
         stream_session_offer_provider=_NoStreamOfferProvider(),
         operation_block_ms=1,
@@ -1339,6 +1345,8 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
         runner_authenticator=FakeRunnerAuthenticator(),
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=RecordingTransferResultSink(),
         stream_session_offer_provider=_NoStreamOfferProvider(),
     )
@@ -1356,6 +1364,7 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
             ),
             runtime_id="runtime-1",
             generation=1,
+            browser_intents={},
             active_transfer_dispatches={},
         )
     )
@@ -1384,6 +1393,8 @@ async def test_runner_operation_relay_checks_authority_before_claim() -> None:
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
         runner_authenticator=authenticator,
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=RecordingTransferResultSink(),
         stream_session_offer_provider=_NoStreamOfferProvider(),
     )
@@ -1393,6 +1404,7 @@ async def test_runner_operation_relay_checks_authority_before_claim() -> None:
         authentication=authenticator.credential,
         runtime_id="runtime-1",
         generation=1,
+        browser_intents={},
         active_transfer_dispatches={},
     )
 
@@ -1452,6 +1464,8 @@ async def test_runner_transfer_relay_deduplicates_only_identical_intent() -> Non
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
         runner_authenticator=authenticator,
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=RecordingTransferResultSink(),
         stream_session_offer_provider=_NoStreamOfferProvider(),
     )
@@ -1461,6 +1475,7 @@ async def test_runner_transfer_relay_deduplicates_only_identical_intent() -> Non
             authentication=authenticator.credential,
             runtime_id="runtime-1",
             generation=1,
+            browser_intents={},
             active_transfer_dispatches={dispatch_key: fingerprint},
         )
     )
@@ -1490,6 +1505,8 @@ async def test_runner_transfer_relay_fails_closed_on_conflicting_duplicate() -> 
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
         runner_authenticator=authenticator,
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=RecordingTransferResultSink(),
         stream_session_offer_provider=_NoStreamOfferProvider(),
     )
@@ -1500,6 +1517,7 @@ async def test_runner_transfer_relay_fails_closed_on_conflicting_duplicate() -> 
             authentication=authenticator.credential,
             runtime_id="runtime-1",
             generation=1,
+            browser_intents={},
             active_transfer_dispatches={
                 dispatch_key: ("other-request", "file.transfer.v1", "reply-1", b"")
             },
@@ -1563,6 +1581,8 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
         runner_authenticator=authenticator,
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=sink,
         stream_session_offer_provider=_NoStreamOfferProvider(),
     )
@@ -1589,6 +1609,8 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
         authentication=authenticator.credential,
         runtime_id="runtime-1",
         generation=1,
+        browser_intents={},
+        browser_reconcile_event=None,
         active_transfer_dispatches=tombstones,
     )
 
@@ -2444,6 +2466,36 @@ async def test_runner_control_reissues_stream_session_offer_for_current_generati
     assert provider.calls[:2] == [("runtime-1", 3), ("runtime-1", 3)]
 
 
+async def test_browser_reconciliation_waits_for_report_signal() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    servicer = _servicer(service, store, FakeStateSink())
+    changed, called = asyncio.Event(), asyncio.Event()
+    calls: list[tuple[str, int]] = []
+
+    class Reconciler:
+        async def reconcile_runtime(
+            self, runtime_id: str, runner_generation: int
+        ) -> None:
+            calls.append((runtime_id, runner_generation))
+            called.set()
+
+    servicer.browser_reconciler = Reconciler()
+    task = asyncio.create_task(
+        servicer._reconcile_browser(changed, runtime_id="runtime-1", generation=7)
+    )
+    try:
+        assert not calls
+        changed.set()
+        async with asyncio.timeout(1):
+            await called.wait()
+        assert calls == [("runtime-1", 7)]
+        assert not task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 def _servicer(
     service: RuntimeControlProtocolService,
     store: InMemoryRuntimeCoordinationStore,
@@ -2460,6 +2512,8 @@ def _servicer(
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
         runner_authenticator=runner_authenticator or FakeRunnerAuthenticator(),
+        browser_configuration=None,
+        browser_reconciler=None,
         transfer_result_sink=RecordingTransferResultSink(),
         stream_session_offer_provider=(
             stream_session_offer_provider or _NoStreamOfferProvider()

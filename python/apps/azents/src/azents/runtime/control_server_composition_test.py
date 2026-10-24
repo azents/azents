@@ -404,7 +404,9 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         assert isinstance(
             owner_registry, control_server.RuntimeStreamOwnerSessionRegistry
         )
-        assert read_factory_engines == [engine, engine, engine, engine, engine]
+        assert read_factory_engines == [engine] * 6
+        assert runner["browser_configuration"] is not None
+        assert runner["browser_reconciler"] is not None
         browser_source = dict(registrations)["browser-source"]
         browser_scope = browser_source["validate_scope"]
         assert isinstance(browser_scope, DatabaseRuntimeBrowserStreamScopeValidator)

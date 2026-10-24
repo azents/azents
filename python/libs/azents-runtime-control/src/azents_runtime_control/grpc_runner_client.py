@@ -1322,7 +1322,11 @@ def _copy_final_success(
     message: runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload,
     payload: Mapping[str, JsonValue],
 ) -> None:
-    if "tasks" in payload or "action_state" in payload:
+    if (
+        "tasks" in payload
+        or "action_state" in payload
+        or "browser_configuration" in payload
+    ):
         message.browser.canonical_result = browser_result_to_wire(payload)
         return
     if "process_observation" in payload:

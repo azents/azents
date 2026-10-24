@@ -49,6 +49,7 @@ interface AgentRuntimeSettingsProps {
   handle: string;
   agent: AgentResponse;
   environmentVariables?: React.ReactNode;
+  browserConfiguration?: React.ReactNode;
   state: AgentRuntimeSettingsState;
   metricsState: RuntimeSystemMetricsOverviewState;
   selectedProfileId: string | null;
@@ -685,6 +686,7 @@ function RemovingView({
 export function AgentRuntimeSettings({
   agent,
   environmentVariables,
+  browserConfiguration,
   state,
   metricsState,
   selectedProfileId,
@@ -826,6 +828,7 @@ export function AgentRuntimeSettings({
             />
           </Paper>
         ) : null}
+        {browserConfiguration}
         {runtime.capability === "managed" ? (
           <ManagedView
             readOnly={readOnly}

@@ -82,7 +82,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-22
+last_verified_at: 2026-10-23
 spec_version: 45
 ---
 
@@ -102,8 +102,12 @@ commands, manifest, and package cache under the existing persistent Runner
 ## Session Browser native state
 
 The product Browser uses a native persistent context/profile for each concrete
-Session under the current Runner-reported Workspace. Tasks within that Session
-reuse site state; distinct Sessions do not share a browser context. Existing
+Session and selected engine under the current Runner-reported Workspace. Tasks
+within that Session/engine reuse site state; distinct Sessions or engines do not
+share a browser context. Patchright retains its existing profile location and
+Camoufox uses a separate engine-specific location without profile migration.
+Switching engines retires live browser identities but keeps both profiles and
+does not recreate the Runtime or stop unrelated shells/jobs. Existing
 Runtime storage persistence owns the bytes, not a server checkpoint or profile
 export/restore service.
 

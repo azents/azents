@@ -39,6 +39,10 @@ from azents_runtime_control.browser_contract import (
     encode_browser_command,
     encode_browser_result,
 )
+from azents_runtime_control.browser_runner_wire import (
+    decode_configured_browser_command,
+    encode_configured_browser_command,
+)
 from azents_runtime_control.grpc_runner_client import GrpcRunnerControlClient
 from azents_runtime_control.grpc_runner_transfer_client import (
     GrpcRunnerTransferClient,
@@ -399,6 +403,14 @@ class _NoStreamSessionOfferProvider:
         del runtime_id, runner_generation
 
 
+class _BrowserIntentReader:
+    async def current_intent(
+        self, runtime_id: str, runner_generation: int, *, require_ready: bool
+    ) -> str | None:
+        assert runtime_id == "runtime-1" and runner_generation > 0
+        return "browser-intent-1"
+
+
 class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
     def __init__(
         self,
@@ -419,6 +431,8 @@ class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
             runner_authenticator=runner_authenticator,
+            browser_configuration=_BrowserIntentReader(),
+            browser_reconciler=None,
             transfer_result_sink=_TransferResultSink(),
             stream_session_offer_provider=_NoStreamSessionOfferProvider(),
             operation_block_ms=operation_block_ms,
@@ -1308,6 +1322,7 @@ async def test_browser_command_and_result_cross_real_runner_grpc(
             "action": action,
         }
     command = decode_browser_command(operation_type, payload)
+    payload = encode_configured_browser_command("browser-intent-1", command)
     page = BrowserPage(
         "page-1",
         "task-1",
@@ -1387,7 +1402,11 @@ async def test_browser_command_and_result_cross_real_runner_grpc(
         assert delivered.operation_type == operation_type
         assert delivered.owner_session_id == authority.session_id
         assert delivered.payload == payload
-        assert decode_browser_command(operation_type, delivered.payload) == command
+        configured = decode_configured_browser_command(
+            operation_type, delivered.payload
+        )
+        assert configured.intent_id == "browser-intent-1"
+        assert configured.command == command
         assert await asyncio.wait_for(
             client.start_runner_operation(delivered), timeout=3
         )

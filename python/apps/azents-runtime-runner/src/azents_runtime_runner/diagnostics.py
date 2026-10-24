@@ -28,6 +28,7 @@ class RunnerDiagnosticReason(enum.StrEnum):
     TRANSFER_RENEWAL_FAILED = "direct_claim_renewal_failed"
     TERMINAL_ADMISSION_FAILED = "runner_terminal_admission_failed"
     OPERATION_FAILED = "runner_operation_failed"
+    BROWSER_APPLICATION_FAILED = "runner_browser_application_failed"
     OPERATION_CLEANUP_TIMED_OUT = "runner_operation_cleanup_timed_out"
 
 

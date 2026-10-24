@@ -16,6 +16,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.browser_configuration import BrowserConfigurationRepository
 from azents.repos.runtime_browser_authority_read import (
     RuntimeBrowserAuthorityReadRepository,
 )
@@ -58,11 +59,15 @@ def get_runtime_browser_authority_resolver(
     working_folder_service: Annotated[
         SessionWorkingFolderBindingService, Depends(SessionWorkingFolderBindingService)
     ],
+    browser_configuration: Annotated[
+        BrowserConfigurationRepository, Depends(BrowserConfigurationRepository)
+    ],
 ) -> DatabaseRuntimeBrowserAuthorityResolver:
     return DatabaseRuntimeBrowserAuthorityResolver(
         authority_repository=authority_repository,
         runtime_coordination=runtime_coordination,
         working_folder_service=working_folder_service,
+        browser_configuration=browser_configuration,
     )
 
 
@@ -136,7 +141,12 @@ def build_runtime_browser_stream_scope_validator(
     return DatabaseRuntimeBrowserStreamScopeValidator(
         authority_repository=repository,
         authority_resolver=DatabaseRuntimeBrowserAuthorityResolver(
-            repository, runtime_coordination, folders
+            repository,
+            runtime_coordination,
+            folders,
+            BrowserConfigurationRepository(
+                read_session_manager, session_manager, RuntimeProfileRepository()
+            ),
         ),
         runner_operations=runner_operations,
         clock=_utc_now,
