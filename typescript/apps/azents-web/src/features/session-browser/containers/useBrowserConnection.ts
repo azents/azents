@@ -314,7 +314,7 @@ export function useBrowserConnection(
   const coordinate = useCallback(
     (frame: BrowserFrame, action: BrowserCoordinateAction): boolean =>
       !latest.current.readOnly &&
-      (client.current?.coordinate(frame, action) ?? false),
+      (client.current?.coordinateFromEvent(frame, action) ?? false),
     [],
   );
   const openField = useCallback(

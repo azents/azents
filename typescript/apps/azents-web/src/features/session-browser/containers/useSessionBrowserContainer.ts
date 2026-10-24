@@ -374,6 +374,7 @@ export function useSessionBrowserContainer(
       !readOnly &&
       focused &&
       fieldEditor.controls.draft === null &&
+      !live.state.navigationPending &&
       state.type === "READY" &&
       !mutationPending &&
       query.data?.allow_input === true &&
@@ -492,7 +493,7 @@ export function useSessionBrowserContainer(
     source !== null &&
     status !== null &&
     browserFrameMatchesStatus(source, status) &&
-    live.state.pendingInputs === 0;
+    !live.state.navigationPending;
   const navigate = (action: BrowserNavigationAction): void => {
     if (!navigationEnabled) {
       return;

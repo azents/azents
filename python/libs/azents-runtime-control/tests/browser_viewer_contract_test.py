@@ -21,6 +21,7 @@ from azents_runtime_control.browser_viewer_contract import (
     ViewerPointer,
     ViewerSource,
     ViewerTarget,
+    ViewerTextEdit,
     decode_viewer_editables,
     decode_viewer_field_attributes,
     decode_viewer_frame,
@@ -105,6 +106,24 @@ def test_request_roundtrip_and_read_only_frame_ack() -> None:
     assert decode_viewer_request(
         b'{"type":"frame_ack","attachment_id":"a","frame_sequence":1}'
     ) == ViewerFrameAck("a", 1)
+
+
+@pytest.mark.parametrize("count", [1, 32768])
+def test_native_text_edit_is_bounded_and_has_no_remote_snapshot(count: int) -> None:
+    payload = _input()
+    payload["action"] = {"kind": "text_edit", "delete_before": count, "text": "한"}
+    parsed = decode_viewer_request(json.dumps(payload).encode())
+    assert isinstance(parsed, ViewerInput)
+    assert parsed.action == ViewerTextEdit(count, "한")
+    assert "한" not in repr(parsed.action)
+
+
+@pytest.mark.parametrize("count", [0, -1, 32769, True, 1.5, "1"])
+def test_native_text_edit_rejects_invalid_delete_count(count: object) -> None:
+    payload = _input()
+    payload["action"] = {"kind": "text_edit", "delete_before": count, "text": ""}
+    with pytest.raises(BrowserViewerContractError):
+        decode_viewer_request(json.dumps(payload).encode())
 
 
 @pytest.mark.parametrize(

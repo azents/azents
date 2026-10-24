@@ -66,6 +66,12 @@ class ViewerComposition:
 
 
 @dataclass(frozen=True)
+class ViewerTextEdit:
+    delete_before: int
+    text: str = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ViewerPaste:
     editable_id: str
     text: str
@@ -142,6 +148,7 @@ type ViewerAction = (
     | ViewerWheel
     | ViewerKey
     | ViewerComposition
+    | ViewerTextEdit
     | ViewerPaste
     | ViewerFieldOpen
     | ViewerFieldReplace
@@ -503,6 +510,12 @@ def _action(value: object) -> ViewerAction:
                     "Invalid Browser composition combination"
                 )
             return ViewerComposition(phase, text)
+        case "text_edit":
+            fields = _Fields(value, {"kind", "delete_before", "text"})
+            return ViewerTextEdit(
+                fields.integer("delete_before", 32768),
+                fields.text("text", 32768, empty=True),
+            )
         case "paste":
             fields = _Fields(value, {"kind", "editable_id", "text"})
             return ViewerPaste(

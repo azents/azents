@@ -71,13 +71,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/components/BrowserKeyboardToolbar.tsx
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserConnection.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserInteraction.ts
+  - typescript/apps/azents-web/src/features/session-browser/native-text.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserTouchView.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserDirectTouch.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserTouchView.ts
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-23
+last_verified_at: 2026-10-24
 spec_version: 1
 ---
 
@@ -205,6 +206,22 @@ The source uses existing Owner/relay routing, flow control, capacity, lease/fing
 
 ## Live Panel and Input
 
+Local keyboard receivers retain only their own transient typed text tail while
+focused. Ordinary input is reconciled against that tail rather than clearing the
+textarea after every event. This preserves native Korean replacement on iOS,
+including insert/delete sequences without composition events. Composition commits
+and their following duplicate input event insert text once. A changed tail uses
+grapheme-aware suffix replacement: the closed `text_edit` action carries a positive
+`delete_before` count (at most 32,768) and replacement text (at most 32,768
+characters), never a remote field snapshot. The Runner selects the native preceding cursor units and applies Backspace
+and insertion under one task interaction guard and a ten-second effect deadline.
+Selection avoids treating Firefox's partial emoji Backspace as deletion of a whole
+local grapheme.
+Partial/unknown effects are not replayed. Held input conflicts, source fences and
+the whole-message bound still apply. Local blur/cancellation, receiver change,
+remote caret/key chords, document/attachment changes and access loss discard the
+tail. Typed text is absent from React state, telemetry and history.
+
 The address field requests the native URL keyboard through URL type/input mode,
 with capitalization, autocorrect and spellcheck disabled. Exact shortcut keys
 remain an OS/keyboard choice.
@@ -213,7 +230,7 @@ The panel validates the first status against its exact selected target and attac
 
 The supporting panel presents browser-style tabs above address/navigation chrome and an unframed live image. Controls retain internal padding; the image has no outer margin or decorative border. Preview content does not send remote input: activation opens focused viewing and consumes that gesture locally. Authorized input participants can enter an HTTP(S) address, go back or forward in the selected page's native history, and reload the actual page. The address field smoothly expands while focused by collapsing the preceding navigation controls and restores on blur/submission; reduced motion disables the transition. Address drafts are volatile, cleared on blur/target change/submission, and never form an input history. Unsupported schemes and embedded user credentials are rejected. Read-only viewers cannot edit or navigate. Connection refresh is separately labelled and does not claim to reload the site. No standalone page-text entry form is shown.
 
-Navigation is one closed admitted viewer input carrying the same current acknowledged source and sequence. The Runner checks input permission, current source/target/generation and actual held-input conflict before invoking its existing structured navigation/dialog handler. In-flight input blocks another UI navigation without queuing it. New navigation invalidates prior displayed-frame input until the current image is acknowledged; lost actions are not replayed.
+Navigation is one closed admitted viewer input carrying the same current acknowledged source and sequence. The Runner checks input permission, current source/target/generation and actual held-input conflict before invoking its existing structured navigation/dialog handler. Ordinary typing acknowledgements do not toggle navigation controls or address editability. One explicit navigation intent may wait locally for already-sent input and cleanup acknowledgements; further effect-bearing input and a second navigation are blocked while it drains or executes. It is sent once only if those acknowledgements succeed in the same live page/document/geometry scope. Rejection, unknown outcome, dialog/conflict, document change or disconnect discards an unsent intent; reconnection never replays it. New navigation invalidates prior displayed-frame input until the current image is acknowledged; lost actions are not replayed.
 
 Main-page navigation changes the viewer navigation identity. Subframe navigation
 invalidates that frame's element references without replacing the main-page viewer
@@ -228,9 +245,9 @@ Focused viewing can explicitly enable direct touch from the existing upper Brows
 
 A second finger, movement outside the displayed image, pointer cancellation/capture loss, or explicit release ends a direct press without synthesizing another click. After interruption, remaining contacts must lift before a new press. Blur/background, focused-view exit, attachment/document changes, access loss and disconnect clean up and reset to normal touch browsing; ordinary frame updates do not reset the mode. Uncertain or rejected actions are not replayed. Release ends held input, not site effects already caused by pressing or dropping. Zoom/navigation cannot overlap an active direct touch press. Keyboard/edit/paste and mouse input otherwise retain their existing contracts.
 
-Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. Each frame carries at most sixteen content-free native editable rectangles with document-local identity and input mode. Native input/textarea receivers use an inner rectangle inscribed within computed rounded corners, including normalized percentage/elliptical radii. Clipping and corner/edge-midpoint/center hit tests apply to the published receiver, so noninteractive rounded corner pixels do not exclude an otherwise eligible field and overlays are not accepted by a center-only test. Unknown radius geometry fails closed. Bounded open-shadow and untransformed iframe traversal excludes disabled, read-only, occluded, clipped-away and uncertain targets. Unstable capture geometry omits receivers while streaming the image. Local transparent textareas retain identity across ordinary frame/visual-viewport updates and retire on document/attachment changes. The visually hidden generic receiver defaults to `inputmode=none`; it remains the viewport's keyboard stop and physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key.
+Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. Synchronous DOM input resolves the latest actually displayed frame at event dispatch, even when React still holds an earlier render's frame number. This is allowed only within the same attachment, task/page/incarnation, document and dimensions; decoding-only replacement images and stale geometry never authorize input. Explicit frame-bound operations retain their exact source checks. Each frame carries at most sixteen content-free native editable rectangles with document-local identity and input mode. Native input/textarea receivers use an inner rectangle inscribed within computed rounded corners, including normalized percentage/elliptical radii. Clipping and corner/edge-midpoint/center hit tests apply to the published receiver, so noninteractive rounded corner pixels do not exclude an otherwise eligible field and overlays are not accepted by a center-only test. Unknown radius geometry fails closed. Bounded open-shadow and untransformed iframe traversal excludes disabled, read-only, occluded, clipped-away and uncertain targets. Unstable capture geometry omits receivers while streaming the image. Local transparent textareas retain identity across ordinary frame/visual-viewport updates and retire on document/attachment changes. The visually hidden generic receiver defaults to `inputmode=none`; it remains the viewport's keyboard stop and physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key.
 
-Focused viewing provides a Show keyboard action independently of native editable membership. In the explicit trusted click/touch gesture it synchronously focuses the local generic receiver with textual input mode; it does not click, refind or move remote focus. Subsequent text follows the existing source-fenced direct-input stream to the remote page's current focus. A separate stable generic receiver reference avoids activating a previously selected field overlay by mistake. Local blur, target/document/attachment change, hidden page, access loss, disconnect and unmount reset its mode and contents; streaming frame-sequence changes alone do not. Existing input authority, active-dialog and stale-image checks govern activation. The action does not grant unrecognized targets private Edit/Paste eligibility, read values, retain a preference or repair direct multilingual IME. Native software keyboard availability remains browser/OS controlled.
+Focused viewing provides a Show keyboard action independently of native editable membership. In the explicit trusted click/touch gesture it synchronously focuses the local generic receiver with textual input mode; it does not click, refind or move remote focus. Subsequent text follows the existing source-fenced direct-input stream to the remote page's current focus. A separate stable generic receiver reference avoids activating a previously selected field overlay by mistake. Local blur, target/document/attachment change, hidden page, access loss, disconnect and unmount reset its mode and contents; streaming frame-sequence changes alone do not. Existing input authority, active-dialog and stale-image checks govern activation. The action does not grant unrecognized targets private Edit/Paste eligibility, read values or retain a preference. Native software keyboard availability remains browser/OS controlled.
 
 With Patchright, plain unmodified viewer clicks nominate only their initiating attachment for a one-shot native popup selection hint. Other attachments/reconnections do not receive that preference. Modifier/middle-click background intent does not nominate a foreground selection. The web refreshes projection and selects the opened tab only while the originating tab remains selected; explicit user tab choice cancels pending preference. Camoufox registers native popup tabs but leaves foreground selection to the user; it does not construct the Chromium popup tracker. Explicit Agent `expect=popup` still associates the popup with its trigger.
 

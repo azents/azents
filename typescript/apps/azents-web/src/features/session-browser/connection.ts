@@ -2,6 +2,7 @@ import {
   browserDialogInput,
   browserFrameMatchesStatus,
   browserInput,
+  browserReleaseFrame,
   sameBrowserTarget,
 } from "./input.ts";
 import { decodeBrowserFrame, decodeBrowserText } from "./wire.ts";
@@ -13,6 +14,7 @@ import type {
   BrowserFrame,
   BrowserImage,
   BrowserInput,
+  BrowserNavigationAction,
   BrowserStatus,
   BrowserTarget,
 } from "./types";
@@ -26,6 +28,7 @@ export interface BrowserLiveState {
   conflict: boolean;
   outcomeUnknown: boolean;
   pendingInputs: number;
+  navigationPending: boolean;
 }
 
 export const emptyBrowserLiveState: BrowserLiveState = {
@@ -36,11 +39,20 @@ export const emptyBrowserLiveState: BrowserLiveState = {
   conflict: false,
   outcomeUnknown: false,
   pendingInputs: 0,
+  navigationPending: false,
 };
 
 export interface BrowserImageUrls {
   create: (jpeg: Uint8Array<ArrayBuffer>) => string;
   revoke: (url: string) => void;
+}
+
+function browserCleanupAction(action: BrowserCoordinateAction): boolean {
+  return (
+    (action.kind === "pointer" && action.phase === "cancel") ||
+    (action.kind === "composition" && action.phase === "cancel") ||
+    (action.kind === "key" && action.phase === "up")
+  );
 }
 
 /** One attachment owns the displayed image plus at most one decoding replacement. */
@@ -50,6 +62,11 @@ export class BrowserConnection {
   private nextSequence = 1;
   private lastAcknowledged = 0;
   private lastFrame = 0;
+  private navigation: {
+    frame: BrowserFrame;
+    action: BrowserNavigationAction;
+    sequence: number | null;
+  } | null = null;
   private displayedImageUrl: string | null = null;
   private field: { editableId: string; editId: string | null } | null = null;
   private openedField: BrowserFieldValue | null = null;
@@ -112,6 +129,15 @@ export class BrowserConnection {
         this.current.status.viewport.width !== event.viewport.width ||
         this.current.status.viewport.height !== event.viewport.height;
       if (
+        changedNavigation ||
+        event.state !== "connected" ||
+        !event.allow_input ||
+        event.dialog !== null ||
+        event.conflict
+      ) {
+        this.navigation = null;
+      }
+      if (
         (this.field !== null || this.fieldPending !== null) &&
         (changedNavigation ||
           !event.allow_input ||
@@ -140,6 +166,7 @@ export class BrowserConnection {
             ? null
             : this.current.displayed,
         conflict: event.conflict,
+        navigationPending: this.navigation !== null,
       });
       return true;
     }
@@ -165,6 +192,14 @@ export class BrowserConnection {
       return true;
     }
     this.lastAcknowledged = event.sequence;
+    const navigationSequence = this.navigation?.sequence;
+    if (
+      !event.accepted ||
+      event.outcome !== "dispatched" ||
+      (navigationSequence != null && event.sequence >= navigationSequence)
+    ) {
+      this.navigation = null;
+    }
     if (
       this.fieldPending !== null &&
       event.sequence >= this.fieldPending.sequence
@@ -220,9 +255,21 @@ export class BrowserConnection {
     this.update({
       conflict: event.reason_code === "browser_input_conflict",
       pendingInputs: this.nextSequence - 1 - this.lastAcknowledged,
+      navigationPending: this.navigation !== null,
       outcomeUnknown:
         this.current.outcomeUnknown || event.outcome === "outcome_unknown",
     });
+    const navigation = this.navigation;
+    if (
+      navigation !== null &&
+      navigation.sequence === null &&
+      this.current.pendingInputs === 0
+    ) {
+      this.navigation = null;
+      if (!this.coordinateInput(navigation.frame, navigation.action)) {
+        this.update({ navigationPending: false, conflict: true });
+      }
+    }
     return true;
   }
 
@@ -338,22 +385,37 @@ export class BrowserConnection {
     return this.coordinateInput(frame, action);
   }
 
+  /** DOM events hit the currently displayed pixels, not a prior React closure. */
+  public coordinateFromEvent(
+    rendered: BrowserFrame,
+    action: BrowserCoordinateAction,
+  ): boolean {
+    const displayed = this.current.displayed;
+    if (
+      displayed === null ||
+      rendered.frame_sequence > displayed.frame_sequence ||
+      browserReleaseFrame(rendered, displayed) !== displayed
+    ) {
+      // Strict cleanup retires an attachment if its original scope is gone.
+      return browserCleanupAction(action) && this.coordinate(rendered, action);
+    }
+    return this.coordinate(displayed, action);
+  }
+
   private coordinateInput(
     frame: BrowserFrame,
     action: BrowserCoordinateAction,
   ): boolean {
     const displayed = this.current.displayed;
-    const cleanup =
-      (action.kind === "pointer" && action.phase === "cancel") ||
-      (action.kind === "composition" && action.phase === "cancel") ||
-      (action.kind === "key" && action.phase === "up");
+    const cleanup = browserCleanupAction(action);
     if (
-      (action.kind === "navigation" && this.current.pendingInputs > 0) ||
+      (this.navigation !== null && !cleanup) ||
       displayed === null ||
       this.current.status === null ||
       (action.kind !== "navigation" &&
         action.kind !== "key" &&
         action.kind !== "composition" &&
+        action.kind !== "text_edit" &&
         !cleanup &&
         displayed.frame_sequence !== frame.frame_sequence) ||
       displayed.attachment_id !== frame.attachment_id ||
@@ -368,9 +430,29 @@ export class BrowserConnection {
       }
       return false;
     }
-    const sent = this.input(
-      browserInput(displayed, this.current.status, this.nextSequence, action),
+    const request = browserInput(
+      displayed,
+      this.current.status,
+      this.nextSequence,
+      action,
     );
+    if (action.kind === "navigation" && request !== null) {
+      this.navigation = {
+        frame: displayed,
+        action,
+        sequence: this.current.pendingInputs === 0 ? this.nextSequence : null,
+      };
+      this.update({ navigationPending: true });
+      // Drain already-sent input and cleanup before this single explicit intent.
+      if (this.current.pendingInputs > 0) {
+        return true;
+      }
+    }
+    const sent = this.input(request);
+    if (!sent && action.kind === "navigation") {
+      this.navigation = null;
+      this.update({ navigationPending: false });
+    }
     if (!sent && cleanup && this.active) {
       this.disconnect(false);
       this.interrupted("transport");
@@ -401,6 +483,7 @@ export class BrowserConnection {
     }
     this.invalidateField(this.fieldPending?.kind === "field_replace");
     this.active = false;
+    this.navigation = null;
     const unknown =
       this.current.outcomeUnknown ||
       this.nextSequence - 1 > this.lastAcknowledged;
@@ -425,11 +508,13 @@ export class BrowserConnection {
       image: clear ? null : this.current.image,
       outcomeUnknown: unknown,
       pendingInputs: 0,
+      navigationPending: false,
     });
   }
 
   public dispose(): void {
     this.active = false;
+    this.navigation = null;
     this.invalidateField(this.fieldPending?.kind === "field_replace");
     if (this.current.image !== null) {
       this.images.revoke(this.current.image.url);

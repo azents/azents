@@ -2330,6 +2330,7 @@ export const LongLabels = {
   },
 } satisfies Story;
 export const KeyboardAndComposition = {
+  tags: ["ci-contract"],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
@@ -2349,11 +2350,11 @@ export const KeyboardAndComposition = {
     actions.mockClear();
     await fireEvent.compositionStart(keyboard);
     await fireEvent.input(keyboard, {
-      target: { value: "한" },
+      target: { value: "x한" },
       isComposing: true,
     });
     await fireEvent.compositionEnd(keyboard, { data: "한" });
-    await fireEvent.input(keyboard, { target: { value: "한" }, data: "한" });
+    await fireEvent.input(keyboard, { target: { value: "x한" }, data: "한" });
     await expect(actions).toHaveBeenCalledTimes(2);
     await expect(actions).toHaveBeenLastCalledWith(frame, {
       kind: "composition",
@@ -2364,7 +2365,63 @@ export const KeyboardAndComposition = {
     await expect(keyboard).not.toHaveFocus();
   },
 } satisfies Story;
+export const KoreanWithoutCompositionEvents = {
+  tags: ["ci-contract"],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const keyboard = canvas.getByRole("textbox", {
+      name: "Remote browser keyboard",
+    });
+    await clickBrowserViewport(
+      canvas.getByRole("region", { name: "Remote browser page" }),
+    );
+    actions.mockClear();
+    await fireEvent.input(keyboard, {
+      target: { value: "ㅇ" },
+      data: "ㅇ",
+      inputType: "insertText",
+    });
+    await expect(keyboard).toHaveValue("ㅇ");
+    // iOS Korean replaces an ordinary insertion, without isComposing.
+    await fireEvent(
+      keyboard,
+      new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "deleteContentBackward",
+      }),
+    );
+    await expect(keyboard).toHaveValue("ㅇ");
+    await fireEvent.input(keyboard, {
+      target: { value: "" },
+      inputType: "deleteContentBackward",
+    });
+    await fireEvent.input(keyboard, {
+      target: { value: "아" },
+      data: "아",
+      inputType: "insertText",
+    });
+    await expect(keyboard).toHaveValue("아");
+    await expect(actions.mock.calls.map(([, action]) => action)).toEqual([
+      { kind: "composition", phase: "start", text: null },
+      { kind: "composition", phase: "commit", text: "ㅇ" },
+      { kind: "text_edit", delete_before: 1, text: "" },
+      { kind: "composition", phase: "start", text: null },
+      { kind: "composition", phase: "commit", text: "아" },
+    ]);
+    actions.mockClear();
+    if (keyboard instanceof HTMLTextAreaElement) {
+      keyboard.setSelectionRange(keyboard.value.length, keyboard.value.length);
+    }
+    await userEvent.keyboard("{Backspace}");
+    await expect(keyboard).toHaveValue("");
+    await expect(actions).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard("{Tab}");
+    await expect(keyboard).not.toHaveFocus();
+  },
+} satisfies Story;
 export const CancelledCompositionDoesNotCommit = {
+  tags: ["ci-contract"],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
