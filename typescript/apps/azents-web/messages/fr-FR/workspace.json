@@ -1316,7 +1316,6 @@
         "label": "Moteur du navigateur",
         "patchright": "Patchright (par défaut)",
         "camoufox": "Camoufox (expérimental)",
-        "experimental": "Camoufox est expérimental. Sélectionnez les onglets des fenêtres contextuelles manuellement.",
         "loadError": "Paramètres du navigateur indisponibles",
         "refresh": "Actualiser l’état",
         "saving": "Enregistrement du choix du navigateur…",

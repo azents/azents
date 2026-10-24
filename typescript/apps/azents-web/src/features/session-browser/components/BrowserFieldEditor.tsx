@@ -223,7 +223,6 @@ export function BrowserFieldEditorView({
                     >
                       {t("paste")}
                     </Button>
-                    <Text size="xs">{t("fieldEditorOneShot")}</Text>
                   </Group>
                 </Stack>
               </Box>

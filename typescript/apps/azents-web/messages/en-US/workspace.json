@@ -1316,7 +1316,6 @@
         "label": "Browser engine",
         "patchright": "Patchright (default)",
         "camoufox": "Camoufox (experimental)",
-        "experimental": "Camoufox is experimental. Select popup tabs manually.",
         "loadError": "Browser settings unavailable",
         "refresh": "Refresh status",
         "saving": "Saving browser choice…",
