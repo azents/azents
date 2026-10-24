@@ -77,7 +77,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-24
+last_verified_at: 2026-10-25
 spec_version: 1
 ---
 
@@ -387,6 +387,11 @@ Runner final failures map to typed, non-secret tool errors. The Engine validates
 One RunnerBrowserManager belongs to the current Runner connection lifecycle. Registration advertises `browser.v1` only when product browser initialization succeeds; browser unavailability does not stop independent Runner capabilities. Commands validate the current Runtime and accepted Runner generation before resource execution.
 
 Each concrete Session and selected engine has a separate native persistent BrowserContext/profile under the current Runner Workspace. Tasks within that Session/engine reuse its site state. Existing Patchright profiles retain their location; Camoufox uses a distinct engine-specific location. Session working-folder association cannot change during a live manager's identity. Task-owned pages/popups and frames remain in a live registry with exact resource incarnations, not a durable help/task ownership table.
+
+Camoufox fixes its content coordinate plane at 1280×800 CSS pixels and its native
+outer window at 1280×900, leaving room for browser chrome. Generated fingerprint
+window dimensions cannot shrink the native window and clip input that is inside
+the SDK viewport. Patchright retains its existing native sizing behavior.
 
 Native profile bytes remain under existing Runtime persistence; manager/Runner shutdown closes live contexts and invalidates handles without deleting those bytes. Normal Run completion is not profile cleanup. No backup, profile export/replay, retention sweeper or restoration of old live pages exists. Task/page close affects only the intended task resources, not all contexts or other Sessions.
 

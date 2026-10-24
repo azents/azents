@@ -91,9 +91,14 @@ async def open_camoufox_context(
         proxy=proxy,
         firefox_user_prefs=_proxy_preferences(proxy),
         accept_downloads=True,
-        # Match the public window configuration to the SDK coordinate plane;
-        # Juggler otherwise waits for a size the spoofed window cannot report.
-        config={"window.innerWidth": 1280, "window.innerHeight": 800},
+        # Keep the native window large enough for the fixed SDK input plane.
+        # A generated smaller outer window clips otherwise valid native clicks.
+        config={
+            "window.outerWidth": 1280,
+            "window.outerHeight": 900,
+            "window.innerWidth": 1280,
+            "window.innerHeight": 800,
+        },
         viewport={"width": 1280, "height": 800},
     )
     if not isinstance(context, BrowserContext):
