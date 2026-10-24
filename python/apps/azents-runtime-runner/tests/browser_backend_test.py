@@ -117,7 +117,7 @@ async def test_native_backends_keep_distinct_session_profiles(
             await manager.close()
 
 
-async def test_camoufox_viewer_streams_without_chromium_popup_tracker(
+async def test_camoufox_viewer_streams_current_frame_and_editables(
     tmp_path: Path, site: str
 ) -> None:
     manager = RunnerBrowserManager(
@@ -138,11 +138,8 @@ async def test_camoufox_viewer_streams_without_chromium_popup_tracker(
         )
         frame = await transport.frame()
         assert frame.source.width > 0 and frame.source.height > 0
-        source = viewer.sources[actor.page_id]
-        assert source.popups is None
-        assert source.page.popup_tracker is None
         assert frame.editables
-        assert source.page.popup_selection is None
+        assert viewer.sources[actor.page_id].page.popup_selection is None
     finally:
         if running is not None:
             await stop(running, transport)

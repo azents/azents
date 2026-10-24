@@ -61,11 +61,9 @@ from azents_runtime_runner.browser_editables import (
     BrowserEditableRegions,
     EditableFieldSnapshot,
 )
-from azents_runtime_runner.browser_popups import BrowserPopupTracker
 from azents_runtime_runner.browser_sdk import (
     BROWSER_SDK_ERRORS,
     BrowserSDKError,
-    ChromiumPage,
     Page,
 )
 
@@ -125,17 +123,9 @@ class _LatestPage:
         self.changed = asyncio.Condition()
         self.task: asyncio.Task[None] | None = None
         self.editables = BrowserEditableRegions(page.page)
-        self.popups = (
-            BrowserPopupTracker(page.page, lambda: page.popup_owner)
-            if isinstance(page.page, ChromiumPage)
-            else None
-        )
 
     async def capture(self) -> None:
         try:
-            if self.popups is not None:
-                await self.popups.start()
-                self.page.popup_tracker = self.popups
             while not self.page.page.is_closed():
                 if self.page.dialog is None:
                     await self.capture_once()
@@ -241,10 +231,6 @@ class _LatestPage:
             await asyncio.gather(self.task, return_exceptions=True)
         self.clear()
         await self.editables.close()
-        if self.page.popup_tracker is self.popups:
-            self.page.popup_tracker = None
-        if self.popups is not None:
-            await self.popups.close()
 
 
 class _Viewport(NamedTuple):
@@ -384,6 +370,8 @@ class _Attachment:
         self.last_status: bytes | None = None
         self.send_lock = asyncio.Lock()
         self.field_edit: _FieldEdit | None = None
+        if authority.allow_input and task.guard.actor is None:
+            self.page.popup_interest = self.id
 
     def current(self) -> None:
         concrete = self.manager.viewer_authority(self.authority)
@@ -675,6 +663,7 @@ class _Attachment:
                 )
             )
             await self.cleanup()
+            self.page.popup_interest = self.id
             return
         if isinstance(action, ViewerDialogResponse):
             concrete = self.manager.viewer_authority(self.authority)
@@ -715,9 +704,8 @@ class _Attachment:
             if not isinstance(action, ViewerPointer) and not (
                 isinstance(action, ViewerKey) and action.phase == "up"
             ):
-                self.page.popup_owner = None
-                if self.source.popups is not None:
-                    self.source.popups.clear()
+                self.page.popup_interest = self.id if not self.keys else None
+                self.page.popup_selection = None
             match action:
                 case ViewerPointer():
                     if action.phase != "cancel":
@@ -734,9 +722,7 @@ class _Attachment:
                             )
                         self.buttons.add(action.button)
                         self.page.popup_selection = None
-                        if self.source.popups is not None:
-                            self.source.popups.clear()
-                        self.page.popup_owner = (
+                        self.page.popup_interest = (
                             self.id
                             if action.button == "left"
                             and not self.keys.intersection(
@@ -759,12 +745,9 @@ class _Attachment:
                             lambda: self.page.page.mouse.move(action.x, action.y)
                         )
                         self.buttons.discard(action.button)
-                        try:
-                            await self.effect(
-                                lambda: self.page.page.mouse.up(button=action.button)
-                            )
-                        finally:
-                            self.page.popup_owner = None
+                        await self.effect(
+                            lambda: self.page.page.mouse.up(button=action.button)
+                        )
                     else:
                         await self.cleanup()
                 case ViewerWheel():
@@ -778,6 +761,13 @@ class _Attachment:
                         )
                     )
                 case ViewerKey():
+                    if action.phase == "down" and action.key in {
+                        "Control",
+                        "Meta",
+                        "Shift",
+                        "Alt",
+                    }:
+                        self.page.popup_interest = None
                     if self.composing:
                         raise BrowserFailure(
                             "browser_input_conflict", "Browser composition is active"
@@ -1018,10 +1008,13 @@ class _Attachment:
 
     async def cleanup(self) -> None:
         await self.discard_field_edit()
-        if self.page.popup_owner == self.id:
-            self.page.popup_owner = None
-        if self.source.popups is not None:
-            self.source.popups.discard(self.id)
+        if self.page.popup_interest == self.id:
+            self.page.popup_interest = None
+        if (
+            self.page.popup_selection is not None
+            and self.page.popup_selection.owner == self.id
+        ):
+            self.page.popup_selection = None
         # Never release another attachment's pressed state or guard.
         owns = self.task.guard.actor == self.id or self.task.guard.actor is None
         try:

@@ -16,9 +16,11 @@ export function browserPopupHintCurrent(
   status: BrowserStatus | null,
   selected: BrowserTarget | null,
   connected: boolean,
+  dismissedAttachment: string | null,
 ): boolean {
   return (
     connected &&
+    hint.attachment !== dismissedAttachment &&
     hint.resourceKey === resourceKey &&
     status !== null &&
     status.state === "connected" &&
