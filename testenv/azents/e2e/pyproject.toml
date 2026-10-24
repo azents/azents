@@ -22,7 +22,7 @@ dependencies = [
     "azents-public-client",
     "azents-runtime-control",
     # type stubs
-    "types-requests==2.33.0.20260906",
+    "types-requests==2.33.0.20261006",
     "types-docker==7.2.0.20260923",
 ]
 
