@@ -76,6 +76,19 @@ def _is_gated_e2e_job(name: str) -> bool:
     return re.fullmatch(r"ci-e2e-.+-[1-9][0-9]*", name) is not None
 
 
+def _duration_seconds(value: object) -> float:
+    """Reject supplied malformed measurements instead of losing evidence."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError("Duration must be a finite non-negative number")
+    try:
+        duration = float(value)
+    except OverflowError as exc:
+        raise ValueError("Duration must be a finite non-negative number") from exc
+    if not math.isfinite(duration) or duration < 0:
+        raise ValueError("Duration must be a finite non-negative number")
+    return duration
+
+
 def _parse_lane(
     *,
     sample: str,
@@ -97,9 +110,7 @@ def _parse_lane(
     test_calls: dict[str, float] = defaultdict(float)
     fixture_setups: dict[str, float] = defaultdict(float)
     for timing in timings:
-        duration = timing.get("duration_seconds")
-        if not isinstance(duration, int | float):
-            continue
+        duration = _duration_seconds(timing.get("duration_seconds"))
         if timing.get("record_type") == "test_phase" and timing.get("phase") == "call":
             node_id = timing.get("node_id")
             if isinstance(node_id, str) and node_id:
@@ -112,9 +123,9 @@ def _parse_lane(
     image_builds: dict[str, float] = defaultdict(float)
     for image in _read_json_lines(artifact_dir / "image-build-timings.jsonl"):
         name = image.get("image")
-        duration = image.get("duration_seconds")
-        if isinstance(name, str) and isinstance(duration, int | float):
-            image_builds[name] += float(duration)
+        duration = _duration_seconds(image.get("duration_seconds"))
+        if isinstance(name, str):
+            image_builds[name] += duration
 
     if not test_calls:
         raise ValueError(

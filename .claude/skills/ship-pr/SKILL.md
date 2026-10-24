@@ -34,7 +34,16 @@ Batch accepted findings into one correction pass on the same branch.
 - If final verification changes the diff, rerun affected validation and apply
   the re-review criteria again before calling `/create-pr`.
 
-### 3. Call `/create-pr`
+### 3. Complete the spec-impact gate
+
+Run `/spec-review` against the final change and resolve required current-Spec
+updates before creating the PR. Reuse completed evidence when it covers the
+current behavioral diff; for phased work, follow the project's one pre-QA
+spec-review phase. Recheck material behavior changes made after that evidence.
+Record the result even when no Spec update is required. A PR-body `Spec Impact`
+section summarizes this gate; it does not replace it.
+
+### 4. Call `/create-pr`
 
 Call `/create-pr` with the validation context. Because `/create-pr` only creates the PR, leave the following information in the conversation context so it can be included in the PR body when appropriate:
 
@@ -43,7 +52,7 @@ Call `/create-pr` with the validation context. Because `/create-pr` only creates
 
 Follow the `/create-pr` rules.
 
-### 4. Report the result
+### 5. Report the result
 
 - Created PR URL
 - Review requester, reviewer, findings, and re-review decision or result

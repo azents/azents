@@ -55,12 +55,21 @@ class ChangedPaths:
     deleted: tuple[str, ...]
 
 
+class ChangeCheckpoint(TypedDict):
+    checked_at: str | None
+    checked_through_commit: str | None
+
+
+class RangeCheckpoint(ChangeCheckpoint):
+    checked_scope_revision: str | None
+
+
 class AuditState(TypedDict):
     """Validated persisted Living Spec audit state."""
 
     schema_version: int
-    change_checkpoint: dict[str, Any]
-    ranges: dict[str, dict[str, Any]]
+    change_checkpoint: ChangeCheckpoint
+    ranges: dict[str, RangeCheckpoint]
 
 
 class AuditPlan(TypedDict, total=False):
@@ -129,6 +138,25 @@ def empty_state() -> AuditState:
     }
 
 
+def _checkpoint_fields(value: object, fields: set[str]) -> dict[str, Any]:
+    """Validate exact fields and nullable values before planner use."""
+    if not isinstance(value, dict) or set(value) != fields:
+        raise AuditStateError("Audit checkpoint has unknown or missing fields")
+    for field in fields:
+        item = value[field]
+        if item is not None and (not isinstance(item, str) or not item.strip()):
+            raise AuditStateError(f"Audit checkpoint has invalid {field}")
+    timestamp = value["checked_at"]
+    if timestamp is not None:
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise AuditStateError("Audit checkpoint has invalid checked_at") from exc
+        if parsed.tzinfo is None:
+            raise AuditStateError("Audit checkpoint checked_at must include timezone")
+    return value
+
+
 def load_state(state_path: Path) -> AuditState:
     """Load and validate the audit state."""
     if not state_path.exists():
@@ -141,20 +169,41 @@ def load_state(state_path: Path) -> AuditState:
         raise AuditStateError("Audit state must be a JSON object")
     if set(state) != {"schema_version", "change_checkpoint", "ranges"}:
         raise AuditStateError("Audit state has unknown or missing fields")
-    if state.get("schema_version") != SCHEMA_VERSION:
+    if (
+        type(state.get("schema_version")) is not int
+        or state["schema_version"] != SCHEMA_VERSION
+    ):
         raise AuditStateError(
             f"Unsupported audit state schema: {state.get('schema_version')!r}"
         )
     checkpoint = state.get("change_checkpoint")
     ranges = state.get("ranges")
-    if not isinstance(checkpoint, dict):
-        raise AuditStateError("Audit state is missing change_checkpoint")
+    checkpoint = _checkpoint_fields(
+        checkpoint, {"checked_at", "checked_through_commit"}
+    )
     if not isinstance(ranges, dict):
         raise AuditStateError("Audit state is missing ranges")
+    decoded_ranges: dict[str, RangeCheckpoint] = {}
     for range_name, range_checkpoint in ranges.items():
-        if not isinstance(range_name, str) or not isinstance(range_checkpoint, dict):
+        if not isinstance(range_name, str) or not range_name:
             raise AuditStateError("Audit state has an invalid range checkpoint")
-    return cast(AuditState, state)
+        value = _checkpoint_fields(
+            range_checkpoint,
+            {"checked_at", "checked_through_commit", "checked_scope_revision"},
+        )
+        decoded_ranges[range_name] = RangeCheckpoint(
+            checked_at=value["checked_at"],
+            checked_through_commit=value["checked_through_commit"],
+            checked_scope_revision=value["checked_scope_revision"],
+        )
+    return AuditState(
+        schema_version=SCHEMA_VERSION,
+        change_checkpoint=ChangeCheckpoint(
+            checked_at=checkpoint["checked_at"],
+            checked_through_commit=checkpoint["checked_through_commit"],
+        ),
+        ranges=decoded_ranges,
+    )
 
 
 def load_plan(plan_path: Path) -> AuditPlan:
@@ -445,7 +494,7 @@ def discover_audit_scope(repo_root: Path) -> AuditScope:
     )
 
 
-def empty_range_checkpoint() -> dict[str, Any]:
+def empty_range_checkpoint() -> RangeCheckpoint:
     """Return an unchecked range checkpoint."""
     return {
         "checked_at": None,
@@ -667,7 +716,7 @@ def changed_work_plans(
 
 
 def rotation_reason(
-    checkpoint: dict[str, Any],
+    checkpoint: Mapping[str, Any],
     current_range: dict[str, Any],
 ) -> tuple[int, str]:
     """Return priority and reason for one recurring range."""
