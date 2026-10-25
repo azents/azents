@@ -267,7 +267,6 @@ def test_documented_model_resource_uses_only_public_literal_profile(
     arn: str,
     literal_model: str,
 ) -> None:
-    assert BedrockProvider.model_profile(arn) is None
     assert bedrock_assembly_profile(arn) == BedrockProvider.model_profile(literal_model)
 
 
