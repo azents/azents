@@ -91,6 +91,24 @@ class RuntimeBashResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class _BashCompletion:
+    """Validated final-success payload from the bash operation boundary."""
+
+    exit_code: int
+
+    @classmethod
+    def decode(cls, payload: dict[str, JsonValue]) -> "_BashCompletion":
+        if set(payload) != {"exit_code"} or type(payload["exit_code"]) is not int:
+            raise RuntimeRunnerOperationFailedError(
+                "Runner bash completion requires an integer exit code",
+                code="invalid_bash_completion",
+            )
+        value = payload["exit_code"]
+        assert isinstance(value, int)
+        return cls(exit_code=value)
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeFileReadResult:
     """Completed file read operation result."""
 
@@ -1588,11 +1606,11 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
             cancel_check=cancel_check,
         )
-        exit_code = _int_payload(final.event.payload, "exit_code", default=0)
+        completion = _BashCompletion.decode(final.event.payload)
         return RuntimeBashResult(
             stdout="".join(folder.stdout),
             stderr="".join(folder.stderr),
-            exit_code=exit_code,
+            exit_code=completion.exit_code,
             final_cursor=final.cursor,
         )
 

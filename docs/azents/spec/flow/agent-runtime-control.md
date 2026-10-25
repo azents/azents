@@ -1138,6 +1138,13 @@ payloads before dispatch. Extension keys and the existing optional null/default
 choices remain supported; malformed supplied fields retain their operation's
 validation/error boundary, and handlers own filesystem, process, and Git outcomes.
 
+Bash final-success replies have one required integer `exit_code` field. The
+Control client validates that closed payload before constructing its typed result;
+missing, boolean, null, string or unexpected fields fail with
+`invalid_bash_completion` rather than fabricating exit code zero. A valid nonzero
+exit code remains an ordinary completed command result, not a transport failure.
+Malformed completion evidence never triggers command replay.
+
 Handled Runner authentication, Control-stream, transfer, Web-protocol, and
 operation failures use bounded implementation-owned reason labels. Logging formats
 a new bounded exception value, while separate structured fields retain the original
