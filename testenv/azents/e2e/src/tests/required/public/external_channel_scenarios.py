@@ -4624,7 +4624,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     discord_provider_fake_url: str,
-    azents_engine_worker_container: DockerContainer,
+    ordinary_model_stream_worker: DockerContainer,
     azents_external_channel_gateway_factory: Callable[
         [], AbstractContextManager[DockerContainer]
     ],
@@ -4874,7 +4874,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         setup_gate_counts = setup_gate_state.request_counts
         assert setup_gate_counts.get("create_thread", 0) == 0
         assert setup_gate_counts.get("create_message", 0) == 1
-        engine_worker = azents_engine_worker_container.get_wrapped_container()
+        engine_worker = ordinary_model_stream_worker.get_wrapped_container()
 
         def ensure_engine_worker_running() -> None:
             engine_worker.reload()
@@ -5005,7 +5005,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 final_counts = _discord_provider_observation(
                     discord_provider_fake_url
                 ).request_counts
-                worker_stdout, worker_stderr = azents_engine_worker_container.get_logs()
+                worker_stdout, worker_stderr = ordinary_model_stream_worker.get_logs()
                 title_log_lines = [
                     line
                     for line in (
