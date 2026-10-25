@@ -1,3 +1,4 @@
+import { expect, waitFor } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   codeReadabilityMarkdownSample,
@@ -49,7 +50,30 @@ export const SingleLineScrollableCode = {
 } satisfies Story;
 
 export const MermaidDiagram = {
+  tags: ["ci-contract"],
   args: {
     children: mermaidMarkdownSample,
+  },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => {
+      const diagram = canvasElement.querySelector("svg[id^='azents-mermaid-']");
+      await expect(diagram).toBeInTheDocument();
+      await expect(diagram).toHaveTextContent("Send message");
+    });
+  },
+} satisfies Story;
+
+export const MermaidMath = {
+  tags: ["ci-contract"],
+  args: {
+    children:
+      '```mermaid\nflowchart LR\n    A["$$x^2 + y^2 = z^2$$"] --> B["Result"]\n```',
+  },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => {
+      await expect(
+        canvasElement.querySelector("svg[id^='azents-mermaid-'] .katex"),
+      ).toBeInTheDocument();
+    });
   },
 } satisfies Story;
