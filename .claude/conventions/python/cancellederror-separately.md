@@ -1,22 +1,25 @@
 ---
-title: "In async code (especially Temporal workflows/activities) catch asyncio.CancelledError separately and re-raise immediately — putting it under `except Exception` lets shutdown trigger side effects that then replay on retry."
+title: "At async error boundaries, explicitly re-raise asyncio.CancelledError and keep ordinary-error side effects separate from cancellation."
 ---
 
 # Handle CancelledError Separately
 
-`asyncio.CancelledError` fires on worker shutdown. If your `except Exception` cleanup includes side effects (notifications, writes, external calls), those execute, then the activity replays on retry, executing them again.
+`asyncio.CancelledError` inherits from `BaseException` in supported Python, so
+`except Exception` does not catch it. Explicit cancellation branches make shutdown
+intent visible and protect it when error boundaries are refactored.
 
 - ALWAYS handle `asyncio.CancelledError` in its own `except` clause and re-raise immediately
 - Reserve `except Exception` for actual errors that warrant your cleanup side effects
+- Keep required resource cleanup in `finally` or context-manager exit paths.
+  Propagating cancellation must not bypass resource ownership.
 
 ## Bad
 
 ```python
 try:
     await do_work()
-except Exception as e:
-    await send_notification()  # Fires on shutdown too — duplicates after replay
-    raise
+except BaseException:
+    await send_notification()  # Incorrectly treats cancellation as ordinary failure.
 ```
 
 ## Good

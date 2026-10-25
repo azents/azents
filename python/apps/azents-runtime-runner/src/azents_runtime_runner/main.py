@@ -14,6 +14,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import grpc
+from azents_runtime_control.browser_configuration import (
+    BROWSER_CONFIGURATION_CAPABILITY,
+    BrowserImplementation,
+)
 from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
@@ -41,7 +45,8 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
-from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
+from azents_runtime_runner.browser import RunnerBrowserManager
+from azents_runtime_runner.browser_controller import RunnerBrowserController
 from azents_runtime_runner.browser_input import BrowserInputKey
 from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
 from azents_runtime_runner.diagnostics import (
@@ -388,21 +393,33 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 allow_insecure=allow_insecure_control,
             )
             connection_id = _control_connection_id(base_connection_id)
-            browser_manager = RunnerBrowserManager(
-                workspace_root=workspace.root,
-                proxy=runner_network_environment.get("HTTP_PROXY"),
+
+            def create_browser(
+                implementation: BrowserImplementation,
+            ) -> RunnerBrowserManager:
+                manager = RunnerBrowserManager(
+                    workspace_root=workspace.root,
+                    proxy=runner_network_environment.get("HTTP_PROXY"),
+                    input_key=browser_input_key,
+                    implementation=implementation,
+                )
+                manager.bind_runtime(runtime_id, accepted_generation)
+                return manager
+
+            browser_manager = RunnerBrowserController(
+                manager_factory=create_browser,
+                viewer_factory=lambda manager: RunnerBrowserViewer(
+                    manager, web_resources
+                ),
                 input_key=browser_input_key,
             )
-            try:
-                await browser_manager.initialize()
-                browser_capabilities = (*registration.capabilities, "browser.v1")
-            except BrowserFailure as exc:
-                L.warning(
-                    "Product browser is unavailable",
-                    exc_info=True,
-                    extra={"reason_code": exc.code},
-                )
-                browser_capabilities = tuple(registration.capabilities)
+            # Support is advertised independently of applied configuration.
+            # Browser admission waits for exact current-intent ready evidence.
+            browser_capabilities = (
+                *registration.capabilities,
+                "browser.v1",
+                BROWSER_CONFIGURATION_CAPABILITY,
+            )
             operations = RunnerOperations(
                 browser_manager=browser_manager,
                 client=client,
@@ -489,7 +506,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 web_manager,
                 resources=web_resources,
                 monotonic_clock=time.monotonic,
-                browser=RunnerBrowserViewer(browser_manager, web_resources),
+                browser=browser_manager,
             )
             transfer_manager = RunnerTransferManager(
                 control=client,

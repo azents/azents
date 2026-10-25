@@ -16,6 +16,7 @@ from azents_runtime_control.browser_viewer_contract import ViewerTarget
 from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 from pydantic import BaseModel, ConfigDict, StrictStr, ValidationError
 
+from azents.core.browser_configuration import BrowserConfigurationIntentReader
 from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionKind,
@@ -89,6 +90,7 @@ class DatabaseRuntimeBrowserAuthorityResolver:
     authority_repository: RuntimeBrowserAuthorityReadRepository
     runtime_coordination: RuntimeCoordinationStore
     working_folder_service: SessionWorkingFolderBindingService
+    browser_configuration: BrowserConfigurationIntentReader
 
     async def resolve(
         self,
@@ -164,6 +166,13 @@ class DatabaseRuntimeBrowserAuthorityResolver:
         except ValidationError:
             return RuntimeBrowserUnavailable("browser_unavailable")
         if "browser.v1" not in capabilities:
+            return RuntimeBrowserUnavailable("browser_unavailable")
+        if (
+            await self.browser_configuration.current_intent(
+                runtime.id, runtime.runner_generation, require_ready=True
+            )
+            is None
+        ):
             return RuntimeBrowserUnavailable("browser_unavailable")
         target = RuntimeOperationTarget(
             id=runtime.id,

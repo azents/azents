@@ -11,6 +11,7 @@ import {
   browserTextareaModifier,
   browserTextareaTextKey,
 } from "../input";
+import { browserNativeTextChange } from "../native-text";
 import { useBrowserPaste } from "./useBrowserPaste";
 import type { BrowserInteractionHandlers } from "../components/SessionBrowserPanel";
 import type { BrowserCoordinateAction, BrowserFrame } from "../types";
@@ -49,7 +50,7 @@ export function useBrowserInteraction({
     receiver: HTMLTextAreaElement | null;
   } | null>(null);
   const composing = useRef<BrowserFrame | null>(null);
-  const suppressInput = useRef<string | null>(null);
+  const nativeText = useRef("");
   const pressed = useRef(new Map<string, BrowserFrame>());
 
   const send = useCallback((action: BrowserCoordinateAction): boolean => {
@@ -90,7 +91,7 @@ export function useBrowserInteraction({
     }
     const compositionFrame = composing.current;
     composing.current = null;
-    suppressInput.current = null;
+    nativeText.current = "";
     if (compositionFrame !== null) {
       current.onAction(compositionFrame, {
         kind: "composition",
@@ -157,6 +158,51 @@ export function useBrowserInteraction({
     },
     [send],
   );
+  const commitText = (
+    field: HTMLTextAreaElement,
+    composition: boolean,
+  ): void => {
+    const next = field.value;
+    const change = browserNativeTextChange(nativeText.current, next);
+    nativeText.current = next;
+    if (!releaseKeys()) {
+      cancel();
+      return;
+    }
+    if (composition && change.remove === 0) {
+      if (
+        !send({ kind: "composition", phase: "commit", text: change.insert })
+      ) {
+        cancel();
+      }
+      return;
+    }
+    if (composition) {
+      send({ kind: "composition", phase: "cancel", text: null });
+    }
+    if (change.remove > 0) {
+      if (
+        !send({
+          kind: "text_edit",
+          delete_before: change.remove,
+          text: change.insert,
+        })
+      ) {
+        cancel();
+      }
+      return;
+    }
+    if (
+      change.insert &&
+      send({ kind: "composition", phase: "start", text: null })
+    ) {
+      if (
+        !send({ kind: "composition", phase: "commit", text: change.insert })
+      ) {
+        cancel();
+      }
+    }
+  };
   useEffect(() => {
     if (!enabled) {
       return;
@@ -173,7 +219,7 @@ export function useBrowserInteraction({
         return;
       }
       const key =
-        event.inputType === "deleteContentBackward"
+        event.inputType === "deleteContentBackward" && nativeText.current === ""
           ? "Backspace"
           : event.inputType === "deleteContentForward"
             ? "Delete"
@@ -181,6 +227,8 @@ export function useBrowserInteraction({
               ? "Enter"
               : null;
       if (key !== null && (pressed.current.has(key) || softwareKey(key))) {
+        nativeText.current = "";
+        field.value = "";
         event.preventDefault();
       }
     };
@@ -191,6 +239,10 @@ export function useBrowserInteraction({
 
   const interaction: BrowserInteractionHandlers = {
     onKeyboardFocus: (event) => {
+      if (keyboardRef.current !== event.currentTarget) {
+        cancel();
+        event.currentTarget.value = "";
+      }
       keyboardRef.current = event.currentTarget;
       paste.onFocus(event);
     },
@@ -404,8 +456,17 @@ export function useBrowserInteraction({
       ) {
         return;
       }
-      suppressInput.current = null;
       const textarea = event.currentTarget instanceof HTMLTextAreaElement;
+      if (
+        textarea &&
+        event.key === "Backspace" &&
+        nativeText.current !== "" &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        return;
+      }
       if (
         textarea &&
         (((event.ctrlKey || event.metaKey) &&
@@ -442,6 +503,11 @@ export function useBrowserInteraction({
       }
       const key = browserKey(event.key);
       const source = latest.current.frame;
+      if (event.currentTarget instanceof HTMLTextAreaElement && key !== null) {
+        // Remote caret movement/chords end ownership of the local text tail.
+        nativeText.current = "";
+        event.currentTarget.value = "";
+      }
       if (textarea && key !== null && source !== null) {
         for (const modifier of browserRemoteModifiers(modifiers)) {
           if (pressed.current.has(modifier)) {
@@ -511,16 +577,15 @@ export function useBrowserInteraction({
       }
       const original = composing.current;
       composing.current = null;
-      const text = event.data;
-      suppressInput.current = text;
-      if (!send({ kind: "composition", phase: "commit", text })) {
+      if (!latest.current.enabled) {
         latest.current.onAction(original, {
           kind: "composition",
           phase: "cancel",
           text: null,
         });
+        return;
       }
-      event.currentTarget.value = "";
+      commitText(event.currentTarget, true);
     },
     onKeyboardInput: (event) => {
       if (document.activeElement !== event.currentTarget) {
@@ -534,27 +599,9 @@ export function useBrowserInteraction({
       ) {
         return;
       }
-      const text = event.currentTarget.value;
-      event.currentTarget.value = "";
-      if (suppressInput.current !== null) {
-        const duplicate =
-          text === suppressInput.current ||
-          (event.nativeEvent instanceof InputEvent &&
-            event.nativeEvent.data === suppressInput.current);
-        suppressInput.current = null;
-        if (duplicate) {
-          return;
-        }
-      }
-      if (!text) {
-        return;
-      }
-      if (!releaseKeys()) {
-        return;
-      }
-      if (send({ kind: "composition", phase: "start", text: null })) {
-        send({ kind: "composition", phase: "commit", text });
-      }
+      // iOS Korean updates ordinary text by deleting/replacing the active
+      // syllable, without composition events. Keep its native context intact.
+      commitText(event.currentTarget, false);
     },
   };
   return {

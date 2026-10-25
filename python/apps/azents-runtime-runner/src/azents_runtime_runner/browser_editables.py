@@ -10,7 +10,13 @@ from azents_runtime_control.browser_viewer_contract import (
     decode_viewer_editables,
     decode_viewer_field_attributes,
 )
-from patchright.async_api import Error, Frame, JSHandle, Page
+
+from azents_runtime_runner.browser_sdk import (
+    BROWSER_SDK_ERRORS,
+    Frame,
+    JSHandle,
+    Page,
+)
 
 _PROBE = r"""() => {
     const ids = new WeakMap(); let sequence = 0;
@@ -373,7 +379,7 @@ class BrowserEditableRegions:
                             region.input_mode,
                         )
                     )
-            except Error as error:
+            except BROWSER_SDK_ERRORS as error:
                 if not any(
                     signature in error.message.lower()
                     for signature in (
@@ -441,7 +447,7 @@ class BrowserEditableRegions:
                         return False
                     current = current.parent_frame
                 return True
-            except Error as error:
+            except BROWSER_SDK_ERRORS as error:
                 if any(
                     signature in error.message.lower()
                     for signature in (

@@ -6,6 +6,19 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, session, toolkit, runtime]
 code_paths:
+  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_configuration.py
+  - python/apps/azents/src/azents/core/browser_configuration.py
+  - python/apps/azents/src/azents/repos/browser_configuration.py
+  - python/apps/azents/src/azents/services/browser_configuration.py
+  - python/apps/azents/src/azents/api/public/agent/v1/browser_configuration.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_controller.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_camoufox.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_install.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_sdk.py
+  - typescript/apps/azents-web/src/features/agents/AgentBrowserChoiceSection.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentBrowserChoice.ts
+  - typescript/apps/azents-web/src/features/agents/components/AgentBrowserChoice.tsx
+  - testenv/azents/e2e/src/tests/required/public/test_browser_configuration.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_contract.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_runner_wire.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_runner_client.py
@@ -15,7 +28,6 @@ code_paths:
   - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_browser_source_client.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_viewer.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_editables.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_popups.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_input.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_display.py
@@ -58,13 +70,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/components/BrowserKeyboardToolbar.tsx
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserConnection.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserInteraction.ts
+  - typescript/apps/azents-web/src/features/session-browser/native-text.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserTouchView.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserDirectTouch.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserTouchView.ts
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-23
+last_verified_at: 2026-10-25
 spec_version: 1
 ---
 
@@ -84,6 +97,40 @@ stop unrelated Runtime features. It is a product capability switch, not a sandbo
 against arbitrary Runtime shell access.
 
 Runtime capability guards enforce process/workspace availability, and image observation additionally requires current transfer authority. Projection without current execution authority omits these tools. Each call revalidates access and resolves its actual Session working folder independently of any scheduling/root alias.
+
+## Per-Agent Browser Engine
+
+Agent Runtime settings offer Patchright (default) and Camoufox (experimental,
+explicit opt-in). Both engines ship in the Runtime image. The choice applies to
+every Session of the Agent and does not change `browser_enabled`, Runtime identity,
+Runner generation, infrastructure configuration authority, or Runtime capability.
+
+GET and PUT `/agent/v1/workspaces/{handle}/agents/{agent_id}/browser-configuration`
+return the opaque current intent, requested/applied engine, current Runtime and
+Runner generation, and `offline`, `applying`, `ready` or `failed` state with a
+bounded reason. PUT accepts a closed replacement with `expected_intent_id`,
+`implementation` and explicit `retry`. Existing Agent access checks protect reads;
+Agent administrators manage the choice. Stale-intent replacement is rejected.
+The UI confirms browser retirement before saving, distinguishes requested from
+applied state, and exposes explicit retry without promising site compatibility.
+
+Saving first persists Agent-owned intent, then immediately attempts browser-only
+application. A durable leased reconciliation task and current Runner state reports
+resume pending work after offline periods or control loss. Application queries
+current Runner status before deciding whether configuration is still needed;
+a lost response does not replay website actions or restart an already-applied
+browser. Claims and admission are fenced by exact intent and current Runtime,
+infrastructure configuration and Runner evidence, not a new browser version
+counter. Browser operations cannot start until the exact intent is ready.
+
+The Runner serializes transitions, revokes live viewer sources and transient
+inputs, retires task/page/frame identities and pending browser work, closes old
+contexts/display/driver resources, and starts only the requested engine. Shells,
+PTYs, unrelated jobs and Runtime files continue unchanged. New native startup
+failure is visible and does not fall back to Patchright. Existing browser profile
+bytes remain; each engine has a separate per-Session profile and no cross-engine
+profile migration. Switching back can reuse that engine's cookies, never its old
+live tab identities.
 
 ## Public Session Projection and Tabs
 
@@ -106,7 +153,7 @@ Read-only presentation never starts or recreates a Runtime merely for inspection
 
 ## Browser Automation Markers
 
-Managed Session contexts use pinned Patchright with installed full Chromium in
+Default Patchright Session contexts use installed full Chromium in
 headed mode, retaining the existing sandbox/proxy policy and driver defaults.
 Before admitting a newly launched persistent context, the Runner awaits Chromium's
 initial GPU-information completion through the SDK's public browser CDP session
@@ -123,6 +170,14 @@ The Runner uses the
 browser's native User-Agent, client hints, language and GPU identity rather than
 injecting fingerprint overrides. Product DOM observation and private field
 geometry/editing scripts remain separate browser functionality.
+
+Experimental Camoufox contexts use the pinned Camoufox SDK and official
+Firefox-based distribution through the native Playwright boundary, including the
+SDK's packaged fingerprint-generation model. Explicit viewport/window geometry
+matches the viewer coordinate plane. This backend does not run the Chromium GPU
+startup query. Both backends use native opener-scoped popup events. The product
+does not add page-world interception, infer popup ownership from URLs or promise
+successful access to a particular site.
 
 On Linux without a supplied DISPLAY, the browser manager starts one owned Xvfb,
 waits for its bounded displayfd readiness record and passes that display only to
@@ -150,6 +205,35 @@ The source uses existing Owner/relay routing, flow control, capacity, lease/fing
 
 ## Live Panel and Input
 
+Routine Browser status stays compact. While the connected page is waiting for
+current pixels, a small noninteractive loading indicator replaces explanatory
+text over the image; its accessible name announces the update. Stale/disconnected
+images retain their existing input fences and dimming. The header reports
+connection/read-only state without repeating a status paragraph over or below
+the image. A missing image shows one concise connection/loading status. Actual
+failures and unconfirmed action outcomes remain visible with a short next action.
+Empty pages rely on the New tab control instead of instructional copy.
+The private editor explains only that Apply commits the change, without repeating
+direct-input or single-field implementation details. Browser-engine controls retain
+the experimental option label and disruptive-switch/profile warnings, without
+duplicating an experimental/popup-selection helper paragraph.
+
+Local keyboard receivers retain only their own transient typed text tail while
+focused. Ordinary input is reconciled against that tail rather than clearing the
+textarea after every event. This preserves native Korean replacement on iOS,
+including insert/delete sequences without composition events. Composition commits
+and their following duplicate input event insert text once. A changed tail uses
+grapheme-aware suffix replacement: the closed `text_edit` action carries a positive
+`delete_before` count (at most 32,768) and replacement text (at most 32,768
+characters), never a remote field snapshot. The Runner selects the native preceding cursor units and applies Backspace
+and insertion under one task interaction guard and a ten-second effect deadline.
+Selection avoids treating Firefox's partial emoji Backspace as deletion of a whole
+local grapheme.
+Partial/unknown effects are not replayed. Held input conflicts, source fences and
+the whole-message bound still apply. Local blur/cancellation, receiver change,
+remote caret/key chords, document/attachment changes and access loss discard the
+tail. Typed text is absent from React state, telemetry and history.
+
 The address field requests the native URL keyboard through URL type/input mode,
 with capitalization, autocorrect and spellcheck disabled. Exact shortcut keys
 remain an OS/keyboard choice.
@@ -158,7 +242,7 @@ The panel validates the first status against its exact selected target and attac
 
 The supporting panel presents browser-style tabs above address/navigation chrome and an unframed live image. Controls retain internal padding; the image has no outer margin or decorative border. Preview content does not send remote input: activation opens focused viewing and consumes that gesture locally. Authorized input participants can enter an HTTP(S) address, go back or forward in the selected page's native history, and reload the actual page. The address field smoothly expands while focused by collapsing the preceding navigation controls and restores on blur/submission; reduced motion disables the transition. Address drafts are volatile, cleared on blur/target change/submission, and never form an input history. Unsupported schemes and embedded user credentials are rejected. Read-only viewers cannot edit or navigate. Connection refresh is separately labelled and does not claim to reload the site. No standalone page-text entry form is shown.
 
-Navigation is one closed admitted viewer input carrying the same current acknowledged source and sequence. The Runner checks input permission, current source/target/generation and actual held-input conflict before invoking its existing structured navigation/dialog handler. In-flight input blocks another UI navigation without queuing it. New navigation invalidates prior displayed-frame input until the current image is acknowledged; lost actions are not replayed.
+Navigation is one closed admitted viewer input carrying the same current acknowledged source and sequence. The Runner checks input permission, current source/target/generation and actual held-input conflict before invoking its existing structured navigation/dialog handler. Ordinary typing acknowledgements do not toggle navigation controls or address editability. One explicit navigation intent may wait locally for already-sent input and cleanup acknowledgements; further effect-bearing input and a second navigation are blocked while it drains or executes. It is sent once only if those acknowledgements succeed in the same live page/document/geometry scope. Rejection, unknown outcome, dialog/conflict, document change or disconnect discards an unsent intent; reconnection never replays it. New navigation invalidates prior displayed-frame input until the current image is acknowledged; lost actions are not replayed.
 
 Main-page navigation changes the viewer navigation identity. Subframe navigation
 invalidates that frame's element references without replacing the main-page viewer
@@ -173,13 +257,15 @@ Focused viewing can explicitly enable direct touch from the existing upper Brows
 
 A second finger, movement outside the displayed image, pointer cancellation/capture loss, or explicit release ends a direct press without synthesizing another click. After interruption, remaining contacts must lift before a new press. Blur/background, focused-view exit, attachment/document changes, access loss and disconnect clean up and reset to normal touch browsing; ordinary frame updates do not reset the mode. Uncertain or rejected actions are not replayed. Release ends held input, not site effects already caused by pressing or dropping. Zoom/navigation cannot overlap an active direct touch press. Keyboard/edit/paste and mouse input otherwise retain their existing contracts.
 
-Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. Each frame carries at most sixteen content-free native editable rectangles with document-local identity and input mode. Native input/textarea receivers use an inner rectangle inscribed within computed rounded corners, including normalized percentage/elliptical radii. Clipping and corner/edge-midpoint/center hit tests apply to the published receiver, so noninteractive rounded corner pixels do not exclude an otherwise eligible field and overlays are not accepted by a center-only test. Unknown radius geometry fails closed. Bounded open-shadow and untransformed iframe traversal excludes disabled, read-only, occluded, clipped-away and uncertain targets. Unstable capture geometry omits receivers while streaming the image. Local transparent textareas retain identity across ordinary frame/visual-viewport updates and retire on document/attachment changes. The visually hidden generic receiver defaults to `inputmode=none`; it remains the viewport's keyboard stop and physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key.
+Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. Synchronous DOM input resolves the latest actually displayed frame at event dispatch, even when React still holds an earlier render's frame number. This is allowed only within the same attachment, task/page/incarnation, document and dimensions; decoding-only replacement images and stale geometry never authorize input. Explicit frame-bound operations retain their exact source checks. Each frame carries at most sixteen content-free native editable rectangles with document-local identity and input mode. Native input/textarea receivers use an inner rectangle inscribed within computed rounded corners, including normalized percentage/elliptical radii. Clipping and corner/edge-midpoint/center hit tests apply to the published receiver, so noninteractive rounded corner pixels do not exclude an otherwise eligible field and overlays are not accepted by a center-only test. Unknown radius geometry fails closed. Bounded open-shadow and untransformed iframe traversal excludes disabled, read-only, occluded, clipped-away and uncertain targets. Unstable capture geometry omits receivers while streaming the image. Local transparent textareas retain identity across ordinary frame/visual-viewport updates and retire on document/attachment changes. The visually hidden generic receiver defaults to `inputmode=none`; it remains the viewport's keyboard stop and physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key.
 
-Focused viewing provides a Show keyboard action independently of native editable membership. In the explicit trusted click/touch gesture it synchronously focuses the local generic receiver with textual input mode; it does not click, refind or move remote focus. Subsequent text follows the existing source-fenced direct-input stream to the remote page's current focus. A separate stable generic receiver reference avoids activating a previously selected field overlay by mistake. Local blur, target/document/attachment change, hidden page, access loss, disconnect and unmount reset its mode and contents; streaming frame-sequence changes alone do not. Existing input authority, active-dialog and stale-image checks govern activation. The action does not grant unrecognized targets private Edit/Paste eligibility, read values, retain a preference or repair direct multilingual IME. Native software keyboard availability remains browser/OS controlled.
+Focused viewing provides a Show keyboard action independently of native editable membership. In the explicit trusted click/touch gesture it synchronously focuses the local generic receiver with textual input mode; it does not click, refind or move remote focus. Subsequent text follows the existing source-fenced direct-input stream to the remote page's current focus. A separate stable generic receiver reference avoids activating a previously selected field overlay by mistake. Local blur, target/document/attachment change, hidden page, access loss, disconnect and unmount reset its mode and contents; streaming frame-sequence changes alone do not. Existing input authority, active-dialog and stale-image checks govern activation. The action does not grant unrecognized targets private Edit/Paste eligibility, read values or retain a preference. Native software keyboard availability remains browser/OS controlled.
 
-Plain unmodified viewer clicks nominate only their initiating attachment for a one-shot native popup selection hint. Other attachments/reconnections do not receive that preference. Modifier/middle-click background intent does not nominate a foreground selection. The web refreshes projection and selects the opened tab only while the originating tab remains selected; explicit user tab choice cancels pending preference.
+Patchright and Camoufox share the same popup-follow policy through the native page's `popup` event. An input-capable live attachment expresses interest in its observed page; subsequent ordinary foreground human input renews that interest. Popups from that exact opener nominate the interested attachment for selection, including script-opened tabs and slow initial responses arriving after mouseup. This is a viewing preference, not proof that a click caused the popup. No Chromium target-creation session, URL matching, elapsed-time heuristic or page-world interception is used for selection. Explicit Agent `expect=popup` still associates its popup with its trigger independently.
 
-Native target-creation IDs correlate only popups created during the active pointer operation with their later SDK popup event, including a slow initial response. The private source-owned SDK CDP session filters the exact managed opener; it exposes no public CDP interface. Pointer eligibility ends at mouseup/cancel, and bounded one-shot target records retire on destruction, new manipulation, navigation and cleanup. A later unrelated script popup cannot inherit an old click. Pending web preference also requires the same current resource, attachment, navigation and hint when projection refresh completes.
+Modified/middle-button background intent suppresses follow until ordinary foreground input resumes. Agent effects retire that page's human interest and existing hint, so their immediate or later scripted popups cannot reuse it until human input resumes. Another source page has independent interest and cannot publish a hint for this attachment. Input cancellation/disconnect and document changes retire interest; a new attachment never receives a previous attachment's hint. Human toolbar navigation renews interest after its own cleanup.
+
+The web refreshes projection and selects a hinted live tab only while the originating resource/page/incarnation, attachment, navigation and hint are current. Explicit user tab choice synchronously dismisses hints for the old attachment before routing completes, including a hint that arrives after that choice. Fresh foreground input can resume follow, without replaying a dismissed hint. Popups that open after human input resumes follow the current viewing preference; native popup events do not distinguish script provenance or prove ownership by an earlier action.
 
 Direct input remains the default. Selecting a current native editable exposes one compact lower floating Paste/Edit pair; the connected panel removes the duplicate upper Paste control. Paste invokes a feature-detected clipboard read directly in the trusted gesture; browser/OS consent remains native. Local keyboard/callout `paste` consumes only authorized `text/plain`, clears the receiver, prevents duplicate local insertion and does not forward Ctrl/Cmd+V to the remote clipboard. Both direct routes submit a typed paste action with the editable ID and unchanged text on the existing Browser stream. Runner verifies acknowledged-region membership, current native focus through the frame/shadow chain and existing input authority immediately before `keyboard.insert_text`. A delayed read cannot follow a changed receiver, document, attachment or target. Clipboard text is absent from telemetry, files, Agent events and history; only the explicit native editor can retain pasted text in its transient draft. Empty/oversized/denied/unsupported/stale outcomes do not fabricate successful insertion. Routine clipboard/completion/cancellation banners are not shown. The existing 32,768-character and 64-KiB whole-message bounds apply without truncation. Native insertion emits input rather than a custom remote paste event; rich clipboard/editor semantics and remote-to-local copy are not implemented.
 
@@ -300,7 +386,12 @@ Runner final failures map to typed, non-secret tool errors. The Engine validates
 
 One RunnerBrowserManager belongs to the current Runner connection lifecycle. Registration advertises `browser.v1` only when product browser initialization succeeds; browser unavailability does not stop independent Runner capabilities. Commands validate the current Runtime and accepted Runner generation before resource execution.
 
-Each concrete Session has a separate native persistent BrowserContext/profile under the current Runner Workspace. Tasks within that Session reuse its site state. Session working-folder association cannot change during a live manager's identity. Task-owned pages/popups and frames remain in a live registry with exact resource incarnations, not a durable help/task ownership table.
+Each concrete Session and selected engine has a separate native persistent BrowserContext/profile under the current Runner Workspace. Tasks within that Session/engine reuse its site state. Existing Patchright profiles retain their location; Camoufox uses a distinct engine-specific location. Session working-folder association cannot change during a live manager's identity. Task-owned pages/popups and frames remain in a live registry with exact resource incarnations, not a durable help/task ownership table.
+
+Camoufox fixes its content coordinate plane at 1280×800 CSS pixels and its native
+outer window at 1280×900, leaving room for browser chrome. Generated fingerprint
+window dimensions cannot shrink the native window and clip input that is inside
+the SDK viewport. Patchright retains its existing native sizing behavior.
 
 Native profile bytes remain under existing Runtime persistence; manager/Runner shutdown closes live contexts and invalidates handles without deleting those bytes. Normal Run completion is not profile cleanup. No backup, profile export/replay, retention sweeper or restoration of old live pages exists. Task/page close affects only the intended task resources, not all contexts or other Sessions.
 
@@ -318,13 +409,22 @@ Each context retains one internal blank tab so headed Chromium remains alive
 after its final task tab closes. The blank tab is outside task/page projection
 and task quotas, has no site navigation, and closes with the context.
 
-The Runner application declares a locked Patchright dependency. Image provisioning
-installs matching Chromium through that environment into the product browser path
-and supplies Xvfb for displayless Linux execution. System pip/Agent-installed
-drivers are not product availability evidence. Engine launch preserves the trusted
-Runner proxy route when configured and does not add a direct-network alternative.
+The Runner application locks Patchright and Camoufox SDK dependencies. Image
+provisioning installs matching Chromium and a pinned Camoufox/browser/fingerprint
+model pairing, verifies the browser archive SHA-256, and supplies Xvfb and native
+dependencies for displayless Linux execution. Runtime startup checks packaged
+assets without downloading browsers, models or addons. Missing assets fail the
+selected engine explicitly. System pip/Agent-installed drivers are not product
+availability evidence. Both launchers preserve the trusted Runner proxy route,
+including loopback destinations, without a direct-network alternative.
 
-Required Runner host tests also install the matching Chromium/native prerequisites before pytest in CI; the product image does not supply the separate host test environment.
+Required Runner host tests install both matching engines, model and native
+prerequisites before pytest in CI; the product image does not supply the separate
+host test environment. Browser-native and common contract tests exercise both SDK
+boundaries; the representative product E2E covers browser-only switching,
+source retirement, a new-engine page and preservation of the existing shell and
+Runtime/Runner identity. Profile return and restart reconciliation stay in narrower
+Runner and backend tests rather than expanding the E2E flow.
 
 ## Supported Observation and Interaction
 

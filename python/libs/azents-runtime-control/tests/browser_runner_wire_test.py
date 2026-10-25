@@ -23,7 +23,6 @@ from azents_runtime_control.browser_contract import (
     BrowserTarget,
     BrowserTask,
     browser_operation_type,
-    decode_browser_command,
     decode_browser_result,
     encode_browser_command,
     encode_browser_result,
@@ -34,6 +33,8 @@ from azents_runtime_control.browser_runner_wire import (
     browser_command_to_wire,
     browser_result_from_wire,
     browser_result_to_wire,
+    decode_configured_browser_command,
+    encode_configured_browser_command,
 )
 from azents_runtime_control.grpc_runner_client import (
     _event_message,
@@ -123,7 +124,7 @@ RICH_RESULT = BrowserResult(
 @pytest.mark.parametrize("command", COMMANDS)
 def test_command_protobuf_roundtrip(command: BrowserCommand) -> None:
     operation_type = browser_operation_type(command)
-    payload = encode_browser_command(command)
+    payload = encode_configured_browser_command("intent", command)
     message = pb.RunnerControlMessage(
         request_id="request-1",
         operation_request=pb.RunnerOperationRequest(
@@ -142,11 +143,14 @@ def test_command_protobuf_roundtrip(command: BrowserCommand) -> None:
     envelope = _operation(received)
     assert envelope.payload == payload
     assert envelope.owner_session_id == AUTHORITY.session_id
-    assert decode_browser_command(operation_type, envelope.payload) == command
+    configured = decode_configured_browser_command(operation_type, envelope.payload)
+    assert configured.command == command and configured.intent_id == "intent"
+    inner = envelope.payload["command"]
+    assert isinstance(inner, dict)
     if isinstance(command, BrowserObserveCommand):
-        assert type(envelope.payload["max_characters"]) is int
+        assert type(inner["max_characters"]) is int
     if isinstance(command, BrowserActCommand):
-        action = envelope.payload["action"]
+        action = inner["action"]
         assert isinstance(action, dict)
         assert type(action["timeout_ms"]) is int
 
@@ -186,7 +190,7 @@ def test_result_protobuf_roundtrip(result: BrowserResult) -> None:
 
 @pytest.mark.parametrize("wrong_type", ["bash", "browser.open", "browser.unknown"])
 def test_command_type_and_oneof_mismatch_is_denied(wrong_type: str) -> None:
-    payload = encode_browser_command(COMMANDS[2])
+    payload = encode_configured_browser_command("intent", COMMANDS[2])
     message = pb.RunnerControlMessage(
         operation_request=pb.RunnerOperationRequest(
             operation_type=wrong_type,
@@ -246,10 +250,11 @@ def test_malformed_or_oversize_wire_is_denied(wire: bytes) -> None:
 def test_command_integer_fields_remain_strict(value: object) -> None:
     payload: dict[str, object] = dict(encode_browser_command(COMMANDS[2]))
     payload["max_characters"] = value
+    configured = {"intent_id": "intent", "command": payload}
     with pytest.raises(BrowserContractError):
-        browser_command_to_wire("browser.list", payload)
+        browser_command_to_wire("browser.list", configured)
     with pytest.raises(BrowserContractError):
-        browser_command_from_wire("browser.list", json.dumps(payload).encode())
+        browser_command_from_wire("browser.list", json.dumps(configured).encode())
 
 
 @pytest.mark.parametrize("value", [True, 1.0, "1", -1, (1 << 40) + 1])

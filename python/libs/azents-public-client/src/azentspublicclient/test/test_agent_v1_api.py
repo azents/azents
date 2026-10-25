@@ -103,6 +103,13 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_get_browser_configuration(self) -> None:
+        """Test case for agent_v1_get_browser_configuration
+
+        Get Browser Configuration
+        """
+        pass
+
     def test_agent_v1_list_agent_admins(self) -> None:
         """Test case for agent_v1_list_agent_admins
 
@@ -149,6 +156,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_replace_automatic_session_projects
 
         Replace Automatic Session Projects
+        """
+        pass
+
+    def test_agent_v1_replace_browser_configuration(self) -> None:
+        """Test case for agent_v1_replace_browser_configuration
+
+        Replace Browser Configuration
         """
         pass
 

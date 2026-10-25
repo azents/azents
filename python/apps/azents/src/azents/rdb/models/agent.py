@@ -5,6 +5,7 @@ from typing import Any
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +13,7 @@ from azents.core.agent import (
     DEFAULT_SUBAGENT_MAX_DEPTH,
     DEFAULT_SUBAGENT_MAX_SUBAGENTS,
 )
+from azents.core.browser_configuration import AgentBrowserApplicationState
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -148,6 +150,61 @@ class RDBAgent(RDBModel):
         default=False,
         server_default=sa.false(),
     )
+    browser_implementation: Mapped[BrowserImplementation] = mapped_column(
+        ENUM(
+            BrowserImplementation,
+            name="browser_implementation",
+            create_type=False,
+            values_callable=lambda values: [value.value for value in values],
+        ),
+        init=False,
+        nullable=False,
+        default=BrowserImplementation.PATCHRIGHT,
+        server_default=BrowserImplementation.PATCHRIGHT.value,
+    )
+    browser_configuration_intent_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        init=False,
+        nullable=False,
+        default_factory=lambda: uuid7().hex,
+        server_default=sa.text("replace(gen_random_uuid()::text, '-', '')"),
+    )
+    browser_application_state: Mapped[AgentBrowserApplicationState] = mapped_column(
+        ENUM(
+            AgentBrowserApplicationState,
+            name="agent_browser_application_state",
+            create_type=False,
+            values_callable=lambda values: [value.value for value in values],
+        ),
+        init=False,
+        nullable=False,
+        default=AgentBrowserApplicationState.APPLYING,
+        server_default=AgentBrowserApplicationState.APPLYING.value,
+    )
+    # Non-owning evidence: only the exact current Runtime/generation can admit
+    # browser work. Removing/replacing that Runtime never removes Agent settings.
+    browser_observed_runtime_id: Mapped[str | None] = mapped_column(
+        sa.String(32), init=False, nullable=True, default=None
+    )
+    browser_observed_runner_generation: Mapped[int | None] = mapped_column(
+        sa.BigInteger, init=False, nullable=True, default=None
+    )
+    browser_application_reason: Mapped[str | None] = mapped_column(
+        sa.String(128), init=False, nullable=True, default=None
+    )
+    browser_application_claim_id: Mapped[str | None] = mapped_column(
+        sa.String(32), init=False, nullable=True, default=None
+    )
+    browser_application_lease_until: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True, default=None
+    )
+    browser_application_next_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        default_factory=lambda: datetime.datetime.now(datetime.UTC),
+        server_default=sa.func.now(),
+    )
     # Enable human interactive Terminal access independently of Worker tools.
     terminal_enabled: Mapped[bool] = mapped_column(
         sa.Boolean,
@@ -271,6 +328,27 @@ class RDBAgent(RDBModel):
         name="ck_agents_subagent_settings_shape",
     )
 
+    IX_BROWSER_APPLICATION_DUE = sa.Index(
+        "ix_agents_browser_application_due", "browser_application_next_at"
+    )
+    CK_BROWSER_OBSERVATION = sa.CheckConstraint(
+        "(browser_observed_runtime_id IS NULL AND "
+        "browser_observed_runner_generation IS NULL) OR "
+        "(browser_observed_runtime_id IS NOT NULL AND "
+        "browser_observed_runner_generation IS NOT NULL AND "
+        "browser_observed_runner_generation > 0)",
+        name="ck_agents_browser_observation",
+    )
+    CK_BROWSER_CLAIM = sa.CheckConstraint(
+        "(browser_application_claim_id IS NULL) = "
+        "(browser_application_lease_until IS NULL)",
+        name="ck_agents_browser_claim",
+    )
+    CK_BROWSER_FAILURE = sa.CheckConstraint(
+        "(browser_application_state = 'failed') = "
+        "(browser_application_reason IS NOT NULL)",
+        name="ck_agents_browser_failure",
+    )
     UQ_ID_WORKSPACE = sa.UniqueConstraint(
         "id", "workspace_id", name="uq_agents_id_workspace"
     )
@@ -279,6 +357,10 @@ class RDBAgent(RDBModel):
         UQ_ID_WORKSPACE,
         IX_WORKSPACE_ID,
         IX_RUNTIME_PROFILE_ID,
+        IX_BROWSER_APPLICATION_DUE,
+        CK_BROWSER_OBSERVATION,
+        CK_BROWSER_CLAIM,
+        CK_BROWSER_FAILURE,
         CK_RUNTIME_PROFILE_SELECTION_VERSION_POSITIVE,
         CK_RUNTIME_CAPABILITY_VERSION_POSITIVE,
         CK_RUNTIME_CAPABILITY_PROFILE,

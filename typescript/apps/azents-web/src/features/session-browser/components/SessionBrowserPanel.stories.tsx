@@ -545,7 +545,7 @@ function PastePreviewFixture(
   );
 }
 
-/** Synthetic remote values; actual clipboard text stays in transient UI state. */
+/** Synthetic remote values and paste text; never read the device clipboard. */
 function FieldEditorPreviewFixture(
   props: SessionBrowserPanelProps & {
     multiline?: boolean;
@@ -739,13 +739,7 @@ function FieldEditorPreviewFixture(
           const field = selected;
           const originalValue =
             field === "search" ? searchValue : passwordValue;
-          if (
-            typeof navigator.clipboard === "undefined" ||
-            typeof navigator.clipboard.readText !== "function"
-          ) {
-            return;
-          }
-          void navigator.clipboard.readText().then(
+          void Promise.resolve("Synthetic paste only").then(
             (text) => {
               if (
                 document.activeElement !== receiver ||
@@ -775,13 +769,7 @@ function FieldEditorPreviewFixture(
             return;
           }
           const original = draft;
-          if (
-            typeof navigator.clipboard === "undefined" ||
-            typeof navigator.clipboard.readText !== "function"
-          ) {
-            return;
-          }
-          void navigator.clipboard.readText().then(
+          void Promise.resolve("Synthetic paste only").then(
             (text) => {
               if (
                 latestDraft.current !== original ||
@@ -1052,6 +1040,7 @@ export const FieldEditorFloatingLowerInputVisibility = {
 
 export const FieldEditorPreviewInteraction = {
   ...FieldEditorPreview,
+  tags: ["ci-contract"],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const open = (): HTMLElement =>
@@ -1077,9 +1066,9 @@ export const FieldEditorPreviewInteraction = {
     await userEvent.click(
       within(toolbar).getByRole("button", { name: "Edit" }),
     );
-    await expect(
-      canvas.getByRole("dialog", { name: "Edit input" }),
-    ).toBeVisible();
+    await waitFor(() =>
+      expect(canvas.getByRole("dialog", { name: "Edit input" })).toBeVisible(),
+    );
     const input = canvas.getByRole("textbox", { name: "검색어" });
     await expect(input).toHaveValue("서울 날씨");
     await waitFor(() => expect(input).toHaveFocus());
@@ -1105,6 +1094,10 @@ export const FieldEditorPreviewInteraction = {
     await userEvent.click(open());
     await expect(canvas.getByRole("textbox", { name: "검색어" })).toHaveValue(
       "서울 날씨",
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    await expect(canvas.getByRole("textbox", { name: "검색어" })).toHaveValue(
+      "서울 날씨Synthetic paste only",
     );
     await userEvent.clear(canvas.getByRole("textbox", { name: "검색어" }));
     await userEvent.type(
@@ -2130,16 +2123,26 @@ export const ReadOnly = {
 } satisfies Story;
 
 export const Disconnected = {
+  tags: ["ci-contract"],
   args: { state: { ...ready, connection: "stale", canClose: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
-    await expect(canvas.getByText(/last received image/)).toBeVisible();
+    await expect(canvas.getByText("Disconnected")).toBeVisible();
+    await expect(canvas.getByRole("img")).toBeVisible();
     await expect(
       canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeDisabled();
     await expect(
       canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
     ).toBeNull();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Browser actions" }),
+    );
+    await expect(
+      await canvas.findByRole("menuitem", {
+        name: "Refresh browser connection",
+      }),
+    ).toBeEnabled();
   },
 } satisfies Story;
 
@@ -2244,22 +2247,48 @@ export const ReadOnlyDialogBeforeImage = {
   },
 } satisfies Story;
 export const StaleCoordinates = {
+  tags: ["ci-contract"],
   args: {
     state: { ...ready, status: { ...initialDialogStatus, dialog: null } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const surface = canvas.getByRole("region", { name: "Remote browser page" });
+    const updating = canvas.getByRole("status", { name: "Updating page…" });
+    await expect(updating).toBeVisible();
+    await expect(updating).toHaveTextContent("");
+    await expect(canvas.getByRole("img")).toBeVisible();
+    await expect(
+      canvas.getByRole("textbox", { name: "Remote browser keyboard" }),
+    ).toHaveAttribute("readonly");
     await expect(surface).toHaveAttribute("tabindex", "-1");
     await fireEvent.keyDown(surface, { key: "Enter" });
     await expect(actions).not.toHaveBeenCalled();
   },
 } satisfies Story;
 export const Conflict = {
+  tags: ["ci-contract"],
   args: { state: { ...ready, conflict: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await expect(
+      canvas.getByText(
+        "Another interaction is in progress. Try again when it finishes.",
+      ),
+    ).toBeVisible();
+  },
 } satisfies Story;
 export const UnknownOutcome = {
+  tags: ["ci-contract"],
   args: { state: { ...ready, outcomeUnknown: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await expect(
+      canvas.getByText(
+        "Input result unconfirmed. Check the page before retrying.",
+      ),
+    ).toBeVisible();
+  },
 } satisfies Story;
 export const CloseFailed = { args: { closeError: true } } satisfies Story;
 export const Loading = { args: { state: { type: "LOADING" } } } satisfies Story;
@@ -2276,6 +2305,7 @@ export const Connecting = {
   args: { state: { ...ready, connection: "connecting", image: null } },
 } satisfies Story;
 export const LiveTransportUnavailable = {
+  tags: ["ci-contract"],
   args: {
     state: {
       ...ready,
@@ -2291,8 +2321,13 @@ export const LiveTransportUnavailable = {
       canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeEnabled();
     await expect(
-      canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
-    ).toBeNull();
+      canvas.getByRole("textbox", { name: "Remote browser keyboard" }),
+    ).toHaveAttribute("readonly");
+    await expect(
+      canvas.getByText(
+        "Browser connection unavailable. Reconnect from the Browser menu.",
+      ),
+    ).toBeVisible();
   },
 } satisfies Story;
 export const Mobile = {
@@ -2330,6 +2365,7 @@ export const LongLabels = {
   },
 } satisfies Story;
 export const KeyboardAndComposition = {
+  tags: ["ci-contract"],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
@@ -2349,11 +2385,11 @@ export const KeyboardAndComposition = {
     actions.mockClear();
     await fireEvent.compositionStart(keyboard);
     await fireEvent.input(keyboard, {
-      target: { value: "한" },
+      target: { value: "x한" },
       isComposing: true,
     });
     await fireEvent.compositionEnd(keyboard, { data: "한" });
-    await fireEvent.input(keyboard, { target: { value: "한" }, data: "한" });
+    await fireEvent.input(keyboard, { target: { value: "x한" }, data: "한" });
     await expect(actions).toHaveBeenCalledTimes(2);
     await expect(actions).toHaveBeenLastCalledWith(frame, {
       kind: "composition",
@@ -2364,7 +2400,63 @@ export const KeyboardAndComposition = {
     await expect(keyboard).not.toHaveFocus();
   },
 } satisfies Story;
+export const KoreanWithoutCompositionEvents = {
+  tags: ["ci-contract"],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const keyboard = canvas.getByRole("textbox", {
+      name: "Remote browser keyboard",
+    });
+    await clickBrowserViewport(
+      canvas.getByRole("region", { name: "Remote browser page" }),
+    );
+    actions.mockClear();
+    await fireEvent.input(keyboard, {
+      target: { value: "ㅇ" },
+      data: "ㅇ",
+      inputType: "insertText",
+    });
+    await expect(keyboard).toHaveValue("ㅇ");
+    // iOS Korean replaces an ordinary insertion, without isComposing.
+    await fireEvent(
+      keyboard,
+      new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "deleteContentBackward",
+      }),
+    );
+    await expect(keyboard).toHaveValue("ㅇ");
+    await fireEvent.input(keyboard, {
+      target: { value: "" },
+      inputType: "deleteContentBackward",
+    });
+    await fireEvent.input(keyboard, {
+      target: { value: "아" },
+      data: "아",
+      inputType: "insertText",
+    });
+    await expect(keyboard).toHaveValue("아");
+    await expect(actions.mock.calls.map(([, action]) => action)).toEqual([
+      { kind: "composition", phase: "start", text: null },
+      { kind: "composition", phase: "commit", text: "ㅇ" },
+      { kind: "text_edit", delete_before: 1, text: "" },
+      { kind: "composition", phase: "start", text: null },
+      { kind: "composition", phase: "commit", text: "아" },
+    ]);
+    actions.mockClear();
+    if (keyboard instanceof HTMLTextAreaElement) {
+      keyboard.setSelectionRange(keyboard.value.length, keyboard.value.length);
+    }
+    await userEvent.keyboard("{Backspace}");
+    await expect(keyboard).toHaveValue("");
+    await expect(actions).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard("{Tab}");
+    await expect(keyboard).not.toHaveFocus();
+  },
+} satisfies Story;
 export const CancelledCompositionDoesNotCommit = {
+  tags: ["ci-contract"],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {

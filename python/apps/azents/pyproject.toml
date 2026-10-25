@@ -32,7 +32,7 @@ dependencies = [
     # Monitoring
     "sentry-sdk[fastapi]==2.68.1",
     # CLI
-    "typer==0.27.2",
+    "typer==0.27.3",
     # Template rendering
     "jinja2==3.1.6",
     # Type stubs
@@ -49,11 +49,11 @@ dependencies = [
     # Local dependencies
     "az-common",
     # Model transports
-    "pydantic-ai-slim[anthropic,google,openai]==2.53.0",
-    "openai[realtime]==3.22.1",
+    "pydantic-ai-slim[anthropic,google,openai]==2.59.0",
+    "openai[realtime]==3.26.0",
     "openrouter==0.10.8",
-    "anthropic==1.9.0",
-    "google-genai==2.25.0",
+    "anthropic==1.12.1",
+    "google-genai==2.30.0",
     "Pillow==13.0.0",
     "redis==8.1.0",
     "mcp==2.2.0",
@@ -79,7 +79,7 @@ dependencies = [
     # Bounded document conversion and extraction (no OCR or macro execution)
     "markdown-it-py==4.2.0",
     "defusedxml==0.7.1",
-    "pypdf==6.21.1",
+    "pypdf==6.21.2",
 ]
 
 [project.scripts]

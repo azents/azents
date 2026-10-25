@@ -25,6 +25,8 @@ function createMermaidConfig(colorScheme: "dark" | "light"): MermaidConfig {
     flowchart: {
       useMaxWidth: true,
     },
+    layout: "dagre",
+    look: "classic",
     maxEdges: 500,
     maxTextSize: 50_000,
     securityLevel: "strict",

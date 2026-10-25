@@ -5,7 +5,7 @@ description = "Azents local test environment tools (preflight, devserver lifecyc
 requires-python = ">=3.14"
 dependencies = [
     "cryptography==50.0.2",
-    "filelock==3.32.7",
+    "filelock==4.2.1",
     "httpx==0.28.1",
     "mcp==2.2.0",
     "azents",
@@ -15,7 +15,7 @@ dependencies = [
     "python-dotenv==1.2.4",
     "python-frontmatter==1.3.0",
     "pyyaml==6.0.3",
-    "typer==0.27.2",
+    "typer==0.27.3",
     "websockets==15.0.1",
 ]
 

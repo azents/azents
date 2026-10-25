@@ -5,6 +5,7 @@ import inspect
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from unittest.mock import create_autospec
 
 import pytest
 from cryptography.fernet import Fernet
@@ -21,7 +22,11 @@ from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.runtime.terminal_coordination.memory import (
     InMemoryRuntimeTerminalCoordinationStore,
 )
-from azents.runtime.transfer.object_store import RuntimeTransferOrphanRepairResult
+from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
+from azents.runtime.transfer.object_store import (
+    RuntimeTransferOrphanRepairResult,
+    RuntimeTransferS3Cleanup,
+)
 from azents.services.runtime_browser.authority import (
     DatabaseRuntimeBrowserStreamScopeValidator,
 )
@@ -404,7 +409,9 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         assert isinstance(
             owner_registry, control_server.RuntimeStreamOwnerSessionRegistry
         )
-        assert read_factory_engines == [engine, engine, engine, engine, engine]
+        assert read_factory_engines == [engine] * 6
+        assert runner["browser_configuration"] is not None
+        assert runner["browser_reconciler"] is not None
         browser_source = dict(registrations)["browser-source"]
         browser_scope = browser_source["validate_scope"]
         assert isinstance(browser_scope, DatabaseRuntimeBrowserStreamScopeValidator)
@@ -501,3 +508,29 @@ async def test_transfer_repair_one_shot_runs_bounded_categories() -> None:
         ("stale", 7),
     ]
     assert cleanup.calls == [(now, timedelta(hours=1), 7)]
+
+
+@pytest.mark.asyncio
+async def test_transfer_repair_propagates_cancellation_without_error_logging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure = asyncio.CancelledError()
+
+    coordinator = create_autospec(RuntimeTransferCoordinator, instance=True)
+    coordinator.repair_terminal_correlations.side_effect = failure
+    cleanup = create_autospec(RuntimeTransferS3Cleanup, instance=True)
+
+    with pytest.raises(asyncio.CancelledError) as error:
+        await asyncio.wait_for(
+            control_server._run_transfer_repair(
+                coordinator,
+                cleanup=cleanup,
+                clock=lambda: datetime(2026, 10, 25, tzinfo=UTC),
+                stop=asyncio.Event(),
+                interval_seconds=60,
+                page_size=7,
+            ),
+            timeout=1,
+        )
+    assert error.value is failure
+    assert "Runtime transfer repair iteration failed" not in caplog.text

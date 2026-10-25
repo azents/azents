@@ -21,6 +21,7 @@ from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
 )
+from azents.services.browser_configuration import BrowserConfigurationCoordinator
 from azents.services.chat import ChatSessionService
 from azents.services.compacted_event_retention import CompactedEventRetentionService
 from azents.services.exchange_file import ExchangeFileService
@@ -171,6 +172,13 @@ async def agent_runtime_removal_handler(context: TaskContext) -> TaskResult:
             **dataclasses.asdict(summary),
         },
     )
+
+
+async def browser_configuration_handler(context: TaskContext) -> TaskResult:
+    """Reconcile durable browser intent without allocating or recreating compute."""
+    coordinator = await context.container.solve(BrowserConfigurationCoordinator)
+    count = await coordinator.reconcile_once(context.deadline)
+    return TaskResult(next_run_at=None, summary={"claimed_count": count})
 
 
 async def owner_lifecycle_handler(context: TaskContext) -> TaskResult:
@@ -364,6 +372,16 @@ AGENT_RUNTIME_REMOVAL_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+BROWSER_CONFIGURATION_TASK = ScheduledTaskDefinition(
+    key="browser_configuration",
+    description="Reconcile Agent browser implementations on current Runners.",
+    interval=datetime.timedelta(seconds=5),
+    timeout=datetime.timedelta(minutes=5),
+    retry_policy=RetryPolicy(kind="next_interval"),
+    handler=browser_configuration_handler,
+    enabled_by_default=True,
+)
+
 OWNER_LIFECYCLE_TASK = ScheduledTaskDefinition(
     key="owner_lifecycle",
     description="Archive/purge User Sessions for membership loss and account deletion.",
@@ -471,6 +489,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     SESSION_AUTO_ARCHIVE_TASK,
     AGENT_DECOMMISSION_TASK,
     AGENT_RUNTIME_REMOVAL_TASK,
+    BROWSER_CONFIGURATION_TASK,
     OWNER_LIFECYCLE_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
     EXTERNAL_ACCOUNT_OAUTH_CLEANUP_TASK,

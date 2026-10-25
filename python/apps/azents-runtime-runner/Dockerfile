@@ -1,6 +1,6 @@
 FROM docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32 AS docker-cli
 
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
+FROM python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.6@sha256:88bc6eb1ccd4b82efd0e1b530caffabddf50dc2bf612e66c14ea25b8ee8a4d3d /uv /uvx /bin/
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
@@ -100,20 +100,16 @@ RUN set -eux; \
 
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && dpkg --compare-versions "$(node --version | cut -c2-)" ge 24.22.1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /usr/local/bin/corepack-shims \
     && corepack enable --install-directory /usr/local/bin/corepack-shims
 
-RUN mkdir -p -m 755 /etc/apt/keyrings \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-        > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends gh \
-    && rm -rf /var/lib/apt/lists/*
+COPY python/apps/azents-runtime-runner/docker/install-gh.sh /tmp/install-gh.sh
+RUN sh /tmp/install-gh.sh "${TARGETARCH:-$(dpkg --print-architecture)}" /usr/local \
+    && gh --version | grep -F "gh version 2.103.1 " \
+    && rm /tmp/install-gh.sh
 
 RUN pip install --no-cache-dir --break-system-packages \
         pandas \
@@ -150,12 +146,19 @@ WORKDIR /workspace/python/apps/azents-runtime-runner
 COPY python/apps/azents-runtime-runner/pyproject.toml ./
 COPY python/apps/azents-runtime-runner/uv.lock ./
 COPY python/libs/azents-runtime-control /workspace/python/libs/azents-runtime-control
-COPY python/apps/azents-runtime-runner/src ./src
+COPY python/apps/azents-runtime-runner/src/azents_runtime_runner/__init__.py \
+     python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_camoufox.py \
+     python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_install.py \
+     ./src/azents_runtime_runner/
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/azents-browsers
 RUN uv sync --frozen --no-dev \
     && uv run --no-dev patchright install --with-deps chromium \
-    && chmod -R a+rX /opt/azents-browsers
+    && uv run --no-dev playwright install-deps firefox \
+    && uv run --no-dev python -m azents_runtime_runner.browser_install \
+    && chmod -R a+rX /opt/azents-browsers .venv/share/azents-browsers
+
+COPY python/apps/azents-runtime-runner/src ./src
 
 COPY python/apps/azents-runtime-runner/docker/azents-git-credential.sh /usr/local/bin/azents-git-credential
 RUN chmod +x /usr/local/bin/azents-git-credential \

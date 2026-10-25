@@ -7,11 +7,42 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from analyze_e2e_ci import analyze, load_samples
+from analyze_e2e_ci import _parse_lane, analyze, load_samples
 
 
 class AnalyzeE2ECITest(unittest.TestCase):
     """Verify critical-path and overlap calculations."""
+
+    def test_rejects_invalid_supplied_duration_evidence(self) -> None:
+        for record in ("test", "fixture", "image"):
+            for value in (-3, float("nan"), float("inf"), True, "invalid", None):
+                with (
+                    self.subTest(record=record, value=value),
+                    tempfile.TemporaryDirectory() as directory,
+                ):
+                    root = Path(directory)
+                    self._write_lane(root, "required-1")
+                    artifact = root / "e2e-observability-required-1"
+                    if record == "image":
+                        path = artifact / "image-build-timings.jsonl"
+                        row = {"image": "server", "duration_seconds": value}
+                    else:
+                        path = artifact / "pytest-timings.jsonl"
+                        row = {
+                            "record_type": "test_phase"
+                            if record == "test"
+                            else "fixture",
+                            "phase": "call" if record == "test" else "setup",
+                            "node_id": "test.py::test_core",
+                            "fixture": "e2e_images",
+                            "duration_seconds": value,
+                        }
+                    with path.open("a") as handle:
+                        handle.write(json.dumps(row) + "\n")
+                    with self.assertRaisesRegex(
+                        (TypeError, ValueError), "finite non-negative"
+                    ):
+                        _parse_lane(sample="attempt", artifact_dir=artifact, job={})
 
     @staticmethod
     def _write_lane(

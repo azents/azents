@@ -335,10 +335,12 @@ The packaging script will:
 
 1. **Validate** the skill automatically, checking:
 
-   - YAML frontmatter format and required fields
-   - Skill naming conventions and directory structure
-   - Description completeness and quality
-   - File organization and resource references
+   - YAML frontmatter format, allowed fields, and required nonempty name/description
+   - Skill name format and length
+   - Description character and length constraints
+
+   Review prose quality, directory organization, and resource references separately;
+   the minimal validator does not establish those properties.
 
 2. **Package** the skill if validation passes, creating a .skill file named after the skill (e.g., `my-skill.skill`) that includes all files and maintains the proper directory structure for distribution. The .skill file is a zip file with a .skill extension.
 

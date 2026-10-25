@@ -9,16 +9,23 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 from typing import Literal
 
+from azents_runtime_control.browser_configuration import (
+    BrowserConfigurationRequest,
+    BrowserConfigurationStatus,
+    decode_browser_configuration_status,
+    encode_browser_configuration,
+)
 from azents_runtime_control.browser_contract import (
     BrowserCommand,
     BrowserContractError,
     BrowserResult,
     browser_operation_type,
     decode_browser_result,
-    encode_browser_command,
 )
+from azents_runtime_control.browser_runner_wire import encode_configured_browser_command
 from azents_runtime_control.process_observation import ProcessObservation
 
+from azents.core.browser_configuration import BrowserConfigurationIntentReader
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
@@ -81,6 +88,24 @@ class RuntimeBashResult:
     stderr: str
     exit_code: int
     final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _BashCompletion:
+    """Validated final-success payload from the bash operation boundary."""
+
+    exit_code: int
+
+    @classmethod
+    def decode(cls, payload: dict[str, JsonValue]) -> "_BashCompletion":
+        if set(payload) != {"exit_code"} or type(payload["exit_code"]) is not int:
+            raise RuntimeRunnerOperationFailedError(
+                "Runner bash completion requires an integer exit code",
+                code="invalid_bash_completion",
+            )
+        value = payload["exit_code"]
+        assert isinstance(value, int)
+        return cls(exit_code=value)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -455,6 +480,7 @@ class RuntimeRunnerOperationClient:
         control_protocol: RuntimeControlProtocolService,
         coordination_store: RuntimeCoordinationStore,
         metrics: RuntimeReplyDeliveryMetrics,
+        browser_configuration: BrowserConfigurationIntentReader | None,
         body_chunk_size_bytes: int = _DEFAULT_BODY_CHUNK_SIZE_BYTES,
     ) -> None:
         """Initialize the Runner operation client."""
@@ -464,6 +490,7 @@ class RuntimeRunnerOperationClient:
         self.coordination_store = coordination_store
         self.metrics = metrics
         self._body_chunk_size_bytes = body_chunk_size_bytes
+        self.browser_configuration = browser_configuration
 
     async def run_browser_command(
         self,
@@ -475,7 +502,18 @@ class RuntimeRunnerOperationClient:
         deadline_at: datetime,
     ) -> BrowserResult:
         """Dispatch one typed browser command without retrying site effects."""
-        payload = encode_browser_command(command)
+        intent = (
+            await self.browser_configuration.current_intent(
+                runtime_id, runner_generation, require_ready=True
+            )
+            if self.browser_configuration is not None
+            else None
+        )
+        if intent is None:
+            raise RuntimeRunnerOperationUnavailable(
+                "Browser configuration is not ready on the current Runner."
+            )
+        payload = encode_configured_browser_command(intent, command)
         dispatch = await self._dispatch_runner_operation(
             RuntimeRunnerOperation(
                 runtime_id=runtime_id,
@@ -504,6 +542,50 @@ class RuntimeRunnerOperationClient:
                 "do not repeat an uncertain action.",
                 code="browser_invalid_response",
             ) from exc
+
+    async def browser_configuration_control(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        request: BrowserConfigurationRequest | None,
+        deadline_at: datetime,
+    ) -> BrowserConfigurationStatus:
+        """Observe or apply configuration without replaying website operations."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type=(
+                    "browser.configuration_status"
+                    if request is None
+                    else "browser.configure"
+                ),
+                owner_session_id=None,
+                payload={}
+                if request is None
+                else encode_browser_configuration(request),
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        record = await self._read_until_final(
+            dispatch.reply_stream_id,
+            _ReplyFolder(after_cursor=None),
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+        if set(record.event.payload) != {"browser_configuration"}:
+            raise RuntimeRunnerOperationFailedError(
+                "Runner browser configuration response is malformed.",
+                code="browser_invalid_response",
+            )
+        return decode_browser_configuration_status(
+            record.event.payload["browser_configuration"]
+        )
 
     async def run_bash(
         self,
@@ -1524,11 +1606,11 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
             cancel_check=cancel_check,
         )
-        exit_code = _int_payload(final.event.payload, "exit_code", default=0)
+        completion = _BashCompletion.decode(final.event.payload)
         return RuntimeBashResult(
             stdout="".join(folder.stdout),
             stderr="".join(folder.stderr),
-            exit_code=exit_code,
+            exit_code=completion.exit_code,
             final_cursor=final.cursor,
         )
 

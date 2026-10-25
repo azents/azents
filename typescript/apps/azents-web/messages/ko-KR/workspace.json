@@ -1312,6 +1312,25 @@
       "unknown": "현재 Runtime 구성을 사용할 수 없습니다."
     },
     "runtimeSettings": {
+      "browserChoice": {
+        "label": "브라우저 엔진",
+        "patchright": "Patchright (기본)",
+        "camoufox": "Camoufox (실험적)",
+        "loadError": "브라우저 설정을 불러올 수 없습니다",
+        "refresh": "상태 새로고침",
+        "saving": "브라우저 선택을 저장하는 중…",
+        "applying": "{browser} 적용 중…",
+        "offline": "저장한 선택은 다음에 Runtime이 정상 시작될 때 적용됩니다.",
+        "failedTitle": "브라우저 전환에 실패했습니다",
+        "unsupported": "브라우저 선택을 지원하는 Runner 이미지가 필요합니다. 호환되는 Runner가 연결되면 저장한 선택이 적용됩니다.",
+        "failedDescription": "브라우저를 사용할 수 없습니다. 다시 시도하거나 다른 엔진을 직접 선택해 주세요. 다른 Runtime 작업에는 영향을 주지 않습니다.",
+        "retry": "전환 다시 시도",
+        "confirmTitle": "브라우저 엔진을 변경할까요?",
+        "confirmDescription": "{browser}를 지금 적용할까요? 이 Agent의 모든 브라우저 탭과 브라우저 작업이 종료됩니다. 터미널과 다른 Runtime 작업은 계속됩니다.",
+        "profiles": "각 엔진은 로그인 상태를 별도로 보관합니다. 사이트 상태는 엔진 사이에 복사되지 않습니다.",
+        "cancel": "취소",
+        "confirm": "브라우저 선택 적용"
+      },
       "browserLabel": "세션 브라우저",
       "browserDescription": "Agent의 브라우저 도구와 실시간 브라우저 패널을 사용합니다. 꺼도 저장된 사이트 상태는 유지되며 다른 Runtime 기능에는 영향을 주지 않습니다.",
       "environmentVariables": {

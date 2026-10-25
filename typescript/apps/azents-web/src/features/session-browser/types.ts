@@ -137,6 +137,7 @@ export type BrowserInputAction =
     }
   | { kind: "key"; phase: "down" | "up"; key: string }
   | { kind: "paste"; editable_id: string; text: string }
+  | { kind: "text_edit"; delete_before: number; text: string }
   | { kind: "field_open"; editable_id: string }
   | {
       kind: "field_replace";

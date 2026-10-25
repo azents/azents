@@ -29,7 +29,9 @@ import { useBrowserTouchView } from "./useBrowserTouchView";
 import type { SessionBrowserPanelProps } from "../components/SessionBrowserPanel";
 import type { BrowserPopupHint } from "../popup";
 import type {
+  BrowserCoordinateAction,
   BrowserFieldResult,
+  BrowserFrame,
   BrowserNavigationAction,
   BrowserPageChoice,
   BrowserTarget,
@@ -254,6 +256,27 @@ export function useSessionBrowserContainer(
   const [addressError, setAddressError] = useState(false);
   const source = live.state.displayed;
   const status = live.state.status;
+  const dismissedPopupAttachment = useRef<string | null>(null);
+  const coordinate = (
+    frame: BrowserFrame,
+    action: BrowserCoordinateAction,
+  ): boolean => {
+    const accepted =
+      query.data?.allow_input === true && live.coordinate(frame, action);
+    if (
+      accepted &&
+      ((action.kind === "pointer" && action.phase === "down") ||
+        (action.kind === "key" && action.phase === "down") ||
+        (action.kind === "composition" && action.phase === "start") ||
+        action.kind === "wheel" ||
+        action.kind === "paste" ||
+        action.kind === "text_edit" ||
+        action.kind === "navigation")
+    ) {
+      dismissedPopupAttachment.current = null;
+    }
+    return accepted;
+  };
   const popup = useRef<
     | (BrowserPopupHint & {
         key: string;
@@ -287,6 +310,7 @@ export function useSessionBrowserContainer(
           status,
           selectedRef.current,
           live.state.connection === "connected",
+          dismissedPopupAttachment.current,
         )
       ) {
         candidate.pending = false;
@@ -374,6 +398,7 @@ export function useSessionBrowserContainer(
       !readOnly &&
       focused &&
       fieldEditor.controls.draft === null &&
+      !live.state.navigationPending &&
       state.type === "READY" &&
       !mutationPending &&
       query.data?.allow_input === true &&
@@ -384,8 +409,7 @@ export function useSessionBrowserContainer(
       source !== null &&
       browserFrameMatchesStatus(source, status),
     frame: source,
-    onAction: (frame, action) =>
-      query.data?.allow_input === true && live.coordinate(frame, action),
+    onAction: coordinate,
   });
   const manualKeyboard = useBrowserManualKeyboard({
     enabled: interaction.interaction !== null && !fieldEditor.active,
@@ -412,8 +436,7 @@ export function useSessionBrowserContainer(
     frame: source,
     zoom,
     onZoomChange: setZoom,
-    onAction: (frame, action) =>
-      query.data?.allow_input === true && live.coordinate(frame, action),
+    onAction: coordinate,
     keyboardRef: interaction.keyboardRef,
     cancelInput: interaction.cancel,
   });
@@ -492,13 +515,13 @@ export function useSessionBrowserContainer(
     source !== null &&
     status !== null &&
     browserFrameMatchesStatus(source, status) &&
-    live.state.pendingInputs === 0;
+    !live.state.navigationPending;
   const navigate = (action: BrowserNavigationAction): void => {
     if (!navigationEnabled) {
       return;
     }
     interaction.cancel();
-    if (live.coordinate(source, action)) {
+    if (coordinate(source, action)) {
       setAddressDraft(null);
       setAddressError(false);
       void utils.browser.projection.invalidate(resource);
@@ -561,6 +584,9 @@ export function useSessionBrowserContainer(
       }
     },
     onSelect: (target) => {
+      dismissedPopupAttachment.current = status?.attachment_id ?? null;
+      // Protect an explicit choice before the router commits a new render.
+      selectedRef.current = target;
       if (popup.current !== null) {
         popup.current.pending = false;
       }

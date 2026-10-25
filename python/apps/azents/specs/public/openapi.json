@@ -6,6 +6,128 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/browser-configuration": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Get Browser Configuration",
+        "description": "Read requested choice and current-Runner application evidence.",
+        "operationId": "agent_v1_get_browser_configuration",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentBrowserConfiguration"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Replace Browser Configuration",
+        "description": "Save confirmed selection and immediately start browser-only application.",
+        "operationId": "agent_v1_replace_browser_configuration",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserConfigurationReplaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentBrowserConfiguration"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects": {
       "get": {
         "tags": [
@@ -24873,6 +24995,86 @@
         "title": "AgentAdminResponse",
         "description": "AgentAdmin response."
       },
+      "AgentBrowserConfiguration": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "intent_id": {
+            "type": "string",
+            "title": "Intent Id"
+          },
+          "requested": {
+            "$ref": "#/components/schemas/BrowserImplementation"
+          },
+          "applied": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserImplementation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "offline",
+              "applying",
+              "ready",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "runtime_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Id"
+          },
+          "runner_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runner Generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "intent_id",
+          "requested",
+          "applied",
+          "state",
+          "reason_code",
+          "runtime_id",
+          "runner_generation"
+        ],
+        "title": "AgentBrowserConfiguration"
+      },
       "AgentCreateGitWorktreeAction": {
         "properties": {
           "type": {
@@ -29236,6 +29438,32 @@
         ],
         "title": "BrowserClosePageRequest"
       },
+      "BrowserConfigurationReplaceRequest": {
+        "properties": {
+          "expected_intent_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]+$",
+            "title": "Expected Intent Id"
+          },
+          "implementation": {
+            "$ref": "#/components/schemas/BrowserImplementation"
+          },
+          "retry": {
+            "type": "boolean",
+            "title": "Retry"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_intent_id",
+          "implementation",
+          "retry"
+        ],
+        "title": "BrowserConfigurationReplaceRequest"
+      },
       "BrowserCreatePageRequest": {
         "properties": {},
         "additionalProperties": false,
@@ -29282,6 +29510,15 @@
           "name"
         ],
         "title": "BrowserFrameResponse"
+      },
+      "BrowserImplementation": {
+        "type": "string",
+        "enum": [
+          "patchright",
+          "camoufox"
+        ],
+        "title": "BrowserImplementation",
+        "description": "Packaged product browsers; never an executable or profile override."
       },
       "BrowserPageResponse": {
         "properties": {

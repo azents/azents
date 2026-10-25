@@ -1312,6 +1312,25 @@
       "unknown": "現在のRuntime構成は利用できません。"
     },
     "runtimeSettings": {
+      "browserChoice": {
+        "label": "ブラウザーエンジン",
+        "patchright": "Patchright（既定）",
+        "camoufox": "Camoufox（実験的）",
+        "loadError": "ブラウザー設定を読み込めません",
+        "refresh": "状態を更新",
+        "saving": "ブラウザーの選択を保存中…",
+        "applying": "{browser}を適用中…",
+        "offline": "保存した選択は、次にRuntimeが正常に起動したときに適用されます。",
+        "failedTitle": "ブラウザーを切り替えられませんでした",
+        "unsupported": "ブラウザー選択に対応したRunnerイメージが必要です。互換性のあるRunnerが接続すると、保存した選択が適用されます。",
+        "failedDescription": "ブラウザーは利用できません。再試行するか、別のエンジンを明示的に選択してください。他のRuntimeジョブには影響しません。",
+        "retry": "切り替えを再試行",
+        "confirmTitle": "ブラウザーエンジンを変更しますか？",
+        "confirmDescription": "{browser}を今すぐ適用しますか？このAgentのすべてのブラウザータブと操作が終了します。ターミナルや他のRuntimeジョブは継続します。",
+        "profiles": "ログイン状態はエンジンごとに保存されます。サイトの状態はエンジン間でコピーされません。",
+        "cancel": "キャンセル",
+        "confirm": "ブラウザーの選択を適用"
+      },
       "browserLabel": "セッションブラウザー",
       "browserDescription": "Agentのブラウザーツールとライブパネルを有効にします。無効にしても保存済みのサイト状態は保持され、他のRuntime機能は引き続き利用できます。",
       "environmentVariables": {

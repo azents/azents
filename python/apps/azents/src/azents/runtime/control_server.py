@@ -70,6 +70,7 @@ from azents.rdb.session_capabilities import (
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.browser_configuration import BrowserConfigurationRepository
 from azents.repos.runtime_connection_generation.repository import (
     CURRENT_ALLOCATOR_VERSION,
     RuntimeConnectionGenerationRepository,
@@ -238,6 +239,7 @@ from azents.runtime.transfer.workspace_upload_redis import (
     RedisWorkspaceUploadStore,
     _RedisClient,
 )
+from azents.services.browser_configuration import BrowserConfigurationCoordinator
 from azents.services.runtime_browser.deps import (
     build_runtime_browser_stream_scope_validator,
 )
@@ -926,15 +928,25 @@ async def runtime_control_server_lifespan(
     transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
+    browser_configuration = BrowserConfigurationRepository(
+        read_session_manager=create_read_only_session_manager(engine),
+        session_manager=session_manager,
+        profile_repository=RuntimeProfileRepository(),
+    )
+    browser_operations = RuntimeRunnerOperationClient(
+        control_protocol=control_protocol,
+        coordination_store=coordination_store,
+        metrics=RuntimeReplyDeliveryMetrics(),
+        browser_configuration=browser_configuration,
+    )
+    browser_reconciler = BrowserConfigurationCoordinator(
+        browser_configuration, browser_operations, coordination_store
+    )
     browser_scope_validator = build_runtime_browser_stream_scope_validator(
         session_manager=session_manager,
         read_session_manager=create_read_only_session_manager(engine),
         runtime_coordination=coordination_store,
-        runner_operations=RuntimeRunnerOperationClient(
-            control_protocol=control_protocol,
-            coordination_store=coordination_store,
-            metrics=RuntimeReplyDeliveryMetrics(),
-        ),
+        runner_operations=browser_operations,
     )
     generation_repository = RuntimeConnectionGenerationRepository()
     runtime_repository = AgentRuntimeRepository()
@@ -1295,6 +1307,8 @@ async def runtime_control_server_lifespan(
         connection_registrar=runner_connection_registrar,
         transfer_result_sink=transfer_result_coordinator,
         stream_session_offer_provider=stream_session_offer_provider,
+        browser_configuration=browser_configuration,
+        browser_reconciler=browser_reconciler,
     )
     add_runtime_runner_terminal_servicer(
         server,
@@ -1508,6 +1522,8 @@ async def _run_reconciler(
                     "Runtime lifecycle reconcile dispatched commands",
                     extra={"dispatched": dispatched},
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Runtime lifecycle reconciler iteration failed")
         try:
@@ -1541,6 +1557,8 @@ async def _run_transfer_repair(
                     "Runtime transfer repair observed records",
                     extra={"observed": observed},
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Runtime transfer repair iteration failed")
         try:
@@ -1604,6 +1622,8 @@ async def _run_workspace_upload_repair(
                         "source_failed_cleanups": orphans.failed_cleanups,
                     },
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Workspace upload repair iteration failed")
         try:
@@ -1650,6 +1670,8 @@ async def _run_terminal_repair(
                     "Runtime Terminal repair requested termination",
                     extra={"terminal_count": len(repaired.terminal_ids)},
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("Runtime Terminal repair iteration failed")
         try:

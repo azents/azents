@@ -160,10 +160,6 @@
   max-height: 50%;
   overflow-y: auto;
 }
-.footer {
-  flex-shrink: 0;
-  padding: var(--mantine-spacing-xs);
-}
 
 .viewport {
   position: relative;
@@ -210,11 +206,12 @@
 
 .overlay {
   position: absolute;
-  inset-inline: var(--mantine-spacing-sm);
-  bottom: var(--mantine-spacing-sm);
-  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  inset-inline-end: var(--mantine-spacing-sm);
+  top: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-xs);
   border-radius: var(--mantine-radius-sm);
   background: var(--mantine-color-body);
+  pointer-events: none;
 }
 
 .keyboard {

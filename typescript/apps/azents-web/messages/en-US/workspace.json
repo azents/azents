@@ -1312,6 +1312,25 @@
       "unknown": "The current Runtime configuration is unavailable."
     },
     "runtimeSettings": {
+      "browserChoice": {
+        "label": "Browser engine",
+        "patchright": "Patchright (default)",
+        "camoufox": "Camoufox (experimental)",
+        "loadError": "Browser settings unavailable",
+        "refresh": "Refresh status",
+        "saving": "Saving browser choice…",
+        "applying": "Applying {browser}…",
+        "offline": "The saved choice will apply on the next valid Runtime start.",
+        "failedTitle": "Browser switch failed",
+        "unsupported": "This Runtime needs a Runner image with browser-selection support. The saved choice will apply when a compatible Runner connects.",
+        "failedDescription": "The browser is unavailable. Retry or explicitly select another engine. Other Runtime jobs are not affected.",
+        "retry": "Retry switch",
+        "confirmTitle": "Change browser engine?",
+        "confirmDescription": "Apply {browser} now? All browser tabs and browser operations for this Agent will end. Terminals and unrelated Runtime jobs will continue.",
+        "profiles": "Each engine keeps its own saved sign-ins. Site state is not copied between engines.",
+        "cancel": "Cancel",
+        "confirm": "Apply browser choice"
+      },
       "browserLabel": "Session browser",
       "browserDescription": "Allow Agent browser tools and the live browser panel. Turning this off preserves saved site state and leaves other Runtime features available.",
       "environmentVariables": {

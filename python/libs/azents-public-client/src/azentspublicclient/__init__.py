@@ -76,6 +76,7 @@ __all__ = [
     "AgentAdminAddRequest",
     "AgentAdminListResponse",
     "AgentAdminResponse",
+    "AgentBrowserConfiguration",
     "AgentCreateGitWorktreeAction",
     "AgentCreateRequest",
     "AgentDecommissionResponse",
@@ -182,8 +183,10 @@ __all__ = [
     "AwsSecrets",
     "Body",
     "BrowserClosePageRequest",
+    "BrowserConfigurationReplaceRequest",
     "BrowserCreatePageResponse",
     "BrowserFrameResponse",
+    "BrowserImplementation",
     "BrowserPageResponse",
     "BrowserProjectionResponse",
     "BrowserTaskResponse",
@@ -771,6 +774,7 @@ from azentspublicclient.models.add_agent_runtime_request import AddAgentRuntimeR
 from azentspublicclient.models.agent_admin_add_request import AgentAdminAddRequest as AgentAdminAddRequest
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse as AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse as AgentAdminResponse
+from azentspublicclient.models.agent_browser_configuration import AgentBrowserConfiguration as AgentBrowserConfiguration
 from azentspublicclient.models.agent_create_git_worktree_action import AgentCreateGitWorktreeAction as AgentCreateGitWorktreeAction
 from azentspublicclient.models.agent_create_request import AgentCreateRequest as AgentCreateRequest
 from azentspublicclient.models.agent_decommission_response import AgentDecommissionResponse as AgentDecommissionResponse
@@ -877,8 +881,10 @@ from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
 from azentspublicclient.models.body import Body as Body
 from azentspublicclient.models.browser_close_page_request import BrowserClosePageRequest as BrowserClosePageRequest
+from azentspublicclient.models.browser_configuration_replace_request import BrowserConfigurationReplaceRequest as BrowserConfigurationReplaceRequest
 from azentspublicclient.models.browser_create_page_response import BrowserCreatePageResponse as BrowserCreatePageResponse
 from azentspublicclient.models.browser_frame_response import BrowserFrameResponse as BrowserFrameResponse
+from azentspublicclient.models.browser_implementation import BrowserImplementation as BrowserImplementation
 from azentspublicclient.models.browser_page_response import BrowserPageResponse as BrowserPageResponse
 from azentspublicclient.models.browser_projection_response import BrowserProjectionResponse as BrowserProjectionResponse
 from azentspublicclient.models.browser_task_response import BrowserTaskResponse as BrowserTaskResponse

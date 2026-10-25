@@ -12,11 +12,13 @@ from azents_runtime_runner.browser_viewer import BrowserFrameBudget, _LatestPage
 async def test_capture_failure_keeps_traceback_without_sdk_content(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    page = _Page("page", MagicMock(spec=Page), None, None, None)
+    native = MagicMock(spec=Page)
+    native.is_closed.return_value = False
+    page = _Page("page", native, None, None)
     source = _LatestPage(page, MagicMock(spec=BrowserFrameBudget))
     sensitive = "synthetic-private-url-and-page-content"
     failure = Error(sensitive)
-    monkeypatch.setattr(source.popups, "start", AsyncMock(side_effect=failure))
+    monkeypatch.setattr(source, "capture_once", AsyncMock(side_effect=failure))
 
     await source.capture()
 

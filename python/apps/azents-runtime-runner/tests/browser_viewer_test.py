@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
+from azents_runtime_control.browser_configuration import BrowserImplementation
 from azents_runtime_control.browser_contract import (
     BrowserActCommand,
     BrowserAuthority,
@@ -33,6 +34,7 @@ from PIL import Image
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_editables import BrowserEditableRegions
 from azents_runtime_runner.browser_input import BrowserInputKey
+from azents_runtime_runner.browser_sdk import ChromiumDriver
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     _capture_error_code,
@@ -173,10 +175,17 @@ onkeydown="if(event.key==='Enter') document.body.dataset.answer=prompt('Key ques
     await runner.cleanup()
 
 
-@pytest.fixture
-async def manager(tmp_path: Path) -> AsyncIterator[RunnerBrowserManager]:
+@pytest.fixture(params=[BrowserImplementation.PATCHRIGHT])
+async def manager(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> AsyncIterator[RunnerBrowserManager]:
+    implementation = request.param
+    assert isinstance(implementation, BrowserImplementation)
     value = RunnerBrowserManager(
-        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+        workspace_root=tmp_path,
+        proxy=None,
+        input_key=BrowserInputKey(),
+        implementation=implementation,
     )
     value.bind_runtime("runtime", lambda: 7)
     yield value
@@ -257,6 +266,7 @@ async def test_capture_pixels_stay_current_without_changing_tab_visibility(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     driver = await manager._initialize()
+    assert isinstance(driver, ChromiumDriver)
     # Use the SDK's public focus-control option to expose real tab visibility.
     # Production focus emulation otherwise reports every tab as visible.
     monkeypatch.setattr(
@@ -323,6 +333,7 @@ async def stop(task: asyncio.Task[None], transport: Transport) -> None:
         await task
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -361,6 +372,7 @@ async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
     assert authority.task_id in manager.tasks
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_unfocused_iframe_navigation_preserves_main_view_and_text_input(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -402,6 +414,73 @@ async def test_unfocused_iframe_navigation_preserves_main_view_and_text_input(
         await stop(running, transport)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+async def test_native_korean_text_tail_replacement(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.locator("#text").focus()
+    viewer, transport = RunnerBrowserViewer(manager, Budget()), Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        await transport.frame()
+        actions = [
+            {"kind": "composition", "phase": "start", "text": None},
+            {"kind": "composition", "phase": "commit", "text": "ㅇ"},
+            {"kind": "text_edit", "delete_before": 1, "text": "아"},
+            {"kind": "text_edit", "delete_before": 1, "text": "안"},
+            {"kind": "composition", "phase": "start", "text": None},
+            {"kind": "composition", "phase": "commit", "text": "ㄴ"},
+            {"kind": "text_edit", "delete_before": 1, "text": "녕"},
+        ]
+        for sequence, action in enumerate(actions, 1):
+            assert (await transport.input(sequence, action))["accepted"] is True
+        assert await native.locator("#text").input_value() == "안녕"
+        assert (
+            await transport.input(
+                8, {"kind": "text_edit", "delete_before": 2, "text": ""}
+            )
+        )["accepted"] is True
+        assert await native.locator("#text").input_value() == ""
+        await native.locator("#text").fill("a👨‍👩‍👧‍👦")
+        assert (
+            await transport.input(
+                9, {"kind": "text_edit", "delete_before": 1, "text": "b"}
+            )
+        )["accepted"] is True
+        assert await native.locator("#text").input_value() == "ab"
+        await native.locator("#text").fill("x" * 80)
+        assert (
+            await transport.input(
+                10, {"kind": "text_edit", "delete_before": 80, "text": "한"}
+            )
+        )["accepted"] is True
+        assert await native.locator("#text").input_value() == "한"
+        assert (
+            await transport.input(
+                11, {"kind": "composition", "phase": "start", "text": None}
+            )
+        )["accepted"] is True
+        assert (
+            await transport.input(
+                12, {"kind": "text_edit", "delete_before": 1, "text": ""}
+            )
+        )["reason_code"] == "browser_input_conflict"
+        assert await native.locator("#text").input_value() == "한"
+        assert (
+            await transport.input(
+                13, {"kind": "composition", "phase": "cancel", "text": None}
+            )
+        )["accepted"] is True
+        assert manager.tasks[authority.task_id].guard.actor is None
+    finally:
+        await stop(running, transport)
+
+
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_keys_composition_conflict_sequence_and_disconnect_cleanup(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -469,7 +548,18 @@ async def test_keys_composition_conflict_sequence_and_disconnect_cleanup(
     assert await page.locator("body").get_attribute("data-up") == "yes"
 
 
-@pytest.mark.parametrize("change", ["navigation", "viewport"])
+# Camoufox pins the product's fixed CSS viewport for Juggler. The product has no
+# resize action; preserve Chromium SDK resize fault injection and prove the
+# reachable navigation/source transition on both native implementations.
+@pytest.mark.parametrize(
+    ("manager", "change"),
+    [
+        (BrowserImplementation.PATCHRIGHT, "navigation"),
+        (BrowserImplementation.PATCHRIGHT, "viewport"),
+        (BrowserImplementation.CAMOUFOX, "navigation"),
+    ],
+    indirect=["manager"],
+)
 async def test_inflight_image_retires_when_display_scope_changes(
     manager: RunnerBrowserManager, tmp_path: Path, site: str, change: str
 ) -> None:
@@ -510,6 +600,7 @@ async def test_inflight_image_retires_when_display_scope_changes(
         await stop(running, transport)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_viewer_address_history_and_reload_use_native_page(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -584,6 +675,7 @@ async def test_viewer_navigation_denies_readonly_and_other_active_actor(
         await stop(tasks[1], active)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_navigation_readonly_and_generation_fences(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -622,6 +714,7 @@ async def test_navigation_readonly_and_generation_fences(
     assert "session-b" not in manager.contexts
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_dialog_continuation_and_budget_failure(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -685,6 +778,7 @@ async def test_dialog_continuation_and_budget_failure(
     assert authority.task_id in manager.tasks
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_editable_geometry_is_stable_content_free_and_document_local(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -731,6 +825,7 @@ async def test_editable_geometry_is_stable_content_free_and_document_local(
 
 
 @pytest.mark.parametrize("destination", ["password", "textarea", "shadow", "iframe"])
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_native_plaintext_paste_uses_current_focused_editable(
     manager: RunnerBrowserManager, tmp_path: Path, site: str, destination: str
 ) -> None:
@@ -796,6 +891,7 @@ async def test_native_plaintext_paste_uses_current_focused_editable(
         await stop(running, transport)
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_rotated_shadow_host_cannot_project_child_frame_input(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -822,6 +918,7 @@ async def test_rotated_shadow_host_cannot_project_child_frame_input(
         await regions.close()
 
 
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
 async def test_paste_does_not_bypass_readonly_or_navigation(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
@@ -855,7 +952,8 @@ async def test_paste_does_not_bypass_readonly_or_navigation(
         await stop(second, readonly)
 
 
-@pytest.mark.parametrize("intent", ["plain", "control", "middle"])
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+@pytest.mark.parametrize("intent", ["plain", "control", "meta", "shift", "middle"])
 async def test_popup_selection_belongs_only_to_plain_click_initiator(
     manager: RunnerBrowserManager, tmp_path: Path, site: str, intent: str
 ) -> None:
@@ -873,9 +971,10 @@ async def test_popup_selection_belongs_only_to_plain_click_initiator(
         box = await native.locator("a").bounding_box()
         assert box is not None
         sequence = 1
-        if intent == "control":
+        modifier = {"control": "Control", "meta": "Meta", "shift": "Shift"}.get(intent)
+        if modifier is not None:
             await active.input(
-                sequence, {"kind": "key", "phase": "down", "key": "Control"}
+                sequence, {"kind": "key", "phase": "down", "key": modifier}
             )
             sequence += 1
         button = "middle" if intent == "middle" else "left"
@@ -892,10 +991,15 @@ async def test_popup_selection_belongs_only_to_plain_click_initiator(
                     },
                 )
                 sequence += 1
+            if intent == "meta":
+                # Linux Firefox does not promise a Cmd-click tab effect.
+                # Exercise native popup delivery while that background intent
+                # is active, without depending on the host's shortcut mapping.
+                await native.evaluate("window.open('about:blank')")
         await (await opened.value).wait_for_load_state()
-        if intent == "control":
+        if modifier is not None:
             await active.input(
-                sequence, {"kind": "key", "phase": "up", "key": "Control"}
+                sequence, {"kind": "key", "phase": "up", "key": modifier}
             )
         if intent == "plain":
             async with asyncio.timeout(5):
@@ -908,7 +1012,9 @@ async def test_popup_selection_belongs_only_to_plain_click_initiator(
             assert resource.popup_selection is None
         # A fresh attachment must not receive the prior actor's foreground hint.
         assert (await other.event("status"))["opened_target"] is None
-        assert resource.popup_owner is None
+        assert resource.popup_interest == (
+            active.attachment if intent == "plain" else None
+        )
     finally:
         await stop(first, active)
         await stop(second, other)
@@ -949,12 +1055,15 @@ async def slow_popup_site() -> AsyncIterator[_SlowPopupSite]:
 
 
 @pytest.mark.parametrize("rel", ["", "noopener"])
-async def test_slow_popup_is_exactly_correlated_after_pointer_eligibility_ends(
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+@pytest.mark.parametrize("intent", ["plain", "control", "middle"])
+async def test_slow_popup_follows_current_viewer_interest_after_release(
     manager: RunnerBrowserManager,
     tmp_path: Path,
     site: str,
     slow_popup_site: _SlowPopupSite,
     rel: str,
+    intent: str,
 ) -> None:
     authority = await scope(manager, tmp_path, site)
     resource = manager.tasks[authority.task_id].pages[authority.page_id]
@@ -971,7 +1080,168 @@ async def test_slow_popup_is_exactly_correlated_after_pointer_eligibility_ends(
         await transport.frame()
         box = await native.locator("a").bounding_box()
         assert box is not None
-        async with native.expect_popup() as opened:
+        sequence = 1
+        if intent == "control":
+            await transport.input(
+                sequence, {"kind": "key", "phase": "down", "key": "Control"}
+            )
+            sequence += 1
+        button = "middle" if intent == "middle" else "left"
+        async with native.context.expect_page() as opened:
+            for phase in ["down", "up"]:
+                assert (
+                    await transport.input(
+                        sequence,
+                        {
+                            "kind": "pointer",
+                            "phase": phase,
+                            "button": button,
+                            "x": box["x"] + 4,
+                            "y": box["y"] + 4,
+                        },
+                    )
+                )["accepted"]
+                sequence += 1
+            async with asyncio.timeout(5):
+                await slow_popup_site.entered.wait()
+            assert resource.popup_interest == (
+                transport.attachment if intent == "plain" else None
+            )
+            assert resource.popup_selection is None
+            slow_popup_site.release.set()
+        await (await opened.value).wait_for_load_state()
+        if intent != "plain":
+            assert resource.popup_selection is None
+            return
+        async with asyncio.timeout(5):
+            while (await transport.event("status"))["opened_target"] is None:
+                pass
+        assert resource.popup_selection is not None
+        assert resource.popup_selection.owner == transport.attachment
+        # Later same-page scripts may open tabs too; this is viewer interest,
+        # intentionally not a claim of causal click correlation.
+        for sequence, phase in enumerate(["down", "up"], 3):
+            await transport.input(
+                sequence,
+                {
+                    "kind": "pointer",
+                    "phase": phase,
+                    "button": "left",
+                    "x": 500,
+                    "y": 400,
+                },
+            )
+        assert resource.popup_interest == transport.attachment
+        async with native.expect_popup() as unrelated:
+            await native.evaluate("window.open('about:blank')")
+        await (await unrelated.value).wait_for_load_state()
+        async with asyncio.timeout(5):
+            while (event := await transport.event("status"))["opened_target"] is None:
+                pass
+        assert resource.popup_selection is not None
+        assert event["opened_target"] == asdict(resource.popup_selection.target)
+        assert resource.popup_selection.owner == transport.attachment
+    finally:
+        slow_popup_site.release.set()
+        await stop(running, transport)
+
+
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+async def test_native_page_close_releases_source_and_popup_interest(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    resource = manager.tasks[authority.task_id].pages[authority.page_id]
+    budget = Budget()
+    viewer = RunnerBrowserViewer(manager, budget)
+    transport = Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    await transport.frame()
+    assert resource.popup_interest == transport.attachment
+    await resource.page.close()
+    async with asyncio.timeout(5):
+        await running
+    assert resource.popup_interest is None
+    assert not viewer.sources and budget.bytes == 0
+
+
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+async def test_current_page_script_popup_follows_without_click_proof(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    resource = manager.tasks[authority.task_id].pages[authority.page_id]
+    viewer, transport = RunnerBrowserViewer(manager, Budget()), Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        await transport.frame()
+        assert resource.popup_interest == transport.attachment
+        async with resource.page.expect_popup() as opened:
+            await resource.page.evaluate("window.open('about:blank')")
+        await (await opened.value).wait_for_load_state()
+        async with asyncio.timeout(5):
+            while (event := await transport.event("status"))["opened_target"] is None:
+                pass
+        assert resource.popup_selection is not None
+        assert resource.popup_selection.owner == transport.attachment
+        assert event["opened_target"] == asdict(resource.popup_selection.target)
+        previous = resource.popup_selection
+        # An unobserved opener must not publish a preference on this page.
+        other = manager._register(
+            manager.tasks[authority.task_id], await resource.page.context.new_page()
+        )
+        async with other.page.expect_popup() as unrelated:
+            await other.page.evaluate("window.open('about:blank')")
+        await (await unrelated.value).wait_for_load_state()
+        assert resource.popup_selection == previous
+        assert other.popup_selection is None
+    finally:
+        await stop(running, transport)
+
+
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+async def test_agent_popup_does_not_hijack_viewer_and_human_input_resumes_follow(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    resource = manager.tasks[authority.task_id].pages[authority.page_id]
+    native = resource.page
+    await native.set_content(f"<a href='{site}/popup' target=_blank>Open tab</a>")
+    await native.locator("a").focus()
+    viewer, transport = RunnerBrowserViewer(manager, Budget()), Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        await transport.frame()
+        result = await manager.execute(
+            BrowserActCommand(
+                BrowserAuthority(authority.session_id, str(tmp_path / "session-a")),
+                BrowserTarget(
+                    authority.task_id,
+                    authority.page_id,
+                    authority.resource_incarnation,
+                    None,
+                ),
+                _action("press", key="Enter", expect="popup"),
+            )
+        )
+        assert result.popup is not None
+        assert resource.popup_selection is None
+        assert resource.popup_interest is None
+        # Script effects scheduled by an Agent also stay background until human
+        # input re-establishes viewer interest.
+        async with native.expect_popup() as delayed:
+            await native.evaluate("window.open('about:blank')")
+        await (await delayed.value).wait_for_load_state()
+        assert resource.popup_selection is None
+        box = await native.locator("a").bounding_box()
+        assert box is not None
+        async with native.expect_popup() as human:
             for sequence, phase in enumerate(["down", "up"], 1):
                 assert (
                     await transport.input(
@@ -985,57 +1255,46 @@ async def test_slow_popup_is_exactly_correlated_after_pointer_eligibility_ends(
                         },
                     )
                 )["accepted"]
-            async with asyncio.timeout(5):
-                await slow_popup_site.entered.wait()
-            assert resource.popup_owner is None
-            assert resource.popup_selection is None
-            assert len(viewer.sources[authority.page_id].popups.pending) == 1
-            slow_popup_site.release.set()
-        await (await opened.value).wait_for_load_state()
+        await (await human.value).wait_for_load_state()
         async with asyncio.timeout(5):
             while (await transport.event("status"))["opened_target"] is None:
                 pass
         assert resource.popup_selection is not None
         assert resource.popup_selection.owner == transport.attachment
-        assert not viewer.sources[authority.page_id].popups.pending
-        # An unrelated later script popup is not attributed to the completed click.
-        for sequence, phase in enumerate(["down", "up"], 3):
-            await transport.input(
-                sequence,
-                {
-                    "kind": "pointer",
-                    "phase": phase,
-                    "button": "left",
-                    "x": 500,
-                    "y": 400,
-                },
-            )
-        assert resource.popup_owner is None
-        async with native.expect_popup() as unrelated:
-            await native.evaluate("window.open('about:blank')")
-        await (await unrelated.value).wait_for_load_state()
-        assert resource.popup_selection is None
     finally:
-        slow_popup_site.release.set()
         await stop(running, transport)
 
 
-async def test_native_page_close_releases_source_and_private_popup_session(
-    manager: RunnerBrowserManager, tmp_path: Path, site: str
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+@pytest.mark.parametrize("allow_input", [True, False])
+async def test_readonly_and_cancelled_viewers_do_not_follow_script_popups(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str, allow_input: bool
 ) -> None:
-    authority = await scope(manager, tmp_path, site)
+    authority = replace(await scope(manager, tmp_path, site), allow_input=allow_input)
     resource = manager.tasks[authority.task_id].pages[authority.page_id]
-    budget = Budget()
-    viewer = RunnerBrowserViewer(manager, budget)
-    transport = Transport()
+    viewer, transport = RunnerBrowserViewer(manager, Budget()), Transport()
     running = asyncio.create_task(
         viewer.run(authority, transport.receive, transport.send)
     )
-    await transport.frame()
-    source = viewer.sources[authority.page_id]
-    assert source.popups.session is not None
-    await resource.page.close()
-    async with asyncio.timeout(5):
-        await running
-    assert source.popups.session is None
-    assert not viewer.sources and budget.bytes == 0
+    try:
+        await transport.frame()
+        if allow_input:
+            assert (
+                await transport.input(
+                    1,
+                    {
+                        "kind": "pointer",
+                        "phase": "cancel",
+                        "x": 0,
+                        "y": 0,
+                        "button": None,
+                    },
+                )
+            )["accepted"]
+        assert resource.popup_interest is None
+        async with resource.page.expect_popup() as opened:
+            await resource.page.evaluate("window.open('about:blank')")
+        await (await opened.value).wait_for_load_state()
+        assert resource.popup_selection is None
+    finally:
+        await stop(running, transport)

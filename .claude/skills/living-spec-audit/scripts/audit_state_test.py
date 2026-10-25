@@ -8,6 +8,48 @@ import audit_state
 import pytest
 
 
+@pytest.mark.parametrize("target", ["change", "range"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("checked_through_commit", ["not", "a", "commit"]),
+        ("checked_through_commit", ""),
+        ("checked_at", True),
+        ("checked_at", "not-a-date"),
+        ("checked_at", "2026-10-24T07:00:00"),
+        ("unexpected", None),
+    ],
+)
+def test_load_state_rejects_invalid_nested_checkpoint(
+    tmp_path: Path, target: str, field: str, value: object
+) -> None:
+    state = audit_state.empty_state()
+    state["ranges"]["sample"] = audit_state.empty_range_checkpoint()
+    raw = json.loads(json.dumps(state))
+    checkpoint = (
+        raw["change_checkpoint"] if target == "change" else raw["ranges"]["sample"]
+    )
+    checkpoint[field] = value
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps(raw))
+    with pytest.raises(audit_state.AuditStateError):
+        audit_state.load_state(path)
+
+
+def test_load_state_roundtrips_checked_in_snapshot_and_empty_state(
+    tmp_path: Path,
+) -> None:
+    for state in (
+        audit_state.empty_state(),
+        json.loads(
+            (Path(__file__).parents[3] / "living-spec-audit-state.json").read_text()
+        ),
+    ):
+        path = tmp_path / "state.json"
+        path.write_text(json.dumps(state))
+        assert audit_state.load_state(path) == state
+
+
 def _range(
     *,
     file_path: str,
