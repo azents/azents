@@ -1145,6 +1145,17 @@ missing, boolean, null, string or unexpected fields fail with
 exit code remains an ordinary completed command result, not a transport failure.
 Malformed completion evidence never triggers command replay.
 
+Other file, Git, and process final-success replies are decoded strictly into
+closed immutable operation-result contracts before use. Missing required fields,
+wrong primitive types (including boolean counts), unknown fields, invalid status
+values, and malformed nested collection entries fail with
+`invalid_runner_completion`; they do not fabricate zero/empty success or silently
+filter entries. Declared nullable/omittable fields retain their wire semantics,
+including empty protobuf discovery strings representing absent optional metadata.
+The stream cursor is supplied by Control, never by the result payload. Valid empty
+collections, zero counts, and process-output folding are preserved. Validation does
+not dispatch or replay the operation.
+
 Handled Runner authentication, Control-stream, transfer, Web-protocol, and
 operation failures use bounded implementation-owned reason labels. Logging formats
 a new bounded exception value, while separate structured fields retain the original

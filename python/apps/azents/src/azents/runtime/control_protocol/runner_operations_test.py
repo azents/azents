@@ -495,6 +495,38 @@ async def test_resume_bash_rejects_malformed_completion(
     assert error.value.code == "invalid_bash_completion"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"bytes_written": "0"}, {"bytes_written": True}, {"bytes_written": None}],
+)
+async def test_resume_file_write_rejects_malformed_completion(
+    payload: dict[str, JsonValue],
+) -> None:
+    """A final-success tag cannot replace required write completion evidence."""
+    harness = await _make_harness()
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-write",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.FINAL_SUCCESS,
+            payload=payload,
+            final=True,
+        ),
+        reply_stream_id="reply:req-write",
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await harness.client.resume_file_write(
+            reply_stream_id="reply:req-write",
+            after_cursor=None,
+            request_id="req-write",
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    assert error.value.code == "invalid_runner_completion"
+
+
 @pytest.mark.asyncio
 async def test_run_bash_cancel_check_records_cancelled_final() -> None:
     """Foreground wait records a cancelled final event instead of hanging."""
@@ -558,7 +590,7 @@ async def test_resume_file_read_continues_after_cursor() -> None:
             request_id="req-1",
             generation=harness.runner_generation,
             event_type=RuntimeReplyEventType.FINAL_SUCCESS,
-            payload={},
+            payload={"bytes_read": 6},
             final=True,
         ),
         reply_stream_id="reply:req-1",
@@ -608,7 +640,7 @@ async def test_read_file_collects_file_chunks_until_final() -> None:
     await harness.reply(
         request.request_id,
         RuntimeReplyEventType.FINAL_SUCCESS,
-        {},
+        {"bytes_read": 11},
         final=True,
     )
 
@@ -1298,6 +1330,12 @@ async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() ->
             "process_id": "proc_missing",
             "status": "missing",
             "missing_reason": "runner_generation_changed",
+            "stdout": "",
+            "stderr": "",
+            "stdout_truncated": False,
+            "stderr_truncated": False,
+            "stdout_omitted_bytes": 0,
+            "stderr_omitted_bytes": 0,
         },
         final=True,
     )
@@ -1336,7 +1374,7 @@ async def test_terminate_session_processes_dispatches_runner_operation() -> None
 
 @pytest.mark.asyncio
 async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() -> None:
-    """Process output deltas can be folded when final payload omits text."""
+    """Process output deltas are folded when the final snapshot text is empty."""
     harness = await _make_harness()
     await harness.control.append_reply_event(
         _event(
@@ -1381,7 +1419,17 @@ async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() 
             request_id="req-1",
             generation=harness.runner_generation,
             event_type=RuntimeReplyEventType.FINAL_SUCCESS,
-            payload={"process_id": "proc_1", "status": "exited_unread", "exit_code": 0},
+            payload={
+                "process_id": "proc_1",
+                "status": "exited_unread",
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": "",
+                "stdout_truncated": False,
+                "stderr_truncated": False,
+                "stdout_omitted_bytes": 0,
+                "stderr_omitted_bytes": 0,
+            },
             final=True,
         ),
         reply_stream_id="reply:req-1",
@@ -1625,6 +1673,7 @@ async def test_list_git_refs_returns_final_refs() -> None:
             ],
             "default_branch": "main",
             "head_commit": "abc123",
+            "repository_anchor_path": "/workspace/agent/repo",
         },
         final=True,
     )

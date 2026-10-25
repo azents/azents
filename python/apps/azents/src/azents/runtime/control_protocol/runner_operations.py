@@ -3,9 +3,10 @@
 import asyncio
 import base64
 import dataclasses
+import json
 import math
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -24,6 +25,7 @@ from azents_runtime_control.browser_contract import (
 )
 from azents_runtime_control.browser_runner_wire import encode_configured_browser_command
 from azents_runtime_control.process_observation import ProcessObservation
+from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
 
 from azents.core.browser_configuration import BrowserConfigurationIntentReader
 from azents.runtime.control_protocol.data import (
@@ -80,6 +82,7 @@ class RuntimeRunnerOperationCanceledError(RuntimeError):
     """Foreground Runner operation was cancelled by Control/User intent."""
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeBashResult:
     """Completed bash operation result."""
@@ -90,6 +93,7 @@ class RuntimeBashResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class _BashCompletion:
     """Validated final-success payload from the bash operation boundary."""
@@ -108,6 +112,7 @@ class _BashCompletion:
         return cls(exit_code=value)
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileReadResult:
     """Completed file read operation result."""
@@ -116,6 +121,25 @@ class RuntimeFileReadResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
+@dataclasses.dataclass(frozen=True)
+class _FileReadCompletion:
+    """Validated completion evidence for a binary read stream."""
+
+    bytes_read: int
+    final_cursor: str
+
+
+@with_config(ConfigDict(extra="forbid"))
+@dataclasses.dataclass(frozen=True)
+class _ProcessTerminationCompletion:
+    """Validated completion evidence for Session process cleanup."""
+
+    terminated_count: int
+    final_cursor: str
+
+
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileTextReadResult:
     """Completed decoded character-range operation result."""
@@ -127,6 +151,7 @@ class RuntimeFileTextReadResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileListEntry:
     """Runner file list entry."""
@@ -137,6 +162,7 @@ class RuntimeFileListEntry:
     modified_at: str | None = None
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileListResult:
     """Completed file list operation result."""
@@ -145,6 +171,7 @@ class RuntimeFileListResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileStatResult:
     """Completed file stat operation result."""
@@ -159,6 +186,7 @@ class RuntimeFileStatResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGrepLineMatch:
     """Runner grep line match."""
@@ -167,6 +195,7 @@ class RuntimeGrepLineMatch:
     text: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGrepFileMatch:
     """Runner grep file match."""
@@ -176,6 +205,7 @@ class RuntimeGrepFileMatch:
     truncated: bool
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGrepResult:
     """Completed grep operation result."""
@@ -188,6 +218,7 @@ class RuntimeGrepResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileWriteResult:
     """Completed file write operation result."""
@@ -196,6 +227,7 @@ class RuntimeFileWriteResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileEditResult:
     """Completed file edit operation result."""
@@ -214,6 +246,7 @@ type RuntimeFilePatchPhase = Literal[
 ]
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFilePatchOperation:
     """One file operation referenced by a patch result."""
@@ -222,6 +255,7 @@ class RuntimeFilePatchOperation:
     action: RuntimeFilePatchAction
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFilePatchChange:
     """One file change committed by a patch operation."""
@@ -230,9 +264,10 @@ class RuntimeFilePatchChange:
     action: RuntimeFilePatchAction
     added_lines: int
     removed_lines: int
-    content_sha256: str | None
+    content_sha256: str | None = None
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileApplyPatchFailure:
     """Typed patch failure detail returned by Runtime Runner."""
@@ -245,6 +280,7 @@ class RuntimeFileApplyPatchFailure:
     exact: bool
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileApplyPatchResult:
     """Completed file patch operation result."""
@@ -262,6 +298,7 @@ class RuntimeFileApplyPatchFailedError(RuntimeRunnerOperationFailedError):
         self.failure = failure
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeOperationTextDelta:
     """Live stdout or stderr text delta returned by Runner protocol."""
@@ -270,6 +307,7 @@ class RuntimeOperationTextDelta:
     text: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeProcessOutputDelta:
     """Live process output delta returned by Runner protocol."""
@@ -282,6 +320,7 @@ class RuntimeProcessOutputDelta:
     omitted_bytes: int
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeProcessResult:
     """Completed process operation snapshot result."""
@@ -306,6 +345,7 @@ class RuntimeProcessResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileDeleteResult:
     """Completed file delete operation result."""
@@ -314,6 +354,7 @@ class RuntimeFileDeleteResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileMkdirResult:
     """Completed file mkdir operation result."""
@@ -322,6 +363,7 @@ class RuntimeFileMkdirResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileMoveResult:
     """Completed file move operation result."""
@@ -331,6 +373,7 @@ class RuntimeFileMoveResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileMoveEntry:
     """Runner file move entry."""
@@ -339,6 +382,7 @@ class RuntimeFileMoveEntry:
     destination_path: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileBulkDeleteResult:
     """Completed file bulk delete operation result."""
@@ -347,6 +391,7 @@ class RuntimeFileBulkDeleteResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileBulkMoveResult:
     """Completed file bulk move operation result."""
@@ -355,6 +400,7 @@ class RuntimeFileBulkMoveResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGitRefEntry:
     """Git ref entry discovered by the Runtime Runner."""
@@ -366,6 +412,7 @@ class RuntimeGitRefEntry:
     default: bool
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGitRefsResult:
     """Completed Git ref discovery operation result."""
@@ -377,6 +424,7 @@ class RuntimeGitRefsResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGitCreateWorktreeResult:
     """Completed Git worktree creation operation result."""
@@ -387,6 +435,7 @@ class RuntimeGitCreateWorktreeResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGitInspectWorktreeResult:
     """Completed Git worktree inspection result."""
@@ -399,6 +448,7 @@ class RuntimeGitInspectWorktreeResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGitRemoveWorktreeResult:
     """Completed Git worktree removal operation result."""
@@ -408,6 +458,7 @@ class RuntimeGitRemoveWorktreeResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeDiscoveredGitWorktree:
     """One content-free Git worktree identity discovered under the managed root."""
@@ -420,6 +471,7 @@ class RuntimeDiscoveredGitWorktree:
     failure_code: str | None
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeDiscoverManagedGitWorktreesResult:
     """Completed managed Git worktree discovery operation result."""
@@ -428,6 +480,7 @@ class RuntimeDiscoverManagedGitWorktreesResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeRemoveDiscoveredGitWorktreeResult:
     """Completed guarded removal of a previously discovered Git worktree."""
@@ -437,6 +490,7 @@ class RuntimeRemoveDiscoveredGitWorktreeResult:
     final_cursor: str
 
 
+@with_config(ConfigDict(extra="forbid"))
 @dataclasses.dataclass(frozen=True)
 class RuntimeGitDeleteBranchResult:
     """Completed Git branch deletion operation result."""
@@ -1572,7 +1626,7 @@ class RuntimeRunnerOperationClient:
                 body_stream_id=None,
             )
         )
-        await self._read_until_final(
+        final = await self._read_until_final(
             dispatch.reply_stream_id,
             _ReplyFolder(after_cursor=None),
             request_id=dispatch.request_id,
@@ -1581,6 +1635,7 @@ class RuntimeRunnerOperationClient:
             generation=runner_generation,
             deadline_at=deadline_at,
         )
+        _decode_completion(_ProcessTerminationCompletion, final, derived=None)
 
     async def resume_bash(
         self,
@@ -1636,6 +1691,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
+        _decode_completion(_FileReadCompletion, final, derived=None)
         return RuntimeFileReadResult(
             data=b"".join(folder.file_chunks),
             final_cursor=final.cursor,
@@ -1663,24 +1719,8 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeFileTextReadResult(
-            text="".join(folder.stdout),
-            start_character=_int_payload(
-                final.event.payload,
-                "start_character",
-                default=0,
-            ),
-            end_character=_int_payload(
-                final.event.payload,
-                "end_character",
-                default=0,
-            ),
-            truncated=_bool_payload(
-                final.event.payload,
-                "truncated",
-                default=False,
-            ),
-            final_cursor=final.cursor,
+        return _decode_completion(
+            RuntimeFileTextReadResult, final, derived={"text": "".join(folder.stdout)}
         )
 
     async def resume_file_list(
@@ -1705,8 +1745,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        entries = tuple(_file_list_entries(final.event.payload))
-        return RuntimeFileListResult(entries=entries, final_cursor=final.cursor)
+        return _decode_completion(RuntimeFileListResult, final, derived=None)
 
     async def resume_file_glob(
         self,
@@ -1752,7 +1791,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return _file_stat_result(final.event.payload, final_cursor=final.cursor)
+        return _decode_completion(RuntimeFileStatResult, final, derived=None)
 
     async def resume_file_write(
         self,
@@ -1776,10 +1815,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeFileWriteResult(
-            bytes_written=_int_payload(final.event.payload, "bytes_written", default=0),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileWriteResult, final, derived=None)
 
     async def resume_file_apply_patch(
         self,
@@ -1803,10 +1839,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeFileApplyPatchResult(
-            changes=tuple(_file_patch_changes(final.event.payload, "changes")),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileApplyPatchResult, final, derived=None)
 
     async def resume_file_edit(
         self,
@@ -1830,14 +1863,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeFileEditResult(
-            replacements=_int_payload(
-                final.event.payload,
-                "replacements",
-                default=0,
-            ),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileEditResult, final, derived=None)
 
     async def resume_file_delete(
         self,
@@ -1861,10 +1887,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeFileDeleteResult(
-            path=_str_payload(final.event.payload, "deleted_path"),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileDeleteResult, final, derived=None)
 
     async def resume_file_mkdir(
         self,
@@ -1888,10 +1911,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeFileMkdirResult(
-            path=_str_payload(final.event.payload, "created_path"),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileMkdirResult, final, derived=None)
 
     async def resume_file_move(
         self,
@@ -1915,13 +1935,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeFileMoveResult(
-            source_path=_str_payload(final.event.payload, "moved_source_path"),
-            destination_path=_str_payload(
-                final.event.payload, "moved_destination_path"
-            ),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileMoveResult, final, derived=None)
 
     async def resume_file_bulk_delete(
         self,
@@ -1945,13 +1959,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        paths = final.event.payload.get("deleted_paths")
-        return RuntimeFileBulkDeleteResult(
-            paths=tuple(value for value in paths if isinstance(value, str))
-            if isinstance(paths, list)
-            else (),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileBulkDeleteResult, final, derived=None)
 
     async def resume_file_bulk_move(
         self,
@@ -1975,13 +1983,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        entries = final.event.payload.get("moved_entries")
-        return RuntimeFileBulkMoveResult(
-            entries=tuple(_file_move_entries(entries))
-            if isinstance(entries, list)
-            else (),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeFileBulkMoveResult, final, derived=None)
 
     async def resume_grep_files(
         self,
@@ -2005,22 +2007,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeGrepResult(
-            files=tuple(_grep_file_matches(final.event.payload)),
-            searched_file_count=_int_payload(
-                final.event.payload,
-                "searched_file_count",
-                default=0,
-            ),
-            matched_file_count=_int_payload(
-                final.event.payload,
-                "matched_file_count",
-                default=0,
-            ),
-            truncated=_bool_payload(final.event.payload, "truncated", default=False),
-            stopped_reason=_optional_str_payload(final.event.payload, "stopped_reason"),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeGrepResult, final, derived=None)
 
     async def resume_git_refs(
         self,
@@ -2048,16 +2035,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeGitRefsResult(
-            refs=tuple(_git_ref_entries(final.event.payload)),
-            default_branch=_optional_str_payload(final.event.payload, "default_branch"),
-            head_commit=_optional_str_payload(final.event.payload, "head_commit"),
-            repository_anchor_path=_str_payload(
-                final.event.payload,
-                "repository_anchor_path",
-            ),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeGitRefsResult, final, derived=None)
 
     async def resume_git_create_worktree(
         self,
@@ -2085,12 +2063,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeGitCreateWorktreeResult(
-            base_commit=_str_payload(final.event.payload, "base_commit"),
-            worktree_path=_str_payload(final.event.payload, "worktree_path"),
-            branch_name=_str_payload(final.event.payload, "branch_name"),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeGitCreateWorktreeResult, final, derived=None)
 
     async def resume_git_remove_worktree(
         self,
@@ -2118,11 +2091,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeGitRemoveWorktreeResult(
-            worktree_path=_str_payload(final.event.payload, "removed_worktree_path"),
-            outcome=_git_remove_outcome(final.event.payload.get("outcome")),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeGitRemoveWorktreeResult, final, derived=None)
 
     async def resume_git_inspect_worktree(
         self,
@@ -2150,23 +2119,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeGitInspectWorktreeResult(
-            worktree_path=_str_payload(final.event.payload, "worktree_path"),
-            registered=_bool_payload(
-                final.event.payload,
-                "worktree_registered",
-                default=False,
-            ),
-            registered_branch_name=_optional_str_payload(
-                final.event.payload,
-                "registered_branch_name",
-            ),
-            target_kind=_git_worktree_target_kind(
-                final.event.payload.get("target_kind")
-            ),
-            dirty=_optional_bool_payload(final.event.payload, "dirty"),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeGitInspectWorktreeResult, final, derived=None)
 
     async def resume_discover_managed_git_worktrees(
         self,
@@ -2189,9 +2142,8 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeDiscoverManagedGitWorktreesResult(
-            entries=tuple(_discovered_git_worktrees(final.event.payload)),
-            final_cursor=final.cursor,
+        return _decode_completion(
+            RuntimeDiscoverManagedGitWorktreesResult, final, derived=None
         )
 
     async def resume_remove_discovered_git_worktree(
@@ -2215,13 +2167,8 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeRemoveDiscoveredGitWorktreeResult(
-            worktree_path=_str_payload(
-                final.event.payload,
-                "removed_discovered_worktree_path",
-            ),
-            outcome=_git_remove_outcome(final.event.payload.get("outcome")),
-            final_cursor=final.cursor,
+        return _decode_completion(
+            RuntimeRemoveDiscoveredGitWorktreeResult, final, derived=None
         )
 
     async def resume_git_delete_branch(
@@ -2250,11 +2197,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        return RuntimeGitDeleteBranchResult(
-            branch_name=_str_payload(final.event.payload, "deleted_branch_name"),
-            outcome=_git_branch_delete_outcome(final.event.payload.get("outcome")),
-            final_cursor=final.cursor,
-        )
+        return _decode_completion(RuntimeGitDeleteBranchResult, final, derived=None)
 
     async def resume_process(
         self,
@@ -2282,7 +2225,7 @@ class RuntimeRunnerOperationClient:
             generation=generation,
             deadline_at=deadline_at,
         )
-        result = _process_result(final.event.payload, final_cursor=final.cursor)
+        result = _decode_completion(RuntimeProcessResult, final, derived=None)
         stdout = result.stdout or "".join(folder.process_stdout)
         stderr = result.stderr or "".join(folder.process_stderr)
         return dataclasses.replace(result, stdout=stdout, stderr=stderr)
@@ -2547,6 +2490,83 @@ class RuntimeRunnerOperationClient:
         )
 
 
+_COMPLETION_ALIASES: dict[type, dict[str, str]] = {
+    RuntimeFileDeleteResult: {"deleted_path": "path"},
+    RuntimeFileMkdirResult: {"created_path": "path"},
+    RuntimeFileMoveResult: {
+        "moved_source_path": "source_path",
+        "moved_destination_path": "destination_path",
+    },
+    RuntimeFileBulkDeleteResult: {"deleted_paths": "paths"},
+    RuntimeFileBulkMoveResult: {"moved_entries": "entries"},
+    RuntimeGitRefsResult: {"git_refs": "refs"},
+    RuntimeGitRemoveWorktreeResult: {"removed_worktree_path": "worktree_path"},
+    RuntimeGitInspectWorktreeResult: {"worktree_registered": "registered"},
+    RuntimeDiscoverManagedGitWorktreesResult: {"discovered_worktrees": "entries"},
+    RuntimeRemoveDiscoveredGitWorktreeResult: {
+        "removed_discovered_worktree_path": "worktree_path"
+    },
+    RuntimeGitDeleteBranchResult: {"deleted_branch_name": "branch_name"},
+}
+_COMPLETION_OPTIONAL_FIELDS: dict[type, tuple[str, ...]] = {
+    RuntimeFileStatResult: ("real_path", "resolved_kind", "modified_at"),
+    RuntimeGrepResult: ("stopped_reason",),
+    RuntimeGitRefsResult: ("default_branch", "head_commit"),
+    RuntimeGitInspectWorktreeResult: ("registered_branch_name", "dirty"),
+    RuntimeProcessResult: ("exit_code", "missing_reason"),
+}
+
+
+def _decode_completion[T](
+    result_type: type[T],
+    final: RuntimeReplyRecord,
+    *,
+    derived: dict[str, JsonValue] | None,
+) -> T:
+    """Validate a closed success payload once into its immutable result contract."""
+    aliases = _COMPLETION_ALIASES.get(result_type, {})
+    payload: dict[str, JsonValue] = {}
+    for wire_name, value in final.event.payload.items():
+        name = aliases.get(wire_name, wire_name)
+        if (
+            name == "final_cursor"
+            or name in payload
+            or (name in aliases.values() and wire_name not in aliases)
+            or (derived is not None and name in derived)
+        ):
+            raise RuntimeRunnerOperationFailedError(
+                "Runner completion contains an unexpected or duplicate field",
+                code="invalid_runner_completion",
+            )
+        payload[name] = value
+    for name in _COMPLETION_OPTIONAL_FIELDS.get(result_type, ()):
+        payload.setdefault(name, None)
+    if result_type is RuntimeDiscoverManagedGitWorktreesResult:
+        entries = payload.get("entries")
+        if isinstance(entries, list):
+            # Protobuf represents absent discovery strings as empty.
+            optional_strings = {"repository_anchor_path", "branch_name", "failure_code"}
+            payload["entries"] = [
+                {
+                    name: None if name in optional_strings and value == "" else value
+                    for name, value in entry.items()
+                }
+                if isinstance(entry, dict)
+                else entry
+                for entry in entries
+            ]
+    if derived is not None:
+        payload.update(derived)
+    payload["final_cursor"] = final.cursor
+    try:
+        return TypeAdapter(result_type).validate_json(json.dumps(payload), strict=True)
+    except ValidationError as exc:
+        raise RuntimeRunnerOperationFailedError(
+            "Runner completion does not match its operation result contract",
+            code="invalid_runner_completion",
+        ) from exc
+
+
 @dataclasses.dataclass
 class _ReplyFolder:
     """Mutable accumulator for a foreground operation reply stream."""
@@ -2644,44 +2664,6 @@ def _bool_payload(
     if isinstance(value, bool):
         return value
     return default
-
-
-def _optional_bool_payload(
-    payload: dict[str, JsonValue],
-    key: str,
-) -> bool | None:
-    value = payload.get(key)
-    return value if isinstance(value, bool) else None
-
-
-def _git_worktree_target_kind(
-    value: object,
-) -> Literal["directory", "missing", "other"]:
-    if value == "directory":
-        return "directory"
-    if value == "missing":
-        return "missing"
-    if value == "other":
-        return "other"
-    raise ValueError("Runner returned an invalid Git worktree target kind")
-
-
-def _git_remove_outcome(value: object) -> Literal["removed", "already_absent"]:
-    if value == "removed":
-        return "removed"
-    if value == "already_absent":
-        return "already_absent"
-    raise ValueError("Runner returned an invalid Git worktree removal outcome")
-
-
-def _git_branch_delete_outcome(
-    value: object,
-) -> Literal["deleted", "already_absent"]:
-    if value == "deleted":
-        return "deleted"
-    if value == "already_absent":
-        return "already_absent"
-    raise ValueError("Runner returned an invalid Git branch deletion outcome")
 
 
 def _error_message(payload: dict[str, JsonValue]) -> str:
@@ -2785,288 +2767,6 @@ def _file_patch_phase(value: object) -> RuntimeFilePatchPhase | None:
         return "revalidate"
     if value == "commit":
         return "commit"
-    return None
-
-
-def _file_list_entries(
-    payload: dict[str, JsonValue],
-) -> list[RuntimeFileListEntry]:
-    raw_entries = payload.get("entries")
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[RuntimeFileListEntry] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
-            continue
-        path = raw_entry.get("path")
-        entry_type = raw_entry.get("type")
-        size_bytes = raw_entry.get("size_bytes")
-        if not isinstance(path, str):
-            continue
-        parsed_type = _file_entry_type(entry_type)
-        if parsed_type is None:
-            continue
-        entries.append(
-            RuntimeFileListEntry(
-                path=path,
-                type=parsed_type,
-                size_bytes=size_bytes if isinstance(size_bytes, int) else None,
-                modified_at=_optional_str_payload(raw_entry, "modified_at"),
-            )
-        )
-    return entries
-
-
-def _file_move_entries(values: Sequence[object]) -> list[RuntimeFileMoveEntry]:
-    entries: list[RuntimeFileMoveEntry] = []
-    for value in values:
-        if not isinstance(value, dict):
-            continue
-        source_path = value.get("source_path")
-        destination_path = value.get("destination_path")
-        if isinstance(source_path, str) and isinstance(destination_path, str):
-            entries.append(
-                RuntimeFileMoveEntry(
-                    source_path=source_path,
-                    destination_path=destination_path,
-                )
-            )
-    return entries
-
-
-def _git_ref_entries(payload: dict[str, JsonValue]) -> list[RuntimeGitRefEntry]:
-    raw_entries = payload.get("git_refs")
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[RuntimeGitRefEntry] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
-            continue
-        name = raw_entry.get("name")
-        ref = raw_entry.get("ref")
-        target = raw_entry.get("target")
-        ref_type = _git_ref_type(raw_entry.get("type"))
-        if (
-            isinstance(name, str)
-            and isinstance(ref, str)
-            and isinstance(target, str)
-            and ref_type is not None
-        ):
-            entries.append(
-                RuntimeGitRefEntry(
-                    name=name,
-                    ref=ref,
-                    type=ref_type,
-                    target=target,
-                    default=_bool_payload(raw_entry, "default", default=False),
-                )
-            )
-    return entries
-
-
-def _git_ref_type(
-    value: object,
-) -> Literal["branch", "remote_branch", "tag", "other"] | None:
-    if value == "branch":
-        return "branch"
-    if value == "remote_branch":
-        return "remote_branch"
-    if value == "tag":
-        return "tag"
-    if value == "other":
-        return "other"
-    return None
-
-
-def _discovered_git_worktrees(
-    payload: dict[str, JsonValue],
-) -> list[RuntimeDiscoveredGitWorktree]:
-    """Decode bounded managed-worktree discovery entries."""
-    raw_entries = payload.get("discovered_worktrees")
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[RuntimeDiscoveredGitWorktree] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
-            continue
-        worktree_path = raw_entry.get("worktree_path")
-        fingerprint = raw_entry.get("fingerprint")
-        if not isinstance(worktree_path, str) or not isinstance(fingerprint, str):
-            continue
-        entries.append(
-            RuntimeDiscoveredGitWorktree(
-                worktree_path=worktree_path,
-                registered=_bool_payload(raw_entry, "registered", default=False),
-                repository_anchor_path=_nonempty_optional_str(
-                    raw_entry,
-                    "repository_anchor_path",
-                ),
-                branch_name=_nonempty_optional_str(raw_entry, "branch_name"),
-                fingerprint=fingerprint,
-                failure_code=_nonempty_optional_str(raw_entry, "failure_code"),
-            )
-        )
-    return entries
-
-
-def _nonempty_optional_str(
-    payload: dict[str, JsonValue],
-    key: str,
-) -> str | None:
-    """Decode an optional string serialized by protobuf as an empty string."""
-    value = payload.get(key)
-    return value if isinstance(value, str) and value else None
-
-
-def _file_stat_result(
-    payload: dict[str, JsonValue],
-    *,
-    final_cursor: str,
-) -> RuntimeFileStatResult:
-    """Convert file.stat final payload to result object."""
-    kind = _file_stat_kind(payload.get("kind"))
-    resolved_kind = _file_stat_kind(payload.get("resolved_kind"))
-    size_bytes = payload.get("size_bytes")
-    return RuntimeFileStatResult(
-        path=_str_payload(payload, "path"),
-        kind=kind or "other",
-        size_bytes=(
-            size_bytes
-            if isinstance(size_bytes, int) and not isinstance(size_bytes, bool)
-            else None
-        ),
-        symlink=_bool_payload(payload, "symlink", default=False),
-        real_path=_optional_str_payload(payload, "real_path"),
-        resolved_kind=resolved_kind,
-        modified_at=_optional_str_payload(payload, "modified_at"),
-        final_cursor=final_cursor,
-    )
-
-
-def _file_stat_kind(
-    value: object,
-) -> Literal["file", "directory", "symlink", "other", "missing"] | None:
-    if value == "file":
-        return "file"
-    if value == "directory":
-        return "directory"
-    if value == "symlink":
-        return "symlink"
-    if value == "other":
-        return "other"
-    if value == "missing":
-        return "missing"
-    return None
-
-
-def _process_result(
-    payload: dict[str, JsonValue],
-    *,
-    final_cursor: str,
-) -> RuntimeProcessResult:
-    status = _process_status(payload.get("status"))
-    exit_code = payload.get("exit_code")
-    return RuntimeProcessResult(
-        process_id=_str_payload(payload, "process_id"),
-        status=status or "missing",
-        exit_code=(
-            exit_code
-            if isinstance(exit_code, int) and not isinstance(exit_code, bool)
-            else None
-        ),
-        stdout=_str_payload(payload, "stdout"),
-        stderr=_str_payload(payload, "stderr"),
-        stdout_truncated=_bool_payload(payload, "stdout_truncated", default=False),
-        stderr_truncated=_bool_payload(payload, "stderr_truncated", default=False),
-        stdout_omitted_bytes=_int_payload(payload, "stdout_omitted_bytes", default=0),
-        stderr_omitted_bytes=_int_payload(payload, "stderr_omitted_bytes", default=0),
-        missing_reason=_optional_str_payload(payload, "missing_reason"),
-        final_cursor=final_cursor,
-    )
-
-
-def _process_status(
-    value: object,
-) -> (
-    Literal[
-        "running",
-        "exited_unread",
-        "consumed",
-        "missing",
-        "terminated",
-        "expired",
-    ]
-    | None
-):
-    if value == "running":
-        return "running"
-    if value == "exited_unread":
-        return "exited_unread"
-    if value == "consumed":
-        return "consumed"
-    if value == "missing":
-        return "missing"
-    if value == "terminated":
-        return "terminated"
-    if value == "expired":
-        return "expired"
-    return None
-
-
-def _grep_file_matches(
-    payload: dict[str, JsonValue],
-) -> list[RuntimeGrepFileMatch]:
-    raw_files = payload.get("files")
-    if not isinstance(raw_files, list):
-        return []
-    files: list[RuntimeGrepFileMatch] = []
-    for raw_file in raw_files:
-        if not isinstance(raw_file, dict):
-            continue
-        path = raw_file.get("path")
-        if not isinstance(path, str):
-            continue
-        files.append(
-            RuntimeGrepFileMatch(
-                path=path,
-                lines=tuple(_grep_line_matches(raw_file)),
-                truncated=_bool_value(raw_file.get("truncated")),
-            )
-        )
-    return files
-
-
-def _grep_line_matches(payload: dict[str, JsonValue]) -> list[RuntimeGrepLineMatch]:
-    raw_lines = payload.get("lines")
-    if not isinstance(raw_lines, list):
-        return []
-    lines: list[RuntimeGrepLineMatch] = []
-    for raw_line in raw_lines:
-        if not isinstance(raw_line, dict):
-            continue
-        line_number = raw_line.get("line_number")
-        text = raw_line.get("text")
-        if not isinstance(line_number, int) or not isinstance(text, str):
-            continue
-        lines.append(RuntimeGrepLineMatch(line_number=line_number, text=text))
-    return lines
-
-
-def _bool_value(value: JsonValue | None) -> bool:
-    return value if isinstance(value, bool) else False
-
-
-def _file_entry_type(
-    value: object,
-) -> Literal["file", "directory", "symlink", "other"] | None:
-    if value == "file":
-        return "file"
-    if value == "directory":
-        return "directory"
-    if value == "symlink":
-        return "symlink"
-    if value == "other":
-        return "other"
     return None
 
 
