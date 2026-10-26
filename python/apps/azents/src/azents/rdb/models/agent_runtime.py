@@ -121,6 +121,15 @@ class RDBAgentRuntime(RDBModel):
         "AND terminal_delete_acknowledgement_kind IS NOT NULL)",
         name="ck_agent_runtimes_terminal_delete_acknowledgement",
     )
+    CK_AUTOMATIC_START_RECEIPT = sa.CheckConstraint(
+        "(automatic_start_predecessor_sequence IS NULL "
+        "AND automatic_start_predecessor_generation IS NULL) OR "
+        "(automatic_start_predecessor_sequence >= 1 "
+        "AND automatic_start_predecessor_generation >= 0 "
+        "AND automatic_start_predecessor_sequence IS NOT NULL "
+        "AND automatic_start_predecessor_generation IS NOT NULL)",
+        name="ck_agent_runtimes_automatic_start_receipt",
+    )
     id: Mapped[str] = mapped_column(
         sa.String(32),
         primary_key=True,
@@ -166,6 +175,12 @@ class RDBAgentRuntime(RDBModel):
         init=False,
         nullable=False,
         server_default="0",
+    )
+    automatic_start_predecessor_sequence: Mapped[int | None] = mapped_column(
+        sa.BigInteger, init=False, nullable=True, default=None
+    )
+    automatic_start_predecessor_generation: Mapped[int | None] = mapped_column(
+        sa.Integer, init=False, nullable=True, default=None
     )
     desired_state: Mapped[RuntimeDesiredState] = mapped_column(
         runtime_desired_state_enum,
@@ -326,4 +341,5 @@ class RDBAgentRuntime(RDBModel):
         IX_PROVIDER_OBSERVE_REQUESTED_AT,
         IX_RUNNER_STATE,
         CK_TERMINAL_DELETE_ACKNOWLEDGEMENT,
+        CK_AUTOMATIC_START_RECEIPT,
     )

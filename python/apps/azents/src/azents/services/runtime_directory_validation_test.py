@@ -4,6 +4,7 @@ import datetime
 
 from azcommon.result import Failure, Success
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
@@ -36,6 +37,7 @@ class _FakeRunnerOperations(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime.datetime,

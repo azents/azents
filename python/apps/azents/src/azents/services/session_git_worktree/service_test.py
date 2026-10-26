@@ -42,6 +42,7 @@ from azents.core.mailbox_data import (
     AgentRemoveGitWorktreeContinuationResult,
     TurnActionContinuationMailboxPayload,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
 )
@@ -645,6 +646,7 @@ class _RunnerOperations(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None = None,
         path: str,
         recursive: bool = False,
@@ -669,6 +671,7 @@ class _RunnerOperations(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         parents: bool,
@@ -699,6 +702,7 @@ class _RunnerOperations(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None = None,
         path: str,
         recursive: bool,

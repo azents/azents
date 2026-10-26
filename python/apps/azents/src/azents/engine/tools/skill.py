@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from azents.broker.broadcast import WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityDeniedError,
@@ -181,6 +182,7 @@ class SkillRuntimeFileReader(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool = False,
@@ -195,6 +197,7 @@ class SkillRuntimeFileReader(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         character_offset: int,
@@ -450,6 +453,7 @@ class SkillProjectionService:
                 path=root_path,
                 recursive=False,
                 deadline_at=_runner_file_operation_deadline(),
+                admission_authority=None,
             )
         except (
             RuntimeRunnerOperationUnavailable,
@@ -488,6 +492,7 @@ class SkillProjectionService:
                 max_characters=_SKILL_READ_MAX_CHARACTERS,
                 encoding="utf-8",
                 deadline_at=_runner_file_operation_deadline(),
+                admission_authority=None,
             )
         except (
             RuntimeRunnerOperationUnavailable,

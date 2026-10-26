@@ -141,6 +141,48 @@ class AgentRuntimeLifecycleOperationsRepository:
                 reset_final_desired_state=reset_final_desired_state,
             )
 
+    async def start_or_join_automatically(
+        self,
+        *,
+        runtime_id: str,
+        expected_capability_version: int,
+        expected_configuration_sequence: int,
+        expected_digest: str,
+        expected_generation: int,
+    ) -> AgentRuntimeLifecycleCommand | None:
+        """Lock Agent before Runtime/configuration and fence capability."""
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_id(session, runtime_id)
+            if runtime is None:
+                return None
+            await require_active_agent(session, agent_id=runtime.agent_id)
+            agent = await self.agent_repository.get_by_id(session, runtime.agent_id)
+            if (
+                agent is None
+                or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+                or agent.runtime_capability_version != expected_capability_version
+            ):
+                return None
+            configuration = (
+                await self.runtime_profile_repository.get_configuration_state(
+                    session, runtime_id=runtime_id
+                )
+            )
+            if (
+                configuration is None
+                or configuration.desired.document is None
+                or configuration.desired.document.agent_selection_version
+                != agent.runtime_profile_selection_version
+            ):
+                return None
+            return await self.runtime_repository.start_or_join_automatically(
+                session,
+                runtime_id,
+                expected_configuration_sequence=expected_configuration_sequence,
+                expected_digest=expected_digest,
+                expected_generation=expected_generation,
+            )
+
     async def request_terminal_delete(self, agent_id: str) -> AgentRuntime | None:
         """Read and request deletion atomically for one logical Runtime."""
         async with self.session_manager() as session:

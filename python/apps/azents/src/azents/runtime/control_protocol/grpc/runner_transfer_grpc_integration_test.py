@@ -730,6 +730,7 @@ async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -
                 payload={"command": "echo control-remains-responsive"},
                 deadline_at=datetime.now(UTC) + timedelta(minutes=1),
                 body_stream_id=None,
+                admission_authority=None,
             ),
             created_at=datetime.now(UTC),
         )
@@ -969,6 +970,7 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
                 payload={"command": "echo transfer-cancel-isolated"},
                 deadline_at=datetime.now(UTC) + timedelta(minutes=1),
                 body_stream_id=None,
+                admission_authority=None,
             ),
             created_at=datetime.now(UTC),
         )
@@ -1394,6 +1396,7 @@ async def test_browser_command_and_result_cross_real_runner_grpc(
                 payload=payload,
                 deadline_at=datetime.now(UTC) + timedelta(minutes=1),
                 body_stream_id=None,
+                admission_authority=None,
             ),
             created_at=datetime.now(UTC),
         )

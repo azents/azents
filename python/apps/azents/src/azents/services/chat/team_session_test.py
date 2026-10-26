@@ -32,6 +32,7 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.session_working_folder import build_session_working_folder_path
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
@@ -729,6 +730,7 @@ class _FolderDeleteRunner(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime.datetime,
@@ -759,6 +761,7 @@ class _FolderDeleteRunner(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool,

@@ -76,6 +76,7 @@ async def validate_runtime_directory(
             owner_session_id=None,
             path=path,
             deadline_at=_runtime_directory_validation_deadline(),
+            admission_authority=None,
         )
     except (
         RuntimeRunnerOperationUnavailable,

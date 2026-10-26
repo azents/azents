@@ -78,6 +78,7 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
                 },
                 deadline_at=admission.data_stream_grace_deadline_at,
                 body_stream_id=None,
+                admission_authority=None,
             ),
             created_at=requested_at,
         )
@@ -107,6 +108,7 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
                 },
                 deadline_at=requested_at + _TERMINAL_TERMINATE_DEADLINE,
                 body_stream_id=None,
+                admission_authority=None,
             ),
             created_at=requested_at,
         )

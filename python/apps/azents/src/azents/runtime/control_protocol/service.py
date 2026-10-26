@@ -411,6 +411,7 @@ class RuntimeControlProtocolService:
             request_stream_id=operation.request_stream_id,
             reply_stream_id=operation.reply_stream_id,
             target=RuntimeCoordinationTarget.RUNNER,
+            generation=runner_generation,
         )
 
     async def claim_next_provider_request(
@@ -724,6 +725,7 @@ class RuntimeControlProtocolService:
             request_stream_id=request_stream_id,
             reply_stream_id=reply_stream_id,
             target=target,
+            generation=generation,
         )
 
     async def _generation_current(

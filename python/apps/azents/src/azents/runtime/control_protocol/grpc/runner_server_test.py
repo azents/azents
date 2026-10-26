@@ -908,6 +908,7 @@ async def test_runner_grpc_revoke_current_connection_on_close() -> None:
             payload={"command": "echo ok"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=datetime.now(UTC),
     )
@@ -1062,6 +1063,7 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1168,6 +1170,7 @@ async def test_runner_grpc_relays_typed_terminal_metadata_intents() -> None:
             },
             deadline_at=stream_deadline,
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1200,6 +1203,7 @@ async def test_runner_grpc_relays_typed_terminal_metadata_intents() -> None:
             },
             deadline_at=_now() + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1243,6 +1247,7 @@ async def test_runner_grpc_expires_operation_before_relay() -> None:
             },
             deadline_at=_now() - timedelta(seconds=1),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now() - timedelta(seconds=2),
     )
@@ -1289,6 +1294,7 @@ async def test_runner_grpc_rejects_start_for_canceled_operation() -> None:
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1655,6 +1661,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1681,6 +1688,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1703,6 +1711,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
             payload={},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1726,6 +1735,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1764,6 +1774,7 @@ async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1865,6 +1876,7 @@ async def test_runner_grpc_relays_file_apply_patch_and_preserves_failure() -> No
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=body_stream_id,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -1981,6 +1993,7 @@ async def test_runner_grpc_relays_file_edit_and_replacement_count() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -2162,6 +2175,7 @@ async def test_runner_grpc_revokes_retained_authority_after_generation_change() 
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -2188,6 +2202,7 @@ async def test_runner_grpc_start_claim_is_atomic() -> None:
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -2247,6 +2262,7 @@ async def test_runner_grpc_rejects_start_after_generation_replacement() -> None:
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -2314,6 +2330,7 @@ async def test_runner_grpc_relays_ordered_cancel_command() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )
@@ -2357,6 +2374,7 @@ async def test_runner_grpc_rejects_late_final_after_cancel() -> None:
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=_now(),
     )

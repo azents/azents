@@ -614,6 +614,7 @@ class ChatSessionService:
                         seconds=_WORKING_FOLDER_CLEANUP_TIMEOUT_SECONDS
                     )
                 ),
+                admission_authority=None,
             )
             if target.kind == "missing":
                 await self._complete_working_folder_cleanup(
@@ -645,6 +646,7 @@ class ChatSessionService:
                         seconds=_WORKING_FOLDER_CLEANUP_TIMEOUT_SECONDS
                     )
                 ),
+                admission_authority=None,
             )
         except RuntimeRunnerOperationFailedError as error:
             if error.code == "NOT_FOUND":

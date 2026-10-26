@@ -24,6 +24,7 @@ from azents_runtime_control.grpc_workspace_upload_client import (
 )
 from fastapi import Depends
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.repos.workspace_upload_authority.data import (
     WorkspaceUploadRequesterAccessDenied,
     WorkspaceUploadRequesterAgentUnavailable,
@@ -161,6 +162,7 @@ class WorkspaceUploadRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime,
@@ -613,6 +615,7 @@ class WorkspaceUploadService:
                 owner_session_id=None,
                 path=directory.as_posix(),
                 deadline_at=self._now() + _RUNNER_OPERATION_TIMEOUT,
+                admission_authority=None,
             )
         except (
             RuntimeRunnerOperationUnavailable,

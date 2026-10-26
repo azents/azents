@@ -27,6 +27,7 @@ from azents.core.runtime_transfer_coordinator_credential import (
     RuntimeTransferCoordinatorCredentialVerifier,
 )
 from azents.repos.browser_configuration import BrowserConfigurationRepository
+from azents.repos.runtime_operation_admission import RuntimeOperationAdmissionRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient,
 )
@@ -193,6 +194,10 @@ def get_runtime_runner_operation_client(
         BrowserConfigurationRepository,
         Depends(BrowserConfigurationRepository),
     ],
+    admission_reader: Annotated[
+        RuntimeOperationAdmissionRepository,
+        Depends(RuntimeOperationAdmissionRepository),
+    ],
 ) -> RuntimeRunnerOperationClient:
     """Return the Runtime Runner operation client."""
     return RuntimeRunnerOperationClient(
@@ -200,6 +205,7 @@ def get_runtime_runner_operation_client(
         coordination_store=store,
         metrics=metrics,
         browser_configuration=browser_configuration,
+        admission_reader=admission_reader,
     )
 
 

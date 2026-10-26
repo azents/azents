@@ -11,6 +11,7 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeRunnerState,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -53,6 +54,7 @@ class _FakeRunnerOperations(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None = None,
         path: str,
         deadline_at: datetime.datetime,
@@ -132,6 +134,7 @@ class _TakeoverRunnerOperations(_FakeRunnerOperations):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None = None,
         path: str,
         deadline_at: datetime.datetime,
@@ -143,6 +146,7 @@ class _TakeoverRunnerOperations(_FakeRunnerOperations):
             owner_session_id=owner_session_id,
             path=path,
             deadline_at=deadline_at,
+            admission_authority=None,
         )
         async with self.session_manager() as session:
             await AgentSessionRepository().claim_owner_generation(

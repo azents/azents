@@ -311,6 +311,7 @@ class AgentRuntimeRepository:
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         document = write.document.model_dump(mode="json") if write.document else None
         if state_row is not None and (
@@ -327,6 +328,8 @@ class AgentRuntimeRepository:
         next_sequence = runtime.configuration_sequence + 1
         now = datetime.datetime.now(datetime.UTC)
         runtime.configuration_sequence = next_sequence
+        runtime.automatic_start_predecessor_sequence = None
+        runtime.automatic_start_predecessor_generation = None
         runtime.runtime_provider_id = provider_logical_id
         runtime.runtime_provider_resource_id = provider_resource_id
         runtime.provider_binding_origin = binding_origin
@@ -509,6 +512,8 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
             )
             .values(
+                automatic_start_predecessor_sequence=None,
+                automatic_start_predecessor_generation=None,
                 desired_state=sa.case(
                     (repeated_stop, RDBAgentRuntime.desired_state),
                     else_=desired_state,
@@ -547,6 +552,75 @@ class AgentRuntimeRepository:
             desired_generation=runtime.desired_generation,
         )
 
+    async def start_or_join_automatically(
+        self,
+        session: WriteSession,
+        runtime_id: str,
+        *,
+        expected_configuration_sequence: int,
+        expected_digest: str,
+        expected_generation: int,
+    ) -> AgentRuntimeLifecycleCommand | None:
+        """Commit or join only the exact immediate ordinary-start successor."""
+        runtime = await session.write_session.scalar(
+            sa.select(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        state = await session.write_session.scalar(
+            sa.select(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            runtime is None
+            or state is None
+            or runtime.terminal_delete_requested_generation is not None
+            or state.desired_status is not RuntimeConfigurationStateStatus.READY
+            or state.desired_digest != expected_digest
+            or state.desired_document is None
+            or state.desired_sequence != runtime.configuration_sequence
+            or state.desired_target_generation != runtime.desired_generation
+        ):
+            return None
+        if (
+            runtime.desired_state is RuntimeDesiredState.RUNNING
+            and runtime.last_lifecycle_command is RuntimeLifecycleCommandType.START
+            and runtime.automatic_start_predecessor_sequence
+            == expected_configuration_sequence
+            and runtime.automatic_start_predecessor_generation == expected_generation
+            and runtime.configuration_sequence == expected_configuration_sequence + 1
+            and runtime.desired_generation == expected_generation + 1
+        ):
+            return AgentRuntimeLifecycleCommand(
+                runtime=self._build(runtime),
+                command_type=RuntimeLifecycleCommandType.START,
+                desired_generation=runtime.desired_generation,
+            )
+        if (
+            runtime.desired_state is not RuntimeDesiredState.STOPPED
+            or runtime.configuration_sequence != expected_configuration_sequence
+            or runtime.desired_generation != expected_generation
+        ):
+            return None
+        command = await self.set_desired_state_if_configuration_current(
+            session,
+            runtime_id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+            expected_configuration_sequence=expected_configuration_sequence,
+            expected_digest=expected_digest,
+            expected_generation=expected_generation,
+        )
+        if command is None:
+            return None
+        runtime.automatic_start_predecessor_sequence = expected_configuration_sequence
+        runtime.automatic_start_predecessor_generation = expected_generation
+        await session.write_session.flush()
+        return command
+
     async def set_desired_state_if_configuration_current(
         self,
         session: WriteSession,
@@ -573,6 +647,7 @@ class AgentRuntimeRepository:
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if (
             runtime is None
@@ -588,6 +663,8 @@ class AgentRuntimeRepository:
         next_sequence = runtime.configuration_sequence + 1
         now = datetime.datetime.now(datetime.UTC)
         runtime.configuration_sequence = next_sequence
+        runtime.automatic_start_predecessor_sequence = None
+        runtime.automatic_start_predecessor_generation = None
         runtime.desired_state = desired_state
         runtime.desired_generation = next_generation
         runtime.last_lifecycle_command = command_type
@@ -630,6 +707,8 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
             )
             .values(
+                automatic_start_predecessor_sequence=None,
+                automatic_start_predecessor_generation=None,
                 last_lifecycle_command=RuntimeLifecycleCommandType.START,
                 last_lifecycle_dispatch_generation=desired_generation - 1,
                 failure_generation=sa.case(
@@ -676,6 +755,8 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
             )
             .values(
+                automatic_start_predecessor_sequence=None,
+                automatic_start_predecessor_generation=None,
                 desired_state=RuntimeDesiredState.STOPPED,
                 desired_generation=RDBAgentRuntime.desired_generation + 1,
                 last_lifecycle_command=RuntimeLifecycleCommandType.STOP,
@@ -784,6 +865,8 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.terminal_delete_acknowledgement_kind.is_(None),
             )
             .values(
+                automatic_start_predecessor_sequence=None,
+                automatic_start_predecessor_generation=None,
                 desired_state=RuntimeDesiredState.STOPPED,
                 desired_generation=RDBAgentRuntime.desired_generation + 1,
                 last_lifecycle_command=None,
@@ -862,6 +945,8 @@ class AgentRuntimeRepository:
                 ),
             )
             .values(
+                automatic_start_predecessor_sequence=None,
+                automatic_start_predecessor_generation=None,
                 desired_state=RuntimeDesiredState.STOPPED,
                 desired_generation=next_generation,
                 last_lifecycle_command=None,
