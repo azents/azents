@@ -1,6 +1,7 @@
 ---
 title: "Reliable First Discord Mention Requirements"
 created: 2026-10-26
+implemented: 2026-10-27
 tags: [external-channel, discord, reliability]
 document_role: primary
 document_type: requirements

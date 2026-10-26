@@ -1,6 +1,7 @@
 ---
 title: "Reliable First Discord Mention Design"
 created: 2026-10-26
+implemented: 2026-10-27
 tags: [external-channel, discord, reliability]
 document_role: primary
 document_type: design
@@ -71,9 +72,21 @@ E2E primary scenario: unconfigured human mention with provider reads blocked bey
 
 ## Feasibility
 
-Conditional: existing setup claim source projection, per-channel uniqueness, claim/source revision fencing, provider-effect control plans and Job Runtime support this bounded extension. Must verify migration constraints, replay union exhaustiveness and source-selection races in implementation before claiming complete feasibility.
+Verified in implementation commit `12e2422cd332ee5da386e8cd7586f9738d68bde6`:
+the existing setup claim source projection, per-channel uniqueness, claim/source
+revision fencing, provider-effect control plans and Job Runtime support this bounded
+extension. The related repository/service/Job Runtime suite passed 1,322 tests,
+including PostgreSQL receipt, recovery, dispatch, source-selection and authority
+mutation coverage. Backend type checking and generated-migration checks passed.
+All four required E2E lanes and Web E2E passed in
+[CI run 40347646543, attempt 3](https://github.com/azents/azents/actions/runs/40347646543/attempts/3).
+Independent targeted review and the final automated review found no remaining
+material findings. Earlier attempts stopped before lane-1 tests due to artifact
+transfer failure and current-attempt image availability; the complete same-SHA
+rerun supplied the final evidence. This is development verification, not a
+production migration, deployment or live Discord validation.
 
 ## Design Approval
 
 Mode: Collaborative. Decision owner: Requester. Date: 2026-10-26.
-The requester approved the previously explained durable setup-preparation direction and then explicitly confirmed the requirement snapshot and claim extension choice. Revision 1 records that direction through authority IDs M1–M7 without changing user-visible setup or provider ambiguity policy. New material scope must return for confirmation. Implementation verification remains pending.
+The requester approved the previously explained durable setup-preparation direction and then explicitly confirmed the requirement snapshot and claim extension choice. Revision 1 records that direction through authority IDs M1–M7 without changing user-visible setup or provider ambiguity policy. New material scope must return for confirmation. Implementation verification completed on 2026-10-27 (KST), with evidence recorded above; merge and production deployment remain separate approvals.
