@@ -44,8 +44,8 @@ point. Missing macOS/Xcode/runtime/tool prerequisites fail explicitly.
 - XCTest UI testing launches the real application on a fresh test-owned
   simulator, waits for the labelled Hello World element, checks text/title,
   and attaches a screenshot to the result bundle.
-- Simulator boot uses the platform's readiness command, not a fixed delay.
-  Cleanup shuts down and deletes only the simulator created by this test run.
+- XCTest starts the test-owned simulator and establishes readiness by launching
+  the application. Cleanup shuts down and deletes only that simulator.
 - Path-scoped conventions are discovered through the generated Swift convention
   index and the Swift workspace's Agent instructions.
 
@@ -100,4 +100,4 @@ layers; new pure logic must gain deterministic unit tests when introduced.
 
 ## Changelog
 
-- 2026-10-27: Corrected pull-request checkout provenance to reflect the explicit head SHA.
+- 2026-10-27: Corrected pull-request checkout provenance and simulator startup ownership.
