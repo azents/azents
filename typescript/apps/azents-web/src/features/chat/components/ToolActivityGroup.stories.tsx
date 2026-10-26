@@ -355,7 +355,7 @@ export const RestoredRunIndentation = {
   },
 } satisfies Story;
 
-export const TracksLiveGroupDisclosure = {
+export const PreservesPreviousGroupDisclosure = {
   args: { activity },
   render: () => <LiveActivityGroupTrackingDemo />,
   play: async ({ canvasElement }) => {
@@ -376,9 +376,35 @@ export const TracksLiveGroupDisclosure = {
     }
     await waitFor(() =>
       expect(
-        within(initialGroup).queryByText("Preparing the activity presentation"),
-      ).not.toBeInTheDocument(),
+        within(initialGroup).getByText("Preparing the activity presentation"),
+      ).toBeVisible(),
     );
+    await expect(
+      await canvas.findByText("Next live activity details"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const PreservesUserCollapsedGroupOnCompletion = {
+  args: { activity },
+  render: () => <LiveActivityGroupTrackingDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const initialGroup = canvasElement.querySelector<HTMLElement>(
+      '[data-tool-activity-id="activity:story-call"]',
+    );
+    if (initialGroup === null) {
+      throw new Error("Initial activity group was not rendered");
+    }
+    await userEvent.click(
+      within(initialGroup).getByRole("button", { name: /^Activity/ }),
+    );
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Start next live group" }),
+    );
+    await expect(
+      within(initialGroup).getByRole("button", { name: /^Activity/ }),
+    ).toHaveAttribute("aria-expanded", "false");
     await expect(
       await canvas.findByText("Next live activity details"),
     ).toBeVisible();

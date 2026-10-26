@@ -467,7 +467,9 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           }}
         >
           {/* new message notice chip */}
-          {(showNewMessageChip || hasDetachedNewer) && (
+          {(chatTimelineState.type === "LATEST_FOLLOWING"
+            ? showNewMessageChip
+            : hasDetachedNewer) && (
             <Box
               style={{
                 position: "absolute",

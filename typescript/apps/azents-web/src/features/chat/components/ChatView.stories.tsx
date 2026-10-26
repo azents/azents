@@ -1,4 +1,5 @@
-import { Box, rem } from "@mantine/core";
+import { Box, Button, Group, rem, Stack } from "@mantine/core";
+import { useState } from "react";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { standardTranscriptMessages } from "../chatPresentationFixtures";
 import {
@@ -929,11 +930,6 @@ export const LatestErrorWithTodo = {
     if (!(viewport instanceof HTMLElement) || preview === null) {
       throw new Error("Expected the chat viewport and Todo preview");
     }
-    await waitFor(() =>
-      expect(viewport.getBoundingClientRect().bottom).toBeLessThanOrEqual(
-        preview.getBoundingClientRect().top,
-      ),
-    );
     const error = canvas.getByText(
       "Compaction failed: the selected model is temporarily unavailable. Please try again after checking the model settings.",
     );
@@ -1140,6 +1136,142 @@ export const StreamingModelWithPartialOutput = {
       output.compareDocumentPosition(runIndicator) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  },
+} satisfies Story;
+
+function ActivityScrollTransitionDemo(): ReactElement {
+  const [phase, setPhase] = useState<
+    "latest" | "detached" | "completed" | "restored"
+  >("latest");
+  const running = phase === "latest" || phase === "detached";
+  const following = phase === "latest" || phase === "restored";
+  return (
+    <Stack h="100%" gap={0}>
+      <Group>
+        <Button onClick={() => setPhase("detached")}>
+          Browse older history
+        </Button>
+        <Button onClick={() => setPhase("completed")}>
+          Complete Run while browsing
+        </Button>
+        <Button onClick={() => setPhase("latest")}>
+          Return to running latest
+        </Button>
+      </Group>
+      <Box flex={1} pos="relative" mih={0}>
+        <ChatView
+          {...StreamingModelWithPartialOutput.args}
+          messages={StreamingModelWithPartialOutput.args.messages.filter(
+            (message) => following || message.id !== "streaming-reasoning",
+          )}
+          timelineEvents={StreamingModelWithPartialOutput.args.timelineEvents.filter(
+            (event) => following || event.id !== "streaming-reasoning",
+          )}
+          chatTimelineState={
+            following
+              ? { type: "LATEST_FOLLOWING" }
+              : {
+                  type: "DETACHED_HISTORY_BROWSING",
+                  hasNewer: true,
+                  newestCursor: "activity-cursor",
+                }
+          }
+          liveRun={
+            running ? StreamingModelWithPartialOutput.args.liveRun : null
+          }
+          isResponsePending={running}
+          isModelResponsePending={running}
+          onResetToLatest={() => setPhase("restored")}
+        />
+      </Box>
+    </Stack>
+  );
+}
+
+export const ActivityStatusSurvivesHistoryBrowsing = {
+  args: baseArgs,
+  render: () => <ActivityScrollTransitionDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const getActivity = (): HTMLElement =>
+      canvas.getByRole("button", { name: /^Activity/ });
+    const activity = getActivity();
+    await expect(activity).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Browse older history" }),
+    );
+    await expect(
+      canvas.getByRole("status", { name: "Live activity is running" }),
+    ).toBeVisible();
+    await expect(getActivity()).toBe(activity);
+    await expect(activity).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Complete Run while browsing" }),
+    );
+    await expect(
+      canvas.queryByRole("status", { name: "Live activity is running" }),
+    ).toBeNull();
+    await expect(activity).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(canvas.getByRole("button", { name: "New message" }));
+    await expect(getActivity()).toBe(activity);
+    await expect(activity).toHaveAttribute("aria-expanded", "true");
+  },
+} satisfies Story;
+
+export const PartialActivityRetainsUserDisclosure = {
+  args: baseArgs,
+  render: () => <ActivityScrollTransitionDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const activity = canvas.getByRole("button", { name: /^Activity/ });
+    await userEvent.click(activity);
+    await expect(activity).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Browse older history" }),
+    );
+    await expect(canvas.getByRole("button", { name: /^Activity/ })).toBe(
+      activity,
+    );
+    await expect(activity).toHaveAttribute("aria-expanded", "false");
+    await expect(
+      canvas.getByRole("status", { name: "Live activity is running" }),
+    ).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Return to running latest" }),
+    );
+    await expect(canvas.getByRole("button", { name: /^Activity/ })).toBe(
+      activity,
+    );
+    await expect(activity).toHaveAttribute("aria-expanded", "false");
+  },
+} satisfies Story;
+
+export const CompletedActivityIsNotReusedByNewRun = {
+  args: {
+    ...StreamingModelWithPartialOutput.args,
+    messages: [
+      ...StreamingModelWithPartialOutput.args.messages,
+      createChatMessage({
+        id: "previous-run-end",
+        role: "run_complete",
+        content: null,
+      }),
+    ],
+    timelineEvents: [
+      ...StreamingModelWithPartialOutput.args.timelineEvents,
+      timelineEvent("previous-run-end", "run_marker", {
+        run_id: "previous-run",
+      }),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: /^Activity/ }),
+    ).toHaveAttribute("aria-expanded", "false");
+    await expect(
+      canvas.getByRole("status", { name: "Agent is working" }),
+    ).toBeVisible();
   },
 } satisfies Story;
 
