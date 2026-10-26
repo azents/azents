@@ -12,7 +12,7 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 
 from support.utils import AgentSessionSetup
-from tests.required.public.test_routines import run_routine_execution
+from tests.required.public.test_routines import run_routine_journey
 from tests.web.public.test_model_execution_options import _login_main_web
 
 
@@ -78,12 +78,12 @@ def test_routine_panel_and_collapsed_judgment_survive_reload(
             for item in driver.find_elements(*summaries)
         )
 
-    completed = run_routine_execution(
+    run_routine_journey(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
         azents_admin_server_url,
         openai_proxy_url,
+        inspect,
         None,
     )
-    inspect(completed.setup)

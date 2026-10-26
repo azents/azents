@@ -149,15 +149,6 @@ class RoutineSession:
     primary_session_id: str
 
 
-@dataclass(frozen=True)
-class CompletedRoutineJourney:
-    """Real tool-created definitions and completed work for product inspection."""
-
-    setup: AgentSessionSetup
-    alpha: RoutineDetailResponse
-    beta: RoutineDetailResponse
-
-
 def prepare_routine_session(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
@@ -229,15 +220,16 @@ def prepare_routine_session(
     return RoutineSession(setup, primary_session_id)
 
 
-def run_routine_execution(
+def run_routine_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_admin_server_url: str,
     openai_proxy_url: str,
+    inspect_web: Callable[[AgentSessionSetup], None] | None,
     channel: RoutineChannelJourney | None,
-) -> CompletedRoutineJourney:
-    """Exercise tool creation, both judgments, Runtime work and final delivery."""
+) -> None:
+    """Exercise real Routine boundaries, optionally inspecting the deployed Web."""
     prepared = prepare_routine_session(
         public_api_client, admin_api_client, azents_public_server_url, channel
     )
@@ -538,6 +530,9 @@ def run_routine_execution(
         },
     )
 
+    if inspect_web is not None:
+        inspect_web(setup)
+
     secondary = _create_secondary_session(
         server_url=azents_public_server_url,
         token=setup.access_token,
@@ -568,54 +563,6 @@ def run_routine_execution(
         ).status_code
         == 404
     )
-
-    return CompletedRoutineJourney(setup, alpha, beta)
-
-
-def run_routine_journey(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_admin_server_url: str,
-    openai_proxy_url: str,
-    channel: RoutineChannelJourney | None,
-) -> None:
-    """Retain the complete Required/channel execution and management lifecycle."""
-    completed = run_routine_execution(
-        public_api_client,
-        admin_api_client,
-        azents_public_server_url,
-        azents_admin_server_url,
-        openai_proxy_url,
-        channel,
-    )
-    setup, alpha, beta = completed.setup, completed.alpha, completed.beta
-    common = {
-        "server_url": azents_public_server_url,
-        "token": setup.access_token,
-        "session_id": setup.session_id,
-    }
-    headers = {"Authorization": f"Bearer {setup.access_token}"}
-    resource = (
-        f"{azents_public_server_url}/chat/v1/agents/{setup.agent_id}"
-        f"/sessions/{setup.session_id}/routines"
-    )
-    history = _history(**common).items
-
-    def inventory() -> RoutineListResponse:
-        response = requests.get(resource, headers=headers, timeout=10)
-        response.raise_for_status()
-        return RoutineListResponse.model_validate(response.json())
-
-    def detail(slug: str) -> RoutineDetailResponse:
-        response = requests.get(f"{resource}/{slug}", headers=headers, timeout=10)
-        response.raise_for_status()
-        return RoutineDetailResponse.model_validate(response.json())
-
-    def journal() -> list[_ModelEvidence]:
-        response = requests.get(openai_proxy_url + model.JOURNAL_PATH, timeout=10)
-        response.raise_for_status()
-        return TypeAdapter(list[_ModelEvidence]).validate_python(response.json())
 
     def request_action(message: str, expected: str) -> None:
         response = requests.post(
@@ -765,5 +712,6 @@ def test_joint_tick_uses_canonical_context_and_independent_work_results(
         azents_public_server_url,
         azents_admin_server_url,
         openai_proxy_url,
+        None,
         None,
     )
