@@ -4,6 +4,8 @@ import asyncio
 import dataclasses
 from collections.abc import Mapping, Sequence
 
+import pytest
+
 from azents_runtime_provider_kubernetes.deployment_diagnostics import (
     DeploymentDiagnosticSettings,
     OperationalDiagnosticsState,
@@ -21,6 +23,9 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     ServiceResource,
     ServiceSpec,
 )
+from azents_runtime_provider_kubernetes.kubernetes_http import (
+    KubernetesApiRequestError,
+)
 from azents_runtime_provider_kubernetes.network_enforcement import (
     MandatoryServiceReference,
 )
@@ -35,7 +40,6 @@ class FakeDeploymentDiagnosticsApi:
     """Deterministic read-only deployment inspection API."""
 
     api_resources: dict[str, frozenset[str]]
-    api_groups: frozenset[str]
     access_allowed: bool
     namespace: NamespaceResource | None
     services: dict[tuple[str, str], ServiceResource]
@@ -49,9 +53,6 @@ class FakeDeploymentDiagnosticsApi:
         if self.unexpected_discovery_failure:
             raise RuntimeError("unexpected diagnostic failure")
         return self.api_resources.get(api_version, frozenset())
-
-    async def list_api_groups(self) -> frozenset[str]:
-        return self.api_groups
 
     async def check_resource_access(
         self,
@@ -191,7 +192,6 @@ def _healthy_api() -> FakeDeploymentDiagnosticsApi:
             ),
             "networking.k8s.io/v1": frozenset({"networkpolicies"}),
         },
-        api_groups=frozenset({"cilium.io", "networking.k8s.io"}),
         access_allowed=True,
         namespace=NamespaceResource(
             name="azents-runtime",
@@ -241,7 +241,6 @@ async def test_healthy_deployment_has_no_operational_warnings() -> None:
 async def test_deployment_concerns_are_bounded_warning_only_diagnostics() -> None:
     api = _healthy_api()
     api.api_resources = {}
-    api.api_groups = frozenset()
     api.access_allowed = False
     api.namespace = None
     api.services = {}
@@ -288,6 +287,51 @@ async def test_proxy_artifacts_are_not_checked_without_proxy_attestation() -> No
     )
 
     assert diagnostics.warnings == ()
+
+
+@pytest.mark.parametrize(
+    "resources",
+    [frozenset(), frozenset({"ingresses", "ingressclasses"})],
+)
+async def test_network_policy_api_is_required_for_deployment_diagnostics(
+    resources: frozenset[str],
+) -> None:
+    api = _healthy_api()
+    api.api_resources["networking.k8s.io/v1"] = resources
+
+    diagnostics = await collect_operational_diagnostics(api, _settings())
+
+    warnings = {warning.code: warning.metadata for warning in diagnostics.warnings}
+    assert warnings["cni_support_unconfirmed"] == {
+        "reason": "network_policy_support_unconfirmed"
+    }
+
+
+async def test_network_policy_discovery_failure_remains_a_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = _healthy_api()
+    discover = api.discover_api_resources
+
+    async def discover_with_network_failure(api_version: str) -> frozenset[str]:
+        if api_version == "networking.k8s.io/v1":
+            raise KubernetesApiRequestError(
+                method="GET",
+                path="/apis/networking.k8s.io/v1",
+                status=403,
+                reason="Forbidden",
+                body="API discovery forbidden",
+            )
+        return await discover(api_version)
+
+    monkeypatch.setattr(api, "discover_api_resources", discover_with_network_failure)
+
+    diagnostics = await collect_operational_diagnostics(api, _settings())
+
+    warnings = {warning.code: warning.metadata for warning in diagnostics.warnings}
+    assert warnings["cni_support_unconfirmed"] == {
+        "reason": "api_discovery_unavailable"
+    }
 
 
 async def test_shared_provider_and_workload_namespace_emits_warning_only() -> None:

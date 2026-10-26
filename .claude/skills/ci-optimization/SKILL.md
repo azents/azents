@@ -139,11 +139,39 @@ gate completion, jobs/steps, test-phase mechanism and all overhead. Report mean 
 median, absolute/percentage change and resource costs. Classify accepted,
 reliability-accepted, inconclusive or rejected. Do not claim success from one run.
 
+A failed CI or validation run is work to diagnose and repair while the task is active.
+Continue compatible, coverage-preserving corrections and obtain successful exact-SHA
+validation; do not stop merely by recording the failure or attributing it to noisy
+infrastructure. Preserve each failed attempt separately and never rerun until green
+without an evidence-backed investigation.
+
 For recurring work, continue compatible proven candidates when measurement misses
 acceptance. Finish without an accepted change only with documented exhausted candidates,
 concrete missing evidence or a prerequisite/authority blocker. Do not call an unprofiled
-slow test infeasible. Record and close measured rejected ineffective experiments;
-inconclusive or active feasible work may remain open. Never merge without approval.
+slow test infeasible. Never merge without approval.
+
+## Close unsuccessful experiments
+
+When ending an experiment as failed, rejected, ineffective or inconclusive, complete
+cleanup in the same work cycle:
+
+1. Preserve the failure, measurements, exact SHAs, run/attempt identities, artifact
+   provenance and next findings in the durable report. The report is the failure
+   record; an open experiment PR or retained branch is not the archive.
+2. Close the unsuccessful experiment PR and verify that it is closed. A Draft label,
+   noisy evidence, a future feasible candidate or an approval blocker is not a reason
+   to leave a terminally unsuccessful PR open.
+3. Delete the experiment's remote branch after preserving its report and evidence.
+   Do not create archive branches merely to retain failed work.
+4. Remove its clean, Agent-owned worktree through the managed-worktree lifecycle.
+   For a worktree explicitly reused by new active work, switch it to the new task's
+   branch instead. Protect dirty, foreign or unknown worktrees and report actual
+   cleanup blockers without forcing deletion.
+5. Delete the local experiment branch only after no worktree has it checked out;
+   managed worktree removal preserves that branch. A protected checked-out worktree
+   is a real blocker to report, not a reason to force removal or claim success.
+6. Verify and report the PR, branch and worktree cleanup outcome. Later work starts
+   as a new active experiment rather than leaving the failed PR waiting indefinitely.
 
 ## Durable reporting and recurring prompts
 

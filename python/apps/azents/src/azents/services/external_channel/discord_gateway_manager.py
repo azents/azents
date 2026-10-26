@@ -17,6 +17,9 @@ from azents.core.enums import (
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelOperationDeadline,
+)
 from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionReason,
@@ -58,9 +61,9 @@ from azents.services.external_channel.provider_control import (
 )
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
-    external_channel_transport_deadline,
     transport_outcome_acknowledgeable,
 )
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
@@ -68,6 +71,7 @@ _LEASE_DURATION = datetime.timedelta(seconds=45)
 _RENEW_INTERVAL = datetime.timedelta(seconds=15)
 _READINESS_TIMEOUT = datetime.timedelta(seconds=60)
 _EVENT_RETRY_DELAY_SECONDS = 1.0
+_MESSAGE_PROCESSING_BUDGET = datetime.timedelta(minutes=2)
 
 
 class DiscordGatewayLeaseLost(DiscordGatewayError):
@@ -280,6 +284,43 @@ class DiscordGatewayManagerService:
         shutdown_event: asyncio.Event,
     ) -> None:
         lifecycle_states: asyncio.Queue[DiscordGatewayLifecycleState] = asyncio.Queue()
+        message_tasks: set[asyncio.Task[None]] = set()
+        message_lock = asyncio.Lock()
+        accepting_events = True
+
+        async def process_event(event: DiscordGatewayMessageEvent) -> None:
+            async with message_lock:
+                try:
+                    async with asyncio.timeout(
+                        _MESSAGE_PROCESSING_BUDGET.total_seconds()
+                    ):
+                        await self._admit_gateway_event(
+                            connection_id=connection_id,
+                            lease=lease,
+                            provider_app_id=provider_app_id,
+                            target_guild_id=target_guild_id,
+                            connected_bot_user_id=connected_bot_user_id,
+                            configuration_generation=configuration_generation,
+                            event=event,
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    logger.error(
+                        "Discord Gateway background message processing failed",
+                        exc_info=sanitized_exception_info(
+                            error,
+                            message="Discord message processing error redacted.",
+                        ),
+                        extra={"external_channel_connection_id": connection_id},
+                    )
+
+        async def handle_event(event: DiscordGatewayMessageEvent) -> None:
+            if not accepting_events:
+                return
+            task = asyncio.create_task(process_event(event))
+            message_tasks.add(task)
+            task.add_done_callback(message_tasks.discard)
 
         async def handle_lifecycle(state: DiscordGatewayLifecycleState) -> None:
             await self._handle_gateway_lifecycle(
@@ -298,15 +339,7 @@ class DiscordGatewayManagerService:
                     interactions_callback_selector_hash
                 ),
                 connected_bot_user_id=connected_bot_user_id,
-                handle_event=lambda event: self._admit_gateway_event(
-                    connection_id=connection_id,
-                    lease=lease,
-                    provider_app_id=provider_app_id,
-                    target_guild_id=target_guild_id,
-                    connected_bot_user_id=connected_bot_user_id,
-                    configuration_generation=configuration_generation,
-                    event=event,
-                ),
+                handle_event=handle_event,
                 handle_lifecycle=handle_lifecycle,
                 load_typing_targets=lambda: self._load_typing_targets(
                     connection_id=connection_id,
@@ -347,11 +380,17 @@ class DiscordGatewayManagerService:
                     await asyncio.gather(connection_task, return_exceptions=True)
                     return
         finally:
+            accepting_events = False
+            connection_task.cancel()
             readiness_task.cancel()
             shutdown_task.cancel()
+            for task in message_tasks:
+                task.cancel()
             await asyncio.gather(
+                connection_task,
                 readiness_task,
                 shutdown_task,
+                *message_tasks,
                 return_exceptions=True,
             )
 
@@ -534,7 +573,9 @@ class DiscordGatewayManagerService:
             lease_owner=self.manager_id,
             lease_generation=lease.lease_generation,
         )
-        deadline = external_channel_transport_deadline(received_at)
+        deadline = ExternalChannelOperationDeadline(
+            expires_at=received_at + _MESSAGE_PROCESSING_BUDGET
+        )
         while True:
             outcome = await self.transport_ingestion_service.ingest_discord_event(
                 event=create,

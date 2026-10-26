@@ -19,6 +19,75 @@ def _step_block(workflow: str, name: str) -> str:
     return workflow[start:] if end == -1 else workflow[start:end]
 
 
+def test_runner_browser_install_preserves_commands_and_uses_official_apt_mirror() -> (
+    None
+):
+    """Only the existing Runner unit host changes mirror and observes each phase."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    job = workflow.split("  ci_python_run:\n", 1)[1].split(
+        "\n  ci_python_migrations_run:\n", 1
+    )[0]
+    names = (
+        "Select Ubuntu archive for Runner browser dependencies",
+        "Install Runner Chromium engine",
+        "Install Runner Firefox system dependencies",
+        "Install Runner pinned Camoufox and model",
+    )
+    blocks = [_step_block(job, name) for name in names]
+    assert [job.index(f"      - name: {name}\n") for name in names] == sorted(
+        job.index(f"      - name: {name}\n") for name in names
+    )
+    for block in blocks:
+        assert "if: matrix.project == 'python/apps/azents-runtime-runner'" in block
+        assert "continue-on-error:" not in block
+        assert "timeout-minutes:" not in block
+    assert (
+        "sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt "
+        "--require-selected" in blocks[0]
+    )
+    for block, command in zip(
+        blocks[1:],
+        (
+            "uv run patchright install --with-deps chromium",
+            "uv run playwright install-deps firefox",
+            "uv run python -m azents_runtime_runner.browser_install",
+        ),
+        strict=True,
+    ):
+        assert "working-directory: python/apps/azents-runtime-runner" in block
+        assert block.splitlines()[-1].strip() == f"run: {command}"
+    assert "      - name: Pytest\n" in job
+
+
+def test_component_browser_install_uses_official_mirror_and_keeps_contracts() -> None:
+    """The existing Web job uses the same verified mirror and unchanged SDK install."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    job = workflow.split("  ci_typescript_run:\n", 1)[1].split(
+        "\n  ci-typescript:\n", 1
+    )[0]
+    names = (
+        "Select Ubuntu archive for component browser dependencies",
+        "Install component browser",
+        "Web component contracts",
+    )
+    positions = [job.index(f"      - name: {name}\n") for name in names]
+    assert positions == sorted(positions)
+    mirror, install, contracts = [_step_block(job, name) for name in names]
+    assert mirror.splitlines()[-1].strip() == (
+        "run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt "
+        "--require-selected"
+    )
+    assert install.splitlines()[-1].strip() == (
+        "run: cd typescript && pnpm --filter @azents/web exec "
+        "playwright install --with-deps chromium"
+    )
+    assert "scripts.ci.run_component_tests" in contracts
+    for block in (mirror, install, contracts):
+        assert "continue-on-error:" not in block
+        assert "timeout-minutes:" not in block
+        assert "\n        if:" not in block
+
+
 def test_general_report_can_checkout_and_keeps_forks_read_only() -> None:
     """Job-scoped permissions retain source reads and bound comment publication."""
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -144,6 +213,72 @@ def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -
     assert "retention-days: 1" in publish
     assert "if-no-files-found: error" in publish
     assert "continue-on-error:" not in publish
+
+
+@pytest.mark.parametrize("image", ["azents-runtime-runner", "azents-server"])
+def test_ci_build_reads_only_existing_snapshot_runner_cache(
+    tmp_path: Path, image: str
+) -> None:
+    """Use matching content-addressed layers without publishing a new cache."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    producer = workflow.split("  ci_docker_build_run:\n", 1)[1].split(
+        "\n  ci-docker-build:\n", 1
+    )[0]
+    expose = _step_block(producer, "Expose existing Runtime Runner build cache")
+    assert "if: matrix.name == 'azents-runtime-runner'" in expose
+    assert "uses: ./.github/actions/expose-github-runtime" in expose
+    script = textwrap.dedent(
+        _step_block(producer, "Build ${{ matrix.name }}").split("        run: |\n", 1)[
+            1
+        ]
+    )
+    assert "--cache-to" not in script
+    script = (
+        script.replace("${{ matrix.name }}", image)
+        .replace("${{ matrix.extra_context }}", "")
+        .replace("${{ matrix.dockerfile }}", "fixture.Dockerfile")
+        .replace("${{ matrix.image }}", image + ":ci")
+    )
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    docker = tools / "docker"
+    docker.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGUMENTS"\n')
+    docker.chmod(0o755)
+    arguments = tmp_path / "arguments"
+    subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", script],
+        env={
+            **os.environ,
+            "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+            "ARGUMENTS": str(arguments),
+        },
+        check=True,
+    )
+    cache = (
+        ["--cache-from", "type=gha,scope=azents-e2e-v1-azents-runtime-runner"]
+        if image == "azents-runtime-runner"
+        else []
+    )
+    assert arguments.read_text().splitlines() == [
+        "buildx",
+        "build",
+        "--load",
+        *cache,
+        "-f",
+        "fixture.Dockerfile",
+        "-t",
+        image + ":ci",
+        ".",
+    ]
+    snapshot = (REPOSITORY_ROOT / ".github/workflows/snapshot.yaml").read_text()
+    assert "e2e_cache_repository: azents-runtime-runner" in snapshot
+    assert 'cache_scope="azents-e2e-v1-$cache_repository"' in snapshot
+    assert (
+        producer.index("Build ${{ matrix.name }}")
+        < producer.index("Smoke ${{ matrix.name }}")
+        < producer.index("Export exact E2E image")
+        < producer.index("Publish exact E2E image")
+    )
 
 
 def test_component_contracts_publish_in_existing_typescript_job() -> None:

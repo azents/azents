@@ -1,5 +1,6 @@
 """Optional managed Runtime Web Surface E2E journey."""
 
+import time
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlsplit
 
@@ -43,6 +44,7 @@ from azentspublicclient.models.secrets import Secrets
 from selenium.common.exceptions import (
     ElementNotInteractableException,
     StaleElementReferenceException,
+    TimeoutException,
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -256,10 +258,15 @@ def _wait_for_runtime_metrics(
     token: str,
     handle: str,
     agent_id: str,
+    timeout_seconds: float,
 ) -> None:
     """Wait for the current Runner generation to publish usable metrics."""
 
-    def metrics_are_ready(_: WebDriver) -> bool:
+    def metrics_are_ready(current: WebDriver) -> bool:
+        # Keep browser ownership observable during API polling, not only at teardown.
+        assert current.current_window_handle, (
+            "Runtime Web browser session is unavailable"
+        )
         metrics = runtime_api.agent_runtime_v1_get_agent_runtime_system_metrics(
             agent_id=agent_id,
             handle=handle,
@@ -277,7 +284,66 @@ def _wait_for_runtime_metrics(
             and metrics.disk.used is not None
         )
 
-    WebDriverWait(driver, 120, poll_frequency=1).until(metrics_are_ready)
+    WebDriverWait(driver, timeout_seconds, poll_frequency=1).until(metrics_are_ready)
+
+
+def _start_runtime_and_wait_for_metrics(
+    driver: WebDriver,
+    *,
+    runtime_api: AgentRuntimeV1Api,
+    token: str,
+    handle: str,
+    agent_id: str,
+) -> None:
+    """Observe one UI admission separately within the existing readiness budget."""
+    before = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent_id, handle=handle, _headers=_headers(token)
+    )
+    assert before.lifecycle is not None
+    prior_generation = before.lifecycle.desired_generation
+    deadline = time.monotonic() + 120
+    _click_button(driver, "Start")
+    last_state = "unobserved"
+
+    def admitted(current: WebDriver) -> bool:
+        nonlocal last_state
+        assert current.current_window_handle, (
+            "Runtime Web browser session is unavailable"
+        )
+        observed = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id, handle=handle, _headers=_headers(token)
+        )
+        lifecycle = observed.lifecycle
+        if lifecycle is None:
+            last_state = "no lifecycle"
+            return False
+        last_state = (
+            f"generation={lifecycle.desired_generation}, target={lifecycle.target}, "
+            f"convergence={lifecycle.convergence}, "
+            f"availability={lifecycle.availability}"
+        )
+        return (
+            lifecycle.desired_generation > prior_generation
+            and lifecycle.target == "running"
+        )
+
+    try:
+        _wait(driver).until(admitted)
+    except TimeoutException as error:
+        raise AssertionError(
+            "One Runtime Start click did not advance authoritative admission; "
+            f"previous_generation={prior_generation}; {last_state}"
+        ) from error
+    remaining = deadline - time.monotonic()
+    assert remaining > 0, "Runtime Start exhausted the original metrics budget"
+    _wait_for_runtime_metrics(
+        driver,
+        runtime_api=runtime_api,
+        token=token,
+        handle=handle,
+        agent_id=agent_id,
+        timeout_seconds=remaining,
+    )
 
 
 def _wait_for_runtime_ready(
@@ -532,8 +598,7 @@ def test_runtime_free_add_and_remove_progress(
         agent_id=agent.id,
     )
     browser_driver.refresh()
-    _click_button(browser_driver, "Start")
-    _wait_for_runtime_metrics(
+    _start_runtime_and_wait_for_metrics(
         browser_driver,
         runtime_api=runtime_api,
         token=workspace.token,

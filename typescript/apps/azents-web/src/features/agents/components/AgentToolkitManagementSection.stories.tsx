@@ -543,6 +543,7 @@ export const SharedInstanceCatalog = {
 } satisfies Story;
 
 export const GitHubCandidateCloseAllowed = {
+  tags: ["ci-contract"],
   args: {
     editor: { type: "CREATE", toolkitType: "github" },
     setupPending: true,
@@ -567,6 +568,7 @@ export const GitHubCandidateCloseAllowed = {
 } satisfies Story;
 
 export const GitHubPublicationCloseBlocked = {
+  tags: ["ci-contract"],
   args: {
     editor: { type: "CREATE", toolkitType: "github" },
     setupPending: false,

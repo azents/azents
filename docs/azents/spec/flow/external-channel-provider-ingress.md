@@ -116,7 +116,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-26
-spec_version: 72
+spec_version: 73
 ---
 
 # External Channel Provider Ingress
@@ -385,7 +385,13 @@ the fenced connection to `reconnect_required` with
 `interaction_endpoint_drift`; the raw selector remains process-local.
 
 Ingress consumes eligible target-Guild typed `Message` callbacks for normal
-conversation ingestion. Message identity derives from Guild, channel, thread, and
+conversation ingestion. Each callback schedules a retained process-local task and
+returns before provider history or first-time setup work. Tasks preserve per-connection
+message order and have a two-minute processing budget independent of HTTP acknowledgement
+deadlines. Message failures are logged with redacted exception details without closing
+the Gateway client. Connection teardown cancels and joins unfinished message tasks.
+Work not yet durably admitted can still be lost on process or connection termination.
+Message identity derives from Guild, channel, thread, and
 message identity; the current lease/configuration/App-claim fence protects DB-only
 admission without exposing Gateway transport state. Each delivered callback attempts
 durable admission independently. A failure for one callback does not discard later
@@ -729,6 +735,9 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+
+- **2026-10-26** (spec_version 73) — Detached ordered Discord message processing from
+  SDK callbacks with a bounded process-local lifetime and independent processing budget.
 - **2026-10-26** (spec_version 72) — Added shared missing Session-folder setup
   admission before channel message ordering for new and retained Sessions.
 

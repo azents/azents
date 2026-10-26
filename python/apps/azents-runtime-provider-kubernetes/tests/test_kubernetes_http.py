@@ -136,7 +136,6 @@ class RecordingKubernetesHttpApi(KubernetesHttpApi):
             networking=client.NetworkingV1Api(sdk),
             coordination=client.CoordinationV1Api(sdk),
             authorization=client.AuthorizationV1Api(sdk),
-            apis=client.ApisApi(sdk),
         )
         self.requests = sdk.requests
 
@@ -969,7 +968,6 @@ async def test_deployment_diagnostics_use_read_only_discovery_and_exact_access()
     api = RecordingKubernetesHttpApi(
         (
             {"resources": [{"name": "pods"}, {"name": "pods/status"}]},
-            {"groups": [{"name": "cilium.io"}, {"name": "networking.k8s.io"}]},
             {"status": {"allowed": True}},
             {
                 "metadata": {
@@ -983,7 +981,6 @@ async def test_deployment_diagnostics_use_read_only_discovery_and_exact_access()
     )
 
     resources = await api.discover_api_resources("v1")
-    groups = await api.list_api_groups()
     allowed = await api.check_resource_access(
         namespace="azents-runtime",
         api_group="",
@@ -994,20 +991,18 @@ async def test_deployment_diagnostics_use_read_only_discovery_and_exact_access()
     namespace = await api.get_namespace("azents-runtime")
 
     assert resources == frozenset({"pods"})
-    assert groups == frozenset({"cilium.io", "networking.k8s.io"})
     assert allowed is True
     assert namespace is not None
     assert namespace.name == "azents-runtime"
     assert [(item.method, item.path) for item in api.requests] == [
         ("GET", "/api/v1/"),
-        ("GET", "/apis/"),
         (
             "POST",
             "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
         ),
         ("GET", "/api/v1/namespaces/azents-runtime"),
     ]
-    access_review = api.requests[2].json
+    access_review = api.requests[1].json
     assert access_review == {
         "apiVersion": "authorization.k8s.io/v1",
         "kind": "SelfSubjectAccessReview",
