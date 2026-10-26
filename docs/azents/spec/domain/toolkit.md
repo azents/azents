@@ -1103,7 +1103,10 @@ MCP-backed toolkits must keep `list_tools` discovery off the normal run preparat
   HTTP uses a correlated local non-success response; legacy SSE's writer requires
   local 202 acknowledgment plus cancellation/error handoff to the exact operation.
   The tool caller always receives the original denial, never synthetic success.
-- Failed sessions are discarded for later operations. A failed or uncertain
+- Confirmed unusable sessions/transports are discarded for later operations.
+  Request-local admission, timeout, argument/result validation, and ordinary
+  tool errors do not retire a healthy shared session or poison queued siblings.
+  A failed or uncertain
   `tools/call` is not automatically replayed; existing explicit provider 401
   refresh remains separate from connection recovery. Single-call cancellation
   does not terminate unrelated operations or the shared connection.

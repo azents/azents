@@ -10,8 +10,12 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Hashable
 from contextlib import AsyncExitStack
 
 import httpx2 as httpx
+from anyio import BrokenResourceError, ClosedResourceError, EndOfStream
+from mcp import MCPError
 from mcp.client.session import ClientSession, IncomingMessage
 from mcp.types import (
+    CONNECTION_CLOSED,
+    INVALID_REQUEST,
     CallToolResult,
     ErrorData,
     JSONRPCError,
@@ -58,6 +62,18 @@ _request_auth: contextvars.ContextVar[_DispatchState] = contextvars.ContextVar(
     "mcp_request_auth"
 )
 _wire_message = TypeAdapter(JSONRPCMessage)
+
+
+def _connection_unusable(error: Exception) -> bool:
+    """Only session-wide failure invalidates a shared connection."""
+    if isinstance(error, ExceptionGroup):
+        return any(_connection_unusable(item) for item in error.exceptions)
+    if isinstance(error, (BrokenResourceError, ClosedResourceError, EndOfStream)):
+        return True
+    return isinstance(error, MCPError) and (
+        (error.code == CONNECTION_CLOSED and error.message == "Connection closed")
+        or (error.code == INVALID_REQUEST and error.message == "Session terminated")
+    )
 
 
 class _GuardedClient(httpx.AsyncClient):
@@ -410,10 +426,11 @@ class McpConnections:
             if state.failure is not None:
                 raise state.failure from None
             raise
-        except Exception:
+        except Exception as exc:
             if state.failure is not None:
                 raise state.failure from None
-            connection.retire()
+            if _connection_unusable(exc):
+                connection.retire()
             raise
         finally:
             _request_auth.reset(token)

@@ -104,7 +104,7 @@ class _Server:
                     json={
                         "jsonrpc": "2.0",
                         "id": message.id,
-                        "error": {"code": -32000, "message": "Session terminated"},
+                        "error": {"code": -32600, "message": "Session terminated"},
                     },
                 )
             if value == "slow":
@@ -693,4 +693,81 @@ async def test_real_sse_wire_denial_preserves_writer_and_sibling(
         assert counts["initialize"] == 1
         assert counts["tools/call"] == 3
     finally:
+        await connections.close()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        MCPError(-32602, "Invalid request arguments"),
+        ValueError("Result validation failed"),
+        PermissionError("Call-local admission failed"),
+        TimeoutError("Call-local deadline expired"),
+    ],
+)
+async def test_local_failure_does_not_poison_queued_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    occupied, queued = asyncio.Event(), asyncio.Event()
+    reject, release = asyncio.Event(), asyncio.Event()
+    entered = 0
+
+    class Capacity(asyncio.Semaphore):
+        async def __aenter__(self) -> None:
+            nonlocal entered
+            entered += 1
+            if entered == 17:
+                queued.set()
+            await super().__aenter__()
+
+    calls = 0
+    session = AsyncMock(spec=ClientSession)
+    session.list_tools.return_value = ListToolsResult(tools=[])
+
+    async def call(
+        name: str,
+        *,
+        arguments: dict[str, object],
+    ) -> CallToolResult:
+        nonlocal calls
+        calls += 1
+        if calls == 16:
+            occupied.set()
+        value = arguments["value"]
+        if value == "reject":
+            await reject.wait()
+            raise failure
+        if value != "queued":
+            await release.wait()
+        return CallToolResult(content=[TextContent(type="text", text=str(value))])
+
+    session.call_tool.side_effect = call
+
+    @asynccontextmanager
+    async def open_session(
+        *args: object,
+        **kwargs: object,
+    ) -> AsyncGenerator[ClientSession]:
+        yield session
+
+    monkeypatch.setattr(mcp_connections.asyncio, "Semaphore", Capacity)
+    monkeypatch.setattr(mcp_connections, "_mcp_session", open_session)
+    connections = McpConnections()
+    denied = asyncio.create_task(_call(connections, "reject"))
+    siblings = [asyncio.create_task(_call(connections, str(i))) for i in range(15)]
+    try:
+        await occupied.wait()
+        waiting = asyncio.create_task(_call(connections, "queued"))
+        await queued.wait()
+        reject.set()
+        with pytest.raises(type(failure)) as caught:
+            await denied
+        assert caught.value is failure
+        assert (await waiting).content[0] == TextContent(type="text", text="queued")
+        release.set()
+        await asyncio.gather(*siblings)
+        assert calls == 17
+    finally:
+        release.set()
         await connections.close()
