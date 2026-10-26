@@ -15,11 +15,14 @@ from typing import Literal
 import pytest
 from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
+    _copy_event_payload,
+    runner_event_from_message,
 )
 from azents_runtime_control.process_observation import (
     ProcessCompletion,
     ProcessObservation,
 )
+from azents_runtime_control.proto import runtime_runner_control_pb2
 from azents_runtime_control.runner import (
     JsonValue,
     RunnerBodyChunk,
@@ -45,6 +48,21 @@ class _FakeClient:
         self.events: list[RunnerOperationEvent] = []
 
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
+        if event.event_type == RuntimeRunnerEventType.FINAL_SUCCESS:
+            # Actual producer payloads must survive the production wire codec.
+            message = runtime_runner_control_pb2.RunnerOperationEvent(
+                event_type=event.event_type.value, final=event.final
+            )
+            _copy_event_payload(message, event)
+            decoded = runner_event_from_message(
+                runtime_runner_control_pb2.RunnerOperationEvent.FromString(
+                    message.SerializeToString()
+                ),
+                request_id=event.request_id,
+            )
+            assert decoded.event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+            if "terminated_count" in event.payload:
+                assert decoded.payload == event.payload
         self.events.append(event)
 
 

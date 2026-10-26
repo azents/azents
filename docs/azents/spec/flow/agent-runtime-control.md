@@ -115,7 +115,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-22
+last_verified_at: 2026-10-26
 spec_version: 108
 ---
 
@@ -1144,6 +1144,22 @@ missing, boolean, null, string or unexpected fields fail with
 `invalid_bash_completion` rather than fabricating exit code zero. A valid nonzero
 exit code remains an ordinary completed command result, not a transport failure.
 Malformed completion evidence never triggers command replay.
+
+Other file, Git, and process final-success replies are decoded strictly into
+closed immutable operation-result contracts before use. Missing required fields,
+wrong primitive types (including boolean counts), unknown fields, invalid status
+values, and malformed nested collection entries fail with
+`invalid_runner_completion`; they do not fabricate zero/empty success or silently
+filter entries. Declared nullable/omittable fields retain their wire semantics,
+including empty protobuf discovery strings representing absent optional metadata.
+The Runner gRPC encoder checks required fields, exact primitive types, unknown
+fields, and every nested entry against the protobuf schema before conversion.
+Invalid evidence travels as an explicit final error, not a normalized success.
+Session process termination carries its required `terminated_count` in a dedicated
+typed protobuf result arm, including when the count is zero.
+The stream cursor is supplied by Control, never by the result payload. Valid empty
+collections, zero counts, and process-output folding are preserved. Validation does
+not dispatch or replay the operation.
 
 Handled Runner authentication, Control-stream, transfer, Web-protocol, and
 operation failures use bounded implementation-owned reason labels. Logging formats

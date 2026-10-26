@@ -603,6 +603,7 @@ message RunnerOperationFinalSuccessPayload {
     FileReadTextFinalSuccess file_read_text = 23;
     ProcessObserveFinalSuccess process_observe = 25;
     BrowserFinalSuccess browser = 24;
+    ProcessTerminateSessionFinalSuccess process_terminate_session = 26;
   }
 }
 
@@ -636,6 +637,10 @@ message FileReadTextFinalSuccess {
 
 message FileWriteFinalSuccess {
   uint64 bytes_written = 1;
+}
+
+message ProcessTerminateSessionFinalSuccess {
+  uint64 terminated_count = 1;
 }
 
 message RuntimeFilePatchOperation {
@@ -781,6 +786,7 @@ message FileGrepFinalSuccess {
   uint32 searched_file_count = 2;
   uint32 matched_file_count = 3;
   bool truncated = 4;
+  optional string stopped_reason = 5;
 }
 
 message ProcessOperationFinalSuccess {
