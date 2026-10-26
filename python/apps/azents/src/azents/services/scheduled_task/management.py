@@ -22,6 +22,9 @@ from azents.repos.scheduled_task.definition import RDBScheduledTaskAuthorityVali
 from azents.repos.scheduled_task.management_operations import (
     ScheduledTaskManagementRepository,
 )
+from azents.repos.scheduled_task.presentation import (
+    localize_scheduled_task_registration,
+)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.services.scheduled_task.channel import (
@@ -85,7 +88,9 @@ class ScheduledTaskManagementService:
             timezone=timezone,
             channel_id=channel_id,
         )
-        await self.channel_service.execute_registration(mutation.task)
+        await self.channel_service.execute_registration(
+            localize_scheduled_task_registration(mutation.task, at=at)
+        )
         return mutation.projection
 
     async def get(

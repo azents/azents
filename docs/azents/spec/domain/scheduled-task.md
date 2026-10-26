@@ -278,6 +278,10 @@ A Task may target one exact connected Slack or Discord Binding.
   an Edit link to the exact Session Web tab and Task editor plus a Cancel button
   that first returns an ephemeral confirmation; only the signed confirmation
   control executes the mutation.
+- Immediate one-time registration messages and the creation Tool result retain
+  the validated `at` input's UTC offset for schedule and next-run display. This
+  uses a presentation-only copy after commit; UTC persistence, execution instants,
+  subsequent list/detail results, and recurring IANA timezone behavior are unchanged.
 - Explicit Toolkit, Public API/Web, and provider-native control deletion commits
   before attempting one provider-native deletion notification in the exact bound
   conversation.
