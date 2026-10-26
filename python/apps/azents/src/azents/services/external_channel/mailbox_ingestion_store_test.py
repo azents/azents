@@ -1052,6 +1052,7 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
                 trigger_provider_message_id="3.000000",
                 trigger_position="00000000000000000003",
                 range_start_position="00000000000000000002",
+                expected_file_count=None,
             )
         ),
         source_revision=3,
@@ -1140,6 +1141,7 @@ async def test_duplicate_slack_event_types_reuse_setup_claim_source() -> None:
                 ),
                 trigger_position=request.locator.trigger_position,
                 range_start_position=None,
+                expected_file_count=None,
             )
         ),
         source_revision=5,

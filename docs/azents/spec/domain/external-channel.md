@@ -122,8 +122,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-10-19
-spec_version: 87
+last_verified_at: 2026-10-26
+spec_version: 88
 ---
 
 # External Channel
@@ -230,7 +230,7 @@ inherit a Session mutation fence.
 | Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. Each active dedicated route defaults to open human access and separately defaults to rejecting external bot messages. |
 | Channel default | Multi App channel-to-route preference with exactly one Azents User or provider-principal configuration actor. At most one active default exists per connection and provider parent channel. Replacement or clear terminalizes the old route's parent binding and invalidates its participation setting and pending setup claim rather than silently retargeting them. |
 | Participation setting | One active `channel` or `threads` location and concrete response-mode default for the connection and provider parent channel's selected route. The setting has a generation, exactly one User-or-principal latest actor, and terminal invalidation evidence. It is never inferred from an existing binding. |
-| Setup claim | One bounded nonterminal channel-setup authority retaining the latest eligible explicit mention's content-free source Resource, principal, position/replay boundary, source revision, selected route/location state, and expiry. It creates no Binding, Session, mailbox input, or AgentRun before location selection. |
+| Setup claim | One bounded nonterminal channel-setup authority retaining the latest eligible explicit mention's content-free source Resource, principal, position/replay boundary, source revision, selected route/location state, and expiry. Discord first-mention preparation also retains nullable pending/running/dispatching execution state, the admitting configuration generation, attempt count, due time, and conditional owner/expiry on this same row. Its due-work index supports producer recovery; source replacement and selection fence stale execution. Existing claim cleanup owns preparation metadata with no new independently retained table. It creates no Binding, Session, mailbox input, or AgentRun before location selection. |
 | Interaction | Idempotent signed Slack or Discord shortcut, command, component/action, navigation, or submission claim. An interaction may bind to a setup claim, setting generation, or connected Binding while provider trigger IDs, Discord interaction tokens, callback URLs, signatures, and raw bodies remain transient. |
 | Resource | One provider conversation. `parent_channel` uses the stable provider parent-channel identity and delivers directly there. Thread Resources use a Slack root message or Discord root/existing thread and may retain a provisioned Discord delivery-thread identity. A directly and unambiguously created Discord delivery thread additionally retains its exact normalized provisional name as optional one-shot initial-title evidence. Scope is explicit in type and labels and is never inferred from a missing thread field. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
@@ -291,6 +291,10 @@ provider effects and durable-ingestion orchestration run after completion.
   connection and provider parent channel. A later eligible explicit mention replaces
   the pending claim's source and increments its revision. The first valid location
   selection freezes the latest revision and releases exactly one canonical continuation.
+  The setup source retains the bounded callback-observed attachment count through
+  recovery and selected continuation. Preparation control delivery revalidates exact
+  claim/source/configuration and execution ownership immediately before provider I/O;
+  permanent preparation rejection emits a sanitized reason before ownership is cleared.
 - Critical durable execution output uses the exact current Session owner mutation
   fence. Private Channel Work/progress payloads use their existing cycle/revision
   CAS rather than a generic execution transaction manager.
@@ -728,6 +732,10 @@ fallback, uncertain replay or a second copy. Routine completion does not finish
 ordinary External Channel Work or add a destination selector.
 
 ## Changelog
+
+- **2026-10-26** (spec_version 88) — Added claim-owned first-Discord-mention
+  preparation metadata, bounded recovery, attachment-count preservation, terminal
+  diagnostics and atomic control-dispatch reservation with final authority checks.
 
 - 2026-10-19: Document Session Primary authority and independent Routine
   notification, including no-fallback/no-retry delivery.

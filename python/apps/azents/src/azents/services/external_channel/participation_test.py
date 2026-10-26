@@ -113,6 +113,7 @@ def _source() -> ExternalChannelSetupSourceProjection:
         trigger_provider_message_id="1.000000",
         trigger_position="00000000000000000001",
         range_start_position=None,
+        expected_file_count=None,
     )
 
 

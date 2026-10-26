@@ -35,6 +35,9 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
 )
+from azents.core.external_channel_ingestion import (
+    ExternalChannelSetupPreparationBoundary,
+)
 from azents.core.external_channel_navigation import (
     ChannelNavigationAction,
     ChannelNavigationLink,
@@ -650,10 +653,13 @@ class ExternalChannelActionService:
     async def execute_direct_control(
         self,
         plan: ProviderEffectPlan,
+        *,
+        preparation_boundary: ExternalChannelSetupPreparationBoundary | None,
     ) -> ProviderMutationOutcome | None:
         """Execute one post-commit provider control without durable work state."""
         current = await self.operations.revalidate_direct_control(
             plan=plan,
+            preparation_boundary=preparation_boundary,
         )
         if current is None:
             return None

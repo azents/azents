@@ -53,6 +53,7 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelReplayBoundary,
+    ExternalChannelSetupPreparationBoundary,
     ExternalChannelSetupReplayBoundary,
 )
 from azents.core.external_channel_mailbox_payload import (
@@ -1207,7 +1208,11 @@ class ExternalChannelMailboxIngestionRepository:
                 setup_required=False,
             )
         setup_required = (
-            request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
+            request.operation
+            in {
+                ExternalChannelIngestionOperation.CURRENT_TRIGGER,
+                ExternalChannelIngestionOperation.SETUP_PREPARATION,
+            }
             and request.scope.kind
             is ExternalChannelConversationScopeKind.PARENT_CHANNEL
             and request.locator.invocation
@@ -1297,7 +1302,9 @@ class ExternalChannelMailboxIngestionRepository:
                 request=request,
                 selector_id=selector.id,
             )
-            await session.write_session.commit()
+            await _commit_prepared_setup_control(
+                session, request=request, plan=delivery_id
+            )
             return ExternalChannelIngestionAcceptance(
                 status="awaiting_selection",
                 reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
@@ -1352,7 +1359,9 @@ class ExternalChannelMailboxIngestionRepository:
                 ),
                 now=now,
             )
-            await session.write_session.commit()
+            await _commit_prepared_setup_control(
+                session, request=request, plan=delivery_id
+            )
             return ExternalChannelIngestionAcceptance(
                 status="awaiting_access",
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
@@ -1366,7 +1375,7 @@ class ExternalChannelMailboxIngestionRepository:
             resource=conversation.source_resource,
             claim=claim,
         )
-        await session.write_session.commit()
+        await _commit_prepared_setup_control(session, request=request, plan=delivery_id)
         return ExternalChannelIngestionAcceptance(
             status="awaiting_selection",
             reason=ExternalChannelIngestionReason.SETUP_REQUIRED,
@@ -1410,6 +1419,7 @@ class ExternalChannelMailboxIngestionRepository:
                 ),
                 trigger_position=history.trigger_position,
                 range_start_position=history.range_start_position,
+                expected_file_count=request.locator.expected_file_count,
             )
         )
         claim = await self.repository.lock_nonterminal_setup_claim(
@@ -1995,6 +2005,29 @@ class ExternalChannelMailboxIngestionRepository:
             != request.authority.configuration_generation
         ):
             return None
+        boundary = request.replay_boundary
+        if isinstance(boundary, ExternalChannelSetupPreparationBoundary):
+            from azents.repos.external_channel.setup_preparation import (  # noqa: PLC0415
+                setup_preparation_current,
+            )
+
+            if not await setup_preparation_current(
+                session,
+                boundary=boundary,
+                configuration_generation=connection.configuration_generation,
+                now=now,
+            ):
+                return None
+            setting = await self.repository.lock_active_participation_setting(
+                session,
+                connection_id=connection.id,
+                provider_parent_channel_id=_provider_parent_channel_id(request),
+            )
+            binding = await self.repository.lock_connected_binding_by_resource(
+                session, resource_id=boundary.source_resource_id
+            )
+            if setting is not None or binding is not None:
+                return None
         if (
             request.authority.kind is ExternalChannelIngressAuthorityKind.CONFIGURATION
             and request.authority.ingress_profile
@@ -2049,6 +2082,27 @@ class ExternalChannelMailboxIngestionRepository:
             control_plans=(),
             connection_id=None,
         )
+
+
+async def _commit_prepared_setup_control(
+    session: WriteSession,
+    *,
+    request: ExternalChannelIngestionRequest,
+    plan: ProviderEffectPlan | None,
+) -> None:
+    """Keep setup/access reservation and dispatch intent in one transaction."""
+    boundary = request.replay_boundary
+    if plan is not None and isinstance(
+        boundary, ExternalChannelSetupPreparationBoundary
+    ):
+        from azents.repos.external_channel.setup_preparation import (  # noqa: PLC0415
+            mark_setup_preparation_dispatch,
+        )
+
+        await mark_setup_preparation_dispatch(
+            session, boundary=boundary, now=_utc_now()
+        )
+    await session.write_session.commit()
 
 
 def _mailbox_idempotency_key(

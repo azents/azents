@@ -16,6 +16,7 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
+    ExternalChannelSetupPreparationBoundary,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_channel_selection import (
@@ -183,7 +184,13 @@ class _ProviderControlDouble(ExternalChannelProviderControlService):
     def __init__(self) -> None:
         self.calls: list[ProviderEffectPlan] = []
 
-    async def attempt(self, plan: ProviderEffectPlan) -> None:
+    async def attempt(
+        self,
+        plan: ProviderEffectPlan,
+        *,
+        preparation_boundary: ExternalChannelSetupPreparationBoundary | None,
+    ) -> None:
+        assert preparation_boundary is None
         self.calls.append(plan)
 
 

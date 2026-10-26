@@ -288,12 +288,12 @@ class DiscordGatewayManagerService:
         message_lock = asyncio.Lock()
         accepting_events = True
 
-        async def process_event(event: DiscordGatewayMessageEvent) -> None:
-            async with message_lock:
-                try:
-                    async with asyncio.timeout(
-                        _MESSAGE_PROCESSING_BUDGET.total_seconds()
-                    ):
+        async def process_event(
+            event: DiscordGatewayMessageEvent, deadline: float
+        ) -> None:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    async with message_lock:
                         await self._admit_gateway_event(
                             connection_id=connection_id,
                             lease=lease,
@@ -303,22 +303,26 @@ class DiscordGatewayManagerService:
                             configuration_generation=configuration_generation,
                             event=event,
                         )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as error:
-                    logger.error(
-                        "Discord Gateway background message processing failed",
-                        exc_info=sanitized_exception_info(
-                            error,
-                            message="Discord message processing error redacted.",
-                        ),
-                        extra={"external_channel_connection_id": connection_id},
-                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.error(
+                    "Discord Gateway background message processing failed",
+                    exc_info=sanitized_exception_info(
+                        error,
+                        message="Discord message processing error redacted.",
+                    ),
+                    extra={"external_channel_connection_id": connection_id},
+                )
 
         async def handle_event(event: DiscordGatewayMessageEvent) -> None:
             if not accepting_events:
                 return
-            task = asyncio.create_task(process_event(event))
+            deadline = (
+                asyncio.get_running_loop().time()
+                + _MESSAGE_PROCESSING_BUDGET.total_seconds()
+            )
+            task = asyncio.create_task(process_event(event, deadline))
             message_tasks.add(task)
             task.add_done_callback(message_tasks.discard)
 
@@ -604,7 +608,9 @@ class DiscordGatewayManagerService:
     ) -> None:
         """Run direct controls after canonical Gateway admission."""
         for plan in outcome.control_plans:
-            task = asyncio.create_task(self.provider_control.attempt(plan))
+            task = asyncio.create_task(
+                self.provider_control.attempt(plan, preparation_boundary=None)
+            )
             self.control_tasks.add(task)
             task.add_done_callback(self.control_tasks.discard)
             task.add_done_callback(_log_provider_control_task_failure)

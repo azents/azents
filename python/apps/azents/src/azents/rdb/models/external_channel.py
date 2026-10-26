@@ -29,6 +29,7 @@ from azents.core.enums import (
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelSetupClaimStatus,
+    ExternalChannelSetupPreparationStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
 )
@@ -1200,6 +1201,12 @@ class RDBExternalChannelSetupClaim(RDBModel):
 
     __tablename__ = "external_channel_setup_claims"
 
+    IX_PREPARATION_DUE = sa.Index(
+        "ix_external_channel_setup_claims_preparation_due",
+        "preparation_status",
+        "preparation_next_attempt_at",
+    )
+
     UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
         "connection_id",
         "id",
@@ -1365,7 +1372,36 @@ class RDBExternalChannelSetupClaim(RDBModel):
         onupdate=sa.func.now(),
     )
 
+    preparation_status: Mapped[ExternalChannelSetupPreparationStatus | None] = (
+        mapped_column(
+            ENUM(
+                ExternalChannelSetupPreparationStatus,
+                name="external_channel_setup_preparation_status",
+                create_type=False,
+                values_callable=_enum_values,
+            ),
+            nullable=True,
+            default=None,
+        )
+    )
+    preparation_configuration_generation: Mapped[int | None] = mapped_column(
+        sa.Integer, nullable=True, default=None
+    )
+    preparation_attempt_count: Mapped[int] = mapped_column(
+        sa.Integer, default=0, server_default="0"
+    )
+    preparation_next_attempt_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, nullable=True, default=None
+    )
+    preparation_lease_owner: Mapped[str | None] = mapped_column(
+        sa.String(32), nullable=True, default=None
+    )
+    preparation_lease_until: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, nullable=True, default=None
+    )
+
     __table_args__ = (
+        IX_PREPARATION_DUE,
         UQ_CONNECTION_ID_ID,
         UQ_NONTERMINAL_CONNECTION_CHANNEL,
         IX_ROUTE_ID_STATUS,

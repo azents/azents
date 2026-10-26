@@ -265,7 +265,7 @@ class DiscordSelectorResponseService:
     ) -> None:
         """Attempt one access control only after the interaction response."""
         del connection_id
-        await self.provider_control.attempt(plan)
+        await self.provider_control.attempt(plan, preparation_boundary=None)
 
 
 def parse_discord_selector_custom_id(

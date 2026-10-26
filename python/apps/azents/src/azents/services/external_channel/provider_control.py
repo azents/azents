@@ -6,6 +6,9 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from azents.core.external_channel_ingestion import (
+    ExternalChannelSetupPreparationBoundary,
+)
 from azents.core.external_channel_provider_effect import (
     ProviderEffectPlan,
     ProviderMutationOutcome,
@@ -29,9 +32,13 @@ class ExternalChannelProviderControlService:
     async def attempt(
         self,
         plan: ProviderEffectPlan,
+        *,
+        preparation_boundary: ExternalChannelSetupPreparationBoundary | None,
     ) -> ProviderMutationOutcome | None:
         """Attempt one current provider control once without persistence or replay."""
-        outcome = await self.action_service.execute_direct_control(plan)
+        outcome = await self.action_service.execute_direct_control(
+            plan, preparation_boundary=preparation_boundary
+        )
         if outcome is not None and outcome.status in {"failed", "unknown"}:
             logger.warning(
                 "External Channel provider control did not complete",

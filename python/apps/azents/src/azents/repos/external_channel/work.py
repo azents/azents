@@ -31,6 +31,9 @@ from azents.core.external_channel_effect_intent import (
     RetainedDiscordDeliveryIdentity,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_ingestion import (
+    ExternalChannelSetupPreparationBoundary,
+)
 from azents.core.external_channel_limits import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
     DISCORD_DEFAULT_MAX_FILE_BYTES,
@@ -69,6 +72,9 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.external_channel.setup_preparation_fence import (
+    setup_preparation_dispatch_current,
+)
 from azents.repos.external_channel.work_data import (
     AwaitingInputSettlement,
     ChannelActionEffectPlan,
@@ -295,9 +301,22 @@ class ExternalChannelWorkRepository:
         session: ReadSession,
         *,
         plan: ProviderEffectPlan,
+        preparation_boundary: ExternalChannelSetupPreparationBoundary | None,
     ) -> ProviderEffectPlan | None:
         """Refresh one process-local control against current provider authority."""
         target = plan.target
+        if preparation_boundary is not None:
+            if (
+                target.connection_id != preparation_boundary.connection_id
+                or target.resource_id
+                not in (None, preparation_boundary.source_resource_id)
+                or not await setup_preparation_dispatch_current(
+                    session,
+                    boundary=preparation_boundary,
+                    now=datetime.datetime.now(datetime.UTC),
+                )
+            ):
+                return None
         intent = target.decode_intent()
         route_id: str | None = None
         if (
@@ -306,6 +325,11 @@ class ExternalChannelWorkRepository:
         ):
             setup_claim_id = intent.setup_claim_id
             if setup_claim_id is None:
+                return None
+            if (
+                preparation_boundary is not None
+                and setup_claim_id != preparation_boundary.claim_id
+            ):
                 return None
             claim = await session.read_session.get(
                 RDBExternalChannelSetupClaim,
@@ -332,6 +356,11 @@ class ExternalChannelWorkRepository:
                 )
             )
             if request is None:
+                return None
+            if (
+                preparation_boundary is not None
+                and request.setup_claim_id != preparation_boundary.claim_id
+            ):
                 return None
         return await self.prepare_direct_control(
             session,
@@ -440,7 +469,9 @@ class ExternalChannelWorkRepository:
         plan: ProviderEffectPlan,
     ) -> ProviderEffectPlan | None:
         """Refresh an effect only while its exact Binding authority is unchanged."""
-        current = await self.revalidate_direct_control(session, plan=plan)
+        current = await self.revalidate_direct_control(
+            session, plan=plan, preparation_boundary=None
+        )
         if current is None:
             return None
         expected = plan.target

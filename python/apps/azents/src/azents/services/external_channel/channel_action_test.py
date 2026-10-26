@@ -2226,7 +2226,7 @@ async def test_control_settlement_decodes_current_metadata_once(
         )
     else:
         result = await ExternalChannelActionService.execute_direct_control(
-            service, plan
+            service, plan, preparation_boundary=None
         )
     assert result == outcome
     if expected_part is None:
