@@ -774,7 +774,7 @@ class RunnerBrowserManager:
                         isinstance(v, (int, float)) and 0 < v <= 32768
                         for v in dimensions
                     )
-                    or dimensions[0] * dimensions[1] > 16000000
+                    or dimensions[0] * dimensions[1] * MOBILE_DEVICE_SCALE**2 > 16000000
                 ):
                     raise BrowserFailure(
                         "browser_capture_oversized",

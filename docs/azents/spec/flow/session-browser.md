@@ -453,7 +453,7 @@ Help and continuation are ordinary Agent conversation/execution behavior: stop t
 
 ## Captures and Existing Delivery
 
-Image observation saves an original PNG in the current Session working context, with exact size/dimensions and bounded capture limits. Live frames and intentional captures preserve native website rendering, including the site's own password bullets; no credential/password/one-time-code masking layer is added. Model normalization never overwrites the original.
+Image observation saves an original native-density PNG in the current Session working context, with exact size/dimensions and bounded capture limits. Full-page capture checks its sixteen-million-pixel limit against device-pixel area (CSS width × height × device scale squared) before native screenshot execution. Live frames and intentional captures preserve native website rendering, including the site's own password bullets; no credential/password/one-time-code masking layer is added. Model normalization never overwrites the original.
 
 The Engine uses the existing RuntimeImageReadService and ModelFile-backed FilePart to return actual model-visible image input. A path alone, missing transfer service, oversized image or failed materialization is not successful image observation. The Agent can explicitly invoke existing `present_file` to publish the original through verified Exchange transfer; this command layer does not claim user publication merely because capture succeeded.
 
