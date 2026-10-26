@@ -146,69 +146,6 @@ def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -
     assert "continue-on-error:" not in publish
 
 
-@pytest.mark.parametrize(
-    "image,e2e_enabled,direct",
-    [
-        ("azents-runtime-runner", True, True),
-        ("azents-runtime-runner", False, False),
-        ("azents-server", True, False),
-    ],
-)
-def test_runner_archive_replaces_only_its_e2e_build_round_trip(
-    tmp_path: Path, image: str, e2e_enabled: bool, direct: bool
-) -> None:
-    """Execute build selection and preserve smoke-before-publication authority."""
-    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
-    producer = workflow.split("  ci_docker_build_run:\n", 1)[1].split(
-        "\n  ci-docker-build:\n", 1
-    )[0]
-    script = textwrap.dedent(
-        _step_block(producer, "Build ${{ matrix.name }}").split("        run: |\n", 1)[
-            1
-        ]
-    )
-    script = (
-        script.replace("${{ matrix.name }}", image)
-        .replace(
-            "${{ needs.changes.outputs.python_e2e == 'true' || "
-            "needs.changes.outputs.web_e2e == 'true' }}",
-            str(e2e_enabled).lower(),
-        )
-        .replace("${{ matrix.extra_context }}", "")
-        .replace("${{ matrix.dockerfile }}", "fixture.Dockerfile")
-        .replace("${{ matrix.image }}", image + ":ci")
-    )
-    tools = tmp_path / "bin"
-    tools.mkdir()
-    for name in ("python", "docker"):
-        tool = tools / name
-        tool.write_text(f'#!/bin/sh\nprintf "{name} %s\\n" "$*" >> "$CALL_LOG"\n')
-        tool.chmod(0o755)
-    log = tmp_path / "calls"
-    subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", script],
-        env={
-            **os.environ,
-            "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
-            "CALL_LOG": str(log),
-            "RUNNER_TEMP": str(tmp_path),
-        },
-        check=True,
-    )
-    assert log.read_text().splitlines() == [
-        f"python -m scripts.ci.e2e_images build-runner --directory {tmp_path}/e2e-image"
-        if direct
-        else f"docker buildx build --load -f fixture.Dockerfile -t {image}:ci ."
-    ]
-    export = _step_block(producer, "Export exact E2E image")
-    assert "matrix.name != 'azents-runtime-runner'" in export
-    assert (
-        producer.index("Build ${{ matrix.name }}")
-        < producer.index("Smoke ${{ matrix.name }}")
-        < producer.index("Publish exact E2E image")
-    )
-
-
 def test_component_contracts_publish_in_existing_typescript_job() -> None:
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
     job = workflow.split("  ci_typescript_run:\n", 1)[1].split(

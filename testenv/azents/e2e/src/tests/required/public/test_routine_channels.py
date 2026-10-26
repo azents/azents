@@ -316,6 +316,5 @@ def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
         azents_public_server_url,
         azents_admin_server_url,
         openai_proxy_url,
-        None,
         RoutineChannelJourney(prepare, verify, delivery),
     )

@@ -426,20 +426,10 @@ Always-on required CI does not depend on external credentials.
   and Docker Runtime Provider; Web additionally consumes Main Web and Admin Web.
   Both producer and consumer check out the tested head SHA rather than the synthetic
   pull-request merge commit.
-  Runtime Runner streams its single Buildx Docker archive through zstd level 3
-  with one compression worker, then loads that completed archive for the existing
-  producer smoke. Fresh metadata outside the artifact binds the loaded tag to the
-  same successful build's immutable manifest or config digest, matching the native
-  Docker image store's identity representation. Build, compression, metadata, load
-  or identity failure prevents receipt publication; the owner closes and reaps its
-  archive producer on failures and interruption. Other selected producers save
-  their inspected immutable Docker image ID and use the same compression settings.
-  Each producer hashes its exact archive and uploads an image-specific artifact
-  bound to repository, tested SHA, run ID and attempt only after successful smoke.
-  The direct path's receipt `export_seconds` includes build, archive production and
-  hashing but excludes producer load; its CLI separately reports load and total
-  producer duration. It is not a save-only timing comparable to other receipts.
-  Consumers validate the entire exact portfolio,
+  Each selected producer saves its inspected immutable Docker image ID, compresses
+  once with zstd level 3 and one compression worker, hashes the archive and uploads
+  an image-specific artifact bound to repository,
+  tested SHA, run ID and attempt. Consumers validate the entire exact portfolio,
   receipt fields, non-symlink files, archive sizes and SHA256 hashes before loading
   any image. Two bounded import slots overlap independent archive loads on the same
   runner, without changing pytest workers or runner allocation. Every started import
@@ -466,6 +456,14 @@ Always-on required CI does not depend on external credentials.
   Toolkit E2E owns the repository-owner access matrix; personal ownership does not
   replay that matrix as unrelated model/tool round trips. Docker-free script tests
   retain distinct sparse-continuation call IDs and the full GitHub matrix.
+  Routine Web and channel-delivery journeys consume completed real Routine
+  execution: tool-created definitions, both judgments, per-item Runtime work,
+  final records, confirmed notification outcomes and session/User isolation.
+  Required Routine and channel E2E then continue stale-update/recovery, deletion
+  and archive/restore lifecycle checks. Web inspects the real definitions, attachment and
+  judgment expansion/reload state without replaying that unrelated management
+  lifecycle after browser inspection. Channel success/failure variants retain
+  real provider attempts and their own delivery assertions.
   Preparation artifacts retain exact identity, every download/pull status and duration,
   plus same-clock download, prerequisite-owner and import boundaries to distinguish
   actual overlap from sums of nested work. They never contain credentials. Local
