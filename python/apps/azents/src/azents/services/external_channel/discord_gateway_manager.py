@@ -286,6 +286,7 @@ class DiscordGatewayManagerService:
         lifecycle_states: asyncio.Queue[DiscordGatewayLifecycleState] = asyncio.Queue()
         message_tasks: set[asyncio.Task[None]] = set()
         message_lock = asyncio.Lock()
+        accepting_events = True
 
         async def process_event(event: DiscordGatewayMessageEvent) -> None:
             async with message_lock:
@@ -315,6 +316,8 @@ class DiscordGatewayManagerService:
                     )
 
         async def handle_event(event: DiscordGatewayMessageEvent) -> None:
+            if not accepting_events:
+                return
             task = asyncio.create_task(process_event(event))
             message_tasks.add(task)
             task.add_done_callback(message_tasks.discard)
@@ -377,6 +380,7 @@ class DiscordGatewayManagerService:
                     await asyncio.gather(connection_task, return_exceptions=True)
                     return
         finally:
+            accepting_events = False
             connection_task.cancel()
             readiness_task.cancel()
             shutdown_task.cancel()
