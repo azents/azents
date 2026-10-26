@@ -71,6 +71,7 @@ from azents.repos.session_execution import (
 )
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
+    _decode_discord_destination,
     _provider_mutation_outcome,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
@@ -201,6 +202,78 @@ def _target(
         agent_avatar=None,
         request_payload=request_payload,
     )
+
+
+@pytest.mark.parametrize(
+    ("scope", "parent", "root", "valid"),
+    [
+        (None, None, None, True),
+        ("thread", None, None, True),
+        ("parent_channel", None, None, True),
+        ("thread", "222", "333", True),
+        (None, "222", "333", True),
+        ("parent_channel", "222", "333", False),
+        ("thread", None, "333", False),
+        ("thread", "222", None, False),
+        ("thread", "222", "444", False),
+        ("other", None, None, False),
+        ([], None, None, False),
+    ],
+)
+def test_discord_destination_scope_validation(
+    scope: object, parent: object, root: object, valid: bool
+) -> None:
+    """Decode explicit scope and thread identity before provider effects."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": scope,
+            "thread_parent_channel_id": parent,
+            "thread_root_message_id": root,
+        }
+    )
+    destination = _decode_discord_destination(target)
+    assert (destination is not None) is valid
+    if destination is not None:
+        assert destination.guild_id == "111"
+        assert destination.channel_id == "333"
+        assert destination.thread_parent_channel_id == parent
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("guild_id", "invalid"), ("guild_id", "222"), ("channel_id", "invalid")],
+)
+def test_discord_destination_rejects_invalid_provider_identity(
+    field: str, value: str
+) -> None:
+    """Reject malformed identifiers and a guild outside the authorized target."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload[field] = value
+    assert _decode_discord_destination(target) is None
+
+
+def test_discord_destination_rejects_configuration_mismatch() -> None:
+    """A matching tenant cannot override the configured Guild authority."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target = replace(
+        target,
+        provider_configuration=DiscordConnectionConfiguration(
+            target_guild_id="222",
+            suppress_url_previews=True,
+            thread_auto_archive_duration_minutes=1440,
+        ),
+    )
+    assert _decode_discord_destination(target) is None
 
 
 def _effect(

@@ -858,41 +858,20 @@ class ExternalChannelActionService:
             reply = _decode_discord_reply(payload)
             if reply is None:
                 return _discord_invalid_payload()
-        guild_id = payload.get("guild_id")
-        channel_id = payload.get("channel_id")
         configuration = target.provider_configuration
-        if (
-            not isinstance(guild_id, str)
-            or not guild_id.isdigit()
-            or target.provider_tenant_id != guild_id
-            or configuration is None
-            or configuration.target_guild_id != guild_id
-            or not isinstance(channel_id, str)
-            or not channel_id.isdigit()
-        ):
+        destination = _decode_discord_destination(target)
+        if destination is None or configuration is None:
             return _discord_invalid_payload()
+        guild_id = destination.guild_id
+        channel_id = destination.channel_id
         files = (
             reply.files if reply is not None else _outbound_files(payload.get("files"))
         )
         if files is None:
             return _discord_invalid_payload()
         delivery_channel_id = channel_id
-        conversation_scope = payload.get("conversation_scope")
-        parent_channel_id = payload.get("thread_parent_channel_id")
-        root_message_id = payload.get("thread_root_message_id")
-        if conversation_scope == "parent_channel":
-            if parent_channel_id is not None or root_message_id is not None:
-                return _discord_invalid_payload()
-        elif conversation_scope in {None, "thread"} and (
-            parent_channel_id is not None or root_message_id is not None
-        ):
-            if (
-                not isinstance(parent_channel_id, str)
-                or not parent_channel_id.isdigit()
-                or not isinstance(root_message_id, str)
-                or root_message_id != channel_id
-            ):
-                return _discord_invalid_payload()
+        thread_parent = destination.thread_parent_channel_id
+        if thread_parent is not None:
             if not workflow_session_open:
                 try:
                     async with discord_client.open(
@@ -918,8 +897,8 @@ class ExternalChannelActionService:
             thread = await discord_client.ensure_thread(
                 bot_token=bot_token,
                 guild_id=guild_id,
-                parent_channel_id=parent_channel_id,
-                root_message_id=root_message_id,
+                parent_channel_id=thread_parent,
+                root_message_id=channel_id,
                 name=target.agent_name,
                 auto_archive_duration=(
                     configuration.thread_auto_archive_duration_minutes
@@ -938,8 +917,6 @@ class ExternalChannelActionService:
                     initial_thread_title=thread.created_thread_name,
                     authority=authority,
                 )
-        elif conversation_scope not in {None, "thread"}:
-            return _discord_invalid_payload()
         match target.operation:
             case (
                 ExternalChannelDeliveryOperation.REPLY
@@ -2128,6 +2105,55 @@ def _discord_invalid_payload() -> DiscordDeliveryResult:
         provider_message_key=None,
         error_kind="provider_payload_invalid",
         error_summary="The committed Discord provider request is incomplete.",
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordDestination:
+    """Validated provider identity and optional root-message thread target."""
+
+    guild_id: str
+    channel_id: str
+    thread_parent_channel_id: str | None
+
+
+def _decode_discord_destination(target: ProviderTarget) -> _DiscordDestination | None:
+    """Validate the current target without interpreting provider extensions."""
+    payload = target.request_payload
+    guild_id = payload.get("guild_id")
+    channel_id = payload.get("channel_id")
+    scope = payload.get("conversation_scope")
+    parent = payload.get("thread_parent_channel_id")
+    root = payload.get("thread_root_message_id")
+    configuration = target.provider_configuration
+    if (
+        not isinstance(guild_id, str)
+        or not guild_id.isdigit()
+        or target.provider_tenant_id != guild_id
+        or configuration is None
+        or configuration.target_guild_id != guild_id
+        or not isinstance(channel_id, str)
+        or not channel_id.isdigit()
+    ):
+        return None
+    if scope == "parent_channel":
+        if parent is not None or root is not None:
+            return None
+    elif scope is None or scope == "thread":
+        if parent is not None or root is not None:
+            if (
+                not isinstance(parent, str)
+                or not parent.isdigit()
+                or not isinstance(root, str)
+                or root != channel_id
+            ):
+                return None
+    else:
+        return None
+    return _DiscordDestination(
+        guild_id=guild_id,
+        channel_id=channel_id,
+        thread_parent_channel_id=parent if isinstance(parent, str) else None,
     )
 
 
