@@ -119,7 +119,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-26
+last_verified_at: 2026-10-27
 spec_version: 108
 ---
 
@@ -411,6 +411,10 @@ peer session totals are validated separately (monotonic and not beyond sent byte
 and cannot double-credit those retired bytes. Retirement wakes shared-window
 waiters; repeated failed uploads or aborted downloads cannot permanently consume
 the session window. Queue resource release also completes if callbacks cancel.
+Once a Gateway or Control relay source is registered, its session reservation and
+queue are released even if handshake acceptance is cancelled or setup fails before
+the reader starts. Normal stream closure still cancels and joins its reader before
+source cleanup.
 
 Runtime capacity is Owner-scoped ephemeral operational state, not durable product
 authority. It bounds active HTTP, SSE, and WebSocket streams, pending opens, buffered

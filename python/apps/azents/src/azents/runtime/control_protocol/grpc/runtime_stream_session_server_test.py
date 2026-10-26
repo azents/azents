@@ -55,6 +55,7 @@ from azents.runtime.control_protocol.grpc.runtime_stream_session_server import (
     RuntimeStreamControlDataPlane,
     RuntimeStreamControlHardLimits,
     RuntimeStreamControlResourceTracker,
+    RuntimeStreamControlSessionGrpcServicer,
     RuntimeStreamGatewaySessionGrpcServicer,
     RuntimeStreamTrustedPeerAuthenticator,
     RuntimeWebCapacityBackend,
@@ -614,6 +615,143 @@ def _hello() -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
         peer_boot_id="gateway-boot",
         hello=hello,
     )
+
+
+@pytest.mark.asyncio
+async def test_gateway_cancelled_during_acceptance_releases_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_plane = _data_plane()
+    servicer = RuntimeStreamGatewaySessionGrpcServicer(
+        data_plane=data_plane,
+        peers=RuntimeStreamTrustedPeerAuthenticator(
+            allow_insecure=True,
+            gateway_identities=frozenset(),
+            control_identities=frozenset(),
+        ),
+        clock=lambda: datetime.now(UTC),
+    )
+    entered = asyncio.Event()
+    original_register = data_plane.register_source
+
+    async def register_blocked(
+        *, session_id: str, peer_boot_id: str, owner: OwnerSessionEpoch | None
+    ) -> _SourceSession:
+        source = await original_register(
+            session_id=session_id, peer_boot_id=peer_boot_id, owner=owner
+        )
+        await source.queue.condition.acquire()
+        entered.set()
+        return source
+
+    monkeypatch.setattr(data_plane, "register_source", register_blocked)
+
+    async def messages() -> AsyncIterator[
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+    ]:
+        yield _hello()
+
+    responses = servicer.Connect(
+        messages(),
+        FakeGrpcContext[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+        ](),
+    )
+    pending = asyncio.ensure_future(anext(responses))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    source = next(iter(data_plane.sources.values()))
+    snapshot = data_plane.resources.snapshot()
+    assert snapshot.active_sessions == 1
+    assert snapshot.pending_tasks == 1
+    pending.cancel()
+    source.queue.condition.release()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    snapshot = data_plane.resources.snapshot()
+    assert (
+        snapshot.active_sessions
+        == snapshot.pending_tasks
+        == snapshot.queued_envelopes
+        == 0
+    )
+    assert data_plane.sources == {}
+    await data_plane.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_cancelled_during_acceptance_releases_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_plane = _data_plane()
+    monkeypatch.setattr(data_plane, "resolve_local_owner", AsyncMock(return_value=True))
+    servicer = RuntimeStreamControlSessionGrpcServicer(
+        data_plane=data_plane,
+        peers=RuntimeStreamTrustedPeerAuthenticator(
+            allow_insecure=True,
+            gateway_identities=frozenset(),
+            control_identities=frozenset(),
+        ),
+        clock=lambda: datetime.now(UTC),
+    )
+    entered = asyncio.Event()
+    original_register = data_plane.register_source
+
+    async def register_blocked(
+        *, session_id: str, peer_boot_id: str, owner: OwnerSessionEpoch | None
+    ) -> _SourceSession:
+        source = await original_register(
+            session_id=session_id, peer_boot_id=peer_boot_id, owner=owner
+        )
+        await source.queue.condition.acquire()
+        entered.set()
+        return source
+
+    monkeypatch.setattr(data_plane, "register_source", register_blocked)
+    owner = _owner()
+    hello = _hello()
+    hello.hello.role = (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PEER_ROLE_CONTROL
+    )
+    hello.session_id = owner.session_lease_id
+    hello.owner_boot_id = owner.owner_boot_id
+    hello.session_lease_id = owner.session_lease_id
+    hello.lease_generation = owner.lease_generation
+    hello.hello.runtime_id = owner.runtime_id
+    hello.hello.desired_generation = owner.desired_generation
+    hello.hello.runner_generation = owner.runner_generation
+
+    async def messages() -> AsyncIterator[
+        runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+    ]:
+        yield hello
+
+    responses = servicer.Relay(
+        messages(),
+        FakeGrpcContext[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+        ](),
+    )
+    pending = asyncio.ensure_future(anext(responses))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    source = next(iter(data_plane.sources.values()))
+    snapshot = data_plane.resources.snapshot()
+    assert snapshot.active_sessions == 1
+    assert snapshot.pending_tasks == 1
+    pending.cancel()
+    source.queue.condition.release()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    snapshot = data_plane.resources.snapshot()
+    assert (
+        snapshot.active_sessions
+        == snapshot.pending_tasks
+        == snapshot.queued_envelopes
+        == 0
+    )
+    assert data_plane.sources == {}
+    await data_plane.close()
 
 
 @pytest.mark.asyncio
