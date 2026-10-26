@@ -180,6 +180,7 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
       if (zoom === current.zoom) {
         return;
       }
+      clear();
       pendingScroll.current = {
         anchor: {
           x: Math.max(
@@ -202,7 +203,12 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
     });
     return () =>
       document.removeEventListener("wheel", wheel, { capture: true });
-  }, [options.enabled, direct.controls.pressed, direct.controls.sending]);
+  }, [
+    options.enabled,
+    direct.controls.pressed,
+    direct.controls.sending,
+    clear,
+  ]);
 
   const touch: BrowserTouchHandlers = {
     onPointerDown: (event) => {

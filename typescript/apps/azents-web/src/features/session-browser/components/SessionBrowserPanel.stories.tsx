@@ -1711,6 +1711,48 @@ export const PinchZoomUsesFittedFrame = {
   },
 } satisfies Story;
 
+export const ControlWheelCancelsPendingTap = {
+  tags: ["ci-contract"],
+  play: async ({ canvasElement }) => {
+    const region = within(canvasElement.ownerDocument.body).getByRole(
+      "region",
+      { name: "Remote browser page" },
+    );
+    const before = region.getBoundingClientRect();
+    const point = {
+      clientX: before.left + before.width / 2,
+      clientY: before.top + before.height / 2,
+    };
+    region.setPointerCapture = fn();
+    region.hasPointerCapture = (): boolean => false;
+    await fireEvent.pointerDown(region, {
+      ...point,
+      pointerType: "touch",
+      pointerId: 85,
+    });
+    region.dispatchEvent(
+      new WheelEvent("wheel", {
+        ...point,
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: -100,
+      }),
+    );
+    await waitFor(() =>
+      expect(region.getBoundingClientRect().width).toBeGreaterThan(
+        before.width,
+      ),
+    );
+    await fireEvent.pointerUp(region, {
+      ...point,
+      pointerType: "touch",
+      pointerId: 85,
+    });
+    await expect(actions).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
 export const ZoomedMouseInputOwnership = {
   tags: ["ci-contract"],
   args: { zoom: 2 },
