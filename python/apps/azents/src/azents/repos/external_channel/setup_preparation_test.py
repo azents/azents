@@ -9,6 +9,7 @@ import pytest_asyncio
 import sqlalchemy as sa
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     ExternalChannelAccessRequestStatus,
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
@@ -20,6 +21,7 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResponseMode,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelSetupClaimStatus,
     ExternalChannelSetupPreparationStatus,
     ExternalChannelWorkProjectionStatus,
@@ -42,8 +44,11 @@ from azents.core.external_channel_participation_state import (
     setup_source_from_projection,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
+    RDBExternalChannelAgentRoute,
+    RDBExternalChannelBlock,
     RDBExternalChannelConnection,
     RDBExternalChannelParticipationSetting,
     RDBExternalChannelSetupClaim,
@@ -69,6 +74,8 @@ from azents.repos.external_channel.setup_preparation_fence import (
     setup_preparation_dispatch_current,
 )
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.user import UserRepository
+from azents.repos.user.data import UserCreate
 from azents.services.external_channel.ingestion_history import (
     _validate_trigger_file_count,
 )
@@ -576,6 +583,9 @@ async def test_invalidated_selection_cannot_dispatch_prepared_control(
         "status",
         "expiry",
         "setting",
+        "block",
+        "route_removed",
+        "agent_deleting",
     ],
 )
 async def test_final_dispatch_rejects_changes_after_dispatch_commit(
@@ -644,6 +654,30 @@ async def test_final_dispatch_rejects_changes_after_dispatch_commit(
                     configured_by_principal_id=row.principal_id,
                 )
             )
+        elif change in {"block", "route_removed", "agent_deleting"}:
+            assert row.route_id is not None
+            route = await session.write_session.get(
+                RDBExternalChannelAgentRoute, row.route_id
+            )
+            assert route is not None and route.agent_id is not None
+            if change == "block":
+                user = await UserRepository().create(
+                    session, UserCreate(email="setup-block-actor@example.com")
+                )
+                session.write_session.add(
+                    RDBExternalChannelBlock(
+                        agent_id=route.agent_id,
+                        principal_id=row.principal_id,
+                        blocked_by_user_id=user.id,
+                    )
+                )
+            elif change == "route_removed":
+                route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
+                route.catalog_removed_at = _at(3)
+            else:
+                agent = await session.write_session.get(RDBAgent, route.agent_id)
+                assert agent is not None
+                agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
         else:
             raise AssertionError(change)
         await session.write_session.commit()

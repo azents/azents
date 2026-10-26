@@ -419,7 +419,8 @@ and selected-setup replay, so incomplete provider history remains retryable.
 Control dispatch is recorded before provider mutation. Immediately before delivery,
 direct-control revalidation checks the exact claim/source/configuration generations,
 principal and position identity, dispatch status, owner and lease expiry, current
-selection, active participation setting and connected Binding. A changed fence
+selection, routed Agent lifecycle and participant blocks, active participation
+setting and connected Binding. A changed fence
 rejects the plan without provider I/O. Permanent ingestion rejection emits its
 sanitized terminal reason before clearing preparation ownership.
 Expired dispatch ownership or

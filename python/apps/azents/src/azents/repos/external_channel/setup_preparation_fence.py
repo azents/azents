@@ -5,7 +5,9 @@ import datetime
 import sqlalchemy as sa
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     ExternalChannelParticipationSettingStatus,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelSetupClaimStatus,
     ExternalChannelSetupPreparationStatus,
 )
@@ -15,8 +17,11 @@ from azents.core.external_channel_ingestion import (
 from azents.core.external_channel_participation_state import (
     setup_source_from_projection,
 )
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
+    RDBExternalChannelBlock,
     RDBExternalChannelConnection,
     RDBExternalChannelParticipationSetting,
     RDBExternalChannelSetupClaim,
@@ -67,6 +72,34 @@ async def setup_preparation_dispatch_current(
             RDBExternalChannelConnection.configuration_generation
             == boundary.configuration_generation,
             RDBExternalChannelConnection.disconnected_at.is_(None),
+            sa.or_(
+                RDBExternalChannelSetupClaim.route_id.is_(None),
+                sa.exists(
+                    sa.select(RDBExternalChannelAgentRoute.id)
+                    .join(
+                        RDBAgent,
+                        RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                    )
+                    .where(
+                        RDBExternalChannelAgentRoute.id
+                        == RDBExternalChannelSetupClaim.route_id,
+                        RDBExternalChannelAgentRoute.connection_id
+                        == RDBExternalChannelSetupClaim.connection_id,
+                        RDBExternalChannelAgentRoute.catalog_status
+                        == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                        RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                        ~sa.exists()
+                        .where(
+                            RDBExternalChannelBlock.agent_id == RDBAgent.id,
+                            RDBExternalChannelBlock.principal_id
+                            == RDBExternalChannelSetupClaim.principal_id,
+                            RDBExternalChannelBlock.removed_at.is_(None),
+                        )
+                        .correlate(RDBAgent, RDBExternalChannelSetupClaim),
+                    )
+                    .correlate(RDBExternalChannelSetupClaim)
+                ),
+            ),
             ~sa.exists().where(
                 RDBExternalChannelParticipationSetting.connection_id
                 == RDBExternalChannelSetupClaim.connection_id,
