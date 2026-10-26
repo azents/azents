@@ -424,6 +424,14 @@ Always-on required CI does not depend on external credentials.
   behavioral coverage, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
+- Active CI optimization failures require diagnosis and repair rather than stopping
+  at a failure report. When an experiment ends failed, rejected or inconclusive,
+  durable reports retain its evidence; the unsuccessful PR is closed and its remote
+  branch is deleted. Its clean owned worktree is removed, or explicitly reassigned
+  to new active work, before the local experiment branch is deleted. Dirty, foreign
+  and unknown worktrees remain protected, and actual cleanup blockers are reported.
+  Draft status, future candidates, noisy evidence and approval blockers do not
+  justify retaining a terminally unsuccessful experiment PR.
 - Enabled E2E lanes consume the exact images built and smoke-tested by the existing
   Docker build matrix in the same workflow attempt. The Docker matrix is enabled
   whenever either E2E suite is enabled, including test-only changes. Consumers wait

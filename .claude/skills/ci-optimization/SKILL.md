@@ -161,12 +161,16 @@ cleanup in the same work cycle:
 2. Close the unsuccessful experiment PR and verify that it is closed. A Draft label,
    noisy evidence, a future feasible candidate or an approval blocker is not a reason
    to leave a terminally unsuccessful PR open.
-3. Delete the experiment's remote and local branches after preserving its report and
-   evidence. Do not create archive branches merely to retain failed work.
+3. Delete the experiment's remote branch after preserving its report and evidence.
+   Do not create archive branches merely to retain failed work.
 4. Remove its clean, Agent-owned worktree through the managed-worktree lifecycle.
-   Protect dirty, foreign, unknown or actively reused development worktrees; report
-   an actual cleanup blocker instead of forcing deletion or claiming cleanup passed.
-5. Verify and report the PR, branch and worktree cleanup outcome. Later work starts
+   For a worktree explicitly reused by new active work, switch it to the new task's
+   branch instead. Protect dirty, foreign or unknown worktrees and report actual
+   cleanup blockers without forcing deletion.
+5. Delete the local experiment branch only after no worktree has it checked out;
+   managed worktree removal preserves that branch. A protected checked-out worktree
+   is a real blocker to report, not a reason to force removal or claim success.
+6. Verify and report the PR, branch and worktree cleanup outcome. Later work starts
    as a new active experiment rather than leaving the failed PR waiting indefinitely.
 
 ## Durable reporting and recurring prompts
