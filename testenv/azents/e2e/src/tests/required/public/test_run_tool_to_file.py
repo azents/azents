@@ -61,10 +61,9 @@ def _live_idle(
         timeout=10,
     )
     response.raise_for_status()
-    return (
-        LiveEventListResponse.model_validate(response.json()).session_run_state
-        == "idle"
-    )
+    live = LiveEventListResponse.from_dict(response.json())
+    assert live is not None
+    return live.session_run_state == "idle"
 
 
 def _history_items(payload: ChatEventPageResponse) -> list[ChatEventResponse]:
