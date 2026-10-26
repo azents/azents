@@ -42,7 +42,9 @@ export function AgentBrowserChoice({
         </Alert>
       );
     case "READY": {
-      const { configuration, readOnly, saving, confirmation } = state;
+      const { configuration, browserEnabled, readOnly, saving, confirmation } =
+        state;
+      const controlsDisabled = !browserEnabled || readOnly || saving;
       return (
         <>
           <Paper withBorder radius="lg" p="lg">
@@ -51,7 +53,7 @@ export function AgentBrowserChoice({
                 label={t("label")}
                 value={configuration.requested}
                 allowDeselect={false}
-                disabled={readOnly || saving}
+                disabled={controlsDisabled}
                 data={[
                   { value: "patchright", label: t("patchright") },
                   { value: "camoufox", label: t("camoufox") },
@@ -62,12 +64,14 @@ export function AgentBrowserChoice({
                   }
                 }}
               />
-              {saving ? (
+              {browserEnabled && saving ? (
                 <Text size="sm" role="status">
                   {t("saving")}
                 </Text>
               ) : null}
-              {!saving && configuration.state === "applying" ? (
+              {browserEnabled &&
+              !saving &&
+              configuration.state === "applying" ? (
                 <Text size="sm" role="status">
                   {t("applying", {
                     browser:
@@ -77,12 +81,12 @@ export function AgentBrowserChoice({
                   })}
                 </Text>
               ) : null}
-              {configuration.state === "offline" ? (
+              {browserEnabled && configuration.state === "offline" ? (
                 <Text c="dimmed" size="sm">
                   {t("offline")}
                 </Text>
               ) : null}
-              {configuration.state === "failed" ? (
+              {browserEnabled && configuration.state === "failed" ? (
                 <Alert color="red" title={t("failedTitle")}>
                   <Stack gap="sm">
                     <Text size="sm">
@@ -96,7 +100,7 @@ export function AgentBrowserChoice({
                     <Group>
                       <Button
                         variant="light"
-                        disabled={readOnly || saving}
+                        disabled={controlsDisabled}
                         onClick={onRetry}
                       >
                         {t("retry")}
@@ -108,12 +112,14 @@ export function AgentBrowserChoice({
                   </Stack>
                 </Alert>
               ) : null}
-              {state.error ? <Alert color="red">{state.error}</Alert> : null}
+              {browserEnabled && state.error ? (
+                <Alert color="red">{state.error}</Alert>
+              ) : null}
             </Stack>
           </Paper>
           <Modal
             centered
-            opened={confirmation !== null && !readOnly}
+            opened={browserEnabled && confirmation !== null && !readOnly}
             title={t("confirmTitle")}
             closeOnClickOutside={!saving}
             closeOnEscape={!saving}
