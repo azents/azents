@@ -14,6 +14,7 @@ import azentspublicclient
 import pytest
 import requests
 from azents_runtime_control.browser_viewer_contract import ViewerSource, ViewerTarget
+from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
 from azentspublicclient.models.browser_page_response import BrowserPageResponse
 from azentspublicclient.models.browser_projection_response import (
     BrowserProjectionResponse,
@@ -904,7 +905,14 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         canary.close()
 
     def canary_title() -> str | None:
-        current = _projection(azents_public_server_url, resource_path, workspace.token)
+        response = requests.get(
+            f"{azents_public_server_url}{resource_path}",
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return None
+        current = BrowserProjectionResponse.model_validate(response.json())
         for task in current.tasks:
             for page in task.pages:
                 if page.id == target.page_id and page.title.startswith(
@@ -918,9 +926,35 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
     )
     assert first_canary is not None
     assert first_canary.endswith(":1")
+    runtime_url = (
+        f"{azents_public_server_url}/agent-runtime/v1/workspaces/{workspace.handle}"
+        f"/agents/{workspace.agent_id}/runtime"
+    )
+
+    def runtime_epoch() -> tuple[str, int, int] | None:
+        response = requests.get(runtime_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None
+        current = AgentRuntimeResponse.model_validate(response.json()).runtime
+        if current is None or current.runner_generation is None:
+            return None
+        return current.id, current.desired_generation, int(current.runner_generation)
+
+    before_epoch = runtime_epoch()
+    assert before_epoch is not None
     azents_runtime_control_container.get_wrapped_container().restart(timeout=10)
+
+    def rejoined() -> bool:
+        current = runtime_epoch()
+        return (
+            current is not None
+            and current[:2] == before_epoch[:2]
+            and current[2] > before_epoch[2]
+            and canary_title() == first_canary
+        )
+
     wait_until(
-        lambda: canary_title() == first_canary,
+        rejoined,
         timeout=90,
         interval=0.2,
         message="Control reconnect did not preserve the original native tab",
