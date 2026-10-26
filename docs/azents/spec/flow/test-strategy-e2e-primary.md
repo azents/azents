@@ -404,6 +404,12 @@ provider, lifecycle, compaction, or browser E2E cross-product.
 
 Always-on required CI does not depend on external credentials.
 
+- Runtime lifecycle Web verification observes a single Start click's authoritative
+  admission (advanced desired generation and target `running`) separately from usable
+  metrics. Admission uses the existing bounded UI wait and metrics consumes only
+  the remainder of the original readiness budget. Browser ownership is observed
+  during API-based polling so a retired browser fails at that boundary; an
+  unadmitted action reports bounded lifecycle state without repeating the click.
 - Recurring E2E optimization owns implementation through measured acceptance, not
   only candidate analysis. One cycle may combine compatible, separately explainable
   coverage-preserving changes in E2E scenarios, fixtures, provider fakes, support
