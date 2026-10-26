@@ -1,6 +1,7 @@
 ---
 title: "Safe Runtime Operation Admission Requirements"
 created: 2026-10-26
+implemented: 2026-10-26
 tags: [runtime, reliability, backend]
 document_role: primary
 document_type: requirements
