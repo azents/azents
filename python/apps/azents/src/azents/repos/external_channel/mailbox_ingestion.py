@@ -111,8 +111,12 @@ from azents.repos.external_channel.work_state import ChannelWorkState
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
+from azents.repos.mailbox_database import MailboxDatabaseRepository
 from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
+)
+from azents.repos.session_working_folder_setup import (
+    enqueue_missing_session_working_folder,
 )
 
 _ACCESS_REQUEST_AGE = datetime.timedelta(days=7)
@@ -200,6 +204,9 @@ class ExternalChannelMailboxIngestionRepository:
     mailbox_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     mailbox_admission_repository: Annotated[
         MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
+    ]
+    mailbox_database_repository: Annotated[
+        MailboxDatabaseRepository, Depends(MailboxDatabaseRepository)
     ]
     config: Annotated[Config, Depends(get_config)]
 
@@ -725,6 +732,13 @@ class ExternalChannelMailboxIngestionRepository:
                 binding=binding,
                 trigger_principal_id=conversation.principal_id,
                 invocation_id=idempotency_key,
+            )
+            await enqueue_missing_session_working_folder(
+                session,
+                session_id=binding.agent_session_id,
+                agent_session_repository=self.agent_session_repository,
+                mailbox_database_repository=self.mailbox_database_repository,
+                mailbox_admission_repository=self.mailbox_admission_repository,
             )
             order_group = uuid7().hex
             enqueues = await self.mailbox_admission_repository.enqueue_many_in_session(

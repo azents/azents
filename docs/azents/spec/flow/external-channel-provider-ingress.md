@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/session_working_folder_setup.py
   - python/apps/azents/src/azents/repos/external_channel/admission_operations.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_recovery_read.py
   - python/apps/azents/src/azents/core/external_channel_interaction.py
@@ -114,8 +115,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-20
-spec_version: 71
+last_verified_at: 2026-10-26
+spec_version: 72
 ---
 
 # External Channel Provider Ingress
@@ -544,7 +545,14 @@ durable queue content.
     awaiting Work. A duplicate trigger may reuse its existing mailbox item only for
     post-commit wake redispatch, allowing recovery from a prior dispatch failure
     without duplicating canonical input or changing awaiting state.
-12. In the same transaction, successful cursor advances, mailbox rows, retry-tail
+12. Before allocating the canonical message group's queue order, admission uses
+   the shared missing Session-folder setup composition. For a `pending` or `bound`
+   context with no pending or recorded folder setup, it queues one idempotent
+   `create_session_working_folder` action before the channel messages. This covers
+   both new and existing Bindings, so the next channel message repairs older
+   Sessions without a Web message. `none` and `invalidated` contexts are excluded;
+   folder materialization remains a Worker/Runner operation outside the transaction.
+   In the same transaction, successful cursor advances, mailbox rows, retry-tail
    transitions, bounded-failure deletions, queue completion, drain-state update, and
    the existing Session runnable transition commit atomically. Retry retains the same
    ingress identity and original age while assigning a fresh tail key. Successful,
@@ -721,6 +729,9 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+- **2026-10-26** (spec_version 72) — Added shared missing Session-folder setup
+  admission before channel message ordering for new and retained Sessions.
+
 - **2026-10-20** (spec_version 71) — Kept route Agent and Binding mutation
   exclusion compatible with live foreign-key references, preventing ingress wake
   and Binding-owned Work commits from deadlocking with owned Session writes.
