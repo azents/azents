@@ -62,6 +62,7 @@ from azents_runtime_runner.browser_editables import (
     EditableFieldSnapshot,
 )
 from azents_runtime_runner.browser_geometry import browser_visual_geometry
+from azents_runtime_runner.browser_mobile import MOBILE_DEVICE_SCALE
 from azents_runtime_runner.browser_sdk import (
     BROWSER_SDK_ERRORS,
     BrowserSDKError,
@@ -156,7 +157,10 @@ class _LatestPage:
     async def capture_once(self) -> None:
         navigation = self.page.navigation_id
         viewport = _viewport(self.page.page)
-        scratch = viewport[0] * viewport[1] * 4 + MAX_VIEWER_MESSAGE_BYTES
+        scratch = (
+            viewport[0] * viewport[1] * MOBILE_DEVICE_SCALE**2 * 4
+            + MAX_VIEWER_MESSAGE_BYTES
+        )
         if not self.budget.try_reserve_browser_frame(scratch):
             raise BrowserFailure(
                 "browser_resource_exhausted", "Browser capture budget is exhausted"
@@ -199,8 +203,8 @@ class _LatestPage:
         try:
             return await self.page.page.screenshot(
                 type="jpeg",
-                scale="css",
-                quality=60,
+                scale="device",
+                quality=85,
                 full_page=False,
                 timeout=2000,
             )

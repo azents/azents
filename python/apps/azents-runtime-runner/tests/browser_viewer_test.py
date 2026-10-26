@@ -301,7 +301,7 @@ async def test_capture_pixels_stay_current_without_changing_tab_visibility(
         await source.capture_once()
         assert source.latest is not None
         with Image.open(BytesIO(source.latest.data)) as image:
-            assert image.size == (400, 560)
+            assert image.size == (800, 1120)
             assert image.getpixel((16, 16)) == pytest.approx((20, 40, 200), abs=4)
         await native.evaluate("document.body.style.background='rgb(200,40,20)'")
         await native.set_viewport_size({"width": 640, "height": 480})
@@ -309,7 +309,7 @@ async def test_capture_pixels_stay_current_without_changing_tab_visibility(
         assert source.sequence == 2 and source.latest is not None
         assert (source.latest.source.width, source.latest.source.height) == (640, 480)
         with Image.open(BytesIO(source.latest.data)) as image:
-            assert image.size == (640, 480)
+            assert image.size == (1280, 960)
             assert image.getpixel((16, 16)) == pytest.approx((200, 40, 20), abs=4)
         assert await native.evaluate("document.visibilityState") == expected_visibility
         assert budget.bytes > 0
@@ -397,9 +397,12 @@ async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
         await b.frame()
         assert frame.image.startswith(b"\xff\xd8")
         assert frame.source.width == 400 and frame.source.height == 560
+        with Image.open(BytesIO(frame.image)) as image:
+            assert image.size == (800, 1120)
         assert len(viewer.sources) == 1
         source = viewer.sources[authority.page_id]
         assert source.subscribers == 2
+        assert budget.peak >= 800 * 1120 * 4 + 1024 * 1024
         async with asyncio.timeout(5), source.changed:
             await source.changed.wait_for(
                 lambda: source.sequence > frame.source.frame_sequence + 1

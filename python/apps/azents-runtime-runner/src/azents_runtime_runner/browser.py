@@ -47,6 +47,7 @@ from azents_runtime_runner.browser_display import BrowserDisplay, BrowserDisplay
 from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey
 from azents_runtime_runner.browser_mobile import (
     CHROMIUM_MOBILE_USER_AGENT,
+    MOBILE_DEVICE_SCALE,
     MOBILE_HEIGHT,
     MOBILE_WIDTH,
 )
@@ -414,7 +415,7 @@ class RunnerBrowserManager:
                             user_agent=CHROMIUM_MOBILE_USER_AGENT,
                             is_mobile=True,
                             has_touch=True,
-                            device_scale_factor=1,
+                            device_scale_factor=MOBILE_DEVICE_SCALE,
                             accept_downloads=True,
                         )
                         browser = context.browser

@@ -8,6 +8,7 @@ from playwright.async_api import Browser, BrowserContext, Playwright
 
 from azents_runtime_runner.browser_mobile import (
     FIREFOX_MOBILE_USER_AGENT,
+    MOBILE_DEVICE_SCALE,
     MOBILE_HEIGHT,
     MOBILE_WIDTH,
 )
@@ -103,7 +104,7 @@ async def open_camoufox_context(
             "ui.allPointerCapabilities": 1,
         },
         has_touch=True,
-        device_scale_factor=1,
+        device_scale_factor=MOBILE_DEVICE_SCALE,
         accept_downloads=True,
         # Keep the native window large enough for the fixed SDK input plane.
         # A generated smaller outer window clips otherwise valid native clicks.
