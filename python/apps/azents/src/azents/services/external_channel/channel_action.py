@@ -853,6 +853,11 @@ class ExternalChannelActionService:
         """Deliver one Discord text, multipart file, or control mutation."""
         payload = target.request_payload
         intent = target.decode_intent()
+        reply = None
+        if target.operation is ExternalChannelDeliveryOperation.REPLY:
+            reply = _decode_discord_reply(payload)
+            if reply is None:
+                return _discord_invalid_payload()
         guild_id = payload.get("guild_id")
         channel_id = payload.get("channel_id")
         configuration = target.provider_configuration
@@ -866,7 +871,9 @@ class ExternalChannelActionService:
             or not channel_id.isdigit()
         ):
             return _discord_invalid_payload()
-        files = _outbound_files(payload.get("files"))
+        files = (
+            reply.files if reply is not None else _outbound_files(payload.get("files"))
+        )
         if files is None:
             return _discord_invalid_payload()
         delivery_channel_id = channel_id
@@ -1084,11 +1091,19 @@ class ExternalChannelActionService:
                         suppress_embeds=False,
                         embeds=embeds,
                     )
-                text = payload.get("text")
+                text = reply.text if reply is not None else payload.get("text")
                 if not isinstance(text, str):
                     return _discord_invalid_payload()
-                forward_to_parent = payload.get("forward_to_parent", False)
-                forward_parent_channel_id = payload.get("parent_channel_id")
+                forward_to_parent = (
+                    reply.forward_to_parent
+                    if reply is not None
+                    else payload.get("forward_to_parent", False)
+                )
+                forward_parent_channel_id = (
+                    reply.parent_channel_id
+                    if reply is not None
+                    else payload.get("parent_channel_id")
+                )
                 if (
                     not isinstance(forward_to_parent, bool)
                     or forward_to_parent
@@ -1099,11 +1114,27 @@ class ExternalChannelActionService:
                     )
                 ):
                     return _discord_invalid_payload()
-                components = _discord_components(payload.get("components"))
-                if payload.get("components") is not None and components is None:
+                components = (
+                    reply.components
+                    if reply is not None
+                    else _discord_components(payload.get("components"))
+                )
+                if (
+                    reply is None
+                    and payload.get("components") is not None
+                    and components is None
+                ):
                     return _discord_invalid_payload()
-                embeds = _discord_embeds(payload.get("embeds"))
-                if payload.get("embeds") is not None and embeds is None:
+                embeds = (
+                    reply.embeds
+                    if reply is not None
+                    else _discord_embeds(payload.get("embeds"))
+                )
+                if (
+                    reply is None
+                    and payload.get("embeds") is not None
+                    and embeds is None
+                ):
                     return _discord_invalid_payload()
                 if target.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
                     context = _session_navigation_context(
@@ -2097,6 +2128,52 @@ def _discord_invalid_payload() -> DiscordDeliveryResult:
         provider_message_key=None,
         error_kind="provider_payload_invalid",
         error_summary="The committed Discord provider request is incomplete.",
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordReplyPayload:
+    """Validated fields consumed by a Discord reply operation."""
+
+    text: str
+    forward_to_parent: bool
+    parent_channel_id: str | None
+    files: tuple[ExternalChannelOutboundFileManifest, ...]
+    components: list[dict[str, object]] | None
+    embeds: list[dict[str, object]] | None
+
+
+def _decode_discord_reply(payload: dict[str, object]) -> _DiscordReplyPayload | None:
+    """Validate reply fields before any provider mutation."""
+    text = payload.get("text")
+    forward = payload.get("forward_to_parent", False)
+    parent = payload.get("parent_channel_id")
+    raw_components = payload.get("components")
+    raw_embeds = payload.get("embeds")
+    files = _outbound_files(payload.get("files"))
+    components = _discord_components(raw_components)
+    embeds = _discord_embeds(raw_embeds)
+    if (
+        not isinstance(text, str)
+        or not isinstance(forward, bool)
+        or forward
+        and (not isinstance(parent, str) or not parent.isdigit())
+        or raw_components is not None
+        and components is None
+        or raw_embeds is not None
+        and embeds is None
+        or files is None
+        or files
+        and (components is not None or embeds is not None)
+    ):
+        return None
+    return _DiscordReplyPayload(
+        text=text,
+        forward_to_parent=forward,
+        parent_channel_id=parent if isinstance(parent, str) else None,
+        files=files,
+        components=components,
+        embeds=embeds,
     )
 
 

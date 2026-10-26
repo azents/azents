@@ -1685,6 +1685,62 @@ async def test_discord_parent_file_delivery_does_not_open_sdk_session() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("text", None),
+        ("forward_to_parent", None),
+        ("components", [{"type": 99}]),
+        ("embeds", [{"unexpected": "value"}]),
+        (
+            "files",
+            [
+                {
+                    "source": "exchange",
+                    "path": "exchange://file-1",
+                    "filename": "report.txt",
+                    "media_type": "text/plain",
+                    "expected_size": 12,
+                }
+            ],
+        ),
+    ],
+)
+async def test_invalid_discord_reply_never_provisions_thread(
+    field: str, value: object
+) -> None:
+    """Reject malformed reply fields before any Discord thread mutation."""
+    ensure_thread = AsyncMock()
+    service = _service(
+        discord_client=_DiscordClientDelegate(ensure_thread=ensure_thread)
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": "thread",
+            "thread_parent_channel_id": "222",
+            "thread_root_message_id": "333",
+            field: value,
+        }
+    )
+    result = await ExternalChannelActionService._deliver_discord(
+        service,
+        replace(target, resource_id=None),
+        operation_key=ProviderOperationKey.from_seed("invalid-discord-thread"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+    assert result.status == "failed"
+    ensure_thread.assert_not_awaited()
+    assert require_instance(service.discord_client, _OpenableDiscordClient).opens == 0
+
+
+@pytest.mark.asyncio
 async def test_discord_thread_effect_reuses_one_sdk_session() -> None:
     """Thread provisioning and the adjacent message share one login."""
     ensure_thread = AsyncMock(
