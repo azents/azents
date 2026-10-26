@@ -11,8 +11,8 @@ code_paths:
   - .claude/conventions/swift/**
   - .claude/rules/swift-conventions.md
   - scripts/generate-conventions-index.py
-last_verified_at: 2026-10-15
-spec_version: 1
+last_verified_at: 2026-10-27
+spec_version: 2
 ---
 
 # iOS Codebase and Build Artifacts
@@ -82,8 +82,8 @@ Successful runs retain `ios-app-builds-<checked-out-commit>` for 14 days:
 `ios-diagnostics-<checked-out-commit>` retains logs, `.xcresult`, and exported
 test attachments for seven days. Upload explicitly includes these known build
 outputs under the hidden `.build` directory, not arbitrary hidden source files.
-Pull-request checkout normally uses a merge commit; the manifest records that
-actual commit. Artifacts expire and require GitHub artifact access; they are not
+Pull-request runs explicitly check out the pull request head SHA; the manifest
+records the actual checked-out commit. Artifacts expire and require GitHub artifact access; they are not
 permanent GitHub Releases. A failed upload or missing successful-build directory
 fails the publication step.
 
@@ -97,3 +97,7 @@ Linux checks validate source/configuration and shell syntax only. Real SwiftUI
 compilation, UI launch, simulator screenshot, and device archive creation require
 the macOS workflow. The app has no domain logic requiring artificial unit-test
 layers; new pure logic must gain deterministic unit tests when introduced.
+
+## Changelog
+
+- 2026-10-27: Corrected pull-request checkout provenance to reflect the explicit head SHA.
