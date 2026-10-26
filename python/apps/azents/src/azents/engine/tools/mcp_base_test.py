@@ -171,7 +171,7 @@ async def test_update_context_returns_immediately_without_snapshot() -> None:
         state_name="tool_snapshot:test",
     )
     with patch(
-        "azents.engine.tools.mcp_base.mcp_list_tools",
+        "azents.engine.tools.mcp_base.McpConnections.list_tools",
         side_effect=slow_list_tools,
     ):
         async with toolkit:
@@ -198,7 +198,7 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
         state_name="tool_snapshot:test",
     )
     with patch(
-        "azents.engine.tools.mcp_base.mcp_list_tools",
+        "azents.engine.tools.mcp_base.McpConnections.list_tools",
         return_value=McpToolListResult(
             tools=[_tool("zeta"), _tool("alpha")], use_streamable_http=False
         ),
@@ -206,7 +206,7 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
         async with toolkit:
             await _wait_refresh(toolkit)
 
-    with patch("azents.engine.tools.mcp_base.mcp_list_tools") as list_tools:
+    with patch("azents.engine.tools.mcp_base.McpConnections.list_tools") as list_tools:
         state = await toolkit.update_context(_context())
 
     assert [tool.spec.name for tool in state.tools] == ["alpha", "zeta"]
@@ -234,7 +234,7 @@ async def test_background_refresh_stops_after_owner_rejection() -> None:
     with (
         patch.object(toolkit, "_save_tool_snapshot", save),
         patch(
-            "azents.engine.tools.mcp_base.mcp_list_tools",
+            "azents.engine.tools.mcp_base.McpConnections.list_tools",
             return_value=McpToolListResult(
                 tools=[_tool("alpha")], use_streamable_http=False
             ),
@@ -310,7 +310,7 @@ async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
         state_name="tool_snapshot:test",
     )
     with patch(
-        "azents.engine.tools.mcp_base.mcp_list_tools",
+        "azents.engine.tools.mcp_base.McpConnections.list_tools",
         return_value=McpToolListResult(
             tools=[_tool("alpha")], use_streamable_http=False
         ),
@@ -318,7 +318,7 @@ async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
         async with toolkit:
             await _wait_refresh(toolkit)
     with patch(
-        "azents.engine.tools.mcp_base.mcp_list_tools",
+        "azents.engine.tools.mcp_base.McpConnections.list_tools",
         side_effect=ConnectionError("Connection refused"),
     ):
         async with toolkit:
@@ -345,7 +345,7 @@ async def test_failed_refresh_without_snapshot_exposes_no_retry_tool_or_prompt()
         state_name="tool_snapshot:test",
     )
     with patch(
-        "azents.engine.tools.mcp_base.mcp_list_tools",
+        "azents.engine.tools.mcp_base.McpConnections.list_tools",
         side_effect=ConnectionError("Connection refused"),
     ):
         async with toolkit:
@@ -385,7 +385,7 @@ async def test_mixed_tool_exception_group_preserves_unrelated_failure(
     failure = ExceptionGroup("Owned group", [_http_error(401), ValueError("Owned bug")])
     call = AsyncMock(side_effect=failure)
     refresh = AsyncMock(return_value="new-token")
-    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    monkeypatch.setattr(mcp_base_module.McpConnections, "call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
         _tool("alpha"),
         "https://mcp.example.test",
@@ -393,6 +393,8 @@ async def test_mixed_tool_exception_group_preserves_unrelated_failure(
         30.0,
         on_auth_failure=refresh,
         authorization_provider=None,
+        connections=mcp_base_module.McpConnections(),
+        before_send=None,
     )
     with pytest.raises(ExceptionGroup) as caught:
         await tool.handler("{}")
@@ -414,7 +416,7 @@ async def test_known_auth_group_refreshes_once(
         ]
     )
     refresh = AsyncMock(return_value="new-token")
-    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    monkeypatch.setattr(mcp_base_module.McpConnections, "call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
         _tool("alpha"),
         "https://mcp.example.test",
@@ -422,6 +424,8 @@ async def test_known_auth_group_refreshes_once(
         30.0,
         on_auth_failure=refresh,
         authorization_provider=None,
+        connections=mcp_base_module.McpConnections(),
+        before_send=None,
     )
     assert await tool.handler("{}") == "ok"
     assert call.await_count == 2
@@ -438,7 +442,7 @@ async def test_mixed_retry_group_is_not_replaced_by_a_tool_error(
     )
     call = AsyncMock(side_effect=[_http_error(401), failure])
     refresh = AsyncMock(return_value="new-token")
-    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    monkeypatch.setattr(mcp_base_module.McpConnections, "call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
         _tool("alpha"),
         "https://mcp.example.test",
@@ -446,6 +450,8 @@ async def test_mixed_retry_group_is_not_replaced_by_a_tool_error(
         30.0,
         on_auth_failure=refresh,
         authorization_provider=None,
+        connections=mcp_base_module.McpConnections(),
+        before_send=None,
     )
     with pytest.raises(ExceptionGroup) as caught:
         await tool.handler("{}")
@@ -461,7 +467,7 @@ async def test_non_auth_http_sibling_does_not_trigger_auth_retry(
     failure = ExceptionGroup("Owned HTTP group", [_http_error(401), _http_error(403)])
     call = AsyncMock(side_effect=failure)
     refresh = AsyncMock(return_value="new-token")
-    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    monkeypatch.setattr(mcp_base_module.McpConnections, "call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
         _tool("alpha"),
         "https://mcp.example.test",
@@ -469,6 +475,8 @@ async def test_non_auth_http_sibling_does_not_trigger_auth_retry(
         30.0,
         on_auth_failure=refresh,
         authorization_provider=None,
+        connections=mcp_base_module.McpConnections(),
+        before_send=None,
     )
     with pytest.raises(FunctionToolError, match="HTTP 401"):
         await tool.handler("{}")
@@ -495,7 +503,7 @@ async def test_unexpected_background_failure_is_observed_once(
     )
     failure = ValueError("credential=untrusted-secret")
     monkeypatch.setattr(
-        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+        mcp_base_module.McpConnections, "list_tools", AsyncMock(side_effect=failure)
     )
     observed = asyncio.Event()
     observe = toolkit._observe_refresh_failure
@@ -545,7 +553,7 @@ async def test_mixed_background_group_keeps_the_unhandled_failure(
         "Owned discovery group", [ConnectionError("Offline"), ValueError("Owned bug")]
     )
     monkeypatch.setattr(
-        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+        mcp_base_module.McpConnections, "list_tools", AsyncMock(side_effect=failure)
     )
     with pytest.raises(ExceptionGroup) as caught:
         await toolkit._connect_and_list_tools()
@@ -572,7 +580,7 @@ async def test_expected_background_group_remains_nonfatal(
         "Owned transport group", [ConnectionError("Offline"), _http_error(500)]
     )
     monkeypatch.setattr(
-        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+        mcp_base_module.McpConnections, "list_tools", AsyncMock(side_effect=failure)
     )
     await toolkit._connect_and_list_tools()
     assert toolkit._bg_error is not None
@@ -595,15 +603,15 @@ async def test_background_throttling_is_actionable_and_preserves_snapshot(
     )
     failure = ExceptionGroup("transport", [MCPError(-32000, "Too many requests")])
     with patch.object(
-        mcp_base_module,
-        "mcp_list_tools",
+        mcp_base_module.McpConnections,
+        "list_tools",
         return_value=McpToolListResult(
             tools=[_tool("alpha")], use_streamable_http=True
         ),
     ):
         await toolkit._connect_and_list_tools()
     monkeypatch.setattr(
-        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+        mcp_base_module.McpConnections, "list_tools", AsyncMock(side_effect=failure)
     )
     await toolkit._connect_and_list_tools()
     assert toolkit._bg_error == "MCP server rate limited discovery. Retry later."
@@ -635,7 +643,9 @@ async def test_background_cancellation_stays_cancellation(
         session_id="session-1",
     )
     monkeypatch.setattr(
-        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=asyncio.CancelledError)
+        mcp_base_module.McpConnections,
+        "list_tools",
+        AsyncMock(side_effect=asyncio.CancelledError),
     )
     async with toolkit:
         task = toolkit._bg_task

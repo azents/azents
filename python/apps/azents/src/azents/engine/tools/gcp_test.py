@@ -241,7 +241,7 @@ class TestGcpToolkitUpdateContext:
         ctx = _make_context()
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(
                 tools=[_make_mcp_tool("log_query")], use_streamable_http=False
@@ -266,13 +266,15 @@ class TestGcpToolkitUpdateContext:
             *,
             proxy_url: str | None = None,
             auth: object = None,
+            auth_identity: object = None,
+            before_send: object = None,
         ) -> McpToolListResult:
             if "logging" in endpoint:
                 return McpToolListResult([_make_mcp_tool("log_query")], False)
             return McpToolListResult([_make_mcp_tool("metric_query")], False)
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             side_effect=mock_list_tools,
         ):
             async with toolkit:
@@ -290,7 +292,7 @@ class TestGcpToolkitUpdateContext:
         ctx = _make_context()
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(tools=[], use_streamable_http=False),
         ):
@@ -305,7 +307,7 @@ class TestGcpToolkitUpdateContext:
         ctx = _make_context()
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(tools=[], use_streamable_http=False),
         ):
@@ -335,7 +337,7 @@ class TestGcpToolkitReadOnlyFiltering:
         write_tool = _make_mcp_tool("log_delete", read_only=False)
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(
                 tools=[read_tool, write_tool], use_streamable_http=False
@@ -362,7 +364,7 @@ class TestGcpToolkitReadOnlyFiltering:
         write_tool = _make_mcp_tool("log_delete", read_only=False)
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(
                 tools=[read_tool, write_tool], use_streamable_http=False
@@ -386,7 +388,7 @@ class TestGcpToolkitReadOnlyFiltering:
         ctx = _make_context()
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(tools=[], use_streamable_http=False),
         ):
@@ -421,6 +423,8 @@ class TestGcpToolkitConnectionFailure:
             *,
             proxy_url: str | None = None,
             auth: object = None,
+            auth_identity: object = None,
+            before_send: object = None,
         ) -> McpToolListResult:
             nonlocal call_count
             call_count += 1
@@ -430,7 +434,7 @@ class TestGcpToolkitConnectionFailure:
             raise ConnectionError(msg)
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             side_effect=mock_list_tools,
         ):
             async with toolkit:
@@ -490,14 +494,14 @@ class TestGcpToolHandlers:
 
         with (
             patch(
-                "azents.engine.tools.gcp.mcp_list_tools",
+                "azents.engine.tools.gcp.McpConnections.list_tools",
                 new_callable=AsyncMock,
                 return_value=McpToolListResult(
                     tools=[_make_mcp_tool("log_query")], use_streamable_http=False
                 ),
             ),
             patch(
-                "azents.engine.tools.gcp.mcp_call_tool",
+                "azents.engine.tools.gcp.McpConnections.call_tool",
                 new_callable=AsyncMock,
                 return_value=mock_success,
             ) as mock_call,
@@ -528,14 +532,14 @@ class TestGcpToolHandlers:
 
         with (
             patch(
-                "azents.engine.tools.gcp.mcp_list_tools",
+                "azents.engine.tools.gcp.McpConnections.list_tools",
                 new_callable=AsyncMock,
                 return_value=McpToolListResult(
                     tools=[_make_mcp_tool("log_query")], use_streamable_http=False
                 ),
             ),
             patch(
-                "azents.engine.tools.gcp.mcp_call_tool",
+                "azents.engine.tools.gcp.McpConnections.call_tool",
                 new_callable=AsyncMock,
                 side_effect=[http_401, mock_success],
             ) as mock_call,
@@ -577,6 +581,8 @@ class TestGcpToolkitBackgroundConnect:
             *,
             proxy_url: str | None = None,
             auth: object = None,
+            auth_identity: object = None,
+            before_send: object = None,
         ) -> McpToolListResult:
             refresh_started.set()
             await continue_refresh.wait()
@@ -585,7 +591,7 @@ class TestGcpToolkitBackgroundConnect:
             return McpToolListResult([_make_mcp_tool("metric_query")], False)
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             side_effect=mock_list_tools,
         ):
             async with toolkit:
@@ -618,6 +624,8 @@ class TestGcpToolkitBackgroundConnect:
             *,
             proxy_url: str | None = None,
             auth: object = None,
+            auth_identity: object = None,
+            before_send: object = None,
         ) -> McpToolListResult:
             if "logging" in endpoint:
                 return McpToolListResult([_make_mcp_tool("log_query")], False)
@@ -625,7 +633,7 @@ class TestGcpToolkitBackgroundConnect:
             raise ConnectionError(msg)
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             side_effect=mock_list_tools,
         ):
             async with toolkit:
@@ -652,7 +660,7 @@ class TestGcpToolkitBackgroundConnect:
             return McpToolListResult([], False)
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             side_effect=forever_list_tools,
         ):
             async with toolkit:
@@ -669,7 +677,7 @@ class TestGcpToolkitBackgroundConnect:
         ctx = _make_context()
 
         with patch(
-            "azents.engine.tools.gcp.mcp_list_tools",
+            "azents.engine.tools.gcp.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(
                 tools=[_make_mcp_tool("log_query")], use_streamable_http=False

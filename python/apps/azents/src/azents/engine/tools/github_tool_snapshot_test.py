@@ -5,8 +5,9 @@ from collections.abc import Awaitable, Callable
 from typing import AsyncContextManager, NamedTuple
 from unittest.mock import MagicMock, patch
 
+import httpx2 as httpx
 import pytest
-from mcp.types import TextContent
+from mcp.types import CallToolResult, TextContent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import (
@@ -383,7 +384,7 @@ async def test_snapshot_tool_handler_gets_installation_token_at_call_time() -> N
         assert token_calls == 0
 
         with patch(
-            "azents.engine.tools.mcp_base.mcp_call_tool",
+            "azents.engine.tools.mcp_base.McpConnections.call_tool",
             return_value=_make_call_tool_result("ok"),
         ) as call_tool:
             result = await tool.handler("{}")
@@ -393,5 +394,57 @@ async def test_snapshot_tool_handler_gets_installation_token_at_call_time() -> N
         call_args = call_tool.call_args.args
         assert call_args[1] == {"Authorization": "Bearer ghs_snapshot"}
         assert call_args[3] == "create_or_update_file"
+    finally:
+        binding.lazy_mcp_task.cancel()
+
+
+async def test_lazy_snapshot_refresh_updates_dispatch_token_authority() -> None:
+    issued = iter(["old", "replacement"])
+
+    async def token() -> str:
+        return next(issued)
+
+    binding = _binding(
+        target=_target("101", "azents"),
+        state_name="snapshot:refresh",
+        token_provider=token,
+    )
+    _FakeToolkitStateHandle.save_state(_identity(binding), _snapshot("send"))
+    binding.lazy_mcp_task = asyncio.create_task(_never())
+    toolkit = GitHubToolkit(
+        config=_make_config(),
+        installation_bindings=[binding],
+    )
+    attempts: list[str] = []
+
+    async def dispatch(
+        url: str,
+        headers: dict[str, str],
+        *args: object,
+        before_send: Callable[[], Awaitable[None]] | None,
+        **kwargs: object,
+    ) -> CallToolResult:
+        assert before_send is not None
+        await before_send()
+        attempts.append(headers["Authorization"])
+        if len(attempts) == 1:
+            request = httpx.Request("POST", url)
+            raise httpx.HTTPStatusError(
+                "expired",
+                request=request,
+                response=httpx.Response(401, request=request),
+            )
+        return _make_call_tool_result("refreshed")
+
+    try:
+        state = await toolkit.update_context(_make_context())
+        handler = _find_tool(state.tools, "azents__send")
+        with patch(
+            "azents.engine.tools.mcp_base.McpConnections.call_tool",
+            side_effect=dispatch,
+        ):
+            assert await handler.handler("{}") == "refreshed"
+        assert attempts == ["Bearer old", "Bearer replacement"]
+        assert toolkit._installation_token_cache["101"][0] == "replacement"
     finally:
         binding.lazy_mcp_task.cancel()

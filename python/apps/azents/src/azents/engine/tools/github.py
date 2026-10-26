@@ -11,7 +11,7 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from textwrap import dedent
 from typing import Protocol, assert_never
 
@@ -34,6 +34,7 @@ from azents.core.github_credentials import (
 )
 from azents.core.github_user_oauth import GitHubUserOAuthError
 from azents.core.github_user_runtime import GitHubUserExecutionContext
+from azents.core.mcp_connections import McpConnections
 from azents.core.mcp_transport import test_mcp_transport
 from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.session_resource_authority import (
@@ -232,6 +233,7 @@ class GitHubInstallationBinding:
     session_id: str
     state_name: str
     snapshot_store: McpToolSnapshotStore | None
+    connections: McpConnections = field(default_factory=McpConnections)
     lazy_mcp_task: asyncio.Task[None] | None = None
     lazy_mcp_error: str | None = None
 
@@ -567,6 +569,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
     ) -> None:
         """Start MCP connection for an installation binding."""
         if binding.mcp_toolkit is not None:
+            binding.mcp_toolkit.connections = binding.connections
             await binding.mcp_toolkit.__aenter__()
         elif (
             binding.lazy_mcp_config is not None
@@ -595,6 +598,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         binding.lazy_mcp_task = None
         if binding.mcp_toolkit is not None:
             await binding.mcp_toolkit.__aexit__(*exc)
+        await binding.connections.close()
 
     async def _admitted_token(
         self,
@@ -617,7 +621,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
 
         async def refresh() -> str | None:
             assert binding.lazy_mcp_secret_provider is not None
-            return await self._admitted_token(binding.lazy_mcp_secret_provider)
+            return await self._refresh_installation_token(binding)
 
         try:
             secret = await refresh()
@@ -638,6 +642,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 state_name=binding.state_name,
             )
             binding.mcp_toolkit.bind_effect_admission(self.effect_admission)
+            binding.mcp_toolkit.connections = binding.connections
             await binding.mcp_toolkit.__aenter__()
             binding.lazy_mcp_error = None
         except asyncio.CancelledError:
@@ -720,9 +725,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             return await self._installation_auth_headers(binding)
 
         async def refresh() -> str | None:
-            if binding.lazy_mcp_secret_provider is None:
-                return None
-            return await self._admitted_token(binding.lazy_mcp_secret_provider)
+            return await self._refresh_installation_token(binding)
 
         tools: list[FunctionTool] = []
         for item in sorted(snapshot.tools, key=lambda tool: tool.model_name):
@@ -743,6 +746,8 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 proxy_url=binding.lazy_mcp_proxy_url,
                 headers_provider=headers_provider,
                 authorization_provider=None,
+                connections=binding.connections,
+                before_send=self.assert_effect_current,
             )
             if item.model_name != item.raw_name:
                 tool = replace(
@@ -764,6 +769,22 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         if not token:
             return {}
         return {"Authorization": f"Bearer {token}"}
+
+    async def _refresh_installation_token(
+        self, binding: GitHubInstallationBinding
+    ) -> str | None:
+        """Publish refreshed credentials to both lazy and concrete binding paths."""
+        if binding.lazy_mcp_secret_provider is None:
+            return None
+        token = await self._admitted_token(binding.lazy_mcp_secret_provider)
+        if token is not None:
+            self._installation_token_cache[binding.target.installation_id] = (
+                token,
+                time.monotonic() + self._runtime_environment_token_ttl_seconds,
+            )
+            if binding.mcp_toolkit is not None:
+                binding.mcp_toolkit._secret = token
+        return token
 
     async def _prepare_lazy_mcp(self) -> None:
         """Issue GitHub token in background and start MCP lazy load."""
@@ -964,6 +985,7 @@ class GitHubUserMcpToolkit(McpToolkit):
             headers={"Authorization": f"Bearer {connection.access_token}"},
             on_authentication_failure=failed,
             auth=McpAuthenticationFailureObserver(),
+            connection_identity=connection.id,
         )
 
 

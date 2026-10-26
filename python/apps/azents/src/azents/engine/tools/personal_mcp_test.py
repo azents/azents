@@ -97,8 +97,8 @@ async def test_personal_mcp_background_and_cached_calls_recheck_current_source(
             content=[TextContent(type="text", text="fixture-result")]
         )
     )
-    monkeypatch.setattr(mcp_base, "mcp_list_tools", listing)
-    monkeypatch.setattr(mcp_base, "mcp_call_tool", call)
+    monkeypatch.setattr(mcp_base.McpConnections, "list_tools", listing)
+    monkeypatch.setattr(mcp_base.McpConnections, "call_tool", call)
     if timing == "discovery_gap":
 
         async def discover(*args: object, **kwargs: object) -> McpToolListResult:

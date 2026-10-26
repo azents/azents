@@ -6,6 +6,8 @@ spec_type: domain
 domain: toolkit
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/mcp_connections.py
+  - python/apps/azents/src/azents/core/mcp_transport.py
   - python/apps/azents/src/azents/engine/tools/wait.py
   - python/apps/azents/src/azents/engine/tools/process_wait.py
   - python/apps/azents/src/azents/repos/agent_wait_read.py
@@ -137,8 +139,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-23
-spec_version: 154
+last_verified_at: 2026-10-27
+spec_version: 155
 ---
 
 # Toolkit
@@ -1084,6 +1086,36 @@ For an Agent-owned Toolkit, the same encrypted connection row and provider flow 
 
 MCP-backed toolkits must keep `list_tools` discovery off the normal run preparation critical path.
 
+- Active Toolkit bindings retain their own MCP SDK sessions per target, transport,
+  proxy and credential identity. Generic MCP, Notion, Sentry, GitHub installation
+  bindings, AWS and GCP reuse those sessions; setup probes remain short-lived.
+  No live session, secret or auth callback is persisted in the snapshot.
+- A dedicated task owns each SDK context from entry through exit. Cold concurrent
+  calls share initialization and one complete paginated tool listing, warming the
+  SDK result-schema cache before execution. Up to 16 independent calls per
+  connection are admitted, with readiness/capacity bounded by the call timeout.
+- Authority and current credentials are checked per call and again after waits at
+  dispatch. HTTP auth behavior and 401 observation are request-local; shared client
+  defaults are not mutated. Credential rotation selects a new session and retires
+  the old one. Different Toolkit/Session/installation bindings never share sessions.
+  Dispatch admission denial performs no provider I/O and is handed back only to
+  that request, preserving other callers on the shared SDK transport. Streamable
+  HTTP uses a correlated local non-success response; legacy SSE's writer requires
+  local 202 acknowledgment plus cancellation/error handoff to the exact operation.
+  The tool caller always receives the original denial, never synthetic success.
+- Failed sessions are discarded for later operations. A failed or uncertain
+  `tools/call` is not automatically replayed; existing explicit provider 401
+  refresh remains separate from connection recovery. Single-call cancellation
+  does not terminate unrelated operations or the shared connection.
+- Recent successful listings are reused for 300 seconds. Supported
+  `notifications/tools/list_changed` marks a connection stale; the next
+  context refresh or call refreshes its complete listing with single-flight
+  serialization. Refresh failure retains the previous durable snapshot.
+- Toolkit removal/replacement and SessionRunner teardown stop admission, cancel
+  and boundedly drain operations, then close the SDK session/transport (including
+  DELETE when supported). Cleanup waits at most 10 seconds before cancelling a
+  remaining owner task and reporting the deadline. Worker restart prepares fresh
+  sessions rather than restoring live connections from metadata.
 - `update_context()` reads the latest successful session-bound Toolkit State snapshot and returns immediately.
 - If no successful snapshot exists, the toolkit exposes no MCP tools.
 - Background refresh lists tools, sorts them deterministically, builds a complete serializable snapshot, then atomically replaces the stored snapshot.
