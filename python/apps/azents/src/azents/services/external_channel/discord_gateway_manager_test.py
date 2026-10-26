@@ -19,6 +19,9 @@ from azents.core.config import (
     ExternalChannelIngressQuiesceConfig,
 )
 from azents.core.deps import get_config
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelOperationDeadline,
+)
 from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
@@ -342,6 +345,64 @@ class _EventRunner:
         await handle_lifecycle("ready")
         await handle_event(_event())
         raise DiscordGatewayTerminalError("gateway_connection_rejected")
+
+
+class _BackgroundEventRunner:
+    """Return from message callbacks while their ingestion is still blocked."""
+
+    def __init__(self) -> None:
+        self.returned = asyncio.Event()
+        self.stop = asyncio.Event()
+
+    async def run_connection(
+        self,
+        *,
+        bot_token: str,
+        target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
+        connected_bot_user_id: str | None,
+        handle_event: DiscordGatewayEventHandler,
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
+    ) -> None:
+        await handle_lifecycle("ready")
+        await handle_event(_event())
+        await handle_event(_event())
+        await handle_lifecycle("resumed")
+        self.returned.set()
+        await self.stop.wait()
+
+
+class _BlockedIngestionRepository(_Repository):
+    """Synchronize sequential ingestion and shutdown without scheduler sleeps."""
+
+    def __init__(self, *, fail_first: bool) -> None:
+        super().__init__(admission=object())
+        self.fail_first = fail_first
+        self.failure_message = "sensitive provider error must be redacted"
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.second_finished = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def ingest_discord_event(
+        self, **kwargs: object
+    ) -> ExternalChannelIngestionOutcome:
+        first = not self.admission_calls
+        outcome = await super().ingest_discord_event(**kwargs)
+        if first:
+            self.started.set()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                raise
+            if self.fail_first:
+                raise ValueError(self.failure_message)
+        else:
+            self.second_finished.set()
+        return outcome
 
 
 class _BlockingRunner:
@@ -917,6 +978,82 @@ async def test_manager_passes_typed_lifecycle_and_event_handlers_to_sdk() -> Non
         "now",
     }
     assert len(repository.active_calls) == 1
+    assert len(repository.admission_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_first", [False, True])
+async def test_background_ingestion_preserves_order_and_isolates_failures(
+    fail_first: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    repository = _BlockedIngestionRepository(fail_first=fail_first)
+    runner = _BackgroundEventRunner()
+    service = _service(
+        repository=repository, sessions=_SessionManager(), gateway_client=runner
+    )
+    shutdown = asyncio.Event()
+    task = asyncio.create_task(
+        service._run_connection_with_lease(
+            connection_id="connection-1",
+            lease=_lease(),
+            bot_token="test-token",
+            provider_app_id="app-1",
+            target_guild_id="300",
+            interactions_callback_base_url="https://callbacks.example/",
+            interactions_callback_selector_hash="selector-hash",
+            connected_bot_user_id="900",
+            configuration_generation=2,
+            shutdown_event=shutdown,
+        )
+    )
+    try:
+        await asyncio.wait_for(runner.returned.wait(), timeout=5)
+        await asyncio.wait_for(repository.started.wait(), timeout=5)
+        assert len(repository.active_calls) == 2
+        assert len(repository.admission_calls) == 1
+        deadline = repository.admission_calls[0]["deadline"]
+        assert isinstance(deadline, ExternalChannelOperationDeadline)
+        assert deadline.remaining_seconds() > 2.5
+        repository.release.set()
+        await asyncio.wait_for(repository.second_finished.wait(), timeout=5)
+        assert not task.done()
+        assert len(repository.admission_calls) == 2
+        assert "sensitive provider error" not in caplog.text
+        if fail_first:
+            assert "background message processing failed" in caplog.text
+    finally:
+        shutdown.set()
+        await asyncio.wait_for(task, timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_and_joins_background_ingestion() -> None:
+    repository = _BlockedIngestionRepository(fail_first=False)
+    runner = _BackgroundEventRunner()
+    service = _service(
+        repository=repository, sessions=_SessionManager(), gateway_client=runner
+    )
+    shutdown = asyncio.Event()
+    task = asyncio.create_task(
+        service._run_connection_with_lease(
+            connection_id="connection-1",
+            lease=_lease(),
+            bot_token="test-token",
+            provider_app_id="app-1",
+            target_guild_id="300",
+            interactions_callback_base_url="https://callbacks.example/",
+            interactions_callback_selector_hash="selector-hash",
+            connected_bot_user_id="900",
+            configuration_generation=2,
+            shutdown_event=shutdown,
+        )
+    )
+    try:
+        await asyncio.wait_for(repository.started.wait(), timeout=5)
+    finally:
+        shutdown.set()
+        await asyncio.wait_for(task, timeout=5)
+    assert repository.cancelled.is_set()
     assert len(repository.admission_calls) == 1
 
 
