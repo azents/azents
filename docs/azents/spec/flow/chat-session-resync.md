@@ -45,8 +45,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-10-15
-spec_version: 58
+last_verified_at: 2026-10-26
+spec_version: 59
 ---
 
 # Chat Session Resync
@@ -58,7 +58,7 @@ Chat session resync binds WebSocket session subscription and REST history/live b
 Chat screen has two timeline states.
 
 - `LATEST_FOLLOWING`: renders latest durable history tail and live state together.
-- `DETACHED_HISTORY_BROWSING`: browses middle history window and does not render live state.
+- `DETACHED_HISTORY_BROWSING`: preserves the visible history window while continuing to reconcile execution state; live-only timeline content stays hidden.
 
 Pure history/tool selection, provider-call identity merge, pending mailbox
 reduction, and retry visibility live in `@azents/session-core`. Main Web consumes
@@ -403,9 +403,12 @@ and reservation contracts remain available to non-Web consumers.
 
 ### DETACHED_HISTORY_BROWSING
 
-- Does not render live state. Todo preview is also treated as live state and hidden.
+- Preserves the visible history content. Todo preview and live-only timeline additions stay hidden.
 - Hides pending mailbox envelopes/items and live-only indicators, including nonterminal action execution progress; durable terminal action execution results remain in their history positions.
-- WS durable or live observations do not mutate the visible detached history or detached live state. A durable append records only confirmed newer availability; live upserts/removals and live Run/action updates are ignored for detached rendering.
+- WS durable appends record confirmed newer availability without appending to the visible detached history. Live projections and execution lifecycle observations continue updating the managed state, including Run completion and stop availability.
+- An Activity already associated with the active Run before detaching retains that association while the same Run remains active. A different Run never activates an unrelated historical Activity. Actual Run completion updates the Activity status even while detached.
+- Activity ownership in latest view starts after the most recent human input or Run completion boundary. A new live Run cannot reactivate a completed previous Run's Activity when there is no new human input.
+- Activity disclosure is user-owned after it opens: a newly active group opens by default, and completion, detaching, or returning to latest does not automatically collapse an existing group. Activity identity stays stable across live/durable presentation.
 - A successful periodic/resume baseline may also confirm a newer durable gap by comparing the fresh latest cursor with the cursor saved on detach.
 - The “new message” button is displayed only when a durable append or fresh latest cursor confirms an actual latest-direction gap, not by detached state or live-only activity itself.
 - Scrolling up fetches older raw history with the page-owned `before` cursor.
@@ -438,7 +441,7 @@ A resync transaction runs in this order.
 2. Client sends exactly one `subscription_health_check` for the transaction.
 3. After the matching `subscription_health_check_ack`, client performs a fresh imperative REST history/live query. Retained query-cache data is not a new baseline.
 4. Client applies the response only if both its request epoch and starting observation generation are still current. A newer request or already-applied WebSocket observation supersedes the response.
-5. In latest-following state, client replaces the latest baseline. In detached state, a periodic/resume transaction preserves the visible raw window and records only a confirmed newer cursor gap; an explicit latest transaction replaces the tail and returns to latest-following.
+5. Client reconciles the live execution baseline in either timeline state. In latest-following state it also replaces the latest history baseline. In detached state, a periodic/resume transaction preserves the visible raw window and records a confirmed newer cursor gap; an explicit latest transaction replaces the tail and returns to latest-following.
 6. The transaction replays buffered valid observations in arrival order on top of an accepted baseline and disables buffering.
 
 Health-check timeout, socket close, REST failure, or an inapplicable response cannot leave observations

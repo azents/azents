@@ -2276,39 +2276,6 @@ export function useChatSessionContainer(
   const handleChatEvent = useCallback(
     (event: ChatEvent): void => {
       liveObservationGenerationRef.current += 1;
-      if (
-        chatTimelineStateRef.current.type === "DETACHED_HISTORY_BROWSING" &&
-        "type" in event
-      ) {
-        if (event.type === "history_event_appended") {
-          setChatTimelineState((prev) =>
-            prev.type === "DETACHED_HISTORY_BROWSING"
-              ? { ...prev, hasNewer: true }
-              : prev,
-          );
-          return;
-        }
-        if (
-          event.type === "live_event_upserted" ||
-          event.type === "live_event_removed" ||
-          event.type === "live_projection_reset" ||
-          event.type === "mailbox_item_upserted" ||
-          event.type === "mailbox_item_removed" ||
-          event.type === "live_run_updated" ||
-          event.type === "live_run_cleared" ||
-          event.type === "action_execution_updated" ||
-          event.type === "action_execution_removed" ||
-          event.type === "run_started" ||
-          event.type === "run_phase_changed" ||
-          event.type === "run_complete" ||
-          event.type === "run_stopped" ||
-          event.type === "runtime_error" ||
-          event.type === "compaction_started" ||
-          event.type === "compaction_complete"
-        ) {
-          return;
-        }
-      }
       const receivedAt = new Date().toISOString();
       setManagedLiveState((prev) => ({
         ...prev,
@@ -2551,11 +2518,19 @@ export function useChatSessionContainer(
 
       if ("type" in event && event.type === "history_event_appended") {
         const responseEvent = event.event;
-        setHistoryEvents((prev) => {
-          const next = upsertHistoryEvent(prev, responseEvent);
-          historyEventsRef.current = next;
-          return next;
-        });
+        if (chatTimelineStateRef.current.type === "DETACHED_HISTORY_BROWSING") {
+          setChatTimelineState((prev) =>
+            prev.type === "DETACHED_HISTORY_BROWSING"
+              ? { ...prev, hasNewer: true }
+              : prev,
+          );
+        } else {
+          setHistoryEvents((prev) => {
+            const next = upsertHistoryEvent(prev, responseEvent);
+            historyEventsRef.current = next;
+            return next;
+          });
+        }
         setManagedLiveState((prev) => ({
           ...prev,
           partialHistory: removePartialHistoryCounterpart(
@@ -2617,6 +2592,11 @@ export function useChatSessionContainer(
           break;
         case "run_complete":
           if ("item" in event) {
+            if (
+              chatTimelineStateRef.current.type === "DETACHED_HISTORY_BROWSING"
+            ) {
+              break;
+            }
             setTransientMessages((prev) =>
               upsertMessage(prev, {
                 id: event.id,
@@ -2636,6 +2616,11 @@ export function useChatSessionContainer(
           void utils.chat.getSubagentTree.invalidate();
           break;
         case "runtime_error":
+          if (
+            chatTimelineStateRef.current.type === "DETACHED_HISTORY_BROWSING"
+          ) {
+            break;
+          }
           setTransientMessages((prev) => [
             ...prev,
             {
@@ -2792,23 +2777,23 @@ export function useChatSessionContainer(
             historyEventsRef.current = next;
             return next;
           });
-          setManagedLiveState((prev) => {
-            const next = mapSessionEvents(result, prev);
-            if (next.invalidLiveRun !== null) {
-              reportInvalidLiveRun(next.invalidLiveRun.value);
-            }
-            const liveState = next.liveState;
-            return {
-              ...liveState,
-              isResponsePending:
-                options.reason === "compaction" && options.continuing === true
-                  ? liveState.isResponsePending || prev.isResponsePending
-                  : liveState.isResponsePending,
-            };
-          });
           setHasMore(mapped.hasMore);
           setChatTimelineState({ type: "LATEST_FOLLOWING" });
         }
+        setManagedLiveState((prev) => {
+          const next = mapSessionEvents(result, prev);
+          if (next.invalidLiveRun !== null) {
+            reportInvalidLiveRun(next.invalidLiveRun.value);
+          }
+          const liveState = next.liveState;
+          return {
+            ...liveState,
+            isResponsePending:
+              options.reason === "compaction" && options.continuing === true
+                ? liveState.isResponsePending || prev.isResponsePending
+                : liveState.isResponsePending,
+          };
+        });
         setChatViewState({ type: "READY" });
         setFreshBaselineVersion((version) => version + 1);
         replayBufferedLiveEvents();

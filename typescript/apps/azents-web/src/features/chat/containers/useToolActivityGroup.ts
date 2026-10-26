@@ -24,15 +24,13 @@ export function useToolActivityGroup(
   props: ToolActivityGroupProps,
 ): ToolActivityGroupViewProps {
   const { activity, active = false } = props;
-  const [opened, { close, open, toggle }] = useDisclosure(active);
+  const [opened, { open, toggle }] = useDisclosure(active);
   const [, setTick] = useState(0);
   useEffect(() => {
     if (active) {
       open();
-      return;
     }
-    close();
-  }, [active, close, open]);
+  }, [active, open]);
   const enabled = active && activity.events.length > 0;
   useEffect(() => {
     if (!enabled) {
