@@ -92,7 +92,6 @@ async def _watch_api(
                     networking=client.NetworkingV1Api(sdk),
                     coordination=client.CoordinationV1Api(sdk),
                     authorization=client.AuthorizationV1Api(sdk),
-                    apis=client.ApisApi(sdk),
                 )
         finally:
             await runner.cleanup()

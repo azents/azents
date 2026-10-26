@@ -141,14 +141,12 @@ class KubernetesHttpApi(KubernetesApi):
         networking: client.NetworkingV1Api,
         coordination: client.CoordinationV1Api,
         authorization: client.AuthorizationV1Api,
-        apis: client.ApisApi,
     ) -> None:
         self.sdk = sdk
         self.core = core
         self.networking = networking
         self.coordination = coordination
         self.authorization = authorization
-        self.apis = apis
         self.pods = KubernetesResourceOperations(
             read=core.read_namespaced_pod,
             list=core.list_namespaced_pod,
@@ -210,7 +208,6 @@ class KubernetesHttpApi(KubernetesApi):
             networking=client.NetworkingV1Api(sdk),
             coordination=client.CoordinationV1Api(sdk),
             authorization=client.AuthorizationV1Api(sdk),
-            apis=client.ApisApi(sdk),
         )
 
     async def close(self) -> None:
@@ -265,21 +262,6 @@ class KubernetesHttpApi(KubernetesApi):
             item["name"]
             for item in resources
             if isinstance(item.get("name"), str) and "/" not in item["name"]
-        )
-
-    async def list_api_groups(self) -> frozenset[str]:
-        """Return group names using SDK-owned API discovery."""
-        data = await self._request(
-            self.apis.get_api_versions(),
-            allow_not_found=False,
-            method="GET",
-            resource="API groups",
-        )
-        if data is None:
-            return frozenset()
-        groups = _object_list(data.get("groups") or [], "groups")
-        return frozenset(
-            item["name"] for item in groups if isinstance(item.get("name"), str)
         )
 
     async def check_resource_access(

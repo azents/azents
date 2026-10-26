@@ -76,8 +76,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
-last_verified_at: 2026-10-05
-spec_version: 42
+last_verified_at: 2026-10-26
+spec_version: 43
 ---
 
 # Runtime Provider
@@ -164,6 +164,11 @@ and generation-sensitive recreation retain separately named operation guards,
 not read-getter flags.
 
 Admin routes expose inventory and mutable policy/availability operations under `/runtime-provider/v1/providers`. Public discovery exposes only safe option metadata under `/runtime-provider/v1/workspaces/{handle}/providers`; credentials, authentication evidence, encrypted secrets, audit state, and mutable Runtime bindings are excluded.
+
+Provider-scoped recreation uses the Provider's nonnegative administrative version,
+including the initial value `0`, as its optimistic concurrency guard. Admin Web
+forwards this value unchanged; infrastructure Profile operations instead use their
+separate positive Profile versions. Backend stale-version checks remain authoritative.
 
 Public discovery delegates one completed read-only repository operation for Workspace
 eligibility. It retains the enabled filter, ACTIVE lifecycle, system/Workspace scope,
@@ -399,6 +404,13 @@ semantics. Protocol v3 requires operational diagnostics and uses exactly one agg
 `network_enforcement` observation for strict enforcement acknowledgement and repair. Kubernetes
 protocol v1 cannot register. Docker Provider protocol behavior is unchanged and rejects Kubernetes
 reconciliation or diagnostic payloads.
+
+Deployment diagnostics check NetworkPolicy API availability, not optional CNI
+vendor API-group identity. Implementations without vendor CRDs can enforce policy,
+and CRD presence does not prove enforcement. Missing or inaccessible NetworkPolicy
+APIs still produce bounded warnings. A warning-free snapshot is not network
+isolation evidence: strict capability advertisement remains authorized only by the
+existing independent operator attestations.
 
 Admin/Public surfaces expose typed schema versions and values, current compatibility, impact,
 desired/applied status, and bounded recreation progress. These surfaces do not expose Provider

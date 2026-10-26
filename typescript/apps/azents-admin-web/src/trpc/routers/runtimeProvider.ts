@@ -296,7 +296,7 @@ export const runtimeProviderRouter = router({
     .input(
       z.strictObject({
         providerId: z.string().min(1),
-        expectedVersion: z.number().int().positive(),
+        expectedVersion: z.number().int().nonnegative(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
