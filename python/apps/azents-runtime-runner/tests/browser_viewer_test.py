@@ -148,6 +148,14 @@ class Transport:
 @pytest.fixture
 async def site() -> AsyncIterator[str]:
     async def handler(request: web.Request) -> web.Response:
+        if request.path == "/legacy-mobile":
+            return web.Response(
+                text='<input type="checkbox" id="box" '
+                'style="position:absolute;left:800px;top:80px">'
+                '<input id="field" '
+                'style="position:absolute;left:650px;top:150px;width:220px">',
+                content_type="text/html",
+            )
         if request.path == "/initial-dialog":
             return web.Response(
                 text="<body><input id=text><script>"
@@ -156,7 +164,8 @@ async def site() -> AsyncIterator[str]:
                 content_type="text/html",
             )
         return web.Response(
-            text="""<title>Viewer fixture</title><input id=text style='margin:30px'>
+            text="""<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Viewer fixture</title><input id=text style='margin:30px'>
 <button id=dialog style='margin:20px'
 onclick="alert('First');alert('Second')">Question</button>
 <input id=keydialog
@@ -292,7 +301,7 @@ async def test_capture_pixels_stay_current_without_changing_tab_visibility(
         await source.capture_once()
         assert source.latest is not None
         with Image.open(BytesIO(source.latest.data)) as image:
-            assert image.size == (1280, 800)
+            assert image.size == (400, 560)
             assert image.getpixel((16, 16)) == pytest.approx((20, 40, 200), abs=4)
         await native.evaluate("document.body.style.background='rgb(200,40,20)'")
         await native.set_viewport_size({"width": 640, "height": 480})
@@ -307,6 +316,46 @@ async def test_capture_pixels_stay_current_without_changing_tab_visibility(
     finally:
         await source.close()
     assert budget.bytes == 0
+
+
+async def test_mobile_without_meta_maps_visual_clicks_and_editables(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.goto(site + "/legacy-mobile")
+    assert await native.evaluate("innerWidth") > 400
+    viewer = RunnerBrowserViewer(manager, Budget())
+    transport = Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        image = await transport.frame()
+        geometry = await native.evaluate(
+            "({scale:visualViewport.scale,left:visualViewport.offsetLeft,"
+            "top:visualViewport.offsetTop})"
+        )
+        box = await native.locator("#box").bounding_box()
+        assert box is not None
+        x = (box["x"] + box["width"] / 2 - geometry["left"]) * geometry["scale"]
+        y = (box["y"] + box["height"] / 2 - geometry["top"]) * geometry["scale"]
+        for sequence, phase in enumerate(["down", "up"], 1):
+            result = await transport.input(
+                sequence,
+                {"kind": "pointer", "phase": phase, "button": "left", "x": x, "y": y},
+                image,
+            )
+            assert result["accepted"]
+        assert await native.locator("#box").is_checked()
+        field = await native.locator("#field").bounding_box()
+        assert field is not None
+        assert any(
+            abs(region.x - field["x"] * geometry["scale"]) < 5 and region.width > 50
+            for region in image.editables
+        )
+    finally:
+        await stop(running, transport)
 
 
 async def test_unexpected_capture_failure_propagates(
@@ -347,7 +396,7 @@ async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
         frame = await a.frame()
         await b.frame()
         assert frame.image.startswith(b"\xff\xd8")
-        assert frame.source.width == 1280 and frame.source.height == 800
+        assert frame.source.width == 400 and frame.source.height == 560
         assert len(viewer.sources) == 1
         source = viewer.sources[authority.page_id]
         assert source.subscribers == 2
@@ -1127,7 +1176,7 @@ async def test_slow_popup_follows_current_viewer_interest_after_release(
                     "kind": "pointer",
                     "phase": phase,
                     "button": "left",
-                    "x": 500,
+                    "x": 300,
                     "y": 400,
                 },
             )

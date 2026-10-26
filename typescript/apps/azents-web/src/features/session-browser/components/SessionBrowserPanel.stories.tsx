@@ -278,6 +278,7 @@ function BrowserFixture(
       browserFrameMatchesStatus(props.state.image.frame, props.state.status) &&
       props.state.dialog === null,
     canInput: active,
+    mouse: interaction.interaction,
     pendingInputs: 0,
     interrupted: false,
     frame:
@@ -1495,10 +1496,302 @@ export const Zoomed = {
     if (window === null) {
       throw new Error("Browser window missing");
     }
-    await expect(viewport.getBoundingClientRect().width).toBe(
-      window.clientWidth * 2,
+    const scale = Math.min(
+      window.clientWidth / frame.width,
+      window.clientHeight / frame.height,
     );
-    await expect(window.scrollWidth).toBeGreaterThan(window.clientWidth);
+    await expect(
+      Math.abs(
+        viewport.getBoundingClientRect().width - frame.width * scale * 2,
+      ),
+    ).toBeLessThan(1);
+    await expect(getComputedStyle(window).overflow).toBe("hidden");
+  },
+} satisfies Story;
+
+export const AspectFitPortrait = {
+  tags: ["ci-contract"],
+  args: { focused: false },
+  render: (props) => (
+    <Box h={rem(400)} w={rem(480)}>
+      <SessionBrowserPanel {...props} />
+    </Box>
+  ),
+  play: async ({ canvasElement }) => {
+    const region = within(canvasElement).getByRole("region", {
+      name: "Remote browser page",
+    });
+    const view = region.parentElement;
+    if (view === null) {
+      throw new Error("Browser viewport container missing");
+    }
+    const rect = region.getBoundingClientRect();
+    const scale = Math.min(
+      view.clientWidth / frame.width,
+      view.clientHeight / frame.height,
+    );
+    await expect(Math.abs(rect.width - frame.width * scale)).toBeLessThan(1);
+    await expect(Math.abs(rect.height - frame.height * scale)).toBeLessThan(1);
+    await expect(view.scrollWidth).toBe(view.clientWidth);
+    await expect(view.scrollHeight).toBe(view.clientHeight);
+    await expect(getComputedStyle(view).overflow).toBe("hidden");
+  },
+} satisfies Story;
+
+export const ControlWheelZoomAndMousePan = {
+  tags: ["ci-contract"],
+  render: (props) => <BrowserFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const region = canvas.getByRole("region", { name: "Remote browser page" });
+    const view = region.parentElement;
+    if (view === null) {
+      throw new Error("Browser viewport container missing");
+    }
+    const before = region.getBoundingClientRect();
+    const point = {
+      clientX: before.left + before.width / 2,
+      clientY: before.top + before.height / 2,
+    };
+    const ctrlWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      deltaY: -200,
+      ...point,
+    });
+    region.dispatchEvent(ctrlWheel);
+    await waitFor(() =>
+      expect(region.getBoundingClientRect().width).toBeGreaterThan(
+        before.width,
+      ),
+    );
+    await expect(ctrlWheel.defaultPrevented).toBe(true);
+    await expect(actions).not.toHaveBeenCalled();
+    const enlarged = region.getBoundingClientRect();
+    const zoomPoint = {
+      clientX: Math.max(view.getBoundingClientRect().left, enlarged.left) + 20,
+      clientY: Math.max(view.getBoundingClientRect().top, enlarged.top) + 20,
+    };
+    region.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 40,
+        ...zoomPoint,
+      }),
+    );
+    await expect(actions).toHaveBeenLastCalledWith(
+      frame,
+      expect.objectContaining({ kind: "wheel", delta_y: 40 }),
+    );
+    actions.mockClear();
+    region.setPointerCapture = fn();
+    region.hasPointerCapture = (): boolean => false;
+    const previousTop = view.scrollTop;
+    await fireEvent.pointerDown(region, {
+      pointerId: 91,
+      pointerType: "mouse",
+      button: 0,
+      ...zoomPoint,
+    });
+    await fireEvent.pointerMove(region, {
+      pointerId: 91,
+      pointerType: "mouse",
+      clientX: zoomPoint.clientX,
+      clientY: zoomPoint.clientY - 30,
+    });
+    await fireEvent.pointerUp(region, {
+      pointerId: 91,
+      pointerType: "mouse",
+      button: 0,
+      clientX: zoomPoint.clientX,
+      clientY: zoomPoint.clientY - 30,
+    });
+    await expect(view.scrollTop).toBeGreaterThan(previousTop);
+    await expect(actions).not.toHaveBeenCalled();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Browser actions" }),
+    );
+    await userEvent.click(
+      await canvas.findByRole("menuitem", { name: /Fit to window/ }),
+    );
+    await waitFor(() =>
+      expect(
+        Math.abs(region.getBoundingClientRect().width - before.width),
+      ).toBeLessThan(1),
+    );
+    await expect(view.scrollTop).toBe(0);
+    await expect(view.scrollLeft).toBe(0);
+  },
+} satisfies Story;
+
+export const PinchZoomUsesFittedFrame = {
+  tags: ["ci-contract"],
+  play: async ({ canvasElement }) => {
+    const region = within(canvasElement.ownerDocument.body).getByRole(
+      "region",
+      { name: "Remote browser page" },
+    );
+    const before = region.getBoundingClientRect();
+    region.setPointerCapture = fn();
+    region.hasPointerCapture = (): boolean => false;
+    const y = before.top + before.height / 2;
+    const x = before.left + before.width / 2;
+    await fireEvent.pointerDown(region, {
+      pointerType: "touch",
+      pointerId: 81,
+      clientX: x - 30,
+      clientY: y,
+    });
+    await fireEvent.pointerDown(region, {
+      pointerType: "touch",
+      pointerId: 82,
+      clientX: x + 30,
+      clientY: y,
+    });
+    await fireEvent.pointerMove(region, {
+      pointerType: "touch",
+      pointerId: 82,
+      clientX: x + 70,
+      clientY: y,
+    });
+    await waitFor(() =>
+      expect(
+        Math.abs(
+          region.getBoundingClientRect().width - (before.width * 100) / 60,
+        ),
+      ).toBeLessThan(1),
+    );
+    await fireEvent.pointerUp(region, {
+      pointerType: "touch",
+      pointerId: 82,
+      clientX: x + 70,
+      clientY: y,
+    });
+    await fireEvent.pointerUp(region, {
+      pointerType: "touch",
+      pointerId: 81,
+      clientX: x - 30,
+      clientY: y,
+    });
+    await expect(actions).not.toHaveBeenCalled();
+    const center = region.getBoundingClientRect();
+    region.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: -100000,
+        clientX: center.left + center.width / 2,
+        clientY: center.top + center.height / 2,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        Math.abs(region.getBoundingClientRect().width - before.width * 3),
+      ).toBeLessThan(1),
+    );
+    region.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: 100000,
+        clientX: x,
+        clientY: y,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        Math.abs(region.getBoundingClientRect().width - before.width),
+      ).toBeLessThan(1),
+    );
+    await expect(actions).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const ZoomedMouseInputOwnership = {
+  tags: ["ci-contract"],
+  args: { zoom: 2 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const region = canvas.getByRole("region", { name: "Remote browser page" });
+    const view = region.parentElement;
+    if (view === null) {
+      throw new Error("Browser viewport container missing");
+    }
+    const box = view.getBoundingClientRect();
+    const point = {
+      pointerType: "mouse",
+      clientX: box.left + 30,
+      clientY: box.top + 30,
+    };
+    region.setPointerCapture = fn();
+    region.hasPointerCapture = (): boolean => false;
+    await fireEvent.pointerDown(region, { ...point, pointerId: 71, button: 0 });
+    await fireEvent.pointerUp(region, { ...point, pointerId: 71, button: 0 });
+    const keyboard = canvas.getByRole("textbox", {
+      name: "Remote browser keyboard",
+    });
+    await expect(keyboard).toHaveFocus();
+    await fireEvent.keyDown(keyboard, { key: "ArrowDown" });
+    await fireEvent.keyUp(keyboard, { key: "ArrowDown" });
+    await expect(actions).toHaveBeenCalledWith(frame, {
+      kind: "key",
+      phase: "down",
+      key: "ArrowDown",
+    });
+    actions.mockClear();
+    await fireEvent.pointerDown(region, {
+      ...point,
+      pointerId: 72,
+      button: 0,
+      ctrlKey: true,
+    });
+    await fireEvent.pointerUp(region, {
+      ...point,
+      pointerId: 72,
+      button: 0,
+      ctrlKey: true,
+    });
+    await expect(actions).toHaveBeenCalledWith(frame, {
+      kind: "key",
+      phase: "down",
+      key: "Control",
+    });
+    await expect(actions).toHaveBeenCalledWith(frame, {
+      kind: "key",
+      phase: "up",
+      key: "Control",
+    });
+    actions.mockClear();
+    await fireEvent.pointerDown(region, { ...point, pointerId: 73, button: 1 });
+    await fireEvent.pointerMove(region, {
+      ...point,
+      pointerId: 73,
+      button: 1,
+      clientX: point.clientX + 10,
+    });
+    await expect(actions).toHaveBeenLastCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "move" }),
+    );
+    await fireEvent.pointerCancel(region, {
+      ...point,
+      pointerId: 73,
+      button: 1,
+    });
+    await expect(actions).toHaveBeenLastCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "cancel" }),
+    );
+    actions.mockClear();
+    await fireEvent.pointerMove(region, { ...point, pointerId: 74 });
+    await expect(actions).toHaveBeenCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "move" }),
+    );
   },
 } satisfies Story;
 
@@ -1840,6 +2133,13 @@ export const MobileDirectTouchSending = {
       },
       cancel: fn(),
       viewWindowRef: { current: null },
+      pan: {
+        onPointerDown: fn(),
+        onPointerMove: fn(),
+        onPointerUp: fn(),
+        onPointerCancel: fn(),
+        onLostPointerCapture: fn(),
+      },
       touch: {
         onPointerDown: fn(),
         onPointerMove: fn(),
@@ -2028,6 +2328,13 @@ export const PreciseTouchMarker = {
       },
       cancel: fn(),
       viewWindowRef: { current: null },
+      pan: {
+        onPointerDown: fn(),
+        onPointerMove: fn(),
+        onPointerUp: fn(),
+        onPointerCancel: fn(),
+        onLostPointerCapture: fn(),
+      },
       touch: {
         onPointerDown: fn(),
         onPointerMove: fn(),

@@ -106,9 +106,10 @@ async def test_camoufox_native_window_covers_the_fixed_input_viewport(
         assert opened.page is not None
         page = manager.tasks[opened.page.task_id].pages[opened.page.id].page
         await page.set_content(
-            '<button style="position:fixed;left:1200px;top:90px" '
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<button style="position:fixed;left:320px;top:90px" '
             "onclick=\"document.title='Delivered'\">Edge input</button>"
-            '<button style="position:fixed;left:20px;top:740px" '
+            '<button style="position:fixed;left:20px;top:500px" '
             "onclick=\"document.title='Bottom delivered'\">Bottom input</button>"
         )
         await page.get_by_role("button", name="Edge input").click(timeout=10000)

@@ -11,6 +11,7 @@ from azents_runtime_control.browser_viewer_contract import (
     decode_viewer_field_attributes,
 )
 
+from azents_runtime_runner.browser_geometry import browser_visual_geometry
 from azents_runtime_runner.browser_sdk import (
     BROWSER_SDK_ERRORS,
     Frame,
@@ -333,6 +334,21 @@ class BrowserEditableRegions:
         viewport = self.page.viewport_size
         if viewport is None:
             return ()
+        try:
+            geometry = await browser_visual_geometry(self.page)
+        except BROWSER_SDK_ERRORS as error:
+            if any(
+                signature in error.message.lower()
+                for signature in (
+                    "execution context was destroyed",
+                    "cannot find context",
+                    "frame was detached",
+                    "frame has been detached",
+                    "target page, context or browser has been closed",
+                )
+            ):
+                return ()
+            raise
         for frame in self.page.frames[:16]:
             if frame.is_detached():
                 continue
@@ -360,14 +376,13 @@ class BrowserEditableRegions:
                 for region in regions:
                     if len(result) >= 16:
                         break
-                    left, top = round(region.x, 2), round(region.y, 2)
-                    width, height = round(region.width, 2), round(region.height, 2)
-                    if (
-                        left < 0
-                        or top < 0
-                        or left + width > viewport["width"]
-                        or top + height > viewport["height"]
-                    ):
+                    x = (region.x - geometry.left) * geometry.scale
+                    y = (region.y - geometry.top) * geometry.scale
+                    left, top = round(max(0, x), 2), round(max(0, y), 2)
+                    right = min(viewport["width"], x + region.width * geometry.scale)
+                    bottom = min(viewport["height"], y + region.height * geometry.scale)
+                    width, height = round(right - left, 2), round(bottom - top, 2)
+                    if width < 4 or height < 4:
                         continue
                     result.append(
                         ViewerEditable(

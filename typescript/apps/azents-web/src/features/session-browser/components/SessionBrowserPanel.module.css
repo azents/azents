@@ -168,27 +168,23 @@
   overflow: hidden;
   background: var(--mantine-color-dark-7);
   outline-offset: rem(-3px);
+  flex-shrink: 0;
+  margin: auto;
 }
 
 .viewWindow {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  display: flex;
+  container-type: size;
+  overflow: hidden;
   background: var(--mantine-color-dark-7);
   overscroll-behavior: contain;
 }
 
 .viewport[data-focused="true"] {
   touch-action: none;
-}
-.panel[data-focused="false"] .viewWindow {
-  overflow: hidden;
-}
-.viewport[data-focused="false"] {
-  height: 100%;
-}
-.viewport[data-focused="false"] .image {
-  object-fit: contain;
 }
 .viewport:focus-visible {
   outline: rem(3px) solid var(--mantine-primary-color-filled);
@@ -199,6 +195,7 @@
   height: 100%;
   user-select: none;
   pointer-events: none;
+  object-fit: contain;
 }
 .viewport[data-stale="true"] .image {
   opacity: 0.5;

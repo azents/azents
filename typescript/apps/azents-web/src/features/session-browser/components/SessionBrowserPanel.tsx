@@ -775,11 +775,11 @@ export function SessionBrowserPanel({
           <div
             className={classes.viewport}
             style={{
-              width: `${(focused ? zoom : 1) * 100}%`,
               ...(image === null
-                ? {}
+                ? { width: "100%", height: "100%" }
                 : {
-                    aspectRatio: `${image.frame.width} / ${image.frame.height}`,
+                    width: `calc(min(100cqw, 100cqh * ${image.frame.width / image.frame.height}) * ${focused ? zoom : 1})`,
+                    height: `calc(min(100cqh, 100cqw * ${image.frame.height / image.frame.width}) * ${focused ? zoom : 1})`,
                   }),
             }}
             data-stale={!connected || !imageCurrent}
@@ -791,27 +791,37 @@ export function SessionBrowserPanel({
             onPointerDown={(event) =>
               event.pointerType === "touch"
                 ? touch?.onPointerDown(event)
-                : handlers?.onPointerDown(event)
+                : focused && zoom > 1
+                  ? touchView?.pan.onPointerDown(event)
+                  : handlers?.onPointerDown(event)
             }
             onPointerMove={(event) =>
               event.pointerType === "touch"
                 ? touch?.onPointerMove(event)
-                : handlers?.onPointerMove(event)
+                : focused && zoom > 1
+                  ? touchView?.pan.onPointerMove(event)
+                  : handlers?.onPointerMove(event)
             }
             onPointerUp={(event) =>
               event.pointerType === "touch"
                 ? touch?.onPointerUp(event)
-                : handlers?.onPointerUp(event)
+                : focused && zoom > 1
+                  ? touchView?.pan.onPointerUp(event)
+                  : handlers?.onPointerUp(event)
             }
             onPointerCancel={(event) =>
               event.pointerType === "touch"
                 ? touch?.onPointerCancel(event)
-                : handlers?.onPointerCancel(event)
+                : focused && zoom > 1
+                  ? touchView?.pan.onPointerCancel(event)
+                  : handlers?.onPointerCancel(event)
             }
             onLostPointerCapture={(event) =>
               event.pointerType === "touch"
                 ? touch?.onLostPointerCapture(event)
-                : handlers?.onLostPointerCapture(event)
+                : focused && zoom > 1
+                  ? touchView?.pan.onLostPointerCapture(event)
+                  : handlers?.onLostPointerCapture(event)
             }
             onWheel={handlers?.onWheel}
             onBlur={handlers?.onBlur}
