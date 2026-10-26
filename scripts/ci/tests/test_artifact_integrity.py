@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,11 +17,21 @@ from scripts.ci.evidence import (
     file_hashes,
     verify_collection,
 )
-from scripts.ci.tests.test_observability import sample, stamp_provenance
-from scripts.ci.workflow_report import decode_run
+from scripts.ci.tests.test_observability import sample, stamp_archive, stamp_provenance
+from scripts.ci.workflow_report import Run, decode_run
 
 
 class ArtifactIntegrityTest(unittest.TestCase):
+    def duration_run(self, upload_result: str = "success") -> Run:
+        run = decode_run(sample())
+        step = replace(
+            run.jobs[-1].steps[0],
+            name="Upload E2E duration verdict",
+            conclusion=upload_result,
+        )
+        aggregate = replace(run.jobs[-1], name="ci-e2e-aggregate", steps=(step,))
+        return replace(run, jobs=(*run.jobs, aggregate))
+
     def fixture(self, root: Path) -> Path:
         artifact = root / "artifacts/ci-observability-python-azents-1"
         artifact.mkdir(parents=True)
@@ -180,4 +191,99 @@ class ArtifactIntegrityTest(unittest.TestCase):
             self.assertEqual(
                 verify_collection(destination, decode_run(sample())),
                 {"ci-observability-python-azents-1"},
+            )
+
+    def test_duration_verdict_uses_original_zip_and_replay_integrity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            self.fixture(source)
+            verdict = source / "artifacts/e2e-duration-gate"
+            verdict.mkdir()
+            (verdict / "report.json").write_text('{"outcome":"pass"}')
+            (verdict / "summary.md").write_text("Within the existing limit")
+            inventory = json.loads((source / "artifact-inventory.json").read_text())
+            entry = {
+                **inventory[0]["artifacts"][0],
+                "id": 2,
+                "name": "e2e-duration-gate",
+                "digest": stamp_archive(source, "e2e-duration-gate", 2),
+                "created_at": "2026-10-15T00:00:59Z",
+            }
+            inventory[0]["artifacts"].append(entry)
+            raw = sample()
+            run = self.duration_run()
+            destination = root / "collected"
+            with (
+                patch(
+                    "scripts.ci.collect.gh",
+                    side_effect=[json.dumps(raw), json.dumps(inventory)],
+                ),
+                patch("scripts.ci.collect.subprocess.run") as download,
+            ):
+
+                def write_download(args: list[str], **kwargs: object) -> None:
+                    stream = kwargs["stdout"]
+                    assert isinstance(stream, io.BufferedWriter)
+                    artifact_id = int(args[-1].split("/")[-2])
+                    stream.write((source / f"artifact-{artifact_id}.zip").read_bytes())
+
+                download.side_effect = write_download
+                collect("azents/azents", 100, 1, destination)
+            self.assertEqual(
+                verify_collection(destination, run),
+                {"ci-observability-python-azents-1", "e2e-duration-gate"},
+            )
+            self.assertEqual(
+                (destination / "artifact-2.zip").read_bytes(),
+                (source / "artifact-2.zip").read_bytes(),
+            )
+            (destination / "artifacts/e2e-duration-gate/report.json").write_text(
+                '{"outcome":"regression"}'
+            )
+            with self.assertRaisesRegex(ValueError, "Collected artifact bytes"):
+                verify_collection(destination, run)
+
+    def test_successful_verdict_upload_requires_original_artifact(self) -> None:
+        with self.assertRaisesRegex(ValueError, "duration verdict artifact is missing"):
+            artifacts_for_run([{"artifacts": []}], self.duration_run())
+        run = self.duration_run()
+        failed_aggregate = replace(run.jobs[-1], conclusion="failure")
+        failed_run = replace(
+            run, conclusion="failure", jobs=(*run.jobs[:-1], failed_aggregate)
+        )
+        with self.assertRaisesRegex(ValueError, "duration verdict artifact is missing"):
+            artifacts_for_run([{"artifacts": []}], failed_run)
+        for result in ("failure", "skipped", "cancelled"):
+            with self.subTest(upload_result=result):
+                self.assertEqual(
+                    artifacts_for_run([{"artifacts": []}], self.duration_run(result)),
+                    (),
+                )
+
+    def test_duration_verdict_rejects_stale_expired_or_wrong_identity(self) -> None:
+        original = {
+            "id": 2,
+            "name": "e2e-duration-gate",
+            "digest": "sha256:" + "b" * 64,
+            "created_at": "2026-10-15T00:00:59Z",
+            "expired": False,
+            "workflow_run": {"id": 100, "head_sha": "a" * 40},
+        }
+        invalid = (
+            {"created_at": "2026-10-15T00:01:01Z"},
+            {"created_at": "2026-10-14T23:59:59Z"},
+            {"expired": True},
+            {"digest": None},
+            {"workflow_run": {"id": 101, "head_sha": "a" * 40}},
+            {"workflow_run": {"id": 100, "head_sha": "c" * 40}},
+        )
+        for change in invalid:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                artifacts_for_run(
+                    [{"artifacts": [{**original, **change}]}], self.duration_run()
+                )
+        with self.assertRaisesRegex(ValueError, "duplicate artifact name"):
+            artifacts_for_run(
+                [{"artifacts": [original, original]}], self.duration_run()
             )

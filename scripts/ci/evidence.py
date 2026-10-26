@@ -128,6 +128,7 @@ def artifacts_for_run(raw: object, run: Run) -> tuple[Artifact, ...]:
                 and name.endswith(f"-{run.attempt}")
                 or name == f"ci-workflow-{run.attempt}"
                 or name == f"ios-diagnostics-{run.head_sha}"
+                or name == "e2e-duration-gate"
             ):
                 continue
             if re.fullmatch("[a-z0-9][a-z0-9-]*", name) is None:
@@ -159,6 +160,18 @@ def artifacts_for_run(raw: object, run: Run) -> tuple[Artifact, ...]:
             selected.append(artifact)
     if len({a.name for a in selected}) != len(selected):
         raise ValueError("Ambiguous duplicate artifact name")
+    verdict_uploaded = any(
+        job.name == "ci-e2e-aggregate"
+        and any(
+            step.name == "Upload E2E duration verdict" and step.conclusion == "success"
+            for step in job.steps
+        )
+        for job in run.jobs
+    )
+    if verdict_uploaded and not any(
+        artifact.name == "e2e-duration-gate" for artifact in selected
+    ):
+        raise ValueError("Uploaded E2E duration verdict artifact is missing")
     return tuple(selected)
 
 

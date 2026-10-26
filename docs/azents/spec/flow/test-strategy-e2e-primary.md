@@ -37,6 +37,7 @@ code_paths:
   - python/apps/azents/src/azents/conftest.py
   - python/apps/azents/src/azents/testing/transaction_fixture.py
   - .github/actions/ci-test-observability/**
+  - scripts/ci/**
   - .claude/skills/technical-feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
@@ -63,7 +64,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-26
+last_verified_at: 2026-10-27
 spec_version: 87
 ---
 
@@ -879,7 +880,11 @@ Always-on required CI does not depend on external credentials.
   Collected artifact ZIPs must match the SHA256 digest returned by the GitHub
   artifact API before extraction. Replay rechecks the saved ZIP digest and exact
   extracted file hashes against the authenticated archive, not only a locally
-  generated manifest. Missing or malformed digests, missing archives, substituted
+  generated manifest. The existing `e2e-duration-gate` verdict is retained under
+  the same immutable-ID, digest and attempt-boundary checks. If the aggregate
+  successfully uploaded that verdict, a missing original artifact fails
+  collection and replay instead of silently preserving only testcase evidence.
+  Missing or malformed digests, missing archives, substituted
   bytes and unsafe or duplicate ZIP paths fail closed. Historical raw evidence
   remains preserved; incomplete evidence is not upgraded to verified success.
   Explicit JUnit testcase times, pytest phase/fixture numbers, image timing
