@@ -71,7 +71,8 @@ async def test_concrete_refresh_error_classification(
         case _ as unreachable:
             assert_never(unreachable)
     with patch(
-        f"azents.engine.tools.{kind}.mcp_list_tools", AsyncMock(side_effect=error)
+        f"azents.engine.tools.{kind}.McpConnections.list_tools",
+        AsyncMock(side_effect=error),
     ):
         if failure == "network":
             await toolkit._refresh_tool_snapshot()
@@ -90,7 +91,8 @@ async def test_unexpected_background_fault_is_observed_once(
     error = TypeError("secret-marker-not-for-logs")
     observed = asyncio.Event()
     with patch(
-        f"azents.engine.tools.{kind}.mcp_list_tools", AsyncMock(side_effect=error)
+        f"azents.engine.tools.{kind}.McpConnections.list_tools",
+        AsyncMock(side_effect=error),
     ):
         await toolkit.__aenter__()
         task = toolkit._bg_task

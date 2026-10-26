@@ -179,12 +179,9 @@ def _make_toolkit(
         role_arn=role_arn,
     )
     credential_provider = AsyncMock(spec=AwsCredentialProvider)
-    # Configure get_credentials to return mock Credentials
-    mock_credentials = AsyncMock()
-    mock_credentials.access_key = "EXAMPLE_AWS_ACCESS_KEY_ID"
-    mock_credentials.secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-    mock_credentials.token = None
-    credential_provider.get_credentials = AsyncMock(return_value=mock_credentials)
+    credential_provider.get_credentials = AsyncMock(
+        return_value=Credentials("fixture-access-key", "fixture-secret")
+    )
 
     return AwsToolkit(
         config=config,
@@ -218,7 +215,7 @@ class TestAwsToolkitUpdateContext:
         ctx = _make_context()
 
         with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
+            "azents.engine.tools.aws.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(
                 tools=[_make_mcp_tool("aws___call_aws")], use_streamable_http=False
@@ -240,7 +237,7 @@ class TestAwsToolkitUpdateContext:
         ]
 
         with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
+            "azents.engine.tools.aws.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(tools=mock_tools, use_streamable_http=False),
         ):
@@ -302,7 +299,7 @@ class TestAwsToolkitConnectionFailure:
         ctx = _make_context()
 
         with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
+            "azents.engine.tools.aws.McpConnections.list_tools",
             new_callable=AsyncMock,
             side_effect=ConnectionError("Connection refused"),
         ):
@@ -337,7 +334,7 @@ class TestAwsToolkitBackgroundConnect:
             return McpToolListResult(mock_tools, False)
 
         with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
+            "azents.engine.tools.aws.McpConnections.list_tools",
             side_effect=slow_list_tools,
         ):
             async with toolkit:
@@ -369,7 +366,7 @@ class TestAwsToolkitBackgroundConnect:
             raise ConnectionError(msg)
 
         with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
+            "azents.engine.tools.aws.McpConnections.list_tools",
             side_effect=failing_list_tools,
         ):
             async with toolkit:
@@ -397,7 +394,7 @@ class TestAwsToolkitBackgroundConnect:
             return McpToolListResult([], False)
 
         with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
+            "azents.engine.tools.aws.McpConnections.list_tools",
             side_effect=forever_list_tools,
         ):
             async with toolkit:
@@ -416,7 +413,7 @@ class TestAwsToolkitBackgroundConnect:
         mock_tools = [_make_mcp_tool("aws___call_aws")]
 
         with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
+            "azents.engine.tools.aws.McpConnections.list_tools",
             new_callable=AsyncMock,
             return_value=McpToolListResult(tools=mock_tools, use_streamable_http=False),
         ):

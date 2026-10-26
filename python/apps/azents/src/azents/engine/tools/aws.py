@@ -10,6 +10,7 @@ import datetime
 import hashlib
 import json
 import logging
+import time
 from collections.abc import Callable, Generator
 from datetime import timedelta
 from textwrap import dedent
@@ -30,9 +31,7 @@ from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
     McpToolSnapshotState,
 )
-from azents.core.mcp_transport import (
-    call_tool as mcp_call_tool,
-)
+from azents.core.mcp_connections import McpConnections
 from azents.core.mcp_transport import (
     extract_network_error,
 )
@@ -315,6 +314,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         self._entered = False
         self._execution_owner: SessionExecutionOwner | None = None
         self._owner_stale = False
+        self.connections = McpConnections()
+        self._refresh_after = 0.0
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
         """Bind snapshot state before starting background discovery."""
@@ -344,6 +345,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def __aexit__(self, *exc: object) -> None:
         """Cancel background refresh task."""
+        self._entered = False
         if self._bg_task is not None and not self._bg_task.done():
             self._bg_task.cancel()
             try:
@@ -351,12 +353,15 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             except asyncio.CancelledError:
                 pass
         self._bg_task = None
+        await self.connections.close()
 
     def _ensure_refresh_task(self) -> None:
         """Start background refresh unless one is already running."""
         if self._owner_stale:
             return
         if self._bg_task is not None and not self._bg_task.done():
+            return
+        if time.monotonic() < self._refresh_after and not self.connections.stale:
             return
         self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
         self._bg_task.add_done_callback(
@@ -370,12 +375,14 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             credentials = await self.credential_provider.get_credentials()
             await self.assert_effect_current()
             sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
-            discovery = await mcp_list_tools(
+            discovery = await self.connections.list_tools(
                 _AWS_MCP_ENDPOINT,
                 {},
                 self._timeout,
                 proxy_url=self._proxy_url,
                 auth=sigv4_auth,
+                auth_identity=credentials.get_frozen_credentials(),
+                before_send=self.assert_effect_current,
             )
         except asyncio.CancelledError:
             raise
@@ -409,6 +416,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
                 "tool_hash": snapshot.tool_hash,
             },
         )
+
+        self._refresh_after = time.monotonic() + 300.0
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return AWS tools from the latest successful Toolkit State snapshot."""
@@ -451,6 +460,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         return [
             _wrap_aws_snapshot_tool(
                 item=item,
+                connections=self.connections,
                 credential_provider=self.credential_provider,
                 timeout=self._timeout,
                 proxy_url=self._proxy_url,
@@ -500,6 +510,7 @@ def _build_aws_tool_snapshot(
 def _wrap_aws_snapshot_tool(
     *,
     item: McpToolSnapshotItem,
+    connections: McpConnections,
     credential_provider: AwsCredentialProvider,
     timeout: float,
     proxy_url: str | None,
@@ -526,7 +537,17 @@ def _wrap_aws_snapshot_tool(
         if effect_admission is not None:
             await effect_admission.assert_current()
         auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
-        result = await mcp_call_tool(
+
+        async def before_send() -> None:
+            if effect_admission is not None:
+                await effect_admission.assert_current()
+            current = await credential_provider.get_credentials()
+            if current.get_frozen_credentials() != credentials.get_frozen_credentials():
+                raise FunctionToolError("AWS credentials changed before MCP dispatch.")
+            if effect_admission is not None:
+                await effect_admission.assert_current()
+
+        result = await connections.call_tool(
             item.server_url,
             {},
             timeout,
@@ -535,6 +556,8 @@ def _wrap_aws_snapshot_tool(
             use_streamable_http=item.use_streamable_http,
             proxy_url=proxy_url,
             auth=auth,
+            auth_identity=credentials.get_frozen_credentials(),
+            before_send=before_send,
         )
         return await _extract_tool_result(
             result,

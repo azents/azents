@@ -156,13 +156,13 @@ async def test_discovery_refuses_unbounded_or_invalid_retry_delay(
     sleep.assert_not_awaited()
 
 
-def test_discovery_classification_does_not_change_tool_execution_retries() -> None:
+def test_discovery_classifies_protocol_throttling_separately_from_http() -> None:
     failure = _mcp_throttle()
     assert discovery_rate_limit_delay(failure) == 0
     assert _extract_rate_limit_delay(failure) is None
 
 
-@pytest.mark.parametrize("operation", ["discovery", "tool", "connection"])
+@pytest.mark.parametrize("operation", ["discovery", "connection"])
 async def test_cancelled_transport_does_not_fallback_retry_or_report_failure(
     monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
@@ -182,15 +182,6 @@ async def test_cancelled_transport_does_not_fallback_retry_or_report_failure(
     with pytest.raises(asyncio.CancelledError) as caught:
         if operation == "discovery":
             await mcp_transport.list_tools("https://example.invalid/mcp", {}, 30)
-        elif operation == "tool":
-            await mcp_transport.call_tool(
-                "https://example.invalid/mcp",
-                {},
-                30,
-                "example",
-                {},
-                use_streamable_http=True,
-            )
         else:
             await mcp_transport.test_mcp_transport(
                 "https://example.invalid/mcp", {}, 30

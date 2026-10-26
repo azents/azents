@@ -16,7 +16,7 @@ import logging
 import mimetypes
 import time
 from abc import ABC
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Hashable
 from typing import Generic, NamedTuple, TypeVar, assert_never
 from urllib.parse import urlparse
 
@@ -40,9 +40,8 @@ from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
     McpToolSnapshotState,
 )
-from azents.core.mcp_transport import call_tool as mcp_call_tool
+from azents.core.mcp_connections import McpConnections
 from azents.core.mcp_transport import discovery_rate_limit_delay
-from azents.core.mcp_transport import list_tools as mcp_list_tools
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     SessionResourceAuthority,
@@ -102,6 +101,7 @@ class McpRequestAuthorization:
     headers: dict[str, str] = dataclasses.field(repr=False)
     on_authentication_failure: Callable[[], Awaitable[None]] | None
     auth: httpx.Auth | None
+    connection_identity: Hashable | None
 
 
 class McpAuthenticationFailureObserver(httpx.Auth):
@@ -478,11 +478,13 @@ def wrap_mcp_tool(
     auth: httpx.Auth | None = None,
     headers_provider: Callable[[], Awaitable[dict[str, str]]] | None = None,
     authorization_provider: Callable[[], Awaitable[McpRequestAuthorization]] | None,
+    connections: McpConnections,
+    before_send: Callable[[], Awaitable[None]] | None,
     artifact_sink_getter: ArtifactSinkGetter | None = None,
 ) -> FunctionTool:
     """Wrap MCP tool as azents Tool.
 
-    Create new connection for each call.
+    Reuse the binding's connection while resolving authority for each call.
     When on_auth_failure is set, reissue token on 401 response and retry once.
 
     :param mcp_tool: Tool spec fetched from MCP server
@@ -508,6 +510,44 @@ def wrap_mcp_tool(
         input_schema=mcp_tool.input_schema,
     )
 
+    async def execute(
+        call_headers: dict[str, str],
+        args: dict[str, object],
+        request_auth: httpx.Auth | None,
+        request_identity: Hashable | None,
+    ) -> CallToolResult:
+        async def validate_current() -> None:
+            if before_send is not None:
+                await before_send()
+            if authorization_provider is not None:
+                latest = await authorization_provider()
+                latest_headers = latest.headers
+                if latest.connection_identity != request_identity:
+                    raise FunctionToolError(
+                        "MCP account connection changed before dispatch."
+                    )
+            elif headers_provider is not None:
+                latest_headers = await headers_provider()
+            else:
+                latest_headers = call_headers
+            if latest_headers != call_headers:
+                raise FunctionToolError(
+                    "MCP authorization changed while preparing the request."
+                )
+
+        return await connections.call_tool(
+            server_url,
+            call_headers,
+            timeout,
+            mcp_tool.name,
+            args,
+            use_streamable_http=use_streamable_http,
+            proxy_url=proxy_url,
+            auth=request_auth,
+            auth_identity=request_identity,
+            before_send=validate_current,
+        )
+
     async def handler(arguments_json: str) -> str | FunctionToolResult:
         """Call MCP tool."""
         try:
@@ -527,20 +567,18 @@ def wrap_mcp_tool(
             else (await headers_provider() if headers_provider is not None else headers)
         )
         try:
-            result = await mcp_call_tool(
-                server_url,
+            result = await execute(
                 call_headers,
-                timeout,
-                mcp_tool.name,
                 args,
-                use_streamable_http=use_streamable_http,
-                proxy_url=proxy_url,
-                auth=(
+                (
                     call_authorization.auth
                     if call_authorization is not None
                     and call_authorization.auth is not None
                     else auth
                 ),
+                call_authorization.connection_identity
+                if call_authorization is not None
+                else auth,
             )
         except (httpx.HTTPStatusError, MCPError, ExceptionGroup) as exc:
             if (
@@ -559,15 +597,13 @@ def wrap_mcp_tool(
                         "Authorization": f"Bearer {new_token}",
                     }
                     try:
-                        result = await mcp_call_tool(
-                            server_url,
+                        result = await execute(
                             new_headers,
-                            timeout,
-                            mcp_tool.name,
                             args,
-                            use_streamable_http=use_streamable_http,
-                            proxy_url=proxy_url,
-                            auth=auth,
+                            auth,
+                            call_authorization.connection_identity
+                            if call_authorization is not None
+                            else auth,
                         )
                     except (
                         httpx.HTTPStatusError,
@@ -668,6 +704,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._execution_owner: SessionExecutionOwner | None = None
         self._owner_stale = False
         self.snapshot_store = self._make_snapshot_store()
+        self.connections = McpConnections()
+        self._refresh_after = 0.0
 
     def _make_snapshot_store(self) -> McpToolSnapshotStore | None:
         factory = self.snapshot_factory
@@ -732,7 +770,16 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             headers=_build_auth_headers(self._config, self._secret),
             on_authentication_failure=None,
             auth=None,
+            connection_identity=None,
         )
+
+    async def _refresh_authorization(self) -> str | None:
+        if self.on_auth_failure is None:
+            return None
+        secret = await self.on_auth_failure()
+        if secret is not None:
+            self._secret = secret
+        return secret
 
     async def _admitted_request_authorization(self) -> McpRequestAuthorization:
         """Repeat source admission around authorization's external credential gap."""
@@ -761,11 +808,15 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 pass
         self._bg_task = None
 
+        await self.connections.close()
+
     def _ensure_refresh_task(self) -> None:
         """Start background refresh unless one is already running."""
         if self._owner_stale:
             return
         if self._bg_task is not None and not self._bg_task.done():
+            return
+        if time.monotonic() < self._refresh_after and not self.connections.stale:
             return
         self._bg_task = asyncio.create_task(self._connect_and_list_tools())
         self._bg_task.add_done_callback(self._observe_refresh_failure)
@@ -799,13 +850,24 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             self._bg_error = str(exc)
             return
         headers = authorization.headers
+
+        async def before_discovery_send() -> None:
+            latest = await self._admitted_request_authorization()
+            if (
+                latest.headers != headers
+                or latest.connection_identity != authorization.connection_identity
+            ):
+                raise FunctionToolError("MCP authorization changed during discovery.")
+
         try:
-            discovery = await mcp_list_tools(
+            discovery = await self.connections.list_tools(
                 config.server_url,
                 headers,
                 config.timeout,
                 proxy_url=self._proxy_url,
                 auth=authorization.auth,
+                auth_identity=authorization.connection_identity,
+                before_send=before_discovery_send,
             )
         except (
             httpx.HTTPError,
@@ -906,6 +968,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._bg_error = (
             None  # Clear previous error when reconnection succeeds after retry
         )
+        self._refresh_after = time.monotonic() + 300.0
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current toolkit state immediately based on internal state.
@@ -962,8 +1025,14 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 headers,
                 config.timeout,
                 use_streamable_http=item.use_streamable_http,
-                on_auth_failure=self.on_auth_failure,
+                on_auth_failure=(
+                    self._refresh_authorization
+                    if self.on_auth_failure is not None
+                    else None
+                ),
                 authorization_provider=self._admitted_request_authorization,
+                connections=self.connections,
+                before_send=self.assert_effect_current,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
             )

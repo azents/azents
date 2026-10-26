@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import time
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from textwrap import dedent
@@ -26,9 +27,7 @@ from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
     McpToolSnapshotState,
 )
-from azents.core.mcp_transport import (
-    call_tool as mcp_call_tool,
-)
+from azents.core.mcp_connections import McpConnections
 from azents.core.mcp_transport import (
     extract_network_error,
 )
@@ -365,6 +364,8 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         self._entered = False
         self._execution_owner: SessionExecutionOwner | None = None
         self._owner_stale = False
+        self.connections = McpConnections()
+        self._refresh_after = 0.0
 
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
         """Bind snapshot state before starting background discovery."""
@@ -394,6 +395,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     async def __aexit__(self, *exc: object) -> None:
         """Cancel background refresh task."""
+        self._entered = False
         if self._bg_task is not None and not self._bg_task.done():
             self._bg_task.cancel()
             try:
@@ -401,12 +403,15 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             except asyncio.CancelledError:
                 pass
         self._bg_task = None
+        await self.connections.close()
 
     def _ensure_refresh_task(self) -> None:
         """Start background refresh unless one is already running."""
         if self._owner_stale:
             return
         if self._bg_task is not None and not self._bg_task.done():
+            return
+        if time.monotonic() < self._refresh_after and not self.connections.stale:
             return
         self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
         self._bg_task.add_done_callback(
@@ -470,6 +475,8 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                 "refreshed_service_count": success_count,
             },
         )
+        if success_count == len(self._server_configs):
+            self._refresh_after = time.monotonic() + 300.0
 
     async def _refresh_service_items(
         self,
@@ -483,11 +490,14 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": self._project_id,
         }
-        discovery = await mcp_list_tools(
+        discovery = await self.connections.list_tools(
             server.endpoint,
             headers,
             server.timeout,
             proxy_url=self._proxy_url,
+            auth=None,
+            auth_identity=None,
+            before_send=self.assert_effect_current,
         )
         writable = server.service in self._writable_services
         items: list[McpToolSnapshotItem] = []
@@ -550,6 +560,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         tools = [
             _wrap_gcp_snapshot_tool(
                 item=item,
+                connections=self.connections,
                 timeout=server_timeout[item.server_url],
                 token_provider=self.token_provider,
                 project_id=self._project_id,
@@ -591,6 +602,7 @@ def _is_read_only_tool(tool: McpBaseTool) -> bool:
 def _wrap_gcp_snapshot_tool(
     *,
     item: McpToolSnapshotItem,
+    connections: McpConnections,
     timeout: float,
     token_provider: GcpAccessTokenProvider,
     project_id: str,
@@ -621,8 +633,19 @@ def _wrap_gcp_snapshot_tool(
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": project_id,
         }
+
+        async def before_send() -> None:
+            if effect_admission is not None:
+                await effect_admission.assert_current()
+            if await token_provider.get_token() != headers[
+                "Authorization"
+            ].removeprefix("Bearer "):
+                raise FunctionToolError("GCP credentials changed before MCP dispatch.")
+            if effect_admission is not None:
+                await effect_admission.assert_current()
+
         try:
-            result = await mcp_call_tool(
+            result = await connections.call_tool(
                 item.server_url,
                 headers,
                 timeout,
@@ -630,6 +653,9 @@ def _wrap_gcp_snapshot_tool(
                 args,
                 use_streamable_http=item.use_streamable_http,
                 proxy_url=proxy_url,
+                auth=None,
+                auth_identity=None,
+                before_send=before_send,
             )
         except Exception as exc:
             if _is_http_401(exc):
@@ -642,7 +668,8 @@ def _wrap_gcp_snapshot_tool(
                     "Authorization": f"Bearer {refreshed_token}",
                     "x-goog-user-project": project_id,
                 }
-                result = await mcp_call_tool(
+                headers = retry_headers
+                result = await connections.call_tool(
                     item.server_url,
                     retry_headers,
                     timeout,
@@ -650,6 +677,9 @@ def _wrap_gcp_snapshot_tool(
                     args,
                     use_streamable_http=item.use_streamable_http,
                     proxy_url=proxy_url,
+                    auth=None,
+                    auth_identity=None,
+                    before_send=before_send,
                 )
             else:
                 raise

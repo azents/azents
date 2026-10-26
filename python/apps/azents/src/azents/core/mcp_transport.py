@@ -1,8 +1,7 @@
 """MCP transport layer utilities.
 
-Abstracts SSE and Streamable HTTP transport protocols. Tries Streamable HTTP
-first and falls back to SSE on failure. On 429 Rate Limit, respects Retry-After
-header and retries with exponential backoff.
+Provides short-lived discovery/probes and the SDK context used by binding-owned
+connections. Discovery negotiates HTTP/SSE and retries read-only throttling.
 """
 
 import asyncio
@@ -14,10 +13,9 @@ from typing import NamedTuple
 
 import httpx2 as httpx
 from mcp import MCPError
-from mcp.client.session import ClientSession
+from mcp.client.session import ClientSession, MessageHandlerFnT
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
-from mcp.types import CallToolResult
 from mcp.types import Tool as McpBaseTool
 
 from azents.core.tools import TestConnectionResult
@@ -98,6 +96,8 @@ async def _mcp_session(
     use_streamable_http: bool = False,
     proxy_url: str | None = None,
     auth: httpx.Auth | None = None,
+    message_handler: MessageHandlerFnT | None,
+    http_client_type: type[httpx.AsyncClient],
 ) -> AsyncGenerator[ClientSession]:
     """Create MCP session.
 
@@ -109,7 +109,7 @@ async def _mcp_session(
     :param auth: httpx2 Auth handler for per-request signing such as SigV4
     """
     if use_streamable_http:
-        async with httpx.AsyncClient(
+        async with http_client_type(
             headers=headers,
             timeout=httpx.Timeout(timeout, read=300.0),
             proxy=proxy_url,
@@ -119,17 +119,19 @@ async def _mcp_session(
                 server_url,
                 http_client=client,
             ) as (r, w):
-                async with ClientSession(r, w, read_timeout_seconds=timeout) as session:
+                async with ClientSession(
+                    r, w, read_timeout_seconds=timeout, message_handler=message_handler
+                ) as session:
                     await session.initialize()
                     yield session
-    elif proxy_url is not None:
+    elif proxy_url is not None or http_client_type is not httpx.AsyncClient:
 
         def _make_httpx_client(
             headers: dict[str, str] | None = None,
             timeout: httpx.Timeout | None = None,
             auth: httpx.Auth | None = None,
         ) -> httpx.AsyncClient:
-            return httpx.AsyncClient(
+            return http_client_type(
                 headers=headers,
                 timeout=timeout,
                 auth=auth,
@@ -144,7 +146,9 @@ async def _mcp_session(
             httpx_client_factory=_make_httpx_client,
             auth=auth,
         ) as (r, w):
-            async with ClientSession(r, w, read_timeout_seconds=timeout) as session:
+            async with ClientSession(
+                r, w, read_timeout_seconds=timeout, message_handler=message_handler
+            ) as session:
                 await session.initialize()
                 yield session
     else:
@@ -154,7 +158,9 @@ async def _mcp_session(
             timeout=timeout,
             auth=auth,
         ) as (r, w):
-            async with ClientSession(r, w, read_timeout_seconds=timeout) as session:
+            async with ClientSession(
+                r, w, read_timeout_seconds=timeout, message_handler=message_handler
+            ) as session:
                 await session.initialize()
                 yield session
 
@@ -220,6 +226,8 @@ async def _list_tools_once(
             use_streamable_http=True,
             proxy_url=proxy_url,
             auth=auth,
+            message_handler=None,
+            http_client_type=httpx.AsyncClient,
         ) as session:
             result = await session.list_tools()
             return McpToolListResult(tools=list(result.tools), use_streamable_http=True)
@@ -234,68 +242,16 @@ async def _list_tools_once(
         )
 
     async with _mcp_session(
-        server_url, headers, timeout, proxy_url=proxy_url, auth=auth
+        server_url,
+        headers,
+        timeout,
+        proxy_url=proxy_url,
+        auth=auth,
+        message_handler=None,
+        http_client_type=httpx.AsyncClient,
     ) as session:
         result = await session.list_tools()
         return McpToolListResult(tools=list(result.tools), use_streamable_http=False)
-
-
-async def call_tool(
-    server_url: str,
-    headers: dict[str, str],
-    timeout: float,
-    tool_name: str,
-    arguments: dict[str, object],
-    *,
-    use_streamable_http: bool = False,
-    proxy_url: str | None = None,
-    auth: httpx.Auth | None = None,
-) -> CallToolResult:
-    """Call MCP tool.
-
-    On 429 Rate Limit, respect Retry-After header and retry up to 3 times.
-    When Retry-After is absent, apply exponential backoff of 1s, 2s, 4s.
-
-    :param server_url: MCP server URL
-    :param headers: Authentication headers
-    :param timeout: Timeout in seconds
-    :param tool_name: Tool name to call
-    :param arguments: Tool arguments
-    :param use_streamable_http: True for Streamable HTTP, False for SSE
-    :param proxy_url: Egress proxy URL; direct connection when None
-    :param auth: httpx Auth handler
-    """
-    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
-        try:
-            async with _mcp_session(
-                server_url,
-                headers,
-                timeout,
-                use_streamable_http=use_streamable_http,
-                proxy_url=proxy_url,
-                auth=auth,
-            ) as session:
-                return await session.call_tool(tool_name, arguments=arguments)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            delay = _extract_rate_limit_delay(exc)
-            if delay is None or attempt >= _RATE_LIMIT_MAX_RETRIES:
-                raise
-            # When Retry-After is absent (0.0), use exponential backoff
-            if delay == 0.0:
-                delay = _RATE_LIMIT_BASE_DELAY * (2**attempt)
-            logger.warning(
-                "MCP tool rate limited, retrying",
-                extra={
-                    "tool_name": tool_name,
-                    "server_url": server_url,
-                    "attempt": attempt + 1,
-                    "retry_after_secs": delay,
-                },
-            )
-            await asyncio.sleep(delay)
-    raise AssertionError("unreachable")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------

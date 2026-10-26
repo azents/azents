@@ -110,8 +110,8 @@ async def test_cloud_background_and_cached_handlers_use_current_personal_source(
         )
     )
     call = AsyncMock()
-    monkeypatch.setattr(module, "mcp_list_tools", listing)
-    monkeypatch.setattr(module, "mcp_call_tool", call)
+    monkeypatch.setattr(module.McpConnections, "list_tools", listing)
+    monkeypatch.setattr(module.McpConnections, "call_tool", call)
     if timing == "discovery_gap":
         result = listing.return_value
 

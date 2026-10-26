@@ -111,7 +111,7 @@ async def test_retained_snapshot_wrapper_resolves_each_current_token(
     provider = AsyncMock(
         return_value=CallToolResult(content=[TextContent(type="text", text="ok")])
     )
-    monkeypatch.setattr(mcp_module, "mcp_call_tool", provider)
+    monkeypatch.setattr(mcp_module.McpConnections, "call_tool", staticmethod(provider))
     tool = _mcp(runtime)._tools_from_snapshot(_snapshot())[0]
     assert await tool.handler("{}") == "ok"
     assert await tool.handler("{}") == "ok"
@@ -132,7 +132,7 @@ async def test_disconnected_call_uses_no_provider_or_cached_token(
         "Current authorization unavailable.",
     )
     provider = AsyncMock()
-    monkeypatch.setattr(mcp_module, "mcp_call_tool", provider)
+    monkeypatch.setattr(mcp_module.McpConnections, "call_tool", staticmethod(provider))
     tool = _mcp(runtime)._tools_from_snapshot(_snapshot())[0]
     with pytest.raises(FunctionToolError, match="unavailable"):
         await tool.handler("{}")
@@ -150,7 +150,7 @@ async def test_user_action_error_is_sanitized_without_invalidating_account(
             content=[TextContent(type="text", text="untrusted-private-provider-body")],
         )
     )
-    monkeypatch.setattr(mcp_module, "mcp_call_tool", provider)
+    monkeypatch.setattr(mcp_module.McpConnections, "call_tool", staticmethod(provider))
     tool = _mcp(runtime)._tools_from_snapshot(_snapshot())[0]
     with pytest.raises(FunctionToolError, match="target access") as caught:
         await tool.handler("{}")
@@ -181,7 +181,7 @@ async def test_auth_observation_survives_normalized_mcp_error(
             [MCPError(-32000, "Session terminated")],
         )
 
-    monkeypatch.setattr(mcp_module, "mcp_call_tool", provider)
+    monkeypatch.setattr(mcp_module.McpConnections, "call_tool", staticmethod(provider))
     tool = _mcp(runtime)._tools_from_snapshot(_snapshot())[0]
     with pytest.raises(FunctionToolError):
         await tool.handler("{}")
@@ -200,7 +200,7 @@ async def test_auth_failure_publication_does_not_hide_programming_error(
     runtime.current_connection.return_value = _connection("current")
     runtime.authentication_failed.side_effect = RuntimeError("Local persistence defect")
     monkeypatch.setattr(
-        mcp_module, "mcp_call_tool", AsyncMock(side_effect=_failure(401))
+        mcp_module.McpConnections, "call_tool", AsyncMock(side_effect=_failure(401))
     )
     tool = _mcp(runtime)._tools_from_snapshot(_snapshot())[0]
     with pytest.raises(RuntimeError, match="Local persistence defect"):
@@ -215,7 +215,7 @@ async def test_only_definite_auth_failure_is_published_without_reissue(
     runtime = create_autospec(GitHubUserRuntimeService, instance=True)
     runtime.current_connection.return_value = _connection("old")
     provider = AsyncMock(side_effect=_failure(status))
-    monkeypatch.setattr(mcp_module, "mcp_call_tool", provider)
+    monkeypatch.setattr(mcp_module.McpConnections, "call_tool", staticmethod(provider))
     tool = _mcp(runtime)._tools_from_snapshot(_snapshot())[0]
     with pytest.raises((FunctionToolError, httpx.HTTPStatusError)):
         await tool.handler("{}")
@@ -245,7 +245,7 @@ async def test_concurrent_old_failure_publishes_its_own_connection(
             raise _failure(401)
         return CallToolResult(content=[TextContent(type="text", text="new-call-ok")])
 
-    monkeypatch.setattr(mcp_module, "mcp_call_tool", provider)
+    monkeypatch.setattr(mcp_module.McpConnections, "call_tool", staticmethod(provider))
     tool = _mcp(runtime)._tools_from_snapshot(_snapshot())[0]
     old = asyncio.ensure_future(tool.handler("{}"))
     await entered.wait()
@@ -269,7 +269,7 @@ async def test_live_discovery_uses_current_authorization(
         return_value=McpToolListResult(tools=[], use_streamable_http=True),
         side_effect=None if failure is None else _failure(failure),
     )
-    monkeypatch.setattr(mcp_module, "mcp_list_tools", discovery)
+    monkeypatch.setattr(mcp_module.McpConnections, "list_tools", discovery)
     await _mcp(runtime)._connect_and_list_tools()
     assert discovery.await_args is not None
     assert discovery.await_args.args[1] == {"Authorization": "Bearer token-current"}
