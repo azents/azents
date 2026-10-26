@@ -6,6 +6,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+import tempfile
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -46,6 +48,13 @@ class ImageReceipt:
     archive_sha256: str
     archive_bytes: int
     export_seconds: float
+
+
+@dataclass(frozen=True)
+class DirectImageBuild:
+    receipt: ImageReceipt
+    producer_load_seconds: float
+    total_seconds: float
 
 
 @dataclass(frozen=True)
@@ -245,6 +254,94 @@ def inspect(image: str) -> str:
     return result
 
 
+def _write_archive(command: list[str], archive: Path) -> None:
+    """Drain the exact producer and stop it if its compression consumer fails."""
+    with archive.open("xb") as output:
+        producer = subprocess.Popen(command, stdout=subprocess.PIPE)
+        assert producer.stdout is not None
+        try:
+            result = subprocess.run(
+                ["zstd", "-3", "-T1", "--stdout"],
+                stdin=producer.stdout,
+                stdout=output,
+                check=False,
+            )
+            if result.returncode != 0 or producer.wait() != 0:
+                raise RuntimeError("CI Docker image archive production failed")
+        except BaseException:
+            # Reap our producer even if interruption occurs during its final wait.
+            if producer.poll() is None:
+                producer.terminate()
+                try:
+                    producer.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    producer.kill()
+                    producer.wait()
+            raise
+        finally:
+            producer.stdout.close()
+
+
+def build_runner(directory: Path) -> DirectImageBuild:
+    """Retain one build archive for producer smoke and unchanged E2E consumers."""
+    owner = identity()
+    verify_checkout(owner)
+    directory.mkdir(parents=True, exist_ok=False)
+    image = "azents-runtime-runner"
+    tag = f"{image}:ci"
+    archive = directory / ARCHIVE_NAME
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="ci-image-build-") as temporary:
+        metadata = Path(temporary) / "metadata.json"
+        _write_archive(
+            [
+                "docker",
+                "buildx",
+                "build",
+                "--output",
+                "type=docker,dest=-",
+                "--metadata-file",
+                str(metadata),
+                "-f",
+                "python/apps/azents-runtime-runner/Dockerfile",
+                "-t",
+                tag,
+                ".",
+            ],
+            archive,
+        )
+        built = object_value(json.loads(metadata.read_text()))
+        expected_ids = {
+            text(built["containerimage.digest"]),
+            text(built["containerimage.config.digest"]),
+        }
+        if any(
+            re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None
+            for value in expected_ids
+        ):
+            raise ValueError("Build did not report valid image identities")
+        archive_digest = digest(archive)
+        archive_bytes = archive.stat().st_size
+        # Direct production overlaps build, Docker export and compression. This
+        # is inclusive archive-production wall, not legacy post-build export time.
+        export_seconds = time.monotonic() - started
+        load_started = time.monotonic()
+        subprocess.run(["docker", "image", "load", "--input", str(archive)], check=True)
+        image_id = inspect(tag)
+        # Classic Docker reports config IDs; the containerd image store reports
+        # manifest IDs. Both must come from this exact build invocation.
+        if image_id not in expected_ids:
+            raise ValueError("Producer image differs from the exact build output")
+        load_seconds = time.monotonic() - load_started
+    receipt = ImageReceipt(
+        owner, image, image_id, archive_digest, archive_bytes, export_seconds
+    )
+    (directory / "receipt.json").write_text(
+        json.dumps(asdict(receipt), indent=2) + "\n"
+    )
+    return DirectImageBuild(receipt, load_seconds, time.monotonic() - started)
+
+
 def export(image: str, directory: Path) -> ImageReceipt:
     """Keep exactly one already-built image with immutable execution provenance."""
     if image not in IMAGES:
@@ -255,23 +352,7 @@ def export(image: str, directory: Path) -> ImageReceipt:
     started = time.monotonic()
     image_id = inspect(f"{image}:ci")
     archive = directory / ARCHIVE_NAME
-    with archive.open("xb") as output:
-        save = subprocess.Popen(
-            ["docker", "image", "save", image_id], stdout=subprocess.PIPE
-        )
-        assert save.stdout is not None
-        try:
-            compressed = subprocess.run(
-                ["zstd", "-3", "-T1", "--stdout"],
-                stdin=save.stdout,
-                stdout=output,
-                check=False,
-            )
-        finally:
-            save.stdout.close()
-            status = save.wait()
-        if compressed.returncode != 0 or status != 0:
-            raise RuntimeError("CI Docker image export failed")
+    _write_archive(["docker", "image", "save", image_id], archive)
     receipt = ImageReceipt(
         owner,
         image,
@@ -372,6 +453,8 @@ def load(root: Path, suite: str, environment: Path, evidence: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="operation", required=True)
+    direct = commands.add_parser("build-runner")
+    direct.add_argument("--directory", type=Path, required=True)
     producer = commands.add_parser("export")
     producer.add_argument("--image", choices=IMAGES, required=True)
     producer.add_argument("--directory", type=Path, required=True)
@@ -385,7 +468,22 @@ def main() -> int:
     consumer.add_argument("--github-env", type=Path, required=True)
     consumer.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
-    if args.operation == "export":
+    if args.operation == "build-runner":
+        result = build_runner(args.directory)
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "archive_production_seconds": result.receipt.export_seconds,
+                    "producer_load_seconds": result.producer_load_seconds,
+                    "total_seconds": result.total_seconds,
+                    "archive_bytes": result.receipt.archive_bytes,
+                    "image_id": result.receipt.image_id,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+    elif args.operation == "export":
         export(args.image, args.directory)
     elif args.operation == "prepare":
         prepare(args.root, args.suite, args.evidence)

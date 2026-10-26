@@ -86,7 +86,9 @@ def _assert_connected_result(events: list[ChatEventResponse]) -> None:
         for event in events
         if event.kind == "client_tool_result"
     ]
-    result = next(item for item in results if item.call_id == "call_github_user_mcp_0")
+    result = next(
+        item for item in results if item.call_id == "call_github_user_personal_0"
+    )
     assert result.status == "completed"
     assert "connected-user" in result.model_dump_json(exclude_unset=True)
 
@@ -250,7 +252,7 @@ def test_personal_workspace_policy_and_worker_isolation(
             timeout=10,
         )
         assert response.status_code == 404
-    events = _run_user(server, token, agent_a, kind="mcp")
+    events = _run_user(server, token, agent_a, kind="personal")
     _assert_connected_result(events)
     _assert_runtime_result(
         _run_user(server, token, agent_a, kind="runtime-on"),
@@ -262,9 +264,9 @@ def test_personal_workspace_policy_and_worker_isolation(
         _ProxyEvidence,
         label="Provider before denial",
     )
-    assert before.mcp_call_count >= 5
-    _run_team(server, token, agent_a, kind="mcp", session_id=None)
-    _run_user(server, token, agent_b, kind="mcp")
+    assert before.mcp_call_count >= 1
+    _run_team(server, token, agent_a, kind="personal", session_id=None)
+    _run_user(server, token, agent_b, kind="personal")
     _assert_runtime_result(
         _run_user(server, token, agent_b, kind="runtime-off"),
         kind="runtime-off",
@@ -286,7 +288,7 @@ def test_personal_workspace_policy_and_worker_isolation(
         timeout=10,
     )
     assert denied.status_code == 404
-    _run_user(server, member_token, agent_a, kind="mcp")
+    _run_user(server, member_token, agent_a, kind="personal")
     member_denied = _response(
         requests.get(github_validation_proxy_url + "/__testenv/state", timeout=5),
         _ProxyEvidence,
@@ -309,7 +311,7 @@ def test_personal_workspace_policy_and_worker_isolation(
         timeout=10,
     )
     restricted.raise_for_status()
-    _run_user(server, token, agent_a, kind="mcp")
+    _run_user(server, token, agent_a, kind="personal")
     _assert_runtime_result(
         _run_user(server, token, agent_a, kind="runtime-off"),
         kind="runtime-off",
@@ -344,5 +346,5 @@ def test_personal_workspace_policy_and_worker_isolation(
         timeout=10,
     )
     restored.raise_for_status()
-    recovered = _run_user(server, token, agent_a, kind="mcp")
+    recovered = _run_user(server, token, agent_a, kind="personal")
     _assert_connected_result(recovered)

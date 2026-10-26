@@ -1047,6 +1047,12 @@ jobs:
         run: mkdir -p /tmp/next-cache/next-cache
       - name: Build ${{ matrix.name }}
         run: |
+          if [ "${{ matrix.name }}" = azents-runtime-runner ] &&
+             [ "${{ needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true' }}" = true ]; then
+            python -m scripts.ci.e2e_images build-runner \
+              --directory "${RUNNER_TEMP}/e2e-image"
+            exit 0
+          fi
           docker buildx build \
             --load \
             ${{ matrix.extra_context }} \
@@ -1082,6 +1088,7 @@ jobs:
       - name: Export exact E2E image
         if: >-
           (needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true')
+          && matrix.name != 'azents-runtime-runner'
           && contains(fromJSON('["azents-server","azents-runtime-runner","azents-runtime-provider-docker","azents-web","azents-admin-web"]'), matrix.name)
         run: |
           python -m scripts.ci.e2e_images export \
