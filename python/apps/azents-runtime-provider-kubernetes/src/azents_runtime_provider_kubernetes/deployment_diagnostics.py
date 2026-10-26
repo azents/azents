@@ -51,12 +51,6 @@ _DEFAULT_DENY_SELECTOR = {
 }
 _IMMUTABLE_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[0-9a-f]{64}$")
 _ADDON_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-_KNOWN_CNI_API_GROUP_MARKERS = (
-    "cilium.io",
-    "crd.projectcalico.org",
-    "antrea.io",
-    "k8s.cni.cncf.io",
-)
 _EXPECTED_API_RESOURCES = {
     "v1": (
         "configmaps",
@@ -110,10 +104,6 @@ class DeploymentDiagnosticsApi(Protocol):
 
     async def discover_api_resources(self, api_version: str) -> frozenset[str]:
         """Return resource names advertised by one API version."""
-        ...
-
-    async def list_api_groups(self) -> frozenset[str]:
-        """Return visible Kubernetes API group names."""
         ...
 
     async def check_resource_access(
@@ -210,7 +200,7 @@ async def _collect_operational_diagnostics(
     await _check_rbac(api, settings, warnings)
     await _check_namespace_and_policies(api, settings, warnings)
     await _check_mandatory_services(api, settings, warnings)
-    await _check_cni(api, warnings)
+    await _check_network_policy_api(api, warnings)
     _check_proxy_artifacts(settings, warnings)
     snapshot = RuntimeProviderOperationalDiagnostics(
         checked_at=datetime.now(UTC),
@@ -460,10 +450,11 @@ async def _check_mandatory_services(
             )
 
 
-async def _check_cni(
+async def _check_network_policy_api(
     api: DeploymentDiagnosticsApi,
     warnings: dict[str, RuntimeProviderOperationalWarning],
 ) -> None:
+    """Check API availability; data-plane enforcement requires operator attestation."""
     try:
         network_resources = await api.discover_api_resources("networking.k8s.io/v1")
     except _EXPECTED_API_FAILURES:
@@ -478,24 +469,6 @@ async def _check_cni(
             warnings,
             "cni_support_unconfirmed",
             {"reason": "network_policy_support_unconfirmed"},
-        )
-        return
-    try:
-        groups = await api.list_api_groups()
-    except _EXPECTED_API_FAILURES:
-        _add_warning(
-            warnings,
-            "cni_support_unconfirmed",
-            {"reason": "api_discovery_unavailable"},
-        )
-        return
-    if not any(
-        marker in group for marker in _KNOWN_CNI_API_GROUP_MARKERS for group in groups
-    ):
-        _add_warning(
-            warnings,
-            "cni_support_unconfirmed",
-            {"reason": "cni_identity_unavailable"},
         )
 
 

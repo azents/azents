@@ -373,7 +373,7 @@ const operations: OperationCase[] = [
   {
     module: "runtimeProvider",
     operation: "createProviderRecreation",
-    input: { providerId: "provider", expectedVersion: 1 },
+    input: { providerId: "provider", expectedVersion: 0 },
   },
   {
     module: "runtimeProvider",
@@ -469,6 +469,53 @@ for (const item of operations) {
     assert.equal(loaded.calls.length, 1);
   });
 }
+void test("Provider recreation forwards zero and positive administrative versions", async () => {
+  const loaded = loadProtocol(new URL("./runtimeProvider.ts", import.meta.url));
+  const caller = operationCaller(loaded, "runtimeProvider");
+  for (const expectedVersion of [0, 2]) {
+    await invoke(property(caller, "createProviderRecreation"), {
+      providerId: "provider",
+      expectedVersion,
+    });
+    const call = loaded.calls.at(-1);
+    assert.equal(call?.name, "runtimeProviderV1CreateProviderRecreation");
+    assert.deepEqual(object(object(call.request).body), {
+      expected_version: expectedVersion,
+    });
+  }
+});
+void test("Provider recreation rejects invalid administrative versions before SDK work", async () => {
+  const loaded = loadProtocol(new URL("./runtimeProvider.ts", import.meta.url));
+  const caller = operationCaller(loaded, "runtimeProvider");
+  for (const expectedVersion of [-1, 0.5]) {
+    await assert.rejects(
+      async () =>
+        await invoke(property(caller, "createProviderRecreation"), {
+          providerId: "provider",
+          expectedVersion,
+        }),
+      (error: unknown) =>
+        error instanceof trpcServer.TRPCError && error.code === "BAD_REQUEST",
+    );
+  }
+  assert.deepEqual(loaded.calls, []);
+});
+void test("infrastructure Profile recreation requires a positive Profile version", async () => {
+  const loaded = loadProtocol(new URL("./runtimeProvider.ts", import.meta.url));
+  const caller = operationCaller(loaded, "runtimeProvider");
+  await assert.rejects(
+    async () =>
+      await invoke(property(caller, "createInfrastructureProfileRecreation"), {
+        providerId: "provider",
+        profileId: "profile",
+        profileKind: "kubernetes_pod",
+        expectedVersion: 0,
+      }),
+    (error: unknown) =>
+      error instanceof trpcServer.TRPCError && error.code === "BAD_REQUEST",
+  );
+  assert.deepEqual(loaded.calls, []);
+});
 void test("session POST rejects an unknown field before login and cookies", async () => {
   const loaded = loadProtocol(
     new URL("../../app/api/session/route.ts", import.meta.url),

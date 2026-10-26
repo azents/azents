@@ -201,13 +201,19 @@ deployment topology differs.
 
 The Provider performs best-effort startup and periodic checks for required API
 resources and RBAC, mandatory Services, workload Namespace/default-deny ownership,
-discoverable CNI identity, unexpected selecting NetworkPolicies, and proxy artifact
+NetworkPolicy API availability, unexpected selecting NetworkPolicies, and proxy artifact
 immutability. Findings are structured warnings on the active Provider connection.
 They do not change capability advertisement, Runtime desired/applied state, or
 Provider readiness. Deterministic Helm render and Provider tests validate the
 configuration, resource, RBAC, manifest, and warning contracts; the operator
 attestation remains responsible for asserting that the deployment supplies the
 required enforcing substrate.
+
+Vendor API groups are not an enforcement check: implementations such as K3s's
+embedded network-policy controller need no vendor CRDs, and the presence of CNI
+CRDs does not establish data-plane enforcement. The absence of diagnostic warnings
+therefore does not certify network isolation; operators must validate enforcement
+before enabling either strict attestation.
 
 ## External Service And Credential Modes
 
