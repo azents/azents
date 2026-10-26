@@ -25,6 +25,7 @@ import {
   type ActivityRunBinding,
   boundRunActivitySource,
   latestRunActivitySource,
+  retainBoundActivity,
 } from "../activityRunPresentation";
 import { completedCompactionIds } from "../compactionPresentation";
 import {
@@ -561,7 +562,7 @@ export function useChatViewContainer({
     () => new Set<string>(actionExecutionPlacement.durableBeforeMessage.keys()),
     [actionExecutionPlacement.durableBeforeMessage],
   );
-  const chatPresentationItems = useMemo(
+  const projectedChatPresentationItems = useMemo(
     () =>
       projectChatPresentationItems(
         timelineEvents,
@@ -569,6 +570,56 @@ export function useChatViewContainer({
         actionBoundaryMessageIds,
       ),
     [actionBoundaryMessageIds, messages, timelineEvents],
+  );
+  const latestActivitySource = useMemo(
+    () => latestRunActivitySource(projectedChatPresentationItems, messages),
+    [projectedChatPresentationItems, messages],
+  );
+  const [activityRunBinding, setActivityRunBinding] =
+    useState<ActivityRunBinding | null>(null);
+  const latestRunId = liveRun?.run_id ?? null;
+  useLayoutEffect(() => {
+    if (chatTimelineState.type !== "LATEST_FOLLOWING") {
+      return;
+    }
+    setActivityRunBinding((previous) => {
+      if (latestRunId === null || latestActivitySource === null) {
+        return null;
+      }
+      if (
+        previous?.runId === latestRunId &&
+        previous.activity === latestActivitySource
+      ) {
+        return previous;
+      }
+      const sourceIndex =
+        projectedChatPresentationItems.indexOf(latestActivitySource);
+      return {
+        runId: latestRunId,
+        activity: latestActivitySource,
+        followingItemId:
+          projectedChatPresentationItems[sourceIndex + 1]?.id ?? null,
+      };
+    });
+  }, [
+    chatTimelineState.type,
+    latestRunId,
+    latestActivitySource,
+    projectedChatPresentationItems,
+  ]);
+  const chatPresentationItems = useMemo(
+    () =>
+      chatTimelineState.type === "LATEST_FOLLOWING"
+        ? projectedChatPresentationItems
+        : retainBoundActivity(
+            projectedChatPresentationItems,
+            activityRunBinding,
+          ),
+    [
+      chatTimelineState.type,
+      projectedChatPresentationItems,
+      activityRunBinding,
+    ],
   );
   const latestActivityId = useMemo(() => {
     for (let index = chatPresentationItems.length - 1; index >= 0; index -= 1) {
@@ -579,31 +630,6 @@ export function useChatViewContainer({
     }
     return null;
   }, [chatPresentationItems]);
-  const latestActivitySource = useMemo(
-    () => latestRunActivitySource(chatPresentationItems, messages),
-    [chatPresentationItems, messages],
-  );
-  const [activityRunBinding, setActivityRunBinding] =
-    useState<ActivityRunBinding | null>(null);
-  const latestRunId = liveRun?.run_id ?? null;
-  const latestSourceId = latestActivitySource?.id ?? null;
-  useLayoutEffect(() => {
-    if (chatTimelineState.type !== "LATEST_FOLLOWING") {
-      return;
-    }
-    setActivityRunBinding((previous) => {
-      if (latestRunId === null || latestSourceId === null) {
-        return null;
-      }
-      if (
-        previous?.runId === latestRunId &&
-        previous.activityId === latestSourceId
-      ) {
-        return previous;
-      }
-      return { runId: latestRunId, activityId: latestSourceId };
-    });
-  }, [chatTimelineState.type, latestRunId, latestSourceId]);
   const activeActivitySource =
     chatTimelineState.type === "LATEST_FOLLOWING"
       ? liveRun === null
@@ -628,6 +654,7 @@ export function useChatViewContainer({
       ? authorizationRequests
       : authorizationRequests.slice(1);
   const hasTimelineItems =
+    chatPresentationItems.length > 0 ||
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
     pendingMailboxEntries.length > 0 ||

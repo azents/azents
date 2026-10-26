@@ -6,7 +6,27 @@ import type { ChatMessage } from "@azents/session-core/types";
 
 export interface ActivityRunBinding {
   runId: string;
-  activityId: string;
+  activity: ToolActivityPresentationItem;
+  followingItemId: string | null;
+}
+
+export function retainBoundActivity(
+  items: ChatPresentationItem[],
+  binding: ActivityRunBinding | null,
+): ChatPresentationItem[] {
+  if (binding === null) {
+    return items;
+  }
+  if (items.some((item) => item.id === binding.activity.id)) {
+    return items.map((item) =>
+      item.id === binding.activity.id ? binding.activity : item,
+    );
+  }
+  const followingIndex = items.findIndex(
+    (item) => item.id === binding.followingItemId,
+  );
+  const index = followingIndex < 0 ? items.length : followingIndex;
+  return [...items.slice(0, index), binding.activity, ...items.slice(index)];
 }
 
 export function latestRunActivitySource(
@@ -44,7 +64,7 @@ export function boundRunActivitySource(
   return (
     items.find(
       (item): item is ToolActivityPresentationItem =>
-        item.type === "activity" && item.id === binding.activityId,
+        item.type === "activity" && item.id === binding.activity.id,
     ) ?? null
   );
 }

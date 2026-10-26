@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   boundRunActivitySource,
   latestRunActivitySource,
+  retainBoundActivity,
 } from "./activityRunPresentation.ts";
 import type { ToolActivityPresentationItem } from "@azents/session-core/toolActivityPresentation";
 import type { ChatMessage } from "@azents/session-core/types";
@@ -53,7 +54,7 @@ void test("a new human input separates historical activity from the active Run",
 void test("detached history retains only its known current Run Activity binding", () => {
   const previous = activity("previous", 0);
   const current = activity("current", 1);
-  const binding = { runId: "run-1", activityId: current.id };
+  const binding = { runId: "run-1", activity: current, followingItemId: null };
   assert.equal(
     boundRunActivitySource([previous, current], binding, "run-1"),
     current,
@@ -68,4 +69,28 @@ void test("detached history retains only its known current Run Activity binding"
   );
   assert.equal(boundRunActivitySource([previous], binding, "run-1"), null);
   assert.equal(boundRunActivitySource([previous], null, "run-1"), null);
+});
+
+void test("retains a live-only Activity and its position when detached projections hide partial events", () => {
+  const current = activity("partial-activity", 1);
+  const following = {
+    type: "message" as const,
+    id: "following",
+    message: message("following-message", "assistant"),
+    messageIndex: 2,
+  };
+  const binding = {
+    runId: "run-1",
+    activity: current,
+    followingItemId: following.id,
+  };
+  const retained = retainBoundActivity([following], binding);
+  assert.deepEqual(retained, [current, following]);
+  assert.equal(boundRunActivitySource(retained, binding, "run-1"), current);
+  assert.equal(boundRunActivitySource(retained, binding, null), null);
+  assert.equal(
+    retainBoundActivity([activity(current.id, 0)], binding)[0],
+    current,
+  );
+  assert.deepEqual(retainBoundActivity([], binding), [current]);
 });

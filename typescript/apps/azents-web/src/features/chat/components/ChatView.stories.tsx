@@ -1149,6 +1149,7 @@ function ActivityScrollTransitionDemo(): ReactElement {
     "latest" | "detached" | "completed" | "restored"
   >("latest");
   const running = phase === "latest" || phase === "detached";
+  const following = phase === "latest" || phase === "restored";
   return (
     <Stack h="100%" gap={0}>
       <Group>
@@ -1158,12 +1159,21 @@ function ActivityScrollTransitionDemo(): ReactElement {
         <Button onClick={() => setPhase("completed")}>
           Complete Run while browsing
         </Button>
+        <Button onClick={() => setPhase("latest")}>
+          Return to running latest
+        </Button>
       </Group>
       <Box flex={1} pos="relative" mih={0}>
         <ChatView
           {...StreamingModelWithPartialOutput.args}
+          messages={StreamingModelWithPartialOutput.args.messages.filter(
+            (message) => following || message.id !== "streaming-reasoning",
+          )}
+          timelineEvents={StreamingModelWithPartialOutput.args.timelineEvents.filter(
+            (event) => following || event.id !== "streaming-reasoning",
+          )}
           chatTimelineState={
-            phase === "latest" || phase === "restored"
+            following
               ? { type: "LATEST_FOLLOWING" }
               : {
                   type: "DETACHED_HISTORY_BROWSING",
@@ -1210,6 +1220,34 @@ export const ActivityStatusSurvivesHistoryBrowsing = {
     await userEvent.click(canvas.getByRole("button", { name: "New message" }));
     await expect(getActivity()).toBe(activity);
     await expect(activity).toHaveAttribute("aria-expanded", "true");
+  },
+} satisfies Story;
+
+export const PartialActivityRetainsUserDisclosure = {
+  args: baseArgs,
+  render: () => <ActivityScrollTransitionDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const activity = canvas.getByRole("button", { name: /^Activity/ });
+    await userEvent.click(activity);
+    await expect(activity).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Browse older history" }),
+    );
+    await expect(canvas.getByRole("button", { name: /^Activity/ })).toBe(
+      activity,
+    );
+    await expect(activity).toHaveAttribute("aria-expanded", "false");
+    await expect(
+      canvas.getByRole("status", { name: "Live activity is running" }),
+    ).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Return to running latest" }),
+    );
+    await expect(canvas.getByRole("button", { name: /^Activity/ })).toBe(
+      activity,
+    );
+    await expect(activity).toHaveAttribute("aria-expanded", "false");
   },
 } satisfies Story;
 
