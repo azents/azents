@@ -3,6 +3,15 @@
 from scripts.ci.observability import JUnitSummary
 
 STORIES = {
+    "src/features/chat/components/ChatView.stories.tsx": (
+        "Activity Status Survives History Browsing",
+        "Partial Activity Retains User Disclosure",
+        "Completed Activity Is Not Reused By New Run",
+    ),
+    "src/features/chat/components/ToolActivityGroup.stories.tsx": (
+        "Preserves Previous Group Disclosure",
+        "Preserves User Collapsed Group On Completion",
+    ),
     "src/shared/session-context/SessionContextView.stories.tsx": (
         "Unavailable Counters",
         "Usage Counters",

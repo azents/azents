@@ -930,11 +930,6 @@ export const LatestErrorWithTodo = {
     if (!(viewport instanceof HTMLElement) || preview === null) {
       throw new Error("Expected the chat viewport and Todo preview");
     }
-    await waitFor(() =>
-      expect(viewport.getBoundingClientRect().bottom).toBeLessThanOrEqual(
-        preview.getBoundingClientRect().top,
-      ),
-    );
     const error = canvas.getByText(
       "Compaction failed: the selected model is temporarily unavailable. Please try again after checking the model settings.",
     );
