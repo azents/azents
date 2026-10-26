@@ -17,7 +17,11 @@ from azents.core.enums import (
     AgentSessionStatus,
     ScheduledTaskScheduleType,
 )
-from azents.core.scheduled_task_management import ScheduledTaskManagementUnavailable
+from azents.core.scheduled_task_management import (
+    ScheduledTaskManagementProjection,
+    ScheduledTaskManagementUnavailable,
+    ScheduledTaskSessionProjection,
+)
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -28,6 +32,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.management_operations import (
+    ScheduledTaskManagementMutation,
     ScheduledTaskManagementRepository,
 )
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
@@ -772,6 +777,59 @@ async def test_started_one_time_edit_is_conflict_after_canonical_lock_order() ->
         < task_lock_index
     )
     assert not repository.replaced
+
+
+async def test_create_localizes_registration_without_changing_api_projection() -> None:
+    """Public creation localizes the provider effect, not the committed projection."""
+    task = _task()
+    projection = ScheduledTaskManagementProjection(
+        id=task.id,
+        title=task.title,
+        objective=task.objective,
+        schedule_type=task.schedule_type,
+        scheduled_at=task.scheduled_at,
+        cron_expression=task.cron_expression,
+        timezone=task.timezone,
+        next_eligible_at=task.next_eligible_at,
+        execution_state="idle",
+        session=ScheduledTaskSessionProjection(
+            id=task.session_id, handle="session", title=None
+        ),
+        target=None,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+    )
+    operations = AsyncMock(spec=ScheduledTaskManagementRepository)
+    operations.create.return_value = ScheduledTaskManagementMutation(
+        projection=projection, task=task
+    )
+    channel = AsyncMock(spec=ScheduledTaskChannelService)
+    service = ScheduledTaskManagementService(
+        operations=operations, channel_service=channel
+    )
+
+    result = await service.create(
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,
+        user_id="user-1",
+        session_id=task.session_id,
+        title=task.title,
+        objective=task.objective,
+        at="2026-08-16T09:00:00+09:00",
+        cron=None,
+        timezone=None,
+        channel_id=None,
+    )
+
+    assert result is projection
+    assert result.scheduled_at is _NOW
+    channel.execute_registration.assert_awaited_once()
+    displayed = channel.execute_registration.await_args.args[0]
+    assert isinstance(displayed, ScheduledTask)
+    assert displayed.scheduled_at is not None
+    assert displayed.scheduled_at.isoformat() == "2026-08-16T09:00:00+09:00"
+    assert displayed.next_eligible_at.isoformat() == "2026-08-16T09:00:00+09:00"
+    assert task.scheduled_at is _NOW
 
 
 async def test_replace_preserves_no_registration_effect() -> None:

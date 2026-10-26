@@ -3,6 +3,7 @@
 import datetime
 import json
 import re
+from dataclasses import replace
 from typing import NamedTuple
 from unittest.mock import AsyncMock
 
@@ -44,6 +45,11 @@ from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
 from azents.services.file_storage import FileStorage
+from azents.services.scheduled_task.control import (
+    build_scheduled_task_control_locator,
+    render_scheduled_task_discord_registration,
+    render_scheduled_task_slack_registration,
+)
 
 from .scheduled import ScheduledToolkit
 
@@ -305,6 +311,115 @@ async def test_management_tools_derive_scope_and_project_execution_state() -> No
         "task_id": "t" * 32,
     }
     channel_service.execute_deletion.assert_awaited_once_with(created)
+
+
+@pytest.mark.parametrize(
+    ("at", "human"),
+    [
+        ("2026-08-16T21:00:00+09:00", "August 16, 2026 at 9:00 PM UTC+09:00"),
+        ("2026-08-16T08:00:00-04:00", "August 16, 2026 at 8:00 AM UTC-04:00"),
+        ("2026-08-16T17:45:00+05:45", "August 16, 2026 at 5:45 PM UTC+05:45"),
+        ("2026-08-17T02:00:00+14:00", "August 17, 2026 at 2:00 AM UTC+14:00"),
+        ("2026-08-16T12:00:00Z", "August 16, 2026 at 12:00 PM UTC"),
+        ("2026-08-16T12:00:00+00:00", "August 16, 2026 at 12:00 PM UTC"),
+    ],
+)
+async def test_registration_preserves_input_offset_without_mutating_storage(
+    at: str,
+    human: str,
+) -> None:
+    """Tool results and both providers show the requested local registration time."""
+    toolkit, operations, _, channel, _ = _toolkit(active_cycle=None)
+    persisted = replace(_task(), binding_id="b" * 32)
+    operations.create.return_value = persisted
+    state = await toolkit.update_context(_turn_context())
+    tool = next(tool for tool in state.tools if tool.spec.name == "add_scheduled_task")
+
+    result = await tool.handler(
+        json.dumps(
+            {
+                "title": persisted.title,
+                "objective": persisted.objective,
+                "at": at,
+                "cron": None,
+                "timezone": None,
+                "channel_id": persisted.binding_id,
+            }
+        )
+    )
+
+    assert isinstance(result, str)
+    expected_at = at.replace("+00:00", "Z")
+    definition = json.loads(result)["task"]
+    assert definition["at"] == expected_at
+    assert definition["next_eligible_at"] == expected_at
+    assert operations.create.await_args.kwargs["at"] == at
+    channel.execute_registration.assert_awaited_once()
+    displayed = channel.execute_registration.await_args.args[0]
+    assert isinstance(displayed, ScheduledTask)
+    assert displayed is not persisted
+    assert displayed.scheduled_at == persisted.scheduled_at
+    assert displayed.next_eligible_at == persisted.next_eligible_at
+    assert persisted.scheduled_at is not None
+    assert persisted.scheduled_at.tzinfo is datetime.UTC
+    assert persisted.next_eligible_at.tzinfo is datetime.UTC
+
+    discord = render_scheduled_task_discord_registration(task=displayed)
+    assert discord.payload[0]["fields"] == [
+        {"name": "Schedule", "value": human},
+        {"name": "Next run", "value": human},
+        {"name": "Schedule details", "value": expected_at},
+    ]
+    slack = render_scheduled_task_slack_registration(
+        task=displayed,
+        edit_locator=build_scheduled_task_control_locator(
+            secret="test", action="edit", task_id=displayed.id, binding_id="b" * 32
+        ),
+        delete_locator=build_scheduled_task_control_locator(
+            secret="test", action="delete", task_id=displayed.id, binding_id="b" * 32
+        ),
+    )
+    assert slack.payload[2]["text"] == {
+        "type": "mrkdwn",
+        "text": f"*Schedule:* {human}\n*Next run:* {human}",
+    }
+    assert expected_at in str(slack.payload[3])
+
+
+async def test_recurring_registration_keeps_committed_iana_schedule() -> None:
+    """Recurring registration keeps its original IANA timezone and UTC cursor."""
+    toolkit, operations, _, channel, _ = _toolkit(active_cycle=None)
+    persisted = replace(
+        _task(),
+        schedule_type=ScheduledTaskScheduleType.CRON,
+        scheduled_at=None,
+        cron_expression="0 9 * * *",
+        timezone="Asia/Seoul",
+    )
+    operations.create.return_value = persisted
+    state = await toolkit.update_context(_turn_context())
+    tool = next(tool for tool in state.tools if tool.spec.name == "add_scheduled_task")
+
+    result = await tool.handler(
+        json.dumps(
+            {
+                "title": persisted.title,
+                "objective": persisted.objective,
+                "at": None,
+                "cron": persisted.cron_expression,
+                "timezone": persisted.timezone,
+                "channel_id": None,
+            }
+        )
+    )
+
+    assert isinstance(result, str)
+    definition = json.loads(result)["task"]
+    assert definition["at"] is None
+    assert definition["cron"] == persisted.cron_expression
+    assert definition["timezone"] == "Asia/Seoul"
+    assert definition["next_eligible_at"] == "2026-08-16T12:00:00Z"
+    channel.execute_registration.assert_awaited_once_with(persisted)
 
 
 @pytest.mark.parametrize(

@@ -42,6 +42,7 @@ from azents.engine.tools.runtime_instruction_context import (
 )
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.presentation import (
+    localize_scheduled_task_registration,
     render_scheduled_task_compaction_snapshot,
     render_scheduled_task_cycle_guidance,
     render_scheduled_task_runtime_message,
@@ -287,6 +288,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                 )
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
+            task = localize_scheduled_task_registration(task, at=args.at)
             registration = await self.channel_service.execute_registration(task)
             return _json(
                 {
@@ -547,12 +549,12 @@ def _provider_outcome_definition(
 
 
 def _datetime_text(value: datetime.datetime | None) -> str | None:
-    """Render an optional timezone-aware datetime as canonical UTC text."""
+    """Render an optional aware datetime, retaining its presentation offset."""
     if value is None:
         return None
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Scheduled Task datetime must be timezone-aware.")
-    return value.astimezone(datetime.UTC).isoformat().replace("+00:00", "Z")
+    return value.isoformat().replace("+00:00", "Z")
 
 
 def _json(value: dict[str, object]) -> str:
