@@ -31,6 +31,8 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
+    MailboxSchedulingMode,
+    SessionWorkingFolderBindingState,
 )
 from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationScope,
@@ -79,6 +81,7 @@ from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_state import ChannelWorkState
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox_database import MailboxDatabaseRepository
 from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
 )
@@ -280,6 +283,9 @@ def _store(
             MailboxAdmissionRepository, instance=True
         ),
         mailbox_repository=create_autospec(MailboxRepository, instance=True),
+        mailbox_database_repository=create_autospec(
+            MailboxDatabaseRepository, instance=True
+        ),
         config=Config.model_construct(
             web_url="https://azents.example/base",
         ),
@@ -405,6 +411,7 @@ async def _accepted_control_plan_case(
     provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
     invocation: bool = True,
     mailbox_created: bool = True,
+    folder_binding_state: SessionWorkingFolderBindingState | None = None,
 ) -> SimpleNamespace:
     session = _session()
 
@@ -431,6 +438,7 @@ async def _accepted_control_plan_case(
     store.session_manager = MagicMock(return_value=session_context())
     store.mailbox_admission_repository = mailbox_admission_repository
     target_session = SimpleNamespace(
+        id="session-1",
         status=AgentSessionStatus.ACTIVE,
         stop_requested_at=(
             datetime.datetime.now(datetime.UTC) if stopping_session else None
@@ -439,6 +447,16 @@ async def _accepted_control_plan_case(
     store.agent_session_repository = MagicMock()
     store.agent_session_repository.lock_by_id = AsyncMock()
     store.agent_session_repository.get_by_id = AsyncMock(return_value=target_session)
+    mailbox_admission_repository.enqueue_in_session = AsyncMock()
+    folder_visibility = create_autospec(MailboxDatabaseRepository, instance=True)
+    folder_visibility.has_seen_action_type.return_value = folder_binding_state is None
+    store.mailbox_database_repository = folder_visibility
+    store.agent_session_repository.get_working_folder_context_by_session_id = AsyncMock(
+        return_value=SimpleNamespace(
+            id="context-1",
+            binding_state=folder_binding_state,
+        )
+    )
     store.agent_session_repository.admit_input_wakeup = AsyncMock(
         return_value=target_session if admission_succeeds else None
     )
@@ -566,6 +584,7 @@ async def _accepted_control_plan_case(
         progress_plan=progress_plan,
         repository=repository,
         agent_session_repository=store.agent_session_repository,
+        mailbox_admission_repository=mailbox_admission_repository,
         session=session,
     )
 
@@ -603,6 +622,62 @@ async def test_existing_binding_admission_excludes_joined_presence() -> None:
 
     assert case.acceptance.control_plans == (case.progress_plan,)
     case.presence_intent.assert_not_awaited()
+
+
+@pytest.mark.parametrize("existing_binding", [False, True])
+@pytest.mark.parametrize(
+    "provider", [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD]
+)
+@pytest.mark.parametrize(
+    "binding_state",
+    [
+        SessionWorkingFolderBindingState.PENDING,
+        SessionWorkingFolderBindingState.BOUND,
+    ],
+)
+async def test_channel_input_prepares_missing_folder_before_messages(
+    existing_binding: bool,
+    provider: ExternalChannelProvider,
+    binding_state: SessionWorkingFolderBindingState,
+) -> None:
+    """Both new and retained channel Sessions prepare setup before their history."""
+    case = await _accepted_control_plan_case(
+        existing_binding=existing_binding,
+        provider=provider,
+        folder_binding_state=binding_state,
+    )
+    admission = case.mailbox_admission_repository
+    assert [call[0] for call in admission.mock_calls] == [
+        "enqueue_in_session",
+        "enqueue_many_in_session",
+    ]
+    setup = admission.enqueue_in_session.await_args.args[1]
+    assert setup.session_id == "session-1"
+    assert setup.action == {"type": "create_session_working_folder"}
+    assert setup.idempotency_key == "session-working-folder:adoption:context-1"
+    assert setup.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
+    assert admission.enqueue_in_session.await_args.args[0] is case.session
+    assert admission.enqueue_many_in_session.await_args.args[0] is case.session
+
+
+@pytest.mark.parametrize(
+    "binding_state",
+    [
+        SessionWorkingFolderBindingState.NONE,
+        SessionWorkingFolderBindingState.INVALIDATED,
+        None,
+    ],
+)
+async def test_channel_input_preserves_ineligible_or_prepared_folder(
+    binding_state: SessionWorkingFolderBindingState | None,
+) -> None:
+    """Runtime-free, invalidated and already prepared Sessions need no setup."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        folder_binding_state=binding_state,
+    )
+    case.mailbox_admission_repository.enqueue_in_session.assert_not_awaited()
+    case.mailbox_admission_repository.enqueue_many_in_session.assert_awaited_once()
 
 
 async def test_duplicate_binding_input_does_not_resume_awaiting_work() -> None:

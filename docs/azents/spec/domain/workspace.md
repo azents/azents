@@ -6,6 +6,7 @@ spec_type: domain
 domain: workspace
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/session_working_folder_setup.py
   - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_errors.py
@@ -161,8 +162,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-20
-spec_version: 97
+last_verified_at: 2026-10-26
+spec_version: 98
 ---
 
 # Workspace & Membership
@@ -654,6 +655,15 @@ one binding state:
 - `invalidated` retains its historical path and removal evidence for audit after permanent Runtime
   removal but authorizes no Runner, browser, setup, retry, Project, worktree, or archive operation.
 
+Direct human input and External Channel message admission share missing-folder setup admission.
+Before allocating the incoming message's queue order, they enqueue one internal
+`create_session_working_folder` action for eligible `pending` or `bound` contexts that have no
+pending or recorded setup action. Setup admission and input admission use the same database
+transaction; the Worker materializes the folder through the Runner before processing the new
+message group. This also repairs previously created channel Sessions on their next channel
+message without requiring a Web message. Runtime-free and invalidated contexts remain ineligible.
+Concurrent admission uses the context-owned idempotency key to avoid duplicate setup rows.
+
 The existing-session Project browser includes the Session-folder entry only for an active managed
 binding. Runtime-free and invalidated contexts return a capability-aware unavailable state rather
 than exposing a historical path. A later Runtime add never binds an old `none` or `invalidated`
@@ -1080,6 +1090,10 @@ stateDiagram-v2
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
+
+- **2026-10-26 (spec_version=98)** — Shared missing Session-folder setup admission
+  between human and External Channel input, including next-message repair and
+  transactional setup-before-message ordering.
 
 - **2026-10-05 (spec_version=97)** — Integrated injected completed Agent Workspace
   access and native read-only Agent/membership inspection with the common
