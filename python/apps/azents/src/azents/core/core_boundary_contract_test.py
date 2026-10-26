@@ -9,6 +9,7 @@ from unittest.mock import patch
 import httpx2 as httpx
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from mcp.client.session import MessageHandlerFnT
 from mcp.types import ListToolsResult
 from mcp.types import Tool as McpBaseTool
 
@@ -95,6 +96,8 @@ async def test_named_mcp_discovery_transport(fallback: bool) -> None:
         *,
         proxy_url: str | None = None,
         auth: httpx.Auth | None = None,
+        message_handler: MessageHandlerFnT | None,
+        http_client_type: type[httpx.AsyncClient],
     ) -> AsyncIterator[Session]:
         selected.append(use_streamable_http)
         if fallback and use_streamable_http:
