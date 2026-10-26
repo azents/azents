@@ -661,6 +661,20 @@ class RunnerBrowserManager:
 
     async def execute(self, command: BrowserCommand) -> BrowserResult:
         """Execute a typed command, returning verified state or raising failure."""
+        return await self._execute(command, uuid.uuid4().hex)
+
+    async def execute_viewer_navigation(
+        self, command: BrowserActCommand, actor: str
+    ) -> BrowserResult:
+        """Keep navigation ownership with the originating live attachment."""
+        if command.action.kind not in {"navigate", "back", "forward", "reload"}:
+            raise BrowserFailure(
+                "browser_invalid_action",
+                "Viewer navigation requires a navigation action",
+            )
+        return await self._execute(command, actor)
+
+    async def _execute(self, command: BrowserCommand, actor: str) -> BrowserResult:
         self._authority(command.authority)
         try:
             match command:
@@ -669,7 +683,7 @@ class RunnerBrowserManager:
                 case BrowserObserveCommand():
                     return await self._observe(command)
                 case BrowserActCommand():
-                    return await self._act(command)
+                    return await self._act(command, actor)
                 case _:
                     assert_never(command)
         except asyncio.CancelledError:
@@ -922,7 +936,7 @@ class RunnerBrowserManager:
         root.mkdir(parents=True, exist_ok=True)
         return root / f"{prefix}-{uuid.uuid4().hex}{suffix}"
 
-    async def _act(self, command: BrowserActCommand) -> BrowserResult:
+    async def _act(self, command: BrowserActCommand, actor: str) -> BrowserResult:
         task, page, frame = self.target(command.authority, command.target)
         action = command.action
         if frame != page.page.main_frame and action.kind in {
@@ -998,7 +1012,6 @@ class RunnerBrowserManager:
                     timeout=action.timeout_ms,
                 )
             return await self._result(command.authority, task=task, page=page)
-        actor = uuid.uuid4().hex
         async with task.guard.interaction(actor):
             self.target(command.authority, command.target)
             page.popup_interest = None

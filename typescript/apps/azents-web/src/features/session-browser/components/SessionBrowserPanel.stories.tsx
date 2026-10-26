@@ -799,6 +799,26 @@ function FieldEditorPreviewFixture(
   );
 }
 
+function NoticeLayoutFixture(props: SessionBrowserPanelProps): ReactElement {
+  const [visible, setVisible] = useState(false);
+  return (
+    <Box h={rem(640)}>
+      <Button onClick={() => setVisible((value) => !value)}>
+        Toggle test warnings
+      </Button>
+      <Box h={rem(560)}>
+        <BrowserFixture
+          {...props}
+          state={{ ...ready, conflict: visible, outcomeUnknown: visible }}
+          addressError={visible}
+          closeError={visible}
+          createError={visible}
+        />
+      </Box>
+    </Box>
+  );
+}
+
 const meta = {
   component: SessionBrowserPanel,
   parameters: { layout: "fullscreen" },
@@ -2674,6 +2694,87 @@ export const Conflict = {
     ).toBeVisible();
   },
 } satisfies Story;
+
+export const WarningLayoutStable = {
+  tags: ["ci-contract"],
+  args: { focused: false },
+  render: (props) => <NoticeLayoutFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const viewport = canvas.getByRole("region", {
+      name: "Remote browser page",
+    });
+    const address = canvas.getByRole("textbox", { name: "Browser address" });
+    await waitFor(() =>
+      expect(
+        canvas.getByRole<HTMLImageElement>("img", {
+          name: "Browser page: Synthetic order",
+        }).naturalWidth,
+      ).toBeGreaterThan(0),
+    );
+    const geometry = (
+      element: HTMLElement,
+    ): { x: number; y: number; width: number; height: number } => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    const initial = geometry(viewport);
+    const initialAddress = geometry(address);
+    const toggle = canvas.getByRole("button", { name: "Toggle test warnings" });
+    await fireEvent.click(toggle);
+    const conflict = canvas.getByText(
+      "Another interaction is in progress. Try again when it finishes.",
+    );
+    conflict.scrollIntoView({ block: "nearest" });
+    await expect(conflict).toBeVisible();
+    const notices = conflict.closest<HTMLElement>("[tabindex]");
+    await expect(notices).not.toBeNull();
+    if (notices !== null) {
+      notices.focus();
+      await expect(notices).toHaveFocus();
+      await expect(getComputedStyle(notices).overscrollBehavior).toBe(
+        "contain",
+      );
+    }
+    await expect(getComputedStyle(conflict).pointerEvents).toBe("auto");
+    await expect(conflict.closest('[role="status"]')).not.toBeNull();
+    await expect(geometry(viewport)).toEqual(initial);
+    await expect(geometry(address)).toEqual(initialAddress);
+    await expect(
+      Number.parseFloat(getComputedStyle(conflict).fontSize),
+    ).toBeLessThanOrEqual(12);
+    await expect(conflict.getBoundingClientRect().height).toBeLessThan(64);
+    await fireEvent.click(toggle);
+    await expect(conflict).not.toBeInTheDocument();
+    await expect(geometry(viewport)).toEqual(initial);
+    await expect(geometry(address)).toEqual(initialAddress);
+  },
+} satisfies Story;
+
+export const WarningLayoutStableFocused = {
+  ...WarningLayoutStable,
+  tags: ["ci-contract"],
+  args: { focused: true },
+} satisfies Story;
+
+export const WarningLayoutStableMobile = {
+  ...WarningLayoutStable,
+  tags: ["ci-contract"],
+  decorators: [
+    (Story) => (
+      <Box w={rem(360)}>
+        <Story />
+      </Box>
+    ),
+  ],
+} satisfies Story;
+
+export const WarningLayoutStableShortViewport = {
+  ...WarningLayoutStable,
+  tags: ["ci-contract"],
+  args: { focused: true, focusViewport: { top: 0, height: 300 } },
+} satisfies Story;
+
 export const UnknownOutcome = {
   tags: ["ci-contract"],
   args: { state: { ...ready, outcomeUnknown: true } },

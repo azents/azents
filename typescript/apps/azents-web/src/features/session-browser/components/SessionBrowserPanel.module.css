@@ -1,4 +1,5 @@
 .panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -110,6 +111,7 @@
 }
 
 .browser {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -155,6 +157,36 @@
   display: none;
 }
 .notices:not(:empty) {
+  position: absolute;
+  bottom: var(--mantine-spacing-xs);
+  inset-inline: var(--mantine-spacing-xs);
+  z-index: 2;
+  pointer-events: none;
+  align-items: center;
+  max-height: 40%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.notice {
+  width: fit-content;
+  max-width: min(100%, rem(360px));
+  box-sizing: border-box;
+  padding: rem(6px) var(--mantine-spacing-xs);
+  border: rem(1px) solid var(--mantine-color-yellow-outline);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  box-shadow: var(--mantine-shadow-xs);
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+
+.dialogs:empty {
+  display: none;
+}
+.dialogs:not(:empty) {
   padding: var(--mantine-spacing-sm);
   flex-shrink: 0;
   max-height: 50%;
@@ -250,6 +282,7 @@
   bottom: var(--mantine-spacing-md);
   inset-inline: var(--mantine-spacing-md);
   z-index: 1;
+  justify-content: center;
 }
 
 .dialog {
