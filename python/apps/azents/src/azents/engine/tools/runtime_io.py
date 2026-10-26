@@ -8,6 +8,8 @@ from typing import Literal, Protocol
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
 from azents_runtime_control.process_observation import ProcessObservation
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
+
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
 type RuntimeProcessOutputCallback = Callable[
     ["RuntimeProcessOutputDelta"], Awaitable[None]
@@ -249,6 +251,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         command: str,
         timeout_seconds: int,
@@ -264,6 +267,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         command: str,
         fire_and_forget: bool,
         workdir: str | None,
@@ -322,6 +326,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         offset: int,
@@ -336,6 +341,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         character_offset: int,
@@ -351,6 +357,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         data: bytes,
@@ -364,6 +371,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         base_path: str,
         patch: bytes,
@@ -378,6 +386,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         old_string: str,
@@ -393,6 +402,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool = False,
@@ -407,6 +417,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         pattern: str,
         exclude_patterns: list[str] | None,
@@ -420,6 +431,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime,
@@ -432,6 +444,7 @@ class RuntimeRunnerOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         pattern: str,

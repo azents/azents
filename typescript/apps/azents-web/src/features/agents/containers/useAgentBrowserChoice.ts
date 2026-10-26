@@ -51,8 +51,12 @@ export function useAgentBrowserChoice({
       await utils.agent.getBrowserConfiguration.invalidate(input);
     },
   });
+  const browserEnabled = agent?.browser_enabled === true;
   const canManage =
-    !disabled && !readOnly && agent?.toolkit_management_available === true;
+    browserEnabled &&
+    !disabled &&
+    !readOnly &&
+    agent.toolkit_management_available === true;
   const begin = (
     implementation: BrowserImplementation,
     retry: boolean,
@@ -74,6 +78,7 @@ export function useAgentBrowserChoice({
         : {
             type: "READY",
             configuration: query.data,
+            browserEnabled,
             readOnly: !canManage,
             saving: mutation.isPending,
             confirmation: canManage ? (draft?.implementation ?? null) : null,

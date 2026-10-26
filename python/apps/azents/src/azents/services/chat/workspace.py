@@ -26,6 +26,7 @@ from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderObservedState,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.s3.deps import get_s3_service
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
@@ -518,6 +519,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         source_paths: list[str],
         destination_directory: str,
@@ -532,6 +534,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool = False,
@@ -546,6 +549,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         character_offset: int,
@@ -561,6 +565,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime,
@@ -573,6 +578,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool,
@@ -586,6 +592,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         paths: list[str],
         recursive: bool,
@@ -599,6 +606,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         parents: bool,
@@ -612,6 +620,7 @@ class WorkspaceRunnerOperations(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         source_path: str,
         destination_path: str,
@@ -1034,6 +1043,7 @@ class AgentWorkspaceFileService:
                 deadline_at=_runner_file_operation_deadline(
                     self._runner_file_operation_timeout
                 ),
+                admission_authority=None,
             )
             return Success(AgentWorkspaceMutationResult(path=result.path))
         except RuntimeRunnerOperationUnavailable as error:
@@ -1076,6 +1086,7 @@ class AgentWorkspaceFileService:
                 deadline_at=_runner_file_operation_deadline(
                     self._runner_file_operation_timeout
                 ),
+                admission_authority=None,
             )
             return Success(AgentWorkspaceMutationResult(path=result.path))
         except RuntimeRunnerOperationUnavailable as error:
@@ -1135,6 +1146,7 @@ class AgentWorkspaceFileService:
                 deadline_at=_runner_file_operation_deadline(
                     self._runner_file_operation_timeout
                 ),
+                admission_authority=None,
             )
             return Success(
                 AgentWorkspaceMoveResult(
@@ -1198,6 +1210,7 @@ class AgentWorkspaceFileService:
                 deadline_at=_runner_file_operation_deadline(
                     self._runner_file_operation_timeout
                 ),
+                admission_authority=None,
             )
             return Success(AgentWorkspaceBulkDeleteResult(paths=list(result.paths)))
         except RuntimeRunnerOperationUnavailable as error:
@@ -1263,6 +1276,7 @@ class AgentWorkspaceFileService:
                 deadline_at=_runner_file_operation_deadline(
                     self._runner_file_operation_timeout
                 ),
+                admission_authority=None,
             )
             return Success(
                 AgentWorkspaceBulkMoveResult(
@@ -1561,6 +1575,7 @@ class AgentWorkspaceFileService:
                     deadline_at=_runner_file_operation_deadline(
                         self._runner_file_operation_timeout
                     ),
+                    admission_authority=None,
                 )
             )
         except RuntimeRunnerOperationUnavailable as error:
@@ -1586,6 +1601,7 @@ class AgentWorkspaceFileService:
                     deadline_at=_runner_file_operation_deadline(
                         self._runner_file_operation_timeout
                     ),
+                    admission_authority=None,
                 )
             )
         except RuntimeRunnerOperationUnavailable as error:
@@ -1616,6 +1632,7 @@ class AgentWorkspaceFileService:
                 deadline_at=_runner_file_operation_deadline(
                     self._runner_file_operation_timeout
                 ),
+                admission_authority=None,
             )
             return Success(result)
         except RuntimeRunnerOperationUnavailable as error:

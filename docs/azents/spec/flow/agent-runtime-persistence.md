@@ -6,6 +6,9 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/runtime_admission.py
+  - python/apps/azents/src/azents/repos/runtime_operation_admission.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/5074c3290716_add_bounded_automatic_runtime_start_.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/session_workspace_paths.py
@@ -82,7 +85,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-23
+last_verified_at: 2026-10-26
 spec_version: 45
 ---
 
@@ -412,6 +415,31 @@ rewrite Runtime desired or applied slots, Provider bindings, workloads, Runner-r
 paths, or Agent Workspace storage. A running Runtime may therefore retain the deleted Profile ID
 inside its applied document as bounded historical evidence. That evidence is not a foreign key,
 does not block deletion, and cannot authorize future create, start, restart, reset, or recreation.
+
+## Ordinary automatic-start authority
+
+`agent_runtimes` owns two nullable scalar fields,
+`automatic_start_predecessor_sequence` and
+`automatic_start_predecessor_generation`, constrained to be both null or both
+valid. They are bounded current transition evidence, not configuration history
+or foreign keys. Runtime row deletion removes them with their owner; they add no
+new cleanup resource or public API field.
+
+An ordinary internal start locks active Agent capability/selection, then Runtime,
+then current configuration. It advances the exact stopped predecessor once and
+records that pair, or joins its exact immediate current successor without another
+mutation. Joining requires matching digest, current ready desired slot, running
+START, unchanged capability, and sequence/generation each exactly predecessor + 1.
+The original invocation adopts only that committed successor. It cannot follow
+an unrelated START, a completed restart, or a chain of transitions.
+
+Explicit lifecycle operations, removal/rearm/recreation, and material configuration
+writes invalidate the pair atomically. Connection reports and ordinary
+acknowledgements do not invalidate it. Old writers that advance counters without
+clearing the new fields still break exact adjacency and fail joining closed.
+Existing rows have no receipt until a new ordinary automatic start writes one.
+The additive migration precedes server upgrade; server rollback may leave the
+nullable columns in place.
 
 ## Event Persistence
 

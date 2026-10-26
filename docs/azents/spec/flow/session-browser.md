@@ -115,6 +115,10 @@ bounded reason. PUT accepts a closed replacement with `expected_intent_id`,
 Agent administrators manage the choice. Stale-intent replacement is rejected.
 The UI confirms browser retirement before saving, distinguishes requested from
 applied state, and exposes explicit retry without promising site compatibility.
+When Session Browser is disabled, the engine selector is disabled and selection,
+confirmation and retry handlers cannot save a change. Application status and
+previous switch errors are hidden until Browser is enabled again. The saved
+engine choice and the Session Browser enabling control remain unchanged.
 
 Saving first persists Agent-owned intent, then immediately attempts browser-only
 application. A durable leased reconciliation task and current Runner state reports

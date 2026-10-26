@@ -30,7 +30,6 @@ from azents.core.enums import (
     AgentSessionStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
-    SessionWorkingFolderBindingState,
 )
 from azents.core.exchange_file_errors import (
     ExchangeFileInputClaimError,
@@ -88,6 +87,9 @@ from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.mailbox_database import MailboxDatabaseRepository
 from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
+)
+from azents.repos.session_working_folder_setup import (
+    enqueue_missing_session_working_folder,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -1159,49 +1161,13 @@ class AgentSessionInputOperationsRepository:
         *,
         agent_session: AgentSession,
     ) -> None:
-        """Queue one forward-adoption setup action before a human wake input."""
-        action = CreateSessionWorkingFolderAction()
-        if await self.mailbox_database_repository.has_seen_action_type(
+        """Share missing-folder admission with External Channel inputs."""
+        await enqueue_missing_session_working_folder(
             session,
             session_id=agent_session.id,
-            action_type=action.type,
-        ):
-            return
-        repository = self.agent_session_repository
-        context = await repository.get_working_folder_context_by_session_id(
-            session,
-            session_id=agent_session.id,
-        )
-        if context is None:
-            raise RuntimeError("Active root Session is missing working-folder context")
-        if context.binding_state not in {
-            SessionWorkingFolderBindingState.PENDING,
-            SessionWorkingFolderBindingState.BOUND,
-        }:
-            return
-        await self.mailbox_admission_repository.enqueue_in_session(
-            session,
-            MailboxEnqueue(
-                session_id=agent_session.id,
-                kind=MailboxItemKind.ACTION_MESSAGE,
-                scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                requested_enabled_execution_options=[],
-                sender_user_id=None,
-                order_group=None,
-                order_sequence=0,
-                content="",
-                idempotency_key=f"session-working-folder:adoption:{context.id}",
-                metadata={
-                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                    "source": "system",
-                },
-                action=action.model_dump(mode="json"),
-                attachments=[],
-                file_parts=[],
-                payload=None,
-            ),
+            agent_session_repository=self.agent_session_repository,
+            mailbox_database_repository=self.mailbox_database_repository,
+            mailbox_admission_repository=self.mailbox_admission_repository,
         )
 
     async def _enqueue_user_message(

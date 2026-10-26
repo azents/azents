@@ -18,6 +18,7 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.runtime.coordination.data import JsonValue, RuntimeCoordinationTarget
 
 
@@ -155,6 +156,7 @@ class RuntimeRunnerOperation:
     payload: dict[str, JsonValue]
     deadline_at: datetime
     body_stream_id: str | None
+    admission_authority: RuntimeAdmissionAuthority | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -166,6 +168,7 @@ class RuntimeDispatchResult:
     request_stream_id: str
     reply_stream_id: str
     target: RuntimeCoordinationTarget
+    generation: int
 
 
 @dataclasses.dataclass(frozen=True)

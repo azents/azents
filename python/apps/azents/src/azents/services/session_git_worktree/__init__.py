@@ -785,6 +785,7 @@ class SessionGitWorktreeService:
                 path=working_folder_path,
                 parents=True,
                 deadline_at=_git_operation_deadline(),
+                admission_authority=None,
             )
         except (
             RuntimeRunnerOperationUnavailable,
@@ -4260,6 +4261,7 @@ class SessionGitWorktreeService:
                 path=parent_path,
                 recursive=False,
                 deadline_at=_git_operation_deadline(),
+                admission_authority=None,
             )
             if listed.entries:
                 return
@@ -4270,6 +4272,7 @@ class SessionGitWorktreeService:
                 path=parent_path,
                 recursive=False,
                 deadline_at=_git_operation_deadline(),
+                admission_authority=None,
             )
         except (
             RuntimeRunnerOperationCanceledError,

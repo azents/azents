@@ -3,7 +3,7 @@
 import asyncio
 import dataclasses
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Literal, Never
 
 import pytest
 from azents_runtime_control.browser_contract import (
@@ -23,9 +23,20 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
+from azents.core.runtime_admission import (
+    RuntimeAdmissionAuthority,
+    RuntimeAdmissionReady,
+    RuntimeAdmissionRejected,
+    RuntimeAdmissionState,
+    RuntimeAdmissionWaiting,
+)
 from azents.runtime.control_protocol.data import (
+    RuntimeDispatchResult,
     RuntimeProtocolCapabilities,
+    RuntimeProtocolRouteUnavailable,
+    RuntimeProtocolStaleGeneration,
     RuntimeReplyAppendResult,
+    RuntimeRunnerOperation,
     RuntimeRunnerRegistration,
 )
 from azents.runtime.control_protocol.runner_operations import (
@@ -49,11 +60,9 @@ from azents.runtime.control_protocol.runner_operations import (
     encode_file_chunk,
     runner_reply_target,
 )
-from azents.runtime.control_protocol.service import (
-    RuntimeControlProtocolService,
-)
 from azents.runtime.coordination.data import (
     JsonValue,
+    RuntimeBodyChunk,
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
     RuntimeFencedMutationResult,
@@ -255,6 +264,7 @@ async def test_run_bash_folds_stdout_stderr_and_final_exit_code() -> None:
             timeout_seconds=30,
             env={"A": "B"},
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -306,6 +316,7 @@ async def test_run_bash_isolates_concurrent_operation_reply_streams() -> None:
             timeout_seconds=30,
             env=None,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     first_request = await harness.claim()
@@ -318,6 +329,7 @@ async def test_run_bash_isolates_concurrent_operation_reply_streams() -> None:
             timeout_seconds=30,
             env=None,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     second_request = await harness.claim()
@@ -380,6 +392,7 @@ async def test_new_operation_observation_ignores_retained_history(
             timeout_seconds=30,
             env=None,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -528,8 +541,8 @@ async def test_resume_file_write_rejects_malformed_completion(
 
 
 @pytest.mark.asyncio
-async def test_run_bash_cancel_check_records_cancelled_final() -> None:
-    """Foreground wait records a cancelled final event instead of hanging."""
+async def test_run_bash_cancel_before_admission_does_not_submit() -> None:
+    """An already-cancelled invocation creates neither request nor final result."""
     harness = await _make_harness()
 
     with pytest.raises(RuntimeRunnerOperationCanceledError):
@@ -542,6 +555,7 @@ async def test_run_bash_cancel_check_records_cancelled_final() -> None:
             env=None,
             deadline_at=_now() + timedelta(seconds=30),
             cancel_check=_always_cancel,
+            admission_authority=None,
         )
 
     replies = await harness.control.read_replies(
@@ -551,8 +565,8 @@ async def test_run_bash_cancel_check_records_cancelled_final() -> None:
         after_cursor=None,
         limit=10,
     )
-    assert replies[-1].event.final is True
-    assert replies[-1].event.payload["error_code"] == "canceled"
+    assert replies == []
+    assert harness.store.request_appended.empty()
 
 
 @pytest.mark.asyncio
@@ -623,6 +637,7 @@ async def test_read_file_collects_file_chunks_until_final() -> None:
             offset=0,
             max_bytes=None,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -663,6 +678,7 @@ async def test_read_file_deadline_records_final_error_when_runner_drops_reply() 
             offset=0,
             max_bytes=None,
             deadline_at=deadline_at,
+            admission_authority=None,
         )
 
     replies = await harness.control.read_replies(
@@ -688,6 +704,7 @@ async def test_write_file_uses_body_stream_chunks() -> None:
             path="/workspace/agent/out.txt",
             data=b"abcdefg",
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -724,6 +741,7 @@ async def test_apply_patch_uses_body_stream_and_returns_changes() -> None:
             patch=patch,
             schema_version=1,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -789,6 +807,7 @@ async def test_apply_patch_cancellation_waits_for_typed_runner_final() -> None:
             patch=b"*** Begin Patch\n*** End Patch\n",
             schema_version=1,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -835,6 +854,7 @@ async def test_apply_patch_preserves_typed_failure_detail() -> None:
             patch=b"*** Begin Patch\n*** End Patch\n",
             schema_version=1,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -890,6 +910,7 @@ async def test_edit_file_dispatches_one_native_operation_and_returns_count() -> 
             new_string="after",
             replace_all=True,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -922,6 +943,7 @@ async def test_list_files_returns_final_entries() -> None:
             owner_session_id="session-1",
             path="/workspace/agent",
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -958,6 +980,7 @@ async def test_glob_files_dispatches_native_operation_and_returns_matches() -> N
             pattern="/workspace/agent/**/*.py",
             exclude_patterns=[".git", "node_modules"],
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -998,6 +1021,7 @@ async def test_stat_file_returns_final_metadata() -> None:
             owner_session_id="session-1",
             path="/workspace/agent/AGENTS.md",
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -1040,6 +1064,7 @@ async def test_delete_file_returns_final_path() -> None:
             path="/workspace/agent/old.txt",
             recursive=False,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -1074,6 +1099,7 @@ async def test_mkdir_file_returns_final_path() -> None:
             path="/workspace/agent/reports",
             parents=True,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -1109,6 +1135,7 @@ async def test_move_file_returns_final_paths() -> None:
             destination_path="/workspace/agent/b.txt",
             overwrite=False,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -1152,6 +1179,7 @@ async def test_grep_files_returns_final_matches() -> None:
             max_matching_files=10,
             max_lines_per_file=2,
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -1239,6 +1267,7 @@ async def test_start_process_dispatches_and_folds_protocol_events() -> None:
             env={"PYTHONUNBUFFERED": "1"},
             owner_session_id="session-1",
             deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=None,
         )
     )
     request = await harness.claim()
@@ -1742,7 +1771,7 @@ class _ObservableStore(InMemoryRuntimeCoordinationStore):
 @dataclasses.dataclass(frozen=True)
 class _Harness:
     store: _ObservableStore
-    control: RuntimeControlProtocolService
+    control: FakeRuntimeControlProtocolService
     client: RuntimeRunnerOperationClient
     metrics: RuntimeReplyDeliveryMetrics
     runner_generation: int
@@ -1798,6 +1827,7 @@ async def _make_harness(
         metrics=metrics,
         body_chunk_size_bytes=body_chunk_size_bytes,
         browser_configuration=_BrowserConfiguration(),
+        admission_reader=None,
     )
     return _Harness(
         store=store,
@@ -1879,3 +1909,385 @@ async def _append_text_delta(
 
 async def _always_cancel() -> bool:
     return True
+
+
+def _admission_authority() -> RuntimeAdmissionAuthority:
+    return RuntimeAdmissionAuthority(
+        runtime_id="runtime-1",
+        capability_version=4,
+        desired_generation=3,
+        configuration_sequence=1,
+        configuration_digest="d" * 64,
+        workspace_path="/workspace/agent",
+    )
+
+
+class _AdmissionReader:
+    def __init__(self, state: RuntimeAdmissionState) -> None:
+        self.state = state
+        self.calls = 0
+        self.entered = asyncio.Event()
+
+    async def resolve(
+        self, authority: RuntimeAdmissionAuthority
+    ) -> RuntimeAdmissionState:
+        assert authority == _admission_authority()
+        self.calls += 1
+        self.entered.set()
+        return self.state
+
+
+class _ImmediateAdmissionClient(RuntimeRunnerOperationClient):
+    waits: int
+
+    async def _wait_for_admission(self, deadline_at: datetime) -> None:
+        """Advance a deterministic rejection fixture without elapsed-time waits."""
+        assert deadline_at > _now()
+        self.waits += 1
+
+
+def _admission_client(
+    harness: _Harness, reader: _AdmissionReader
+) -> _ImmediateAdmissionClient:
+    client = _ImmediateAdmissionClient(
+        control_protocol=harness.control,
+        coordination_store=harness.store,
+        metrics=harness.metrics,
+        browser_configuration=None,
+        admission_reader=reader,
+    )
+    client.waits = 0
+    return client
+
+
+async def test_already_stale_connection_uses_frozen_authority() -> None:
+    harness = await _make_harness()
+    second = await harness.control.register_runner(
+        _runner_registration(),
+        registered_at=_now(),
+    )
+    reader = _AdmissionReader(RuntimeAdmissionReady(second.generation))
+    client = _admission_client(harness, reader)
+    current = dataclasses.replace(harness, runner_generation=second.generation)
+    task = asyncio.create_task(
+        client.run_bash(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            command="true",
+            timeout_seconds=30,
+            env=None,
+            deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=_admission_authority(),
+        )
+    )
+    request = await current.claim()
+    assert request.generation == second.generation
+    await current.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {"exit_code": 0},
+        final=True,
+    )
+    assert (await asyncio.wait_for(task, 1)).exit_code == 0
+    assert harness.store.request_appended.empty()
+
+
+async def test_changed_authority_rejects_even_same_connection() -> None:
+    harness = await _make_harness()
+    reader = _AdmissionReader(RuntimeAdmissionRejected())
+    client = _admission_client(harness, reader)
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await client.run_bash(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id=None,
+            command="true",
+            timeout_seconds=30,
+            env=None,
+            deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=_admission_authority(),
+        )
+    assert error.value.code == "runtime_authority_changed"
+    assert harness.store.request_appended.empty()
+    assert client.waits == 0
+
+
+async def test_expired_admission_never_checks_or_submits() -> None:
+    harness = await _make_harness()
+    reader = _AdmissionReader(RuntimeAdmissionReady(harness.runner_generation))
+    client = _admission_client(harness, reader)
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await client.run_bash(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id=None,
+            command="true",
+            timeout_seconds=30,
+            env=None,
+            deadline_at=_now() - timedelta(seconds=1),
+            admission_authority=_admission_authority(),
+        )
+    assert error.value.code == "runner_admission_timeout"
+    assert reader.calls == 0
+    assert harness.store.request_appended.empty()
+
+
+async def test_cancel_during_reconnection_does_not_leave_submission() -> None:
+    harness = await _make_harness()
+    reader = _AdmissionReader(RuntimeAdmissionWaiting())
+    client = RuntimeRunnerOperationClient(
+        control_protocol=harness.control,
+        coordination_store=harness.store,
+        metrics=harness.metrics,
+        browser_configuration=None,
+        admission_reader=reader,
+    )
+    task = asyncio.create_task(
+        client.run_bash(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id=None,
+            command="true",
+            timeout_seconds=30,
+            env=None,
+            deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=_admission_authority(),
+        )
+    )
+    await reader.entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert harness.store.request_appended.empty()
+
+
+async def test_patch_reconnect_before_append_reuses_single_staged_body() -> None:
+    harness = await _make_harness(body_chunk_size_bytes=4)
+
+    class ReconnectingReader(_AdmissionReader):
+        async def resolve(
+            self, authority: RuntimeAdmissionAuthority
+        ) -> RuntimeAdmissionState:
+            state = await super().resolve(authority)
+            if self.calls == 1:
+                registration = await harness.control.register_runner(
+                    _runner_registration(),
+                    registered_at=_now(),
+                )
+                self.state = RuntimeAdmissionReady(registration.generation)
+            return state
+
+    reader = ReconnectingReader(RuntimeAdmissionReady(harness.runner_generation))
+    client = _admission_client(harness, reader)
+    patch = b"immutable patch body"
+    task = asyncio.create_task(
+        client.apply_patch(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            base_path="/workspace/agent",
+            patch=patch,
+            schema_version=1,
+            deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=_admission_authority(),
+        )
+    )
+    current = dataclasses.replace(
+        harness, runner_generation=harness.runner_generation + 1
+    )
+    request = await current.claim()
+    assert request.body_stream_id is not None
+    chunks = await harness.store.read_body_chunks(
+        request.body_stream_id,
+        after_cursor=None,
+        limit=100,
+    )
+    assert b"".join(chunk.chunk.data for chunk in chunks) == patch
+    assert sum(chunk.chunk.final for chunk in chunks) == 1
+    assert client.waits == 1
+    await current.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {"changes": []},
+        final=True,
+    )
+    assert (await asyncio.wait_for(task, 1)).changes == ()
+    assert harness.store.request_appended.empty()
+
+
+async def test_ambiguous_exception_after_append_is_never_resubmitted() -> None:
+    harness = await _make_harness()
+
+    class AmbiguousControl(FakeRuntimeControlProtocolService):
+        async def dispatch_runner_operation(
+            self, operation: RuntimeRunnerOperation, *, created_at: datetime
+        ) -> Never:
+            await super().dispatch_runner_operation(operation, created_at=created_at)
+            raise ConnectionError("Submission acknowledgement lost")
+
+    control = AmbiguousControl(harness.store, request_id_factory=_RequestIds())
+    reader = _AdmissionReader(RuntimeAdmissionReady(harness.runner_generation))
+    client = _admission_client(dataclasses.replace(harness, control=control), reader)
+    with pytest.raises(ConnectionError, match="acknowledgement"):
+        await client.run_bash(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id=None,
+            command="true",
+            timeout_seconds=30,
+            env=None,
+            deadline_at=_now() + timedelta(seconds=30),
+            admission_authority=_admission_authority(),
+        )
+    assert reader.calls == 1
+    assert harness.store.request_appended.qsize() == 1
+    assert client.waits == 0
+
+
+async def test_admission_read_is_bounded_by_operation_deadline() -> None:
+    harness = await _make_harness()
+
+    class HungReader(_AdmissionReader):
+        async def resolve(
+            self, authority: RuntimeAdmissionAuthority
+        ) -> RuntimeAdmissionState:
+            await asyncio.Event().wait()
+            return RuntimeAdmissionWaiting()
+
+    client = _admission_client(harness, HungReader(RuntimeAdmissionWaiting()))
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await asyncio.wait_for(
+            client.run_bash(
+                runtime_id="runtime-1",
+                runner_generation=harness.runner_generation,
+                owner_session_id=None,
+                command="true",
+                timeout_seconds=30,
+                env=None,
+                deadline_at=_now() + timedelta(milliseconds=20),
+                admission_authority=_admission_authority(),
+            ),
+            timeout=1,
+        )
+    assert error.value.code == "runner_admission_timeout"
+    assert harness.store.request_appended.empty()
+
+
+async def test_dispatch_timeout_after_append_reports_unknown_without_replay() -> None:
+    harness = await _make_harness()
+
+    class HungAcknowledgement(FakeRuntimeControlProtocolService):
+        async def dispatch_runner_operation(
+            self, operation: RuntimeRunnerOperation, *, created_at: datetime
+        ) -> (
+            RuntimeDispatchResult
+            | RuntimeProtocolRouteUnavailable
+            | RuntimeProtocolStaleGeneration
+        ):
+            result = await super().dispatch_runner_operation(
+                operation, created_at=created_at
+            )
+            await asyncio.Event().wait()
+            return result
+
+    control = HungAcknowledgement(harness.store, request_id_factory=_RequestIds())
+    reader = _AdmissionReader(RuntimeAdmissionReady(harness.runner_generation))
+    client = _admission_client(dataclasses.replace(harness, control=control), reader)
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await asyncio.wait_for(
+            client.run_bash(
+                runtime_id="runtime-1",
+                runner_generation=harness.runner_generation,
+                owner_session_id=None,
+                command="true",
+                timeout_seconds=30,
+                env=None,
+                deadline_at=_now() + timedelta(milliseconds=20),
+                admission_authority=_admission_authority(),
+            ),
+            timeout=1,
+        )
+    assert error.value.code == "runtime_submission_unknown"
+    assert harness.store.request_appended.qsize() == 1
+    assert client.waits == 0
+
+
+@pytest.mark.parametrize("patch", [False, True])
+async def test_body_staging_timeout_never_submits(patch: bool) -> None:
+    harness = await _make_harness()
+
+    class HungBodyStore(_ObservableStore):
+        async def append_body_chunk(
+            self, stream_id: str, chunk: RuntimeBodyChunk
+        ) -> str:
+            await asyncio.Event().wait()
+            return await super().append_body_chunk(stream_id, chunk)
+
+    store = HungBodyStore()
+    reader = _AdmissionReader(RuntimeAdmissionReady(harness.runner_generation))
+    client = RuntimeRunnerOperationClient(
+        control_protocol=harness.control,
+        coordination_store=store,
+        metrics=harness.metrics,
+        browser_configuration=None,
+        admission_reader=reader,
+    )
+    deadline = _now() + timedelta(milliseconds=20)
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        if patch:
+            await asyncio.wait_for(
+                client.apply_patch(
+                    runtime_id="runtime-1",
+                    runner_generation=harness.runner_generation,
+                    owner_session_id=None,
+                    base_path="/workspace/agent",
+                    patch=b"body",
+                    schema_version=1,
+                    deadline_at=deadline,
+                    admission_authority=_admission_authority(),
+                ),
+                timeout=1,
+            )
+        else:
+            await asyncio.wait_for(
+                client.write_file(
+                    runtime_id="runtime-1",
+                    runner_generation=harness.runner_generation,
+                    owner_session_id=None,
+                    path="/workspace/agent/file",
+                    data=b"body",
+                    deadline_at=deadline,
+                    admission_authority=_admission_authority(),
+                ),
+                timeout=1,
+            )
+    assert error.value.code == "runner_admission_timeout"
+    assert reader.calls == 0
+    assert harness.store.request_appended.empty()
+
+
+async def test_hung_cancel_check_cannot_extend_admission_deadline() -> None:
+    harness = await _make_harness()
+
+    async def hung_check() -> bool:
+        await asyncio.Event().wait()
+        return False
+
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await asyncio.wait_for(
+            harness.client.run_bash(
+                runtime_id="runtime-1",
+                runner_generation=harness.runner_generation,
+                owner_session_id=None,
+                command="true",
+                timeout_seconds=30,
+                env=None,
+                deadline_at=_now() + timedelta(milliseconds=20),
+                admission_authority=None,
+                cancel_check=hung_check,
+            ),
+            timeout=1,
+        )
+    assert error.value.code == "runner_admission_timeout"
+    assert harness.store.request_appended.empty()

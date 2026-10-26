@@ -958,13 +958,17 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         async def resolve_edit_target() -> RuntimeEditTarget:
             runtime = await resolve_operation_target()
             return RuntimeEditTarget(
-                runtime_id=runtime.id, runner_generation=runtime.runner_generation
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                admission_authority=runtime.admission_authority,
             )
 
         async def resolve_patch_target() -> RuntimePatchTarget:
             runtime = await resolve_operation_target()
             return RuntimePatchTarget(
-                runtime_id=runtime.id, runner_generation=runtime.runner_generation
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                admission_authority=runtime.admission_authority,
             )
 
         tools = [
@@ -2015,6 +2019,7 @@ class RuntimeRunnerFileStorage:
                 offset=0,
                 max_bytes=None,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
             return result.data
         except RuntimeRunnerOperationFailedError as exc:
@@ -2042,6 +2047,7 @@ class RuntimeRunnerFileStorage:
                 max_characters=limit,
                 encoding=encoding,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
             return TextReadResult(
                 text=result.text,
@@ -2089,6 +2095,7 @@ class RuntimeRunnerFileStorage:
                 offset=offset,
                 max_bytes=max_bytes,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
             return result.data
         except RuntimeRunnerOperationFailedError as exc:
@@ -2110,6 +2117,7 @@ class RuntimeRunnerFileStorage:
                 owner_session_id=self.owner_session_id,
                 path=path,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
@@ -2139,6 +2147,7 @@ class RuntimeRunnerFileStorage:
                 path=path,
                 data=data,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
@@ -2164,6 +2173,7 @@ class RuntimeRunnerFileStorage:
                 env=None,
                 deadline_at=datetime.now(UTC)
                 + timedelta(seconds=30 + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS),
+                admission_authority=runtime.admission_authority,
             )
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
@@ -2232,6 +2242,7 @@ class RuntimeRunnerFileStorage:
                 pattern=pattern,
                 exclude_patterns=exclude_patterns,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
@@ -2299,6 +2310,7 @@ class RuntimeRunnerFileStorage:
                 max_searched_files=max_searched_files,
                 max_scanned_bytes=max_scanned_bytes,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
@@ -2366,6 +2378,7 @@ class RuntimeRunnerFileStorage:
                 recursive=recursive,
                 exclude_patterns=exclude_patterns,
                 deadline_at=_runtime_file_operation_deadline(),
+                admission_authority=runtime.admission_authority,
             )
             return result.entries
         except RuntimeRunnerOperationFailedError as exc:
@@ -2537,6 +2550,7 @@ def make_exec_command_tool(
                 owner_session_id=owner_session_id,
                 deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
                 process_output_callback=_publish_process_output_delta(publish_event),
+                admission_authority=runtime.admission_authority,
             )
         except (
             RuntimeRunnerOperationUnavailable,

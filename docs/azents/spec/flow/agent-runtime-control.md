@@ -6,6 +6,10 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/core/runtime_admission.py
+  - python/apps/azents/src/azents/engine/tools/apply_patch.py
+  - python/apps/azents/src/azents/engine/tools/edit.py
+  - python/apps/azents/src/azents/repos/runtime_operation_admission.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/runtime_stream_session_server.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/runtime_stream_session_server_test.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
@@ -146,6 +150,36 @@ independent API/Worker/Scheduler roots and reload mode likewise reject unsupport
 memory composition. Redis remains the default for distributed deployments, with
 no automatic memory fallback. Restart loses ephemeral coordination, not durable
 Runtime existence, authorization or recovery authority.
+
+## Safe ordinary operation admission
+
+Eligible standalone bash, process-start, and ordinary file operations carry an
+immutable internal authority token from their qualified Runtime target. It freezes
+Runtime identity, capability version, physical desired generation, selected applied
+sequence/digest, and Runner-reported Workspace path. The completed admission read
+rejects changed/revoked authority or terminal failure, but permits bounded waiting
+when that authority is intact and the Runner is transiently disconnected/unready.
+A future blocked/unconfigured desired slot does not revoke retained applied authority.
+
+Only the Runner connection generation may refresh before admission. Control's
+typed missing-route/stale-generation outcomes prove the request was not appended;
+those outcomes may wait and retry admission under the same fixed operation
+deadline. An accepted append permanently ends admission retries. Arbitrary
+dispatch exceptions are ambiguous and never cause automatic resubmission.
+Callers without explicit authority retain exact-generation behavior. Browser,
+configuration, Terminal, transfer, and process-handle/input/observation operations
+do not receive generic connection rebinding.
+
+Write/patch bodies are staged once and remain immutable through proven no-append
+rejections. Result observation and cancellation use the generation actually
+accepted by Control, not the caller's earlier connection generation. Target
+readiness retains its finite 120-second phase; the established operation deadline
+is not reset by reconnects. Expiration and cancellation are checked before
+submission. `runner_admission_timeout` denotes a known unsubmitted operation;
+`runtime_authority_changed` denotes revoked/replaced frozen authority. A timeout
+while dispatch acknowledgement is pending is `runtime_submission_unknown`, not
+proof of non-submission. No outcome claims successful execution or authorizes
+replay of uncertain work.
 
 ## Provider Command Authentication Ingress
 

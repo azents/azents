@@ -22,6 +22,7 @@ function ready(
   return {
     type: "READY",
     configuration,
+    browserEnabled: true,
     readOnly: false,
     saving: false,
     confirmation: null,
@@ -156,6 +157,65 @@ export const ReadOnly: Story = {
     await expect(
       within(canvasElement.ownerDocument.body).queryByRole("dialog"),
     ).not.toBeInTheDocument();
+  },
+};
+export const BrowserDisabled: Story = {
+  args: { state: ready({ browserEnabled: false }) },
+  play: async ({ canvasElement, args }): Promise<void> => {
+    const canvas = within(canvasElement);
+    const select = canvas.getByRole("combobox", { name: "Browser engine" });
+    await expect(select).toBeDisabled();
+    await expect(select).toHaveValue("Patchright (default)");
+    await userEvent.click(select);
+    await expect(
+      within(canvasElement.ownerDocument.body).queryByRole("option"),
+    ).not.toBeInTheDocument();
+    await expect(args.onSelect).not.toHaveBeenCalled();
+  },
+};
+export const BrowserDisabledWithStaleFailure: Story = {
+  args: {
+    state: ready({
+      browserEnabled: false,
+      confirmation: "camoufox",
+      error: "Browser settings changed elsewhere. Refresh and retry.",
+      configuration: {
+        ...configuration,
+        state: "failed",
+        reason_code: "browser_configuration_unsupported",
+      },
+    }),
+  },
+  play: async ({ canvasElement, args }): Promise<void> => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("combobox", { name: "Browser engine" }),
+    ).toBeDisabled();
+    await expect(canvas.queryByRole("alert")).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole("button", { name: "Retry switch" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      within(canvasElement.ownerDocument.body).queryByRole("dialog"),
+    ).not.toBeInTheDocument();
+    await expect(args.onRetry).not.toHaveBeenCalled();
+    await expect(args.onConfirm).not.toHaveBeenCalled();
+  },
+};
+export const BrowserDisabledWhileApplying: Story = {
+  args: {
+    state: ready({
+      browserEnabled: false,
+      saving: true,
+      configuration: { ...configuration, state: "applying" },
+    }),
+  },
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("combobox", { name: "Browser engine" }),
+    ).toBeDisabled();
+    await expect(canvas.queryByRole("status")).not.toBeInTheDocument();
   },
 };
 export const StaleMutation: Story = {

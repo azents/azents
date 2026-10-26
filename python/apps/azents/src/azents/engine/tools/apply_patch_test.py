@@ -7,6 +7,7 @@ from datetime import datetime
 
 import pytest
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.types import (
     FunctionTool,
@@ -52,6 +53,7 @@ class _RunnerOperations:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         base_path: str,
         patch: bytes,
@@ -82,7 +84,9 @@ class _RunnerOperations:
 
 
 async def _resolve_runtime_target() -> RuntimePatchTarget:
-    return RuntimePatchTarget(runtime_id="runtime-1", runner_generation=7)
+    return RuntimePatchTarget(
+        runtime_id="runtime-1", runner_generation=7, admission_authority=None
+    )
 
 
 def _tool(runner_operations: RuntimeApplyPatchOperationClient) -> FunctionTool:

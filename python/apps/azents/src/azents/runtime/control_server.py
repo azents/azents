@@ -938,6 +938,7 @@ async def runtime_control_server_lifespan(
         coordination_store=coordination_store,
         metrics=RuntimeReplyDeliveryMetrics(),
         browser_configuration=browser_configuration,
+        admission_reader=None,
     )
     browser_reconciler = BrowserConfigurationCoordinator(
         browser_configuration, browser_operations, coordination_store

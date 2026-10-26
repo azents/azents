@@ -231,6 +231,7 @@ class AgentProjectCatalogService:
                 owner_session_id=None,
                 path=path,
                 deadline_at=_project_status_sync_deadline(),
+                admission_authority=None,
             )
         except (
             RuntimeRunnerOperationUnavailable,

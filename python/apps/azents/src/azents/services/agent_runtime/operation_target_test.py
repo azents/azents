@@ -184,6 +184,7 @@ class _OperationTargetService(AgentRuntimeService):
         self.capability_versions = [4]
         self.capability_check_index = 0
         self.capability_available = True
+        self.allow_automatic_join = False
 
     async def _ensure_runtime_for_agent(
         self,
@@ -204,6 +205,32 @@ class _OperationTargetService(AgentRuntimeService):
         self.ensure_started_calls += 1
         index = min(self.resolution_index, len(self.resolutions) - 1)
         return self.resolutions[index].runtime
+
+    async def _start_operation_runtime(
+        self,
+        *,
+        runtime_id: str,
+        capability_version: int,
+        authority: RuntimeOperationAuthority,
+    ) -> RuntimeOperationAuthority:
+        """Supply one committed successor rather than a mutable latest read."""
+        assert runtime_id == "runtime-1"
+        assert capability_version == 4
+        if (
+            self.resolutions[0].runtime.desired_state is RuntimeDesiredState.RUNNING
+            and not self.allow_automatic_join
+        ):
+            raise RuntimeStorageError(
+                "Runtime configuration changed since the operation context "
+                "was assembled."
+            )
+        self.ensure_started_calls += 1
+        successor = self.resolutions[self.resolution_index]
+        return RuntimeOperationAuthority(
+            configuration_sequence=successor.desired.sequence,
+            configuration_digest=authority.configuration_digest,
+            desired_generation=successor.runtime.desired_generation,
+        )
 
     async def _require_runtime_operation_capability(
         self,
@@ -709,3 +736,44 @@ async def test_target_projection_uses_retained_read_scope(case: str) -> None:
     service._ensure_runtime_for_agent.assert_not_awaited()
     service.ensure_started_for_agent.assert_not_awaited()
     operations.session_manager.assert_not_called()
+
+
+async def test_prompt_authority_follows_its_exact_automatic_start() -> None:
+    stopped = _resolution(
+        runtime=_runtime(
+            desired_state=RuntimeDesiredState.STOPPED,
+            desired_generation=1,
+            runner_state=RuntimeRunnerState.DISCONNECTED,
+            workspace_path=None,
+        ),
+        revision=_revision(desired_generation=1, sequence=1, qualified=False),
+        applied=False,
+    )
+    service = _OperationTargetService([stopped, _resolution()])
+    target = await service.resolve_operation_target(
+        "agent-1",
+        expected_authority=RuntimeOperationAuthority(
+            configuration_sequence=1,
+            configuration_digest=_DIGEST,
+            desired_generation=1,
+        ),
+    )
+    assert target.desired_generation == 2
+    assert target.configuration_sequence == 2
+    assert service.ensure_started_calls == 1
+    assert target.admission_authority.configuration_digest == _DIGEST
+
+
+async def test_prompt_predecessor_can_join_proven_concurrent_start() -> None:
+    service = _OperationTargetService([_resolution()])
+    service.allow_automatic_join = True
+    target = await service.resolve_operation_target(
+        "agent-1",
+        expected_authority=RuntimeOperationAuthority(
+            configuration_sequence=1,
+            configuration_digest=_DIGEST,
+            desired_generation=1,
+        ),
+    )
+    assert target.configuration_sequence == 2
+    assert service.ensure_started_calls == 1

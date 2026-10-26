@@ -28,6 +28,7 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     WorkspaceUserRole,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
     normalize_session_workspace_path,
@@ -165,6 +166,7 @@ class _FakeRunnerOperations(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime.datetime,

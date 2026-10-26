@@ -15,6 +15,7 @@ from azents_runtime_control.apply_patch import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.vfs import VfsUriError, parse_vfs_search_uri
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.types import (
@@ -107,6 +108,7 @@ class RuntimePatchTarget:
 
     runtime_id: str
     runner_generation: int
+    admission_authority: RuntimeAdmissionAuthority | None
 
 
 type RuntimePatchTargetResolver = Callable[[], Awaitable[RuntimePatchTarget]]
@@ -120,6 +122,7 @@ class RuntimeApplyPatchOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         base_path: str,
         patch: bytes,
@@ -224,6 +227,7 @@ class _ApplyPatchHandler:
                         _APPLY_PATCH_TIMEOUT_SECONDS + _OPERATION_RESULT_GRACE_SECONDS
                     )
                 ),
+                admission_authority=target.admission_authority,
             )
         except RuntimeFileApplyPatchFailedError as exc:
             logger.info(

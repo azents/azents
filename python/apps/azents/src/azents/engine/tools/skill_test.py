@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionRunState,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
@@ -177,6 +178,7 @@ class _SkillScanRunner:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool = False,
@@ -207,6 +209,7 @@ class _SkillScanRunner:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         character_offset: int,
@@ -248,6 +251,7 @@ class _OwnershipTakingSkillScanRunner(_SkillScanRunner):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         character_offset: int,
@@ -265,6 +269,7 @@ class _OwnershipTakingSkillScanRunner(_SkillScanRunner):
             max_characters=max_characters,
             encoding=encoding,
             deadline_at=deadline_at,
+            admission_authority=None,
         )
         async with self.session_manager() as session:
             await AgentSessionRepository().claim_owner_generation(

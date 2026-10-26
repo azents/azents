@@ -11,6 +11,8 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentRuntimeCapability,
     LLMProvider,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
@@ -25,17 +27,31 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
+from azents.core.runtime_admission import (
+    RuntimeAdmissionAuthority,
+    RuntimeAdmissionReady,
+    RuntimeAdmissionRejected,
+    RuntimeAdmissionWaiting,
+)
+from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
+from azents.repos.agent_runtime.data import (
+    AgentRuntimeFailurePatch,
+    AgentRuntimeLifecycleCommand,
+)
+from azents.repos.runtime_operation_admission import RuntimeOperationAdmissionRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.workspace import WorkspaceRepository
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -2070,3 +2086,279 @@ class TestAgentRuntimeRepository:
         assert timed_out == []
         assert current is not None
         assert current.failure_code is None
+
+
+async def _create_automatic_start_predecessor(
+    session: WriteSession, suffix: str
+) -> str:
+    """Seed one ready configuration on a stopped, never-started Runtime."""
+    workspace_id = await _create_workspace(session, f"auto-start-{suffix}")
+    agent_id = await _create_agent(session, workspace_id, f"auto-start-{suffix}")
+    runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
+    await session.write_session.execute(
+        sa.update(RDBAgentRuntime)
+        .where(RDBAgentRuntime.id == runtime.id)
+        .values(configuration_sequence=1)
+    )
+    session.write_session.add(
+        RDBRuntimeConfigurationState(
+            runtime_id=runtime.id,
+            desired_sequence=1,
+            desired_status=RuntimeConfigurationStateStatus.READY,
+            desired_target_generation=0,
+            desired_digest="a" * 64,
+            desired_document={"fixture": "ready"},
+        )
+    )
+    await session.write_session.flush()
+    return runtime.id
+
+
+async def test_automatic_start_joins_only_exact_current_receipt(
+    rdb_session: WriteSession,
+) -> None:
+    repo = AgentRuntimeRepository()
+    runtime_id = await _create_automatic_start_predecessor(rdb_session, uuid4().hex)
+    first = await repo.start_or_join_automatically(
+        rdb_session,
+        runtime_id,
+        expected_configuration_sequence=1,
+        expected_digest="a" * 64,
+        expected_generation=0,
+    )
+    joined = await repo.start_or_join_automatically(
+        rdb_session,
+        runtime_id,
+        expected_configuration_sequence=1,
+        expected_digest="a" * 64,
+        expected_generation=0,
+    )
+    assert first is not None and joined is not None
+    assert (
+        first.runtime.configuration_sequence
+        == joined.runtime.configuration_sequence
+        == 2
+    )
+    assert first.desired_generation == joined.desired_generation == 1
+    current = await rdb_session.write_session.get(RDBAgentRuntime, runtime_id)
+    assert current is not None
+    assert current.automatic_start_predecessor_sequence == 1
+    assert current.automatic_start_predecessor_generation == 0
+
+
+@pytest.mark.parametrize(
+    "command,desired_state",
+    [
+        (RuntimeLifecycleCommandType.START, RuntimeDesiredState.RUNNING),
+        (RuntimeLifecycleCommandType.RESTART, RuntimeDesiredState.RUNNING),
+        (RuntimeLifecycleCommandType.RESET, RuntimeDesiredState.RUNNING),
+        (RuntimeLifecycleCommandType.STOP, RuntimeDesiredState.STOPPED),
+    ],
+)
+async def test_explicit_lifecycle_invalidates_automatic_start_receipt(
+    rdb_session: WriteSession,
+    command: RuntimeLifecycleCommandType,
+    desired_state: RuntimeDesiredState,
+) -> None:
+    repo = AgentRuntimeRepository()
+    runtime_id = await _create_automatic_start_predecessor(rdb_session, uuid4().hex)
+    started = await repo.start_or_join_automatically(
+        rdb_session,
+        runtime_id,
+        expected_configuration_sequence=1,
+        expected_digest="a" * 64,
+        expected_generation=0,
+    )
+    assert started is not None
+    if command is RuntimeLifecycleCommandType.STOP:
+        await repo.set_desired_state(rdb_session, runtime_id, command, desired_state)
+    else:
+        await repo.set_desired_state_if_configuration_current(
+            rdb_session,
+            runtime_id,
+            command,
+            desired_state,
+            expected_configuration_sequence=2,
+            expected_digest="a" * 64,
+            expected_generation=1,
+        )
+    current = await rdb_session.write_session.get(RDBAgentRuntime, runtime_id)
+    assert current is not None
+    assert current.automatic_start_predecessor_sequence is None
+    assert current.automatic_start_predecessor_generation is None
+    assert (
+        await repo.start_or_join_automatically(
+            rdb_session,
+            runtime_id,
+            expected_configuration_sequence=1,
+            expected_digest="a" * 64,
+            expected_generation=0,
+        )
+        is None
+    )
+
+
+async def test_stale_receipt_cannot_survive_old_writer_counter_advance(
+    rdb_session: WriteSession,
+) -> None:
+    repo = AgentRuntimeRepository()
+    runtime_id = await _create_automatic_start_predecessor(rdb_session, uuid4().hex)
+    assert (
+        await repo.start_or_join_automatically(
+            rdb_session,
+            runtime_id,
+            expected_configuration_sequence=1,
+            expected_digest="a" * 64,
+            expected_generation=0,
+        )
+        is not None
+    )
+    # Model an old writer which does not know the receipt columns.
+    await rdb_session.write_session.execute(
+        sa.update(RDBAgentRuntime)
+        .where(RDBAgentRuntime.id == runtime_id)
+        .values(configuration_sequence=3, desired_generation=2)
+    )
+    await rdb_session.write_session.execute(
+        sa.update(RDBRuntimeConfigurationState)
+        .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
+        .values(desired_sequence=3, desired_target_generation=2)
+    )
+    assert (
+        await repo.start_or_join_automatically(
+            rdb_session,
+            runtime_id,
+            expected_configuration_sequence=1,
+            expected_digest="a" * 64,
+            expected_generation=0,
+        )
+        is None
+    )
+
+
+async def test_concurrent_automatic_starts_share_one_successor(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    async with committed_fixture_graph(rdb_engine, RDBAgent.metadata):
+        await _run_concurrent_automatic_starts(rdb_engine)
+
+
+async def _run_concurrent_automatic_starts(rdb_engine: AsyncEngine) -> None:
+    """Exercise separate committed transactions inside owned fixture cleanup."""
+    suffix = uuid4().hex
+    async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+        runtime_id = await _create_automatic_start_predecessor(
+            ReadWriteSession(raw), suffix
+        )
+        await raw.commit()
+    entered = asyncio.Queue[None]()
+    release = asyncio.Event()
+
+    async def start() -> AgentRuntimeLifecycleCommand:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+            entered.put_nowait(None)
+            await release.wait()
+            command = await AgentRuntimeRepository().start_or_join_automatically(
+                ReadWriteSession(raw),
+                runtime_id,
+                expected_configuration_sequence=1,
+                expected_digest="a" * 64,
+                expected_generation=0,
+            )
+            await raw.commit()
+            assert command is not None
+            return command
+
+    tasks = [asyncio.create_task(start()) for _ in range(2)]
+    await entered.get()
+    await entered.get()
+    release.set()
+    first, second = await asyncio.gather(*tasks)
+    assert first.desired_generation == second.desired_generation == 1
+    assert (
+        first.runtime.configuration_sequence
+        == second.runtime.configuration_sequence
+        == 2
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "ready",
+        "disconnected",
+        "changed_capability",
+        "changed_lifecycle",
+        "changed_workspace",
+        "failed",
+        "decommissioning",
+        "blocked_future",
+    ],
+)
+async def test_operation_admission_uses_retained_physical_authority(
+    rdb_session_manager: SessionManager[WriteSession],
+    case: str,
+) -> None:
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_automatic_start_predecessor(session, uuid4().hex)
+        runtime = await session.write_session.get(RDBAgentRuntime, runtime_id)
+        configuration = await session.write_session.get(
+            RDBRuntimeConfigurationState,
+            runtime_id,
+        )
+        assert runtime is not None and configuration is not None
+        agent = await session.write_session.get(RDBAgent, runtime.agent_id)
+        assert agent is not None
+        agent.runtime_capability = AgentRuntimeCapability.MANAGED
+        agent.runtime_capability_version = 4
+        runtime.desired_state = RuntimeDesiredState.RUNNING
+        runtime.desired_generation = 1
+        runtime.configuration_sequence = 2
+        runtime.runner_state = RuntimeRunnerState.READY
+        runtime.runner_generation = 7
+        runtime.workspace_path = "/workspace/reported"
+        configuration.desired_sequence = 2
+        configuration.desired_target_generation = 1
+        configuration.applied_sequence = 2
+        configuration.applied_target_generation = 1
+        configuration.applied_digest = "a" * 64
+        configuration.applied_document = {"fixture": "applied"}
+        configuration.applied_at = datetime.datetime.now(datetime.UTC)
+        authority = RuntimeAdmissionAuthority(
+            runtime_id=runtime_id,
+            capability_version=4,
+            desired_generation=1,
+            configuration_sequence=2,
+            configuration_digest="a" * 64,
+            workspace_path="/workspace/reported",
+        )
+        if case == "disconnected":
+            runtime.runner_state = RuntimeRunnerState.DISCONNECTED
+            runtime.workspace_path = None
+        elif case == "changed_capability":
+            agent.runtime_capability_version = 5
+        elif case == "changed_lifecycle":
+            runtime.desired_generation = 2
+        elif case == "changed_workspace":
+            runtime.workspace_path = "/another/workspace"
+        elif case == "failed":
+            runtime.runner_state = RuntimeRunnerState.FAILED
+        elif case == "decommissioning":
+            agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
+        elif case == "blocked_future":
+            runtime.configuration_sequence = 3
+            configuration.desired_sequence = 3
+            configuration.desired_status = RuntimeConfigurationStateStatus.BLOCKED
+            configuration.desired_digest = None
+            configuration.desired_document = None
+            configuration.desired_reason_code = "profile_unavailable"
+    state = await RuntimeOperationAdmissionRepository(rdb_session_manager).resolve(
+        authority
+    )
+    if case in {"ready", "blocked_future"}:
+        assert state == RuntimeAdmissionReady(7)
+    elif case == "disconnected":
+        assert isinstance(state, RuntimeAdmissionWaiting)
+    else:
+        assert isinstance(state, RuntimeAdmissionRejected)

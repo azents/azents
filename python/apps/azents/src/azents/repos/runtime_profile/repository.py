@@ -704,6 +704,8 @@ class RuntimeProfileRepository:
             )
             next_sequence = runtime.configuration_sequence + 1
             runtime.configuration_sequence = next_sequence
+            runtime.automatic_start_predecessor_sequence = None
+            runtime.automatic_start_predecessor_generation = None
             runtime.updated_at = now
             if state is None:
                 session.write_session.add(
@@ -847,6 +849,8 @@ class RuntimeProfileRepository:
         )
         next_sequence = runtime.configuration_sequence + 1
         runtime.configuration_sequence = next_sequence
+        runtime.automatic_start_predecessor_sequence = None
+        runtime.automatic_start_predecessor_generation = None
         runtime.updated_at = now
         if state is None:
             session.write_session.add(
@@ -936,6 +940,8 @@ class RuntimeProfileRepository:
             return self._build_configuration_state(current)
         next_sequence = runtime.configuration_sequence + 1
         runtime.configuration_sequence = next_sequence
+        runtime.automatic_start_predecessor_sequence = None
+        runtime.automatic_start_predecessor_generation = None
         if current is None:
             current = RDBRuntimeConfigurationState(
                 runtime_id=write.runtime_id,

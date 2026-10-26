@@ -9,6 +9,7 @@ export type BrowserChoiceState =
   | {
       type: "READY";
       configuration: AgentBrowserConfiguration;
+      browserEnabled: boolean;
       readOnly: boolean;
       saving: boolean;
       confirmation: BrowserImplementation | null;
