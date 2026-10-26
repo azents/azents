@@ -97,3 +97,12 @@ async def test_initial_native_admission_epoch_loss_is_not_stale_target() -> None
             target=_TARGET,
         )
     h.runner.run_browser_command.assert_awaited_once()
+
+
+async def test_live_validator_timeout_retains_transient_socket_classification() -> None:
+    h = socket_harness()
+    h.validator.side_effect = TimeoutError()
+    with pytest.raises(BrowserSocketFailure) as caught:
+        await _start(h)
+    assert caught.value.code == 4500
+    assert h.connection.closed and not h.socket.images

@@ -172,7 +172,7 @@ async def test_real_browser_source_rpc_tls_proof_frame_and_scoped_cleanup(
     assert not plane.sources
 
 
-@pytest.mark.parametrize("phase", ["scope", "open"])
+@pytest.mark.parametrize("phase", ["scope", "scope-transient", "open"])
 async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
     monkeypatch: pytest.MonkeyPatch, phase: str
 ) -> None:
@@ -189,7 +189,7 @@ async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
 
     async def current(authority: BrowserStreamAuthority) -> BrowserScopeState:
         del authority
-        if phase == "scope":
+        if phase.startswith("scope"):
             await stall()
         return BrowserScopeState.CURRENT
 
@@ -224,11 +224,17 @@ async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
     )
     assert isinstance(authority, BrowserStreamAuthority)
     authority = dataclasses.replace(
-        authority, open_deadline_at=datetime.now(UTC) + timedelta(seconds=0.5)
+        authority,
+        open_deadline_at=datetime.now(UTC)
+        + timedelta(seconds=5 if phase == "scope-transient" else 0.5),
     )
     try:
-        async with asyncio.timeout(2):
-            with pytest.raises(BrowserSourceScopeRevoked):
+        async with asyncio.timeout(4):
+            with pytest.raises(
+                BrowserSourceUnavailable
+                if phase == "scope-transient"
+                else BrowserSourceScopeRevoked
+            ):
                 await client.connect(authority=authority)
         assert entered.is_set() and cancelled.is_set()
         assert not plane.sources

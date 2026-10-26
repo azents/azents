@@ -353,7 +353,7 @@ class RuntimeBrowserSocketService:
             raise
         except TimeoutError:
             raise BrowserSocketFailure(
-                4403, "Browser access revalidation failed"
+                4500, "Browser authority revalidation is temporarily unavailable"
             ) from None
         if valid is BrowserScopeState.UNAVAILABLE:
             raise BrowserSocketFailure(4500, "Browser connection authority changed")

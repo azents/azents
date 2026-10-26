@@ -307,3 +307,30 @@ async def test_unconfirmed_attachment_cleanup_blocks_fresh_browser_authority(
         )
     assert not manager.closed
     await controller.close()
+
+
+async def test_viewer_source_disposal_failure_preserves_native_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = ControlledManager(tmp_path, BrowserImplementation.PATCHRIGHT)
+    manager.release.set()
+    controller = RunnerBrowserController(
+        lambda _: manager,
+        lambda native: RunnerBrowserViewer(native, Budget()),
+        manager.input_key,
+    )
+    await controller.configure(
+        BrowserConfigurationRequest("intent", None, BrowserImplementation.PATCHRIGHT)
+    )
+    viewer = controller.viewer
+    assert viewer is not None
+
+    async def fail_source_close() -> None:
+        raise Error("Synthetic editable source disposal failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(viewer, "close", fail_source_close)
+        await controller.suspend_connection()
+        assert controller.configuration_status().reason_code == "browser_cleanup_failed"
+        assert controller.manager is manager and not manager.closed
+    await controller.close()

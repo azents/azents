@@ -65,6 +65,7 @@ class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
             return
         source = None
         reader = None
+        authority: BrowserStreamAuthority | None = None
         try:
             setup_deadline = asyncio.get_running_loop().time() + 10
             nonce = secrets.token_hex(32)
@@ -111,7 +112,17 @@ class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
                             ),
                         )
                     )
-                    scope = await self.validate_scope(authority)
+                    try:
+                        async with asyncio.timeout(2):
+                            scope = await self.validate_scope(authority)
+                    except asyncio.CancelledError:
+                        raise
+                    except TimeoutError:
+                        scope = (
+                            BrowserScopeState.EXPIRED
+                            if self.clock() >= authority.open_deadline_at
+                            else BrowserScopeState.UNAVAILABLE
+                        )
                     if scope is not BrowserScopeState.CURRENT:
                         await context.abort(
                             {
@@ -137,7 +148,17 @@ class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
                     )
                     request.validate(self.clock())
                     await plane.handle(source, request.open_envelope)
-            except ValueError, TimeoutError, StopAsyncIteration:
+            except TimeoutError:
+                await context.abort(
+                    grpc.StatusCode.UNAUTHENTICATED
+                    if authority is None
+                    else grpc.StatusCode.DEADLINE_EXCEEDED
+                    if self.clock() >= authority.open_deadline_at
+                    else grpc.StatusCode.UNAVAILABLE,
+                    "Browser source admission timed out",
+                )
+                return
+            except ValueError, StopAsyncIteration:
                 await context.abort(
                     grpc.StatusCode.UNAUTHENTICATED,
                     "Browser source admission is invalid or expired",

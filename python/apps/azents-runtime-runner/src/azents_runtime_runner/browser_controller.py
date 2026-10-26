@@ -16,6 +16,7 @@ from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_input import BrowserInputKey
+from azents_runtime_runner.browser_sdk import BROWSER_SDK_ERRORS
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     ViewerReceive,
@@ -280,7 +281,9 @@ class RunnerBrowserController:
                     await self.manager.suspend_connection()
             except asyncio.CancelledError:
                 raise
-            except BrowserFailure:
+            except (BrowserFailure, *BROWSER_SDK_ERRORS, TimeoutError):
+                if self.manager is not None:
+                    self.manager.connection_cleanup_failed = True
                 self.status = BrowserConfigurationStatus(
                     self.status.intent_id,
                     self.status.implementation,
