@@ -710,7 +710,7 @@ export function SessionBrowserPanel({
             </Menu.Dropdown>
           </Menu>
         </Group>
-        <Stack gap="xs" className={classes.notices}>
+        <Stack gap="xs" className={classes.notices} tabIndex={0}>
           {addressError && (
             <BrowserNotice role="alert">{t("invalidAddress")}</BrowserNotice>
           )}

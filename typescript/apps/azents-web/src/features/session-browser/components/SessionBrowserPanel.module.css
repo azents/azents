@@ -165,6 +165,8 @@
   align-items: center;
   max-height: 40%;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .notice {
@@ -178,6 +180,7 @@
   color: var(--mantine-color-text);
   box-shadow: var(--mantine-shadow-xs);
   overflow-wrap: anywhere;
+  pointer-events: auto;
 }
 
 .dialogs:empty {

@@ -2725,8 +2725,18 @@ export const WarningLayoutStable = {
     const conflict = canvas.getByText(
       "Another interaction is in progress. Try again when it finishes.",
     );
+    conflict.scrollIntoView({ block: "nearest" });
     await expect(conflict).toBeVisible();
-    await expect(getComputedStyle(conflict).pointerEvents).toBe("none");
+    const notices = conflict.closest<HTMLElement>("[tabindex]");
+    await expect(notices).not.toBeNull();
+    if (notices !== null) {
+      notices.focus();
+      await expect(notices).toHaveFocus();
+      await expect(getComputedStyle(notices).overscrollBehavior).toBe(
+        "contain",
+      );
+    }
+    await expect(getComputedStyle(conflict).pointerEvents).toBe("auto");
     await expect(conflict.closest('[role="status"]')).not.toBeNull();
     await expect(geometry(viewport)).toEqual(initial);
     await expect(geometry(address)).toEqual(initialAddress);
@@ -2757,6 +2767,12 @@ export const WarningLayoutStableMobile = {
       </Box>
     ),
   ],
+} satisfies Story;
+
+export const WarningLayoutStableShortViewport = {
+  ...WarningLayoutStable,
+  tags: ["ci-contract"],
+  args: { focused: true, focusViewport: { top: 0, height: 300 } },
 } satisfies Story;
 
 export const UnknownOutcome = {
