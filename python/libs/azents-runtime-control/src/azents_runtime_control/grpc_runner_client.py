@@ -15,6 +15,10 @@ from azents_runtime_control.browser_runner_wire import (
     browser_result_from_wire,
     browser_result_to_wire,
 )
+from azents_runtime_control.completion_wire import (
+    CompletionPayloadError,
+    copy_completion,
+)
 from azents_runtime_control.grpc_runner_stream_session_client import (
     GrpcRunnerStreamSessionClient,
     RunnerStreamEnvelopeResources,
@@ -1304,7 +1308,19 @@ def _copy_event_payload(
             process_output.truncated = _bool_payload(payload, "truncated")
             process_output.omitted_bytes = _int_payload(payload, "omitted_bytes")
         case RuntimeRunnerEventType.FINAL_SUCCESS:
-            _copy_final_success(message.final_success, payload)
+            try:
+                _copy_final_success(message.final_success, payload)
+            except CompletionPayloadError:
+                message.ClearField("final_success")
+                message.event_type = RuntimeRunnerEventType.FINAL_ERROR.value
+                message.final_error.error_code = (
+                    "invalid_bash_completion"
+                    if "exit_code" in payload
+                    and "process_id" not in payload
+                    and "status" not in payload
+                    else "invalid_runner_completion"
+                )
+                message.final_error.error_message = "Invalid Runner completion evidence"
         case RuntimeRunnerEventType.FINAL_ERROR:
             message.final_error.error_code = _str_payload(payload, "error_code")
             message.final_error.error_message = _str_payload(payload, "error_message")
@@ -1330,6 +1346,8 @@ def _copy_final_success(
         message.browser.canonical_result = browser_result_to_wire(payload)
         return
     if "process_observation" in payload:
+        if set(payload) != {"process_observation"}:
+            raise CompletionPayloadError("Unexpected Runner completion field")
         observation = ProcessObservation.from_payload(payload["process_observation"])
         message.process_observe.revision = observation.revision
         message.process_observe.running_count = observation.running_count
@@ -1340,160 +1358,7 @@ def _copy_final_success(
             for item in observation.completed
         )
         return
-    if "process_id" in payload or "status" in payload:
-        process = message.process
-        process.process_id = _str_payload(payload, "process_id")
-        process.status = _str_payload(payload, "status")
-        exit_code = _optional_int_payload(payload, "exit_code")
-        if exit_code is not None:
-            process.exit_code = exit_code
-        process.stdout = _str_payload(payload, "stdout")
-        process.stderr = _str_payload(payload, "stderr")
-        process.stdout_truncated = _bool_payload(payload, "stdout_truncated")
-        process.stderr_truncated = _bool_payload(payload, "stderr_truncated")
-        process.stdout_omitted_bytes = _int_payload(payload, "stdout_omitted_bytes")
-        process.stderr_omitted_bytes = _int_payload(payload, "stderr_omitted_bytes")
-        process.missing_reason = _str_payload(payload, "missing_reason")
-        return
-    if "exit_code" in payload:
-        message.bash.exit_code = _int_payload(payload, "exit_code")
-        return
-    if "bytes_read" in payload:
-        message.file_read.bytes_read = _int_payload(payload, "bytes_read")
-        return
-    if "start_character" in payload:
-        message.file_read_text.start_character = _int_payload(
-            payload,
-            "start_character",
-        )
-        message.file_read_text.end_character = _int_payload(
-            payload,
-            "end_character",
-        )
-        message.file_read_text.truncated = _bool_payload(payload, "truncated")
-        return
-    if "bytes_written" in payload:
-        message.file_write.bytes_written = _int_payload(payload, "bytes_written")
-        return
-    if "matches" in payload:
-        message.file_glob.entries.extend(
-            _file_list_entries(payload, field_name="matches")
-        )
-        return
-    if "changes" in payload:
-        message.file_apply_patch.changes.extend(
-            _file_patch_change_entries(payload, "changes")
-        )
-        return
-    if "replacements" in payload:
-        message.file_edit.replacements = _int_payload(payload, "replacements")
-        return
-    if "entries" in payload:
-        message.file_list.entries.extend(_file_list_entries(payload))
-        return
-    if "files" in payload:
-        grep = message.file_grep
-        grep.files.extend(_grep_file_matches(payload))
-        grep.searched_file_count = _int_payload(payload, "searched_file_count")
-        grep.matched_file_count = _int_payload(payload, "matched_file_count")
-        grep.truncated = _bool_payload(payload, "truncated")
-        return
-    if "kind" in payload:
-        stat = message.file_stat
-        stat.path = _str_payload(payload, "path")
-        stat.kind = _str_payload(payload, "kind")
-        size_bytes = _optional_int_payload(payload, "size_bytes")
-        if size_bytes is not None:
-            stat.size_bytes = size_bytes
-        stat.symlink = _bool_payload(payload, "symlink")
-        real_path = _optional_str_payload(payload, "real_path")
-        if real_path is not None:
-            stat.real_path = real_path
-        resolved_kind = _optional_str_payload(payload, "resolved_kind")
-        if resolved_kind is not None:
-            stat.resolved_kind = resolved_kind
-        modified_at = _optional_str_payload(payload, "modified_at")
-        if modified_at is not None:
-            stat.modified_at = modified_at
-        return
-    if "deleted_paths" in payload:
-        message.file_bulk_delete.paths.extend(
-            _str_list_payload(payload, "deleted_paths")
-        )
-        return
-    if "deleted_path" in payload:
-        message.file_delete.path = _str_payload(payload, "deleted_path")
-        return
-    if "created_path" in payload:
-        message.file_mkdir.path = _str_payload(payload, "created_path")
-        return
-    if "moved_entries" in payload:
-        message.file_bulk_move.entries.extend(_move_entries(payload))
-        return
-    if "moved_source_path" in payload or "moved_destination_path" in payload:
-        message.file_move.source_path = _str_payload(payload, "moved_source_path")
-        message.file_move.destination_path = _str_payload(
-            payload, "moved_destination_path"
-        )
-        return
-    if "git_refs" in payload:
-        git_refs = message.git_list_refs
-        git_refs.refs.extend(_git_ref_entries(payload))
-        git_refs.default_branch = _str_payload(payload, "default_branch")
-        git_refs.head_commit = _str_payload(payload, "head_commit")
-        git_refs.repository_anchor_path = _str_payload(
-            payload,
-            "repository_anchor_path",
-        )
-        return
-    if "base_commit" in payload:
-        worktree = message.git_create_worktree
-        worktree.base_commit = _str_payload(payload, "base_commit")
-        worktree.worktree_path = _str_payload(payload, "worktree_path")
-        worktree.branch_name = _str_payload(payload, "branch_name")
-        return
-    if "worktree_registered" in payload:
-        worktree = message.git_inspect_worktree
-        worktree.worktree_path = _str_payload(payload, "worktree_path")
-        worktree.registered = _bool_payload(payload, "worktree_registered")
-        registered_branch_name = _optional_str_payload(
-            payload, "registered_branch_name"
-        )
-        if registered_branch_name is not None:
-            worktree.registered_branch_name = registered_branch_name
-        worktree.target_kind = _str_payload(payload, "target_kind")
-        dirty = payload.get("dirty")
-        if isinstance(dirty, bool):
-            worktree.dirty = dirty
-        return
-    if "discovered_worktrees" in payload:
-        message.git_discover_managed_worktrees.SetInParent()
-        message.git_discover_managed_worktrees.entries.extend(
-            _discovered_worktree_entries(payload)
-        )
-        return
-    if "removed_discovered_worktree_path" in payload:
-        message.git_remove_discovered_worktree.worktree_path = _str_payload(
-            payload,
-            "removed_discovered_worktree_path",
-        )
-        message.git_remove_discovered_worktree.outcome = _str_payload(
-            payload,
-            "outcome",
-        )
-        return
-    if "removed_worktree_path" in payload:
-        message.git_remove_worktree.worktree_path = _str_payload(
-            payload, "removed_worktree_path"
-        )
-        message.git_remove_worktree.outcome = _str_payload(payload, "outcome")
-        return
-    if "deleted_branch_name" in payload:
-        message.git_delete_branch.branch_name = _str_payload(
-            payload, "deleted_branch_name"
-        )
-        message.git_delete_branch.outcome = _str_payload(payload, "outcome")
-        return
+    copy_completion(message, payload)
 
 
 def _event_payload(
@@ -1550,6 +1415,8 @@ def _final_success_payload(
         }
     if result_kind == "file_write":
         return {"bytes_written": message.file_write.bytes_written}
+    if result_kind == "process_terminate_session":
+        return {"terminated_count": message.process_terminate_session.terminated_count}
     if result_kind == "file_apply_patch":
         return {
             "changes": [
@@ -1564,7 +1431,7 @@ def _final_success_payload(
     if result_kind == "file_glob":
         return {"entries": _file_list_entry_payloads(message.file_glob.entries)}
     if result_kind == "file_grep":
-        return {
+        payload: dict[str, JsonValue] = {
             "files": [
                 {
                     "path": file.path,
@@ -1580,6 +1447,9 @@ def _final_success_payload(
             "matched_file_count": message.file_grep.matched_file_count,
             "truncated": message.file_grep.truncated,
         }
+        if message.file_grep.HasField("stopped_reason"):
+            payload["stopped_reason"] = message.file_grep.stopped_reason
+        return payload
     if result_kind == "file_stat":
         payload = {
             "path": message.file_stat.path,
@@ -1820,99 +1690,6 @@ def _file_patch_operation_payload(
     return {"path": message.path, "action": message.action}
 
 
-def _git_ref_entries(
-    payload: Mapping[str, JsonValue],
-) -> list[runtime_runner_control_pb2.RuntimeGitRefEntry]:
-    raw_entries = payload.get("git_refs")
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[runtime_runner_control_pb2.RuntimeGitRefEntry] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
-            continue
-        name = raw_entry.get("name")
-        ref = raw_entry.get("ref")
-        ref_type = raw_entry.get("type")
-        target = raw_entry.get("target")
-        if (
-            isinstance(name, str)
-            and isinstance(ref, str)
-            and isinstance(ref_type, str)
-            and isinstance(target, str)
-        ):
-            entries.append(
-                runtime_runner_control_pb2.RuntimeGitRefEntry(
-                    name=name,
-                    ref=ref,
-                    type=ref_type,
-                    target=target,
-                    default=_bool_payload(raw_entry, "default"),
-                )
-            )
-    return entries
-
-
-def _move_entries(
-    payload: Mapping[str, JsonValue],
-) -> list[runtime_runner_control_pb2.RuntimeFileMoveEntry]:
-    raw_entries = payload.get("moved_entries")
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[runtime_runner_control_pb2.RuntimeFileMoveEntry] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
-            continue
-        source_path = raw_entry.get("source_path")
-        destination_path = raw_entry.get("destination_path")
-        if isinstance(source_path, str) and isinstance(destination_path, str):
-            entries.append(
-                runtime_runner_control_pb2.RuntimeFileMoveEntry(
-                    source_path=source_path,
-                    destination_path=destination_path,
-                )
-            )
-    return entries
-
-
-def _discovered_worktree_entries(
-    payload: Mapping[str, JsonValue],
-) -> list[runtime_runner_control_pb2.RuntimeDiscoveredGitWorktree]:
-    raw_entries = payload.get("discovered_worktrees")
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[runtime_runner_control_pb2.RuntimeDiscoveredGitWorktree] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
-            continue
-        worktree_path = raw_entry.get("worktree_path")
-        repository_anchor_path = raw_entry.get("repository_anchor_path")
-        branch_name = raw_entry.get("branch_name")
-        fingerprint = raw_entry.get("fingerprint")
-        failure_code = raw_entry.get("failure_code")
-        if not all(
-            isinstance(value, str)
-            for value in (
-                worktree_path,
-                repository_anchor_path,
-                branch_name,
-                fingerprint,
-                failure_code,
-            )
-        ):
-            continue
-        entries.append(
-            runtime_runner_control_pb2.RuntimeDiscoveredGitWorktree(
-                worktree_path=worktree_path,
-                registered=_bool_payload(raw_entry, "registered"),
-                repository_anchor_path=repository_anchor_path,
-                branch_name=branch_name,
-                fingerprint=fingerprint,
-                failure_code=failure_code,
-            )
-        )
-    return entries
-
-
 def _file_list_entry_payloads(
     entries: Sequence[runtime_runner_control_pb2.RuntimeFileListEntry],
 ) -> list[JsonValue]:
@@ -1932,82 +1709,6 @@ def _file_list_entry_payloads(
             }
         )
     return payloads
-
-
-def _file_list_entries(
-    payload: Mapping[str, JsonValue],
-    *,
-    field_name: str = "entries",
-) -> list[runtime_runner_control_pb2.RuntimeFileListEntry]:
-    raw_entries = payload.get(field_name)
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[runtime_runner_control_pb2.RuntimeFileListEntry] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
-            continue
-        path = raw_entry.get("path")
-        entry_type = raw_entry.get("type")
-        if not isinstance(path, str) or not isinstance(entry_type, str):
-            continue
-        entry = runtime_runner_control_pb2.RuntimeFileListEntry(
-            path=path,
-            type=entry_type,
-        )
-        size_bytes = _optional_int_payload(raw_entry, "size_bytes")
-        if size_bytes is not None:
-            entry.size_bytes = size_bytes
-        modified_at = _optional_str_payload(raw_entry, "modified_at")
-        if modified_at is not None:
-            entry.modified_at = modified_at
-        entries.append(entry)
-    return entries
-
-
-def _grep_file_matches(
-    payload: Mapping[str, JsonValue],
-) -> list[runtime_runner_control_pb2.RuntimeGrepFileMatch]:
-    raw_files = payload.get("files")
-    if not isinstance(raw_files, list):
-        return []
-    files: list[runtime_runner_control_pb2.RuntimeGrepFileMatch] = []
-    for raw_file in raw_files:
-        if not isinstance(raw_file, dict):
-            continue
-        path = raw_file.get("path")
-        if not isinstance(path, str):
-            continue
-        files.append(
-            runtime_runner_control_pb2.RuntimeGrepFileMatch(
-                path=path,
-                lines=_grep_line_matches(raw_file),
-                truncated=_bool_payload(raw_file, "truncated"),
-            )
-        )
-    return files
-
-
-def _grep_line_matches(
-    payload: Mapping[str, JsonValue],
-) -> list[runtime_runner_control_pb2.RuntimeGrepLineMatch]:
-    raw_lines = payload.get("lines")
-    if not isinstance(raw_lines, list):
-        return []
-    lines: list[runtime_runner_control_pb2.RuntimeGrepLineMatch] = []
-    for raw_line in raw_lines:
-        if not isinstance(raw_line, dict):
-            continue
-        text = raw_line.get("text")
-        line_number = _optional_int_payload(raw_line, "line_number")
-        if not isinstance(text, str) or line_number is None:
-            continue
-        lines.append(
-            runtime_runner_control_pb2.RuntimeGrepLineMatch(
-                line_number=line_number,
-                text=text,
-            )
-        )
-    return lines
 
 
 def _str_list_payload(payload: Mapping[str, JsonValue], key: str) -> list[str]:

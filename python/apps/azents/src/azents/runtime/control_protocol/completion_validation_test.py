@@ -4,6 +4,12 @@ import dataclasses
 from datetime import datetime, timezone
 
 import pytest
+from azents_runtime_control.grpc_runner_client import (
+    _copy_event_payload,
+    runner_event_from_message,
+)
+from azents_runtime_control.proto import runtime_runner_control_pb2
+from azents_runtime_control.runner import RunnerOperationEvent, RuntimeRunnerEventType
 
 import azents.runtime.control_protocol.runner_operations as operations
 from azents.runtime.coordination.data import (
@@ -150,12 +156,40 @@ def final(payload: dict[str, JsonValue]) -> RuntimeReplyRecord:
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.result_type.__name__)
+@pytest.mark.parametrize("transport", ["direct", "grpc"])
 def test_valid_completion_preserves_empty_values_and_cursor(
     case: CompletionCase,
+    transport: str,
 ) -> None:
+    record = final(case.payload)
+    if transport == "grpc":
+        message = runtime_runner_control_pb2.RunnerOperationEvent(
+            event_type="final_success",
+            final=True,
+        )
+        _copy_event_payload(
+            message,
+            RunnerOperationEvent(
+                request_id="r",
+                runtime_id="runtime",
+                generation=1,
+                event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+                payload=case.payload,
+                created_at=record.event.created_at,
+                final=True,
+            ),
+        )
+        wire_event = runner_event_from_message(
+            runtime_runner_control_pb2.RunnerOperationEvent.FromString(
+                message.SerializeToString()
+            ),
+            request_id="r",
+        )
+        assert wire_event.event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+        record = final(dict(wire_event.payload))
     result = operations._decode_completion(
         case.result_type,
-        final(case.payload),
+        record,
         derived=case.derived,
     )
     assert isinstance(result, case.result_type)

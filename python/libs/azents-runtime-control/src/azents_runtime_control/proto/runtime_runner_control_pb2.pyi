@@ -3474,6 +3474,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
     PROCESS_OBSERVE_FIELD_NUMBER: _builtins.int
     BROWSER_FIELD_NUMBER: _builtins.int
+    PROCESS_TERMINATE_SESSION_FIELD_NUMBER: _builtins.int
     @_builtins.property
     def bash(self) -> Global___BashFinalSuccess: ...
     @_builtins.property
@@ -3528,6 +3529,10 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     def process_observe(self) -> Global___ProcessObserveFinalSuccess: ...
     @_builtins.property
     def browser(self) -> Global___BrowserFinalSuccess: ...
+    @_builtins.property
+    def process_terminate_session(
+        self,
+    ) -> Global___ProcessTerminateSessionFinalSuccess: ...
     def __init__(
         self,
         *,
@@ -3558,6 +3563,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         file_read_text: Global___FileReadTextFinalSuccess | None = ...,
         process_observe: Global___ProcessObserveFinalSuccess | None = ...,
         browser: Global___BrowserFinalSuccess | None = ...,
+        process_terminate_session: Global___ProcessTerminateSessionFinalSuccess
+        | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "bash",
@@ -3610,6 +3617,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"process",
         "process_observe",
         b"process_observe",
+        "process_terminate_session",
+        b"process_terminate_session",
         "result",
         b"result",
     ]
@@ -3665,6 +3674,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"process",
         "process_observe",
         b"process_observe",
+        "process_terminate_session",
+        b"process_terminate_session",
         "result",
         b"result",
     ]
@@ -3695,6 +3706,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         "file_read_text",
         "process_observe",
         "browser",
+        "process_terminate_session",
     ]
     _WhichOneofArgType_result: _TypeAlias = _typing.Literal["result", b"result"]
     def WhichOneof(
@@ -3857,6 +3869,29 @@ class FileWriteFinalSuccess(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___FileWriteFinalSuccess: _TypeAlias = FileWriteFinalSuccess
+
+@_typing.final
+class ProcessTerminateSessionFinalSuccess(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    TERMINATED_COUNT_FIELD_NUMBER: _builtins.int
+    terminated_count: _builtins.int
+    def __init__(
+        self,
+        *,
+        terminated_count: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "terminated_count", b"terminated_count"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ProcessTerminateSessionFinalSuccess: _TypeAlias = (
+    ProcessTerminateSessionFinalSuccess
+)
 
 @_typing.final
 class RuntimeFilePatchOperation(_message.Message):
@@ -4729,9 +4764,11 @@ class FileGrepFinalSuccess(_message.Message):
     SEARCHED_FILE_COUNT_FIELD_NUMBER: _builtins.int
     MATCHED_FILE_COUNT_FIELD_NUMBER: _builtins.int
     TRUNCATED_FIELD_NUMBER: _builtins.int
+    STOPPED_REASON_FIELD_NUMBER: _builtins.int
     searched_file_count: _builtins.int
     matched_file_count: _builtins.int
     truncated: _builtins.bool
+    stopped_reason: _builtins.str
     @_builtins.property
     def files(
         self,
@@ -4743,21 +4780,36 @@ class FileGrepFinalSuccess(_message.Message):
         searched_file_count: _builtins.int = ...,
         matched_file_count: _builtins.int = ...,
         truncated: _builtins.bool = ...,
+        stopped_reason: _builtins.str | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_stopped_reason", b"_stopped_reason", "stopped_reason", b"stopped_reason"
+    ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_stopped_reason",
+        b"_stopped_reason",
         "files",
         b"files",
         "matched_file_count",
         b"matched_file_count",
         "searched_file_count",
         b"searched_file_count",
+        "stopped_reason",
+        b"stopped_reason",
         "truncated",
         b"truncated",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
+    _WhichOneofReturnType__stopped_reason: _TypeAlias = _typing.Literal[
+        "stopped_reason"
+    ]
+    _WhichOneofArgType__stopped_reason: _TypeAlias = _typing.Literal[
+        "_stopped_reason", b"_stopped_reason"
+    ]
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__stopped_reason
+    ) -> _WhichOneofReturnType__stopped_reason | None: ...
 
 Global___FileGrepFinalSuccess: _TypeAlias = FileGrepFinalSuccess
 
