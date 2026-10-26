@@ -76,6 +76,13 @@ def _connection_unusable(error: Exception) -> bool:
     )
 
 
+def _single_preparation_timeout(error: Exception) -> TimeoutError | None:
+    """Recognize one timeout wrapped only by singleton SDK task groups."""
+    while isinstance(error, ExceptionGroup) and len(error.exceptions) == 1:
+        error = error.exceptions[0]
+    return error if isinstance(error, TimeoutError) else None
+
+
 class _GuardedClient(httpx.AsyncClient):
     """Contain local admission errors before HTTP dispatch, outside SDK tasks.
 
@@ -217,22 +224,33 @@ class _Connection:
         token = _request_auth.set(state)
         try:
             async with AsyncExitStack() as stack:
-                async with asyncio.timeout(self.identity.timeout):
-                    session = await stack.enter_async_context(
-                        _mcp_session(
-                            self.identity.url,
-                            {},
-                            self.identity.timeout,
-                            use_streamable_http=self.identity.streamable,
-                            proxy_url=self.identity.proxy,
-                            auth=_ContextAuth(),
-                            message_handler=self._message,
-                            http_client_type=_GuardedClient,
+                try:
+                    async with asyncio.timeout(self.identity.timeout):
+                        session = await stack.enter_async_context(
+                            _mcp_session(
+                                self.identity.url,
+                                {},
+                                self.identity.timeout,
+                                use_streamable_http=self.identity.streamable,
+                                proxy_url=self.identity.proxy,
+                                auth=_ContextAuth(),
+                                message_handler=self._message,
+                                http_client_type=_GuardedClient,
+                            )
                         )
-                    )
-                    await self.list_tools(session)
-                    if state.failure is not None:
-                        raise state.failure
+                        await self.list_tools(session)
+                        if state.failure is not None:
+                            raise state.failure
+                except Exception as error:
+                    timeout = _single_preparation_timeout(error)
+                    if timeout is None:
+                        raise
+                    # Unwind SDK task groups without injecting this preparation
+                    # timeout into them, which would wrap it in ExceptionGroup.
+                    await stack.aclose()
+                    if timeout is error:
+                        raise
+                    raise timeout from error
                 self.ready.set_result(session)
                 logger.debug("MCP connection prepared")
                 await self.stop.wait()
