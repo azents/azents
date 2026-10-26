@@ -247,7 +247,15 @@ class _Connection:
                         raise
                     # Unwind SDK task groups without injecting this preparation
                     # timeout into them, which would wrap it in ExceptionGroup.
-                    await stack.aclose()
+                    try:
+                        await stack.aclose()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as cleanup_error:
+                        raise ExceptionGroup(
+                            "MCP preparation timeout and cleanup failure",
+                            [timeout, cleanup_error],
+                        ) from None
                     if timeout is error:
                         raise
                     raise timeout from error

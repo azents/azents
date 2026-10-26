@@ -469,6 +469,33 @@ async def test_preparation_timeout_wrapped_during_sdk_enter_is_preserved(
         await connections.close()
 
 
+async def test_preparation_timeout_and_cleanup_error_are_both_retained(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timeout = TimeoutError("preparation")
+    cleanup = ValueError("cleanup failed")
+    session = AsyncMock(spec=ClientSession)
+    session.list_tools = AsyncMock(side_effect=timeout)
+
+    @asynccontextmanager
+    async def open_session(
+        *args: object, **kwargs: object
+    ) -> AsyncGenerator[ClientSession]:
+        try:
+            yield session
+        finally:
+            raise cleanup
+
+    monkeypatch.setattr(mcp_connections, "_mcp_session", open_session)
+    connections = McpConnections()
+    try:
+        with pytest.raises(ExceptionGroup) as caught:
+            await _list(connections)
+        assert caught.value.exceptions == (timeout, cleanup)
+    finally:
+        await connections.close()
+
+
 async def test_mixed_sdk_enter_errors_are_not_discarded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
