@@ -14,6 +14,7 @@ from typing import NoReturn, Protocol, TypeVar
 
 import grpc
 from aiohttp import web
+from azents_runtime_control.browser_source_contract import BrowserScopeState
 from azents_runtime_control.proto import (
     runtime_stream_session_pb2,
     runtime_stream_session_pb2_grpc,
@@ -1292,7 +1293,9 @@ class RuntimeStreamControlDataPlane:
         finite_grace_seconds: float,
         hard_limits: RuntimeStreamControlHardLimits,
         resident_memory_bytes: Callable[[], int],
-        browser_scope_validator: Callable[[BrowserStreamAuthority], Awaitable[bool]]
+        browser_scope_validator: Callable[
+            [BrowserStreamAuthority], Awaitable[BrowserScopeState]
+        ]
         | None = None,
     ) -> None:
         if (
@@ -2138,13 +2141,14 @@ class RuntimeStreamControlDataPlane:
                     )
                 )
                 return
-            if not await self._browser_scope_current(authority):
+            scope = await self._browser_scope_current(authority)
+            if scope is not BrowserScopeState.CURRENT:
                 await source.queue.put(
                     _rejection(
                         source,
                         self.control_boot_id,
                         envelope.stream_id,
-                        CloseReason.AUTHORITY_REVOKED,
+                        _browser_scope_close_reason(scope),
                     )
                 )
                 return
@@ -2273,8 +2277,9 @@ class RuntimeStreamControlDataPlane:
         target = binding.target
         if binding.browser_authority is not None:
             checked_at = asyncio.get_running_loop().time()
-            if not await self._browser_scope_current(binding.browser_authority):
-                await self._revoke_browser(binding)
+            scope = await self._browser_scope_current(binding.browser_authority)
+            if scope is not BrowserScopeState.CURRENT:
+                await self._revoke_browser(binding, _browser_scope_close_reason(scope))
                 return
             if binding.key not in self.bindings:
                 return
@@ -2335,31 +2340,35 @@ class RuntimeStreamControlDataPlane:
             return
         await self.relay_pool.forward(target=target, envelope=envelope)
 
-    async def _browser_scope_current(self, authority: BrowserStreamAuthority) -> bool:
+    async def _browser_scope_current(
+        self, authority: BrowserStreamAuthority
+    ) -> BrowserScopeState:
         if (
             self.browser_scope_validator is None
             or self.clock() >= authority.transport_deadline_at
         ):
-            return False
+            return BrowserScopeState.EXPIRED
         try:
             async with asyncio.timeout(2):
                 return await self.browser_scope_validator(authority)
         except asyncio.CancelledError:
             raise
         except TimeoutError:
-            return False
+            return BrowserScopeState.UNAVAILABLE
         except Exception:
             _LOGGER.exception("Browser current authority validation failed")
-            return False
+            return BrowserScopeState.UNAVAILABLE
 
-    async def _revoke_browser(self, binding: _StreamBinding) -> None:
+    async def _revoke_browser(
+        self, binding: _StreamBinding, reason: CloseReason
+    ) -> None:
         async with self.lock:
             current = self.bindings.get(binding.key)
         if current is None:
             return
         async with contextlib.AsyncExitStack() as cleanup:
             cleanup.push_async_callback(self._release, current.key)
-            await self._send_runner_reset(current, CloseReason.AUTHORITY_REVOKED)
+            await self._send_runner_reset(current, reason)
             if not current.target.local:
                 cancel = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
                     protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
@@ -2367,14 +2376,14 @@ class RuntimeStreamControlDataPlane:
                     peer_boot_id=current.source.peer_boot_id,
                     stream_id=current.key.stream_id,
                 )
-                cancel.cancel.reason = _close_reason(CloseReason.AUTHORITY_REVOKED)
+                cancel.cancel.reason = _close_reason(reason)
                 await self.relay_pool.forward(target=current.target, envelope=cancel)
             await current.source.queue.put(
                 _reset(
                     current.source,
                     self.control_boot_id,
                     current.key.stream_id,
-                    CloseReason.AUTHORITY_REVOKED,
+                    reason,
                 )
             )
 
@@ -2383,8 +2392,9 @@ class RuntimeStreamControlDataPlane:
         while binding.key in self.bindings:
             await asyncio.sleep(2)
             checked_at = asyncio.get_running_loop().time()
-            if not await self._browser_scope_current(binding.browser_authority):
-                await self._revoke_browser(binding)
+            scope = await self._browser_scope_current(binding.browser_authority)
+            if scope is not BrowserScopeState.CURRENT:
+                await self._revoke_browser(binding, _browser_scope_close_reason(scope))
                 return
             if binding.key in self.bindings:
                 self.browser_fresh_until[binding.key] = checked_at + 5
@@ -3341,6 +3351,18 @@ def _matches_owner(
         and envelope.HasField("lease_generation")
         and envelope.lease_generation == owner.lease_generation
     )
+
+
+def _browser_scope_close_reason(state: BrowserScopeState) -> CloseReason:
+    match state:
+        case BrowserScopeState.CURRENT:
+            raise ValueError("Current Browser scope has no close reason")
+        case BrowserScopeState.UNAVAILABLE:
+            return CloseReason.TRANSPORT_UNAVAILABLE
+        case BrowserScopeState.REVOKED:
+            return CloseReason.AUTHORITY_REVOKED
+        case BrowserScopeState.EXPIRED:
+            return CloseReason.DEADLINE
 
 
 def _close_reason(

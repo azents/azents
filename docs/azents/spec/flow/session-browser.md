@@ -79,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-26
+last_verified_at: 2026-10-27
 spec_version: 1
 ---
 
@@ -392,7 +392,33 @@ Runner final failures map to typed, non-secret tool errors. The Engine validates
 
 ## Runner Resource Owner
 
-One RunnerBrowserManager belongs to the current Runner connection lifecycle. Registration advertises `browser.v1` only when product browser initialization succeeds; browser unavailability does not stop independent Runner capabilities. Commands validate the current Runtime and accepted Runner generation before resource execution.
+One browser controller and its native managers belong to the Runner process, not
+the Control connection. Registration advertises browser support independently of
+current intent readiness. Browser unavailability does not stop independent Runner
+capabilities. Commands validate the current Runtime and accepted live connection
+generation before resource execution.
+
+Control transport loss synchronously fences former authority and cancels admitted
+browser effects. Connection teardown drains commands, viewer attachments and
+pending dispatch waits, releases held input and private editor state, and disposes
+old observation refs. It retains native contexts, tabs, page memory, profiles and
+surviving task/page/incarnation identities. Dialogs are not automatically answered
+and uncertain website effects are not replayed. A stable nullable epoch callback
+follows the current transport/registration rather than a former RunLoop. New
+admission waits for cleanup and the existing current-intent readiness reconciliation
+in the new generation; same-intent reconciliation does not restart the browser.
+Unconfirmed browser cleanup fails the current intent closed without silently
+replacing native resources. Final Runner exit and explicit engine transitions
+still retire native resources; actual unconfirmed retirement keeps its existing
+sticky failure boundary.
+
+API and Owner live scope distinguish current, temporarily unavailable, revoked and
+expired authority. Connection epoch loss ends the old attachment with transient
+transport semantics and permits fresh admission through existing bounded retries;
+it does not mark a surviving native target closed or an account revoked. Actual
+access loss/expiry and native target closure retain their denial boundaries.
+Agent tool errors describe connection unavailability or changed authority, not
+physical Runtime recreation inferred solely from generation changes.
 
 Each concrete Session and selected engine has a separate native persistent BrowserContext/profile under the current Runner Workspace. Tasks within that Session/engine reuse its site state. Existing Patchright profiles retain their location; Camoufox uses a distinct engine-specific location. Session working-folder association cannot change during a live manager's identity. Task-owned pages/popups and frames remain in a live registry with exact resource incarnations, not a durable help/task ownership table.
 

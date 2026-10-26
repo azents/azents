@@ -378,6 +378,31 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         ),
         name="runtime-web-runner-process-pressure",
     )
+    client: GrpcRunnerControlClient | None = None
+    run_loop: RunnerRunLoop | None = None
+
+    def accepted_generation() -> int | None:
+        if client is None or not client.connected or run_loop is None:
+            return None
+        accepted = run_loop.accepted
+        return None if accepted is None else accepted.generation
+
+    def create_browser(implementation: BrowserImplementation) -> RunnerBrowserManager:
+        manager = RunnerBrowserManager(
+            workspace_root=workspace.root,
+            proxy=runner_network_environment.get("HTTP_PROXY"),
+            input_key=browser_input_key,
+            implementation=implementation,
+        )
+        manager.bind_runtime(runtime_id, accepted_generation)
+        return manager
+
+    browser_manager = RunnerBrowserController(
+        manager_factory=create_browser,
+        viewer_factory=lambda manager: RunnerBrowserViewer(manager, web_resources),
+        input_key=browser_input_key,
+    )
+    browser_manager.bind_runtime(runtime_id, accepted_generation)
     try:
         while True:
             client = GrpcRunnerControlClient.from_endpoint(
@@ -386,6 +411,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 tls=control_tls,
                 allow_insecure=allow_insecure_control,
             )
+            client.set_disconnect_handler(browser_manager.cancel_connection_operations)
             transfer_client = GrpcRunnerTransferClient.from_endpoint(
                 transfer_endpoint,
                 runner_auth_token=runner_auth_token,
@@ -394,25 +420,6 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             )
             connection_id = _control_connection_id(base_connection_id)
 
-            def create_browser(
-                implementation: BrowserImplementation,
-            ) -> RunnerBrowserManager:
-                manager = RunnerBrowserManager(
-                    workspace_root=workspace.root,
-                    proxy=runner_network_environment.get("HTTP_PROXY"),
-                    input_key=browser_input_key,
-                    implementation=implementation,
-                )
-                manager.bind_runtime(runtime_id, accepted_generation)
-                return manager
-
-            browser_manager = RunnerBrowserController(
-                manager_factory=create_browser,
-                viewer_factory=lambda manager: RunnerBrowserViewer(
-                    manager, web_resources
-                ),
-                input_key=browser_input_key,
-            )
             # Support is advertised independently of applied configuration.
             # Browser admission waits for exact current-intent ready evidence.
             browser_capabilities = (
@@ -453,11 +460,6 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 ),
             )
 
-            def accepted_generation(run_loop: RunnerRunLoop = run_loop) -> int | None:
-                accepted = run_loop.accepted
-                return None if accepted is None else accepted.generation
-
-            browser_manager.bind_runtime(runtime_id, accepted_generation)
             terminal_registry = RunnerTerminalRegistry(
                 backend=LinuxPtyTerminalBackend(),
                 limits=TerminalLimits(
@@ -582,6 +584,8 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             except RuntimeRunnerControlStreamClosed as exc:
                 _log_control_stream_closed(L, exc)
             finally:
+                run_loop = None
+                await browser_manager.suspend_connection()
                 if shutting_down:
                     await terminal_manager.close()
                 else:
@@ -614,7 +618,10 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             await web_process_sampler_task
         except asyncio.CancelledError:
             pass
-        await execution_backend.close()
+        try:
+            await browser_manager.close()
+        finally:
+            await execution_backend.close()
 
 
 def _log_control_stream_closed(

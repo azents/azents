@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Literal, Protocol
 
+from azents_runtime_control.browser_source_contract import BrowserScopeState
 from azents_runtime_control.browser_viewer_contract import (
     MAX_VIEWER_TEXT_BYTES,
     BrowserViewerContractError,
@@ -354,7 +355,11 @@ class RuntimeBrowserSocketService:
             raise BrowserSocketFailure(
                 4403, "Browser access revalidation failed"
             ) from None
-        if not valid:
+        if valid is BrowserScopeState.UNAVAILABLE:
+            raise BrowserSocketFailure(4500, "Browser connection authority changed")
+        if valid is BrowserScopeState.EXPIRED:
+            raise BrowserSocketFailure(4408, "Browser authority expired")
+        if valid is not BrowserScopeState.CURRENT:
             raise BrowserSocketFailure(4403, "Browser access was revoked")
         if self.clock() >= authority.transport_deadline_at:
             raise BrowserSocketFailure(4408, "Browser authority expired")

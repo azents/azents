@@ -94,7 +94,7 @@ def _rejection_error(envelope: pb.RuntimeStreamSessionEnvelope) -> BrowserSource
     if reason == pb.RUNTIME_STREAM_SESSION_CLOSE_REASON_AUTHORITY_REVOKED:
         return BrowserSourceScopeRevoked("access_revoked")
     if reason == pb.RUNTIME_STREAM_SESSION_CLOSE_REASON_GENERATION_REPLACED:
-        return BrowserSourceScopeRevoked("stale_target")
+        return BrowserSourceUnavailable("Browser connection generation changed")
     if reason == pb.RUNTIME_STREAM_SESSION_CLOSE_REASON_DEADLINE:
         return BrowserSourceScopeRevoked("expired")
     return BrowserSourceUnavailable("Browser source attachment ended")

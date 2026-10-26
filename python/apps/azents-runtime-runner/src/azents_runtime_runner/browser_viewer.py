@@ -328,14 +328,37 @@ class RunnerBrowserViewer:
             for reader in done:
                 await reader
         finally:
-            for reader in readers:
-                reader.cancel()
-            await asyncio.gather(*readers, return_exceptions=True)
-            await attachment.cleanup()
-            source.subscribers -= 1
-            if source.subscribers == 0 and self.sources.get(page.id) is source:
-                self.sources.pop(page.id, None)
-                await source.close()
+
+            async def cleanup() -> None:
+                for reader in readers:
+                    if not reader.cancelling():
+                        reader.cancel()
+                await asyncio.gather(*readers, return_exceptions=True)
+                try:
+                    await attachment.cleanup()
+                finally:
+                    source.subscribers -= 1
+                    if source.subscribers == 0 and self.sources.get(page.id) is source:
+                        self.sources.pop(page.id, None)
+                        await source.close()
+
+            cleanup_task = asyncio.create_task(cleanup(), name="browser-viewer-cleanup")
+            cancellation: asyncio.CancelledError | None = None
+            while True:
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError as error:
+                    if cleanup_task.cancelled():
+                        self.manager.connection_cleanup_failed = True
+                        raise
+                    cancellation = error
+                except Exception:
+                    self.manager.connection_cleanup_failed = True
+                    raise
+                else:
+                    if cancellation is not None:
+                        raise cancellation
+                    break
 
     async def close(self) -> None:
         for source in tuple(self.sources.values()):
@@ -1019,7 +1042,6 @@ class _Attachment:
             self.finish()
 
     async def cleanup(self) -> None:
-        await self.discard_field_edit()
         if self.page.popup_interest == self.id:
             self.page.popup_interest = None
         if (
@@ -1037,6 +1059,7 @@ class _Attachment:
                     for key in tuple(self.keys):
                         await self.page.page.keyboard.up(key)
         except (*BROWSER_SDK_ERRORS, TimeoutError) as error:
+            self.manager.connection_cleanup_failed = True
             logging.getLogger(__name__).info(
                 "Browser attachment cleanup outcome is unconfirmed",
                 exc_info=BrowserFailure(
@@ -1050,6 +1073,8 @@ class _Attachment:
             self.composing = False
             if self.task.guard.actor == self.id:
                 self.task.guard.end(self.id)
+            async with asyncio.timeout(2):
+                await self.discard_field_edit()
 
     async def discard_field_edit(self) -> None:
         edit, self.field_edit = self.field_edit, None

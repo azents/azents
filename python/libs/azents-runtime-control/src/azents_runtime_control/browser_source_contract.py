@@ -4,6 +4,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
 from azents_runtime_control.proto import runtime_stream_session_pb2 as pb
 from azents_runtime_control.runtime_stream_authority_codec import (
@@ -19,6 +20,15 @@ BROWSER_SOURCE_AUDIENCE = "azents/runtime-browser-source"
 BROWSER_SOURCE_OPERATION = "RuntimeBrowserSourceSession/Connect"
 BROWSER_SOURCE_SETUP_SECONDS = 10
 BROWSER_SOURCE_MAXIMUM_SECONDS = 3600
+
+
+class BrowserScopeState(StrEnum):
+    """Current authority classification, independent of native resource lifetime."""
+
+    CURRENT = "current"
+    UNAVAILABLE = "unavailable"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
 
 
 @dataclass(frozen=True)

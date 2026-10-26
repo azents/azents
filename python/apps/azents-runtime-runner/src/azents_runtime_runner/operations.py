@@ -365,7 +365,7 @@ class RunnerOperations:
                     if operation.payload:
                         raise BrowserContractError("Browser status has no fields")
                     configuration = encode_browser_configuration_status(
-                        self.browser_manager.status
+                        self.browser_manager.configuration_status()
                     )
                     await self._final_success(
                         operation,
@@ -508,12 +508,8 @@ class RunnerOperations:
         )
 
     async def close(self) -> None:
-        """Clean independent resources even if browser cleanup fails."""
-        try:
-            await self._close_managed_processes()
-        finally:
-            if self.browser_manager is not None:
-                await self.browser_manager.close()
+        """Close connection-owned operations; native browser has a process owner."""
+        await self._close_managed_processes()
 
     async def _close_managed_processes(self) -> None:
         """Stop filesystem work and terminate processes before reconnecting."""

@@ -10,6 +10,7 @@ from typing import Literal, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
+from azents_runtime_control.browser_source_contract import BrowserScopeState
 from azents_runtime_control.browser_viewer_contract import (
     ViewerFieldAttributes,
     ViewerFieldValue,
@@ -130,7 +131,7 @@ class _Harness(NamedTuple):
 def _harness() -> _Harness:
     validator = AsyncMock(spec=DatabaseRuntimeBrowserStreamScopeValidator)
     validator.admit.return_value = _CURRENT
-    validator.return_value = True
+    validator.return_value = BrowserScopeState.CURRENT
     connection = _Connection()
     source = _Source(connection)
     return _Harness(
@@ -265,7 +266,7 @@ async def test_selected_stale_page_does_not_open_source_or_choose_another_target
 
 async def test_post_source_scope_check_precedes_any_first_frame() -> None:
     h = _harness()
-    h.validator.return_value = False
+    h.validator.return_value = BrowserScopeState.REVOKED
     h.connection.incoming.put_nowait(_frame())
     with pytest.raises(BrowserSocketFailure) as captured:
         await _start(h)
@@ -324,7 +325,7 @@ async def test_read_only_can_ack_frames_but_cannot_send_input(navigation: bool) 
 async def test_preinput_revocation_stops_forwarding_and_closes_source() -> None:
     h = _harness()
     task = await _connected(h)
-    h.validator.return_value = False
+    h.validator.return_value = BrowserScopeState.REVOKED
     h.socket.incoming.put_nowait(_input())
     with pytest.raises(BrowserSocketFailure) as captured:
         await asyncio.wait_for(task, 2)
@@ -334,7 +335,7 @@ async def test_preinput_revocation_stops_forwarding_and_closes_source() -> None:
 async def test_idle_live_revocation_closes_within_five_second_contract() -> None:
     h = _harness()
     task = await _connected(h)
-    h.validator.return_value = False
+    h.validator.return_value = BrowserScopeState.REVOKED
     with pytest.raises(BrowserSocketFailure) as captured:
         await asyncio.wait_for(task, 5)
     assert captured.value.code == 4403 and h.connection.closed
@@ -591,7 +592,7 @@ async def test_private_field_response_fails_closed_without_forwarding(
     if case not in {"unsolicited", "readonly"}:
         await _open_field(h)
     if case == "revoked":
-        h.validator.return_value = False
+        h.validator.return_value = BrowserScopeState.REVOKED
     if case == "duplicate":
         h.socket.text_sent.clear()
         h.connection.incoming.put_nowait(_field_value())

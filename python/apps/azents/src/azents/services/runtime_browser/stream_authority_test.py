@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from azents_runtime_control.browser_contract import BrowserPage, BrowserResult
+from azents_runtime_control.browser_source_contract import BrowserScopeState
 from azents_runtime_control.browser_viewer_contract import ViewerTarget
 from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 
@@ -99,7 +100,7 @@ async def test_live_scope_checks_authority_without_reentrant_browser_rpc() -> No
     h.runner.run_browser_command.side_effect = AssertionError(
         "An input authority check must not issue a nested Browser operation"
     )
-    assert await h.validator(_scope())
+    assert await h.validator(_scope()) is BrowserScopeState.CURRENT
     h.resolver.resolve.assert_awaited_once_with(
         resource=_RESOURCE,
         user_id="user-a",
@@ -107,14 +108,14 @@ async def test_live_scope_checks_authority_without_reentrant_browser_rpc() -> No
         resolved_at=_NOW,
     )
     h.resolver.resolve.return_value = RuntimeBrowserUnavailable("browser_disabled")
-    assert not await h.validator(_scope())
+    assert await h.validator(_scope()) is not BrowserScopeState.CURRENT
     assert h.resolver.resolve.await_count == 2
     h.runner.run_browser_command.assert_not_awaited()
 
 
 async def test_owner_callback_uses_current_joined_resource() -> None:
     h = _harness()
-    assert await h.validator(_scope())
+    assert await h.validator(_scope()) is BrowserScopeState.CURRENT
     h.repository.read_stream_workspace_handle.assert_awaited_once_with(
         agent_id="agent-1", session_id="concrete-session"
     )
@@ -150,14 +151,14 @@ async def test_invalid_identity_or_resource_never_queries_title_or_selected_page
 ) -> None:
     h = _harness()
     h.resolver.resolve.side_effect = RuntimeBrowserRequestError(status, "Denied")
-    assert not await h.validator(_scope())
+    assert await h.validator(_scope()) is not BrowserScopeState.CURRENT
     h.runner.run_browser_command.assert_not_awaited()
 
 
 async def test_missing_joined_resource_cannot_take_a_client_header_route() -> None:
     h = _harness()
     h.repository.read_stream_workspace_handle.return_value = None
-    assert not await h.validator(_scope())
+    assert await h.validator(_scope()) is not BrowserScopeState.CURRENT
     h.resolver.resolve.assert_not_awaited()
     h.runner.run_browser_command.assert_not_awaited()
 
@@ -186,7 +187,7 @@ async def test_scope_and_expiry_changes_deny_existing_attachment(
 ) -> None:
     h = _harness()
     h.resolver.resolve.return_value = changed
-    assert not await h.validator(_scope())
+    assert await h.validator(_scope()) is not BrowserScopeState.CURRENT
 
 
 @pytest.mark.parametrize(
@@ -231,7 +232,7 @@ async def test_expired_or_overlong_authority_denied_before_repository(
     authority = dataclasses.replace(
         _scope(), transport_deadline_at=deadline, open_deadline_at=min(_NOW, deadline)
     )
-    assert not await h.validator(authority)
+    assert await h.validator(authority) is BrowserScopeState.EXPIRED
     h.repository.read_stream_workspace_handle.assert_not_awaited()
 
 

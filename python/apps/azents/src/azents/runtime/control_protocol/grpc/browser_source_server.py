@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import grpc
 from azents_runtime_control.browser_source_contract import (
+    BrowserScopeState,
     BrowserSourceCredentialRequest,
 )
 from azents_runtime_control.proto import runtime_stream_session_pb2 as pb
@@ -26,7 +27,7 @@ from azents.runtime.control_protocol.grpc.runtime_stream_session_server import (
     _create_control_task,
 )
 
-ScopeValidator = Callable[[BrowserStreamAuthority], Awaitable[bool]]
+ScopeValidator = Callable[[BrowserStreamAuthority], Awaitable[BrowserScopeState]]
 
 
 class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
@@ -110,9 +111,20 @@ class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
                             ),
                         )
                     )
-                    if not await self.validate_scope(authority):
+                    scope = await self.validate_scope(authority)
+                    if scope is not BrowserScopeState.CURRENT:
                         await context.abort(
-                            grpc.StatusCode.PERMISSION_DENIED,
+                            {
+                                BrowserScopeState.UNAVAILABLE: (
+                                    grpc.StatusCode.UNAVAILABLE
+                                ),
+                                BrowserScopeState.REVOKED: (
+                                    grpc.StatusCode.PERMISSION_DENIED
+                                ),
+                                BrowserScopeState.EXPIRED: (
+                                    grpc.StatusCode.DEADLINE_EXCEEDED
+                                ),
+                            }[scope],
                             "Browser scope is no longer current",
                         )
                         return

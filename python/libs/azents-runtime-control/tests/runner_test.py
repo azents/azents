@@ -889,6 +889,8 @@ async def test_run_loop_shutdown_discards_pending_generation_work() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    assert loop.accepted is None
+    await loop.start()
     await loop.run_once(block_ms=0)
     assert operations.started == ["active"]
 

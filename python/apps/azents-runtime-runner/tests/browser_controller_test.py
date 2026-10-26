@@ -139,6 +139,7 @@ async def test_switch_retires_only_browser_and_preserves_native_profiles(
         assert generation == 7
     finally:
         await operations.close()
+        await controller.close()
     assert budget.bytes == 0
 
 
