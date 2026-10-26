@@ -3454,7 +3454,6 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/responses":
             for kind in (
                 "mcp",
-                "personal",
                 "replacement",
                 "runtime-off",
                 "runtime-on",

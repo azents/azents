@@ -450,20 +450,6 @@ Always-on required CI does not depend on external credentials.
   Workflow step evidence separately measures export, upload, preparation, load and
   archive cleanup,
   while whole-workflow gate time and runner-seconds include the producer dependency.
-  Personal Toolkit ownership E2E uses its own identity-only model script for
-  initial and recovered provider access while retaining User, Team, Workspace,
-  credential-export, restriction and reallow boundaries. The dedicated GitHub
-  Toolkit E2E owns the repository-owner access matrix; personal ownership does not
-  replay that matrix as unrelated model/tool round trips. Docker-free script tests
-  retain distinct sparse-continuation call IDs and the full GitHub matrix.
-  Routine Web and channel-delivery journeys consume completed real Routine
-  execution: tool-created definitions, both judgments, per-item Runtime work,
-  final records, confirmed notification outcomes and session/User isolation.
-  Required Routine and channel E2E then continue stale-update/recovery, deletion
-  and archive/restore lifecycle checks. Web inspects the real definitions, attachment and
-  judgment expansion/reload state without replaying that unrelated management
-  lifecycle after browser inspection. Channel success/failure variants retain
-  real provider attempts and their own delivery assertions.
   Preparation artifacts retain exact identity, every download/pull status and duration,
   plus same-clock download, prerequisite-owner and import boundaries to distinguish
   actual overlap from sums of nested work. They never contain credentials. Local
