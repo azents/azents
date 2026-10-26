@@ -65,7 +65,9 @@ class _BrowserEnabledObservation(BaseModel):
 _APP = '''
 import http.server
 
-HTML = b"""<!doctype html><title>Synthetic Browser ready</title>
+HTML = b"""<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthetic Browser ready</title>
 <style>body{margin:0;background:white}button,input{position:absolute;left:20px;
 width:200px;height:40px;box-sizing:border-box}button{top:20px}
 #entry{top:100px}#secret{top:180px;border-radius:8px}
