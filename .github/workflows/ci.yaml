@@ -190,13 +190,21 @@ jobs:
         run: |
           cd "${{ matrix.project }}"
           uv sync
-      - name: Install Runner browser engines
+      - name: Select Ubuntu archive for Runner browser dependencies
+        if: matrix.project == 'python/apps/azents-runtime-runner'
+        run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt
+      - name: Install Runner Chromium engine
         if: matrix.project == 'python/apps/azents-runtime-runner'
         working-directory: python/apps/azents-runtime-runner
-        run: |
-          uv run patchright install --with-deps chromium
-          uv run playwright install-deps firefox
-          uv run python -m azents_runtime_runner.browser_install
+        run: uv run patchright install --with-deps chromium
+      - name: Install Runner Firefox system dependencies
+        if: matrix.project == 'python/apps/azents-runtime-runner'
+        working-directory: python/apps/azents-runtime-runner
+        run: uv run playwright install-deps firefox
+      - name: Install Runner pinned Camoufox and model
+        if: matrix.project == 'python/apps/azents-runtime-runner'
+        working-directory: python/apps/azents-runtime-runner
+        run: uv run python -m azents_runtime_runner.browser_install
       - name: Ruff check
         run: |
           cd "${{ matrix.project }}"

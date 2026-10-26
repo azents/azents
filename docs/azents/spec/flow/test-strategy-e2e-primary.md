@@ -24,6 +24,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
   - typescript/apps/azents-web/src/shared/toolkits/github-creation-completion.test.mts
+  - typescript/apps/azents-web/src/features/agents/google-management-integration.test.mts
+  - python/apps/azents/src/azents/api/public/toolkit/v1/github_user_creation_cancel_integration_test.py
   - typescript/apps/azents-web/src/features/toolkits/github-user-creation-state.test.mts
   - typescript/apps/azents-web/src/shared/toolkits/components/GitHubWizard.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.stories.tsx
@@ -342,7 +344,8 @@ the Node runner, finite positive duration and exit status. Missing or conflictin
 execution evidence cannot qualify a performance sample, even with green workflow
 metadata or JUnit.
 
-That job also runs the explicit Runtime Settings, GitHub Wizard, Chat Session
+That job also runs the explicit Runtime Settings, GitHub Wizard, Agent Toolkit
+Management, Chat Session
 View and Routine tool-card component portfolio through Storybook's Vitest Chromium integration, with one
 browser worker. The story catalog remains available independently; only this
 portfolio is CI contract evidence. Interaction obligations use actual story plays,
@@ -352,7 +355,14 @@ Missing, empty, skipped or failed component results fail the producer, and missi
 native evidence cannot qualify analysis. No synthetic pytest phases are emitted.
 
 The GitHub browser journeys retain saved Workspace popup authorization plus new
-Agent same-context publication and actual Close-button cancellation. The Workspace
+Agent same-context publication. The repeated cancellation-only OAuth journey is
+owned by the actual Agent management Close/publication-guard component plays,
+production management and wizard hooks, and a scoped HTTP/service/PostgreSQL
+contract. The latter rejects another user, Session, Workspace or Agent, then proves
+DELETE 204, candidate GET 404 and an empty Agent Toolkit inventory despite provider
+cleanup failure. Wizard-hook contracts retain exact-attempt cancellation and
+Session storage clearing. The component producer selects these management plays
+explicitly; render-only stories do not replace the removed journey. The Workspace
 new-publication ownership branch uses the production-hook and backend contracts
 rather than repeating the OAuth journey. Runtime browser coverage retains initial
 settings and Session metrics, stopped-state metrics, real lifecycle/storage
@@ -424,6 +434,12 @@ Always-on required CI does not depend on external credentials.
   behavioral coverage, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
+- The existing Runner Python job uses the official HTTPS Ubuntu archive instead
+  of the Azure Ubuntu mirror for browser system dependencies. This changes only
+  the exact mirror URI, preserving suites, components and repository signing keys.
+  Chromium installation, Firefox system dependencies, and pinned Camoufox/model
+  installation remain ordered, mandatory steps with separate timings; no dependency
+  installation, browser engine or native test is skipped.
 - Active CI optimization failures require diagnosis and repair rather than stopping
   at a failure report. When an experiment ends failed, rejected or inconclusive,
   durable reports retain its evidence; the unsuccessful PR is closed and its remote

@@ -2,7 +2,6 @@
 
 import azentsadminclient
 import azentspublicclient
-import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
@@ -11,7 +10,6 @@ from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
-from pydantic import BaseModel, Field
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
@@ -35,12 +33,6 @@ from tests.web.public.test_agent_toolkits import (
 )
 
 E2E_PLANNER_FALLBACK_WEIGHT = 45.0
-
-
-class _CreationAttempt(BaseModel):
-    """Project only the candidate identity; storage validation belongs to Web."""
-
-    attempt_id: str = Field(alias="attemptId", pattern=r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 def _click_choice(driver: WebDriver, title: str) -> None:
@@ -157,7 +149,6 @@ def test_github_user_popup_callback_requires_explicit_sharing_confirmation(
     browser_driver.switch_to.window(original_window)
 
 
-@pytest.mark.parametrize("publish", [True, False])
 def test_new_github_user_creation_returns_before_publication(
     browser_driver: WebDriver,
     azents_main_web_url: str,
@@ -165,9 +156,8 @@ def test_new_github_user_creation_returns_before_publication(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     github_validation_proxy_url: str,
-    publish: bool,
 ) -> None:
-    """Real same-context OAuth returns before explicit publication or cancellation."""
+    """Real same-context OAuth returns before explicit confirmed publication."""
     _scenario(github_validation_proxy_url, "user_success")
     workspace = _create_workspace(
         public_api_client=public_api_client,
@@ -224,39 +214,6 @@ def test_new_github_user_creation_returns_before_publication(
             handle=workspace.handle, agent_id=agent_id, _headers=headers
         ).items
     )
-    if not publish:
-        stored = browser_driver.execute_script(
-            "return sessionStorage.getItem('azents.github-user.creation')"
-        )
-        assert isinstance(stored, str)
-        attempt = _CreationAttempt.model_validate_json(stored).attempt_id
-        candidate_url = (
-            f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
-            f"/agents/{agent_id}/github-user-creations/{attempt}"
-        )
-        browser_driver.find_element(
-            By.CSS_SELECTOR, '[role="dialog"] button[aria-label="Close"]'
-        ).click()
-        _wait(browser_driver).until(
-            lambda _: (
-                requests.get(candidate_url, headers=headers, timeout=10).status_code
-                == 404
-            )
-        )
-        assert (
-            browser_driver.execute_script(
-                "return sessionStorage.getItem('azents.github-user.creation')"
-            )
-            is None
-        )
-        assert not any(
-            item.toolkit.toolkit_type == "github"
-            for item in api.toolkit_v1_list_agent_toolkit_management(
-                handle=workspace.handle, agent_id=agent_id, _headers=headers
-            ).items
-        )
-        browser_driver.set_window_size(1440, 1000)
-        return
     _click_button(browser_driver, "Continue to features")
     _wait(browser_driver).until(
         ec.element_to_be_clickable(

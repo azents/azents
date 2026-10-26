@@ -19,6 +19,45 @@ def _step_block(workflow: str, name: str) -> str:
     return workflow[start:] if end == -1 else workflow[start:end]
 
 
+def test_runner_browser_install_preserves_commands_and_uses_official_apt_mirror() -> (
+    None
+):
+    """Only the existing Runner unit host changes mirror and observes each phase."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    job = workflow.split("  ci_python_run:\n", 1)[1].split(
+        "\n  ci_python_migrations_run:\n", 1
+    )[0]
+    names = (
+        "Select Ubuntu archive for Runner browser dependencies",
+        "Install Runner Chromium engine",
+        "Install Runner Firefox system dependencies",
+        "Install Runner pinned Camoufox and model",
+    )
+    blocks = [_step_block(job, name) for name in names]
+    assert [job.index(f"      - name: {name}\n") for name in names] == sorted(
+        job.index(f"      - name: {name}\n") for name in names
+    )
+    for block in blocks:
+        assert "if: matrix.project == 'python/apps/azents-runtime-runner'" in block
+        assert "continue-on-error:" not in block
+        assert "timeout-minutes:" not in block
+    assert (
+        "sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt" in blocks[0]
+    )
+    for block, command in zip(
+        blocks[1:],
+        (
+            "uv run patchright install --with-deps chromium",
+            "uv run playwright install-deps firefox",
+            "uv run python -m azents_runtime_runner.browser_install",
+        ),
+        strict=True,
+    ):
+        assert "working-directory: python/apps/azents-runtime-runner" in block
+        assert block.splitlines()[-1].strip() == f"run: {command}"
+    assert "      - name: Pytest\n" in job
+
+
 def test_general_report_can_checkout_and_keeps_forks_read_only() -> None:
     """Job-scoped permissions retain source reads and bound comment publication."""
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")

@@ -145,6 +145,16 @@ STORIES = {
         "Installed App Light Contrast",
         "Installed App Dark Contrast",
     ),
+    "src/features/agents/components/AgentToolkitManagementSection.stories.tsx": (
+        "Delete From List",
+        "Detach From List",
+        "Removed Details Close",
+        "Deleted Details Close",
+        "Removal Pending",
+        "Delete Failure",
+        "Git Hub Candidate Close Allowed",
+        "Git Hub Publication Close Blocked",
+    ),
     "src/features/chat/components/ChatSessionView.stories.tsx": (
         "Conversation",
         "Browser Disabled",
