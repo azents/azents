@@ -185,6 +185,7 @@ def _service(
                 ),
                 ExternalChannelConversationIngestionService,
             ),
+            setup_preparation_service=MagicMock(admit=AsyncMock(return_value=None)),
             queue_admission_service=require_instance(
                 MagicMock(
                     spec=ExternalChannelIngressAdmissionService,

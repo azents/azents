@@ -10,6 +10,7 @@ from azents.core.enums import (
     ExternalChannelConversationScopeKind,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
 from azents.core.external_channel_conversation_data import (
@@ -48,6 +49,9 @@ from azents.services.external_channel.ingestion_deps import (
 from azents.services.external_channel.ingress_admission import (
     ExternalChannelIngressAdmissionService,
 )
+from azents.services.external_channel.setup_preparation import (
+    ExternalChannelSetupPreparationService,
+)
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackEventExcluded,
@@ -78,6 +82,11 @@ class ExternalChannelTransportIngestionService:
     queue_admission_service: Annotated[
         ExternalChannelIngressAdmissionService,
         Depends(ExternalChannelIngressAdmissionService),
+    ]
+
+    setup_preparation_service: Annotated[
+        ExternalChannelSetupPreparationService,
+        Depends(ExternalChannelSetupPreparationService),
     ]
 
     async def ingest_slack_event(
@@ -297,6 +306,10 @@ class ExternalChannelTransportIngestionService:
         )
         if queue_outcome is not None:
             return queue_outcome
+        if normalized.author_type is ExternalChannelPrincipalAuthorType.HUMAN:
+            setup_outcome = await self.setup_preparation_service.admit(request)
+            if setup_outcome is not None:
+                return setup_outcome
         return await self.ingestion_service.ingest(request)
 
 

@@ -982,6 +982,14 @@ class ExternalChannelParticipationSettingStatus(enum.StrEnum):
     INVALIDATED = "invalidated"
 
 
+class ExternalChannelSetupPreparationStatus(enum.StrEnum):
+    """Active setup preparation execution state, independent of selection."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    DISPATCHING = "dispatching"
+
+
 class ExternalChannelSetupClaimStatus(enum.StrEnum):
     """Lifecycle state of one provider parent-channel setup claim."""
 

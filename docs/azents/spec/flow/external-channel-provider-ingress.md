@@ -6,6 +6,9 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/setup_preparation.py
+  - python/apps/azents/src/azents/services/external_channel/setup_preparation.py
+  - python/apps/azents/src/azents/services/external_channel/setup_preparation_job.py
   - python/apps/azents/src/azents/repos/session_working_folder_setup.py
   - python/apps/azents/src/azents/repos/external_channel/admission_operations.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_recovery_read.py
@@ -116,7 +119,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-26
-spec_version: 73
+spec_version: 74
 ---
 
 # External Channel Provider Ingress
@@ -387,8 +390,8 @@ the fenced connection to `reconnect_required` with
 Ingress consumes eligible target-Guild typed `Message` callbacks for normal
 conversation ingestion. Each callback schedules a retained process-local task and
 returns before provider history or first-time setup work. Tasks preserve per-connection
-message order and have a two-minute processing budget independent of HTTP acknowledgement
-deadlines. Message failures are logged with redacted exception details without closing
+message order and have a two-minute receipt-time budget covering both lock waiting and
+processing, independent of HTTP acknowledgement deadlines. Message failures are logged with redacted exception details without closing
 the Gateway client. Connection teardown cancels and joins unfinished message tasks.
 Work not yet durably admitted can still be lost on process or connection termination.
 Message identity derives from Guild, channel, thread, and
@@ -397,6 +400,24 @@ admission without exposing Gateway transport state. Each delivered callback atte
 durable admission independently. A failure for one callback does not discard later
 callbacks already delivered by the SDK; transport lifecycle failures remain owned by
 the high-level client and fenced lease manager.
+
+For an unconfigured eligible top-level Discord human mention, DB-only admission
+creates or updates the existing channel-scoped setup claim before provider history
+reads. Its preparation snapshot owns configuration generation, pending/running/dispatching
+status, attempt count, due time and a three-minute conditional execution lease. A
+registered setup-preparation Job uses a separate two-minute attempt budget, with up to
+five attempts within the source's fifteen-minute expiry. The producer recovery scan
+resubmits due claims and reclaims expired execution ownership. Ordinary Gateway
+replacement does not revoke committed preparation; current configuration, claim/source
+revision, selection, active block and connected-conversation state remain authoritative.
+No Binding, Session or AgentRun is created by preparation. Existing controls and
+selected-setup replay retain their authority.
+
+Control dispatch is recorded before provider mutation. Expired dispatch ownership or
+an observed unknown result terminates preparation with a sanitized uncertain outcome,
+not a blind create retry. Definite failures can retry within the same bounded lifecycle.
+No second inbox or durable generic job table owns setup state; existing setup-claim
+cleanup also owns this metadata. Pre-existing claims have inactive preparation defaults.
 
 Typed `on_disconnect` records a fenced degraded gap. Typed `on_ready` and `on_resumed`
 mark the same current lease active and clear its gap. A stale callback fails the client
@@ -735,6 +756,9 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+
+- **2026-10-26** (spec_version 74) — Added claim-owned recoverable first-Discord-mention
+  preparation and bounded Gateway task waiting from callback receipt.
 
 - **2026-10-26** (spec_version 73) — Detached ordered Discord message processing from
   SDK callbacks with a bounded process-local lifetime and independent processing budget.

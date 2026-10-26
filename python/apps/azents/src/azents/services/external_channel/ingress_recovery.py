@@ -17,6 +17,9 @@ from azents.repos.external_channel.ingress_recovery_read import (
 from azents.services.external_channel.ingress_queue import (
     build_external_channel_ingress_job_request,
 )
+from azents.services.external_channel.setup_preparation import (
+    ExternalChannelSetupPreparationService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,10 @@ class ExternalChannelIngressRecoveryService:
         Depends(ExternalChannelIngressRecoveryReadRepository),
     ]
     job_runtime: Annotated[JobRuntime, Depends(get_job_runtime)]
+    setup_preparation: Annotated[
+        ExternalChannelSetupPreparationService,
+        Depends(ExternalChannelSetupPreparationService),
+    ]
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Scan at startup and periodically until producer shutdown."""
@@ -48,6 +55,7 @@ class ExternalChannelIngressRecoveryService:
 
     async def run_once(self, *, now: datetime.datetime) -> list[str]:
         """Submit one bounded set of due or reclaimable Session identities."""
+        await self.setup_preparation.recover(now=now, limit=_RECOVERY_SCAN_LIMIT)
         owners = await self.repository.list_recoverable_owners(
             now=now, limit=_RECOVERY_SCAN_LIMIT
         )

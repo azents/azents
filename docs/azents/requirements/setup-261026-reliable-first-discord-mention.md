@@ -97,4 +97,4 @@ Temporary failures receive bounded retry/recovery. Terminal or ambiguous outcome
 
 ## Confirmation
 
-The requester explicitly requested implementation of the previously explained durable setup-preparation direction on 2026-10-26, after the separately releasable process-local quick fix. This document is the proposed requirement snapshot for that request; explicit confirmation of this exact snapshot and the remaining material technical decisions is pending. No implementation authority is inferred for additional product behavior.
+The requester confirmed this requirement snapshot and the existing setup-claim extension direction on 2026-10-26, after the separately releasable process-local quick fix. The confirmation preserves the existing setup workflow and excludes automatic merge of this follow-up.

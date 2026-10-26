@@ -51,6 +51,7 @@ class ExternalChannelIngestionOperation(enum.StrEnum):
     """Closed synchronous ingestion operation kind."""
 
     CURRENT_TRIGGER = "current_trigger"
+    SETUP_PREPARATION = "setup_preparation"
     SELECTOR_CONTINUATION = "selector_continuation"
     ACCESS_ALLOW = "access_allow"
     SETUP_CONTINUATION = "setup_continuation"
@@ -286,6 +287,16 @@ class ExternalChannelReplayBoundary:
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
+class ExternalChannelSetupPreparationBoundary(ExternalChannelReplayBoundary):
+    """Claim-owned preparation, independent of the admitting transport lease."""
+
+    claim_id: str
+    claim_generation: int
+    source_revision: int
+    preparation_owner: str
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
 class ExternalChannelSetupReplayBoundary:
     """Frozen selected setup continuation and target conversation authority."""
 
@@ -398,6 +409,10 @@ class ExternalChannelIngestionRequest:
             raise ValueError(
                 "Only access Allow replay may carry initial title eligibility."
             )
+        if (
+            self.operation is ExternalChannelIngestionOperation.SETUP_PREPARATION
+        ) != isinstance(self.replay_boundary, ExternalChannelSetupPreparationBoundary):
+            raise ValueError("Setup preparation requires its claim-owned boundary.")
 
     def __repr__(self) -> str:
         """Return only closed operation and content-free locator identity."""
