@@ -287,3 +287,45 @@ class ArtifactIntegrityTest(unittest.TestCase):
             artifacts_for_run(
                 [{"artifacts": [original, original]}], self.duration_run()
             )
+
+    def test_unsuccessful_upload_ignores_only_prior_verdict_and_keeps_evidence(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            inventory = json.loads((root / "artifact-inventory.json").read_text())
+            current = inventory[0]["artifacts"][0]
+            prior_verdict = {
+                **current,
+                "id": 2,
+                "name": "e2e-duration-gate",
+                "created_at": "2026-10-14T23:59:59Z",
+            }
+            inventory[0]["artifacts"].append(prior_verdict)
+            for run in (
+                decode_run(sample()),
+                *(
+                    self.duration_run(result)
+                    for result in ("failure", "skipped", "cancelled")
+                ),
+            ):
+                with self.subTest(run=run):
+                    self.assertEqual(
+                        [a.name for a in artifacts_for_run(inventory, run)],
+                        ["ci-observability-python-azents-1"],
+                    )
+            with self.assertRaisesRegex(ValueError, "different-attempt artifact"):
+                artifacts_for_run(inventory, self.duration_run())
+            prior_verdict["created_at"] = "2026-10-15T00:00:59Z"
+            for change in (
+                {"expired": True},
+                {"digest": None},
+                {"workflow_run": {"id": 100, "head_sha": "c" * 40}},
+                {"created_at": "2026-10-15T00:01:01Z"},
+            ):
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    artifacts_for_run(
+                        [{"artifacts": [current, {**prior_verdict, **change}]}],
+                        self.duration_run("failure"),
+                    )

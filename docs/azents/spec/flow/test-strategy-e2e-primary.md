@@ -884,6 +884,9 @@ Always-on required CI does not depend on external credentials.
   the same immutable-ID, digest and attempt-boundary checks. If the aggregate
   successfully uploaded that verdict, a missing original artifact fails
   collection and replay instead of silently preserving only testcase evidence.
+  If that upload did not succeed, an older stable-name verdict from before the
+  current attempt is excluded while current diagnostic artifacts remain eligible.
+  Current-attempt verdicts still receive the full provenance checks.
   Missing or malformed digests, missing archives, substituted
   bytes and unsafe or duplicate ZIP paths fail closed. Historical raw evidence
   remains preserved; incomplete evidence is not upgraded to verified success.
