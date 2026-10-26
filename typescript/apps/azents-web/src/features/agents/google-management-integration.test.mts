@@ -7,6 +7,7 @@ import {
   noMutation,
   object,
 } from "../../shared/testing/hook-test-harness.ts";
+import * as githubCreation from "../../shared/toolkits/github-user-creation-state.ts";
 import * as googleResume from "../../shared/toolkits/google-resume.ts";
 import * as providerConfigViews from "../../shared/toolkits/provider-config-views.ts";
 import * as formLifecycle from "../../shared/toolkits/toolkit-form-lifecycle.ts";
@@ -91,11 +92,7 @@ function managerHarness(
       "@/shared/toolkits/google-resume": googleResume,
       "@/shared/toolkits/toolkit-form-lifecycle": formLifecycle,
       "@/shared/toolkits/provider-config-views": providerConfigViews,
-      "@/shared/toolkits/github-user-creation-state": {
-        creationReturnPath: googleResume.googleReturnPath,
-        deserializeGitHubUserCreation: () => null,
-        GITHUB_USER_CREATION_KEY: "github.creation",
-      },
+      "@/shared/toolkits/github-user-creation-state": githubCreation,
       "@/shared/toolkits/github-user-oauth-state": {
         deserializeGitHubUserContext: () => null,
         GITHUB_USER_CONTEXT_KEY: "github.context",
@@ -157,6 +154,51 @@ for (const action of ["close", "back"]) {
     harness.render({ handle: "team", agentId: "agent" });
     harness.flushEffects();
     let output = harness.render();
+    let abandoned = 0;
+    invoke(output.onCreateAbandonReady, () => {
+      abandoned += 1;
+    });
+    invoke(output.onCreatePublicationPendingChange, true);
+    output = harness.render();
+    invoke(
+      action === "close" ? output.onCloseEditor : output.onCatalogTabChange,
+      "new",
+    );
+    assert.equal(abandoned, 0);
+    assert.equal(object(harness.render().editor).type, "CREATE");
+    invoke(output.onCreatePublicationPendingChange, false);
+    output = harness.render();
+    invoke(
+      action === "close" ? output.onCloseEditor : output.onCatalogTabChange,
+      "new",
+    );
+    assert.equal(abandoned, 1);
+    assert.equal(
+      object(harness.render().editor).type,
+      action === "close" ? "CLOSED" : "CATALOG",
+    );
+  });
+}
+for (const action of ["close", "back"]) {
+  void test(`actual Agent GitHub ${action} invokes registered abandonment only after publication settles`, () => {
+    const store = new BrowserStorageFixture(
+      githubCreation.GITHUB_USER_CREATION_KEY,
+    );
+    store.value = {
+      handle: "team",
+      agentId: "agent",
+      attemptId: "reviewed-github",
+      phase: "REVIEW",
+      returnPath: githubCreation.creationReturnPath({
+        handle: "team",
+        agentId: "agent",
+      }),
+    };
+    const harness = managerHarness(store, []);
+    harness.render({ handle: "team", agentId: "agent" });
+    harness.flushEffects();
+    let output = harness.render();
+    assert.equal(object(output.editor).toolkitType, "github");
     let abandoned = 0;
     invoke(output.onCreateAbandonReady, () => {
       abandoned += 1;

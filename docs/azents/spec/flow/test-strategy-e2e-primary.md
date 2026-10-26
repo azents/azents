@@ -24,6 +24,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
   - typescript/apps/azents-web/src/shared/toolkits/github-creation-completion.test.mts
+  - typescript/apps/azents-web/src/features/agents/google-management-integration.test.mts
+  - python/apps/azents/src/azents/api/public/toolkit/v1/github_user_creation_cancel_integration_test.py
   - typescript/apps/azents-web/src/features/toolkits/github-user-creation-state.test.mts
   - typescript/apps/azents-web/src/shared/toolkits/components/GitHubWizard.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.stories.tsx
@@ -342,7 +344,8 @@ the Node runner, finite positive duration and exit status. Missing or conflictin
 execution evidence cannot qualify a performance sample, even with green workflow
 metadata or JUnit.
 
-That job also runs the explicit Runtime Settings, GitHub Wizard, Chat Session
+That job also runs the explicit Runtime Settings, GitHub Wizard, Agent Toolkit
+Management, Chat Session
 View and Routine tool-card component portfolio through Storybook's Vitest Chromium integration, with one
 browser worker. The story catalog remains available independently; only this
 portfolio is CI contract evidence. Interaction obligations use actual story plays,
@@ -352,7 +355,14 @@ Missing, empty, skipped or failed component results fail the producer, and missi
 native evidence cannot qualify analysis. No synthetic pytest phases are emitted.
 
 The GitHub browser journeys retain saved Workspace popup authorization plus new
-Agent same-context publication and actual Close-button cancellation. The Workspace
+Agent same-context publication. The repeated cancellation-only OAuth journey is
+owned by the actual Agent management Close/publication-guard component plays,
+production management and wizard hooks, and a scoped HTTP/service/PostgreSQL
+contract. The latter rejects another user, Session, Workspace or Agent, then proves
+DELETE 204, candidate GET 404 and an empty Agent Toolkit inventory despite provider
+cleanup failure. Wizard-hook contracts retain exact-attempt cancellation and
+Session storage clearing. The component producer selects these management plays
+explicitly; render-only stories do not replace the removed journey. The Workspace
 new-publication ownership branch uses the production-hook and backend contracts
 rather than repeating the OAuth journey. Runtime browser coverage retains initial
 settings and Session metrics, stopped-state metrics, real lifecycle/storage
@@ -404,6 +414,12 @@ provider, lifecycle, compaction, or browser E2E cross-product.
 
 Always-on required CI does not depend on external credentials.
 
+- Runtime lifecycle Web verification observes a single Start click's authoritative
+  admission (advanced desired generation and target `running`) separately from usable
+  metrics. Admission uses the existing bounded UI wait and metrics consumes only
+  the remainder of the original readiness budget. Browser ownership is observed
+  during API-based polling so a retired browser fails at that boundary; an
+  unadmitted action reports bounded lifecycle state without repeating the click.
 - Recurring E2E optimization owns implementation through measured acceptance, not
   only candidate analysis. One cycle may combine compatible, separately explainable
   coverage-preserving changes in E2E scenarios, fixtures, provider fakes, support
@@ -418,6 +434,28 @@ Always-on required CI does not depend on external credentials.
   behavioral coverage, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
+- The existing Runner Python and TypeScript component jobs use the official HTTPS
+  Ubuntu archive instead of the Azure Ubuntu mirror for browser system dependencies.
+  This changes only
+  the exact mirror URI, preserving suites, components and repository signing keys.
+  GitHub-hosted sources that reference the exact
+  `mirror+file:/etc/apt/apt-mirrors.txt` list are mapped directly to the same official
+  archive without reading or rewriting arbitrary mirror lists. The selector requires
+  an enabled official Ubuntu source after rewriting, so an unsupported layout cannot
+  silently continue with zero selected sources. Already-selected official sources
+  remain valid and idempotent.
+  Chromium installation, Firefox system dependencies, and pinned Camoufox/model
+  installation remain ordered, mandatory steps with separate timings. The component
+  job still runs the unchanged Playwright Chromium dependency installer and complete
+  selected component portfolio; no dependency, browser engine or native test is skipped.
+- Active CI optimization failures require diagnosis and repair rather than stopping
+  at a failure report. When an experiment ends failed, rejected or inconclusive,
+  durable reports retain its evidence; the unsuccessful PR is closed and its remote
+  branch is deleted. Its clean owned worktree is removed, or explicitly reassigned
+  to new active work, before the local experiment branch is deleted. Dirty, foreign
+  and unknown worktrees remain protected, and actual cleanup blockers are reported.
+  Draft status, future candidates, noisy evidence and approval blockers do not
+  justify retaining a terminally unsuccessful experiment PR.
 - Enabled E2E lanes consume the exact images built and smoke-tested by the existing
   Docker build matrix in the same workflow attempt. The Docker matrix is enabled
   whenever either E2E suite is enabled, including test-only changes. Consumers wait
@@ -426,6 +464,11 @@ Always-on required CI does not depend on external credentials.
   and Docker Runtime Provider; Web additionally consumes Main Web and Admin Web.
   Both producer and consumer check out the tested head SHA rather than the synthetic
   pull-request merge commit.
+  The Runtime Runner producer imports content-addressed BuildKit layers from the
+  existing Snapshot-owned `azents-e2e-v1-azents-runtime-runner` GHA scope. CI does
+  not export this cache or add a cache writer. A cache miss uses the same ordinary
+  build, and hits retain the exact checkout, Dockerfile, load, smoke and immutable
+  image export; a cache never selects an old image tag or bypasses artifact checks.
   Each selected producer saves its inspected immutable Docker image ID, compresses
   once with zstd level 3 and one compression worker, hashes the archive and uploads
   an image-specific artifact bound to repository,

@@ -190,13 +190,21 @@ jobs:
         run: |
           cd "${{ matrix.project }}"
           uv sync
-      - name: Install Runner browser engines
+      - name: Select Ubuntu archive for Runner browser dependencies
+        if: matrix.project == 'python/apps/azents-runtime-runner'
+        run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt --require-selected
+      - name: Install Runner Chromium engine
         if: matrix.project == 'python/apps/azents-runtime-runner'
         working-directory: python/apps/azents-runtime-runner
-        run: |
-          uv run patchright install --with-deps chromium
-          uv run playwright install-deps firefox
-          uv run python -m azents_runtime_runner.browser_install
+        run: uv run patchright install --with-deps chromium
+      - name: Install Runner Firefox system dependencies
+        if: matrix.project == 'python/apps/azents-runtime-runner'
+        working-directory: python/apps/azents-runtime-runner
+        run: uv run playwright install-deps firefox
+      - name: Install Runner pinned Camoufox and model
+        if: matrix.project == 'python/apps/azents-runtime-runner'
+        working-directory: python/apps/azents-runtime-runner
+        run: uv run python -m azents_runtime_runner.browser_install
       - name: Ruff check
         run: |
           cd "${{ matrix.project }}"
@@ -886,6 +894,8 @@ jobs:
         with:
           name: typescript-web
           directory: ${{ runner.temp }}/web-node-tests
+      - name: Select Ubuntu archive for component browser dependencies
+        run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt --require-selected
       - name: Install component browser
         run: cd typescript && pnpm --filter @azents/web exec playwright install --with-deps chromium
       - name: Web component contracts
@@ -1043,12 +1053,23 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Expose existing Runtime Runner build cache
+        if: matrix.name == 'azents-runtime-runner'
+        uses: ./.github/actions/expose-github-runtime
       - name: Prepare empty Next.js cache context
         run: mkdir -p /tmp/next-cache/next-cache
       - name: Build ${{ matrix.name }}
         run: |
+          cache_args=()
+          if [ "${{ matrix.name }}" = azents-runtime-runner ]; then
+            cache_args=(
+              --cache-from
+              "type=gha,scope=azents-e2e-v1-azents-runtime-runner"
+            )
+          fi
           docker buildx build \
             --load \
+            "${cache_args[@]}" \
             ${{ matrix.extra_context }} \
             -f "${{ matrix.dockerfile }}" \
             -t "${{ matrix.image }}" \
