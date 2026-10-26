@@ -1043,12 +1043,23 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Expose existing Runtime Runner build cache
+        if: matrix.name == 'azents-runtime-runner'
+        uses: ./.github/actions/expose-github-runtime
       - name: Prepare empty Next.js cache context
         run: mkdir -p /tmp/next-cache/next-cache
       - name: Build ${{ matrix.name }}
         run: |
+          cache_args=()
+          if [ "${{ matrix.name }}" = azents-runtime-runner ]; then
+            cache_args=(
+              --cache-from
+              "type=gha,scope=azents-e2e-v1-azents-runtime-runner"
+            )
+          fi
           docker buildx build \
             --load \
+            "${cache_args[@]}" \
             ${{ matrix.extra_context }} \
             -f "${{ matrix.dockerfile }}" \
             -t "${{ matrix.image }}" \

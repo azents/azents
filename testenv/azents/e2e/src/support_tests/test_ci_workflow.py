@@ -146,6 +146,72 @@ def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -
     assert "continue-on-error:" not in publish
 
 
+@pytest.mark.parametrize("image", ["azents-runtime-runner", "azents-server"])
+def test_ci_build_reads_only_existing_snapshot_runner_cache(
+    tmp_path: Path, image: str
+) -> None:
+    """Use matching content-addressed layers without publishing a new cache."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    producer = workflow.split("  ci_docker_build_run:\n", 1)[1].split(
+        "\n  ci-docker-build:\n", 1
+    )[0]
+    expose = _step_block(producer, "Expose existing Runtime Runner build cache")
+    assert "if: matrix.name == 'azents-runtime-runner'" in expose
+    assert "uses: ./.github/actions/expose-github-runtime" in expose
+    script = textwrap.dedent(
+        _step_block(producer, "Build ${{ matrix.name }}").split("        run: |\n", 1)[
+            1
+        ]
+    )
+    assert "--cache-to" not in script
+    script = (
+        script.replace("${{ matrix.name }}", image)
+        .replace("${{ matrix.extra_context }}", "")
+        .replace("${{ matrix.dockerfile }}", "fixture.Dockerfile")
+        .replace("${{ matrix.image }}", image + ":ci")
+    )
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    docker = tools / "docker"
+    docker.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGUMENTS"\n')
+    docker.chmod(0o755)
+    arguments = tmp_path / "arguments"
+    subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", script],
+        env={
+            **os.environ,
+            "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+            "ARGUMENTS": str(arguments),
+        },
+        check=True,
+    )
+    cache = (
+        ["--cache-from", "type=gha,scope=azents-e2e-v1-azents-runtime-runner"]
+        if image == "azents-runtime-runner"
+        else []
+    )
+    assert arguments.read_text().splitlines() == [
+        "buildx",
+        "build",
+        "--load",
+        *cache,
+        "-f",
+        "fixture.Dockerfile",
+        "-t",
+        image + ":ci",
+        ".",
+    ]
+    snapshot = (REPOSITORY_ROOT / ".github/workflows/snapshot.yaml").read_text()
+    assert "e2e_cache_repository: azents-runtime-runner" in snapshot
+    assert 'cache_scope="azents-e2e-v1-$cache_repository"' in snapshot
+    assert (
+        producer.index("Build ${{ matrix.name }}")
+        < producer.index("Smoke ${{ matrix.name }}")
+        < producer.index("Export exact E2E image")
+        < producer.index("Publish exact E2E image")
+    )
+
+
 def test_component_contracts_publish_in_existing_typescript_job() -> None:
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
     job = workflow.split("  ci_typescript_run:\n", 1)[1].split(

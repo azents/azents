@@ -432,6 +432,11 @@ Always-on required CI does not depend on external credentials.
   and Docker Runtime Provider; Web additionally consumes Main Web and Admin Web.
   Both producer and consumer check out the tested head SHA rather than the synthetic
   pull-request merge commit.
+  The Runtime Runner producer imports content-addressed BuildKit layers from the
+  existing Snapshot-owned `azents-e2e-v1-azents-runtime-runner` GHA scope. CI does
+  not export this cache or add a cache writer. A cache miss uses the same ordinary
+  build, and hits retain the exact checkout, Dockerfile, load, smoke and immutable
+  image export; a cache never selects an old image tag or bypasses artifact checks.
   Each selected producer saves its inspected immutable Docker image ID, compresses
   once with zstd level 3 and one compression worker, hashes the archive and uploads
   an image-specific artifact bound to repository,
