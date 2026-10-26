@@ -61,7 +61,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-22
+last_verified_at: 2026-10-26
 spec_version: 87
 ---
 
@@ -222,9 +222,14 @@ bytes, or transient provider URLs. Production Discord remains on its real secure
 and Gateway endpoints; `http`/`ws` are permitted only for the explicit deterministic
 test origin with an explicit insecure-Gateway opt-in.
 
-The prepared inference-profile response barrier uses a function-scoped ordinary
-model-stream Worker fixture so public-API coordination is not mistaken for a
-watchdog timeout. It stops the original Worker without removing it, starts one
+The prepared inference-profile response barrier and Discord Gateway location-binding
+journey use a function-scoped ordinary model-stream Worker fixture. The Gateway
+journey pauses that replacement until direct thread delivery commits, then resumes
+it and verifies generated-title commit and exactly-once thread rename. Its model
+calls use the existing bounded ordinary policy rather than the deliberately
+shortened default fixture policy used for watchdog coverage; no policy values
+are tuned per journey.
+The fixture stops the original Worker without removing it, starts one
 replacement with bounded ordinary stream deadlines, and waits for readiness.
 Reached, queued input, explicit release, and durable turn markers establish
 ordering. Teardown removes the replacement and restores the same original Worker,
