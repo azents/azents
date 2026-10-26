@@ -18,6 +18,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import {
+  IconAlertTriangle,
   IconArrowLeft,
   IconArrowRight,
   IconClipboard,
@@ -87,6 +88,23 @@ export interface BrowserInteractionHandlers {
   onCompositionEnd: CompositionEventHandler<HTMLTextAreaElement>;
   onKeyboardInput: FormEventHandler<HTMLTextAreaElement>;
   onSendTab: (reverse: boolean) => void;
+}
+
+function BrowserNotice({
+  children,
+  role,
+}: {
+  children: ReactNode;
+  role: "status" | "alert";
+}): ReactElement {
+  return (
+    <Group className={classes.notice} gap="xs" wrap="nowrap" role={role}>
+      <IconAlertTriangle size={rem(14)} aria-hidden style={{ flexShrink: 0 }} />
+      <Text size="xs" lh={1.35}>
+        {children}
+      </Text>
+    </Group>
+  );
 }
 
 export interface SessionBrowserPanelProps {
@@ -270,9 +288,9 @@ export function SessionBrowserPanel({
           <Text fw={600}>{t("emptyTitle")}</Text>
           {!canCreate && <Text size="sm">{t("readOnly")}</Text>}
           {createError && (
-            <Alert color="yellow" role="alert">
-              {t("createFailed")}
-            </Alert>
+            <div className={classes.notices}>
+              <BrowserNotice role="alert">{t("createFailed")}</BrowserNotice>
+            </div>
           )}
           <Button
             disabled={!canCreate}
@@ -694,35 +712,25 @@ export function SessionBrowserPanel({
         </Group>
         <Stack gap="xs" className={classes.notices}>
           {addressError && (
-            <Alert color="yellow" role="alert">
-              {t("invalidAddress")}
-            </Alert>
+            <BrowserNotice role="alert">{t("invalidAddress")}</BrowserNotice>
           )}
           {closeError && (
-            <Alert color="yellow" role="alert">
-              {t("closeFailed")}
-            </Alert>
+            <BrowserNotice role="alert">{t("closeFailed")}</BrowserNotice>
           )}
           {createError && (
-            <Alert color="yellow" role="alert">
-              {t("createFailed")}
-            </Alert>
+            <BrowserNotice role="alert">{t("createFailed")}</BrowserNotice>
           )}
           {state.conflict && (
-            <Alert color="yellow" role="status">
-              {t("conflict")}
-            </Alert>
+            <BrowserNotice role="status">{t("conflict")}</BrowserNotice>
           )}
           {fieldEditor?.failed && (
-            <Alert color="yellow" role="alert">
-              {t("fieldEditorFailed")}
-            </Alert>
+            <BrowserNotice role="alert">{t("fieldEditorFailed")}</BrowserNotice>
           )}
           {state.outcomeUnknown && (
-            <Alert color="yellow" role="status">
-              {t("unknownOutcome")}
-            </Alert>
+            <BrowserNotice role="status">{t("unknownOutcome")}</BrowserNotice>
           )}
+        </Stack>
+        <Stack gap="xs" className={classes.dialogs}>
           {state.dialog !== null && (
             <Stack
               gap="xs"
@@ -968,15 +976,19 @@ export function SessionBrowserPanel({
         </div>
       </div>
       {focused && paste?.notice != null && (
-        <Alert
-          role="status"
-          className={classes.pasteNotice}
-          withCloseButton
-          closeButtonLabel={t("pasteDismiss")}
-          onClose={paste.onDismiss}
-        >
-          {t(`pasteNotice.${paste.notice}`)}
-        </Alert>
+        <Group className={classes.pasteNotice} gap="xs" wrap="nowrap">
+          <BrowserNotice role="status">
+            {t(`pasteNotice.${paste.notice}`)}
+          </BrowserNotice>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            aria-label={t("pasteDismiss")}
+            onClick={paste.onDismiss}
+          >
+            <IconX size={rem(14)} aria-hidden />
+          </ActionIcon>
+        </Group>
       )}
       {fieldEditor !== null && <BrowserFieldEditor controls={fieldEditor} />}
     </BrowserShell>

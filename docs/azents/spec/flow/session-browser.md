@@ -79,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-26
+last_verified_at: 2026-10-27
 spec_version: 1
 ---
 
@@ -247,6 +247,8 @@ remain an OS/keyboard choice.
 The panel validates the first status against its exact selected target and attachment before treating the stream as connected. Binary frames carry typed logical CSS dimensions, navigation and source identity. Decoded image dimensions must be a uniform integer density of 1× or 2× those dimensions and remain within sixteen million pixels; the JPEG itself carries the raster dimensions without changing the transport header. Only a displayed current image is acknowledged. Live images use native device-pixel capture at JPEG quality 85. The fixed 400×560 content plane renders at 800×1120 pixels; local aspect fit, input and editable coordinates remain CSS-based. Capture scratch budgeting includes the fourfold device-pixel area. The image element is retained across live frame replacement. The displayed Blob URL remains valid while at most one replacement decodes; the old URL is released after successful display, and both are released on clear/disposal. The serial inbox remains bounded; frame bytes are not saved as intentional captures, files, transcripts or image history.
 
 For rollout, the web client that accepts both image densities must reach users before the 2× Runner is enabled. Already loaded older web tabs require a reload: their exact-size image check rejects 2× images. The relay header is unchanged, so the API needs no density-specific protocol change.
+
+Transient browser warnings (invalid address, close/create/edit failure, interaction conflict and unknown input outcome) appear as compact accessible notices over the browser surface. Their appearance and removal do not change the address bar, viewport dimensions, aspect fit or input coordinates; passive notices do not intercept remote pointer input. Paste feedback remains a compact dismissible overlay. Native site dialogs retain their separate interactive confirmation/prompt surface.
 
 The supporting panel presents browser-style tabs above address/navigation chrome and an unframed live image. Controls retain internal padding; the image has no outer margin or decorative border. Preview content does not send remote input: activation opens focused viewing and consumes that gesture locally. Authorized input participants can enter an HTTP(S) address, go back or forward in the selected page's native history, and reload the actual page. The address field smoothly expands while focused by collapsing the preceding navigation controls and restores on blur/submission; reduced motion disables the transition. Address drafts are volatile, cleared on blur/target change/submission, and never form an input history. Unsupported schemes and embedded user credentials are rejected. Read-only viewers cannot edit or navigate. Connection refresh is separately labelled and does not claim to reload the site. No standalone page-text entry form is shown.
 
@@ -447,7 +449,7 @@ Each response races completion of the original operation against the next dialog
 
 ## Actual Input Conflicts and Conversation Help
 
-The manager's task-local transient interaction guard is the common final boundary for actual overlapping manipulation. It does not establish a persistent human/Agent ownership mode. Continuous composition/gestures can hold one actual interaction until end/cancel; a conflicting actor cannot insert input in the middle. Passive waiting and viewing do not acquire long-lived ownership.
+The manager's task-local transient interaction guard is the common final boundary for actual overlapping manipulation. It does not establish a persistent human/Agent ownership mode. Continuous composition/gestures can hold one actual interaction until end/cancel; a conflicting actor cannot insert input in the middle. Passive waiting and viewing do not acquire long-lived ownership. Viewer-requested navigate/back/forward/reload actions retain the originating attachment's actor identity through the common command handler and guard; the requesting attachment does not report its own navigation as another actor's conflict. Other viewers continue to observe and respect that transient ownership.
 
 Help and continuation are ordinary Agent conversation/execution behavior: stop the affected manipulation, continue independent requested work if available, otherwise await normal user input; then freshly observe before continuing. There are no acquire/return tools, first-input takeover, help registry, string-keyword ownership protocol or whole-Run interruption. Panel/browser attachment functionality is separate from this Agent command implementation.
 

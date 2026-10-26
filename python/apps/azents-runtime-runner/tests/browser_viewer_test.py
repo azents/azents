@@ -82,6 +82,7 @@ class Transport:
         self.requests: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.frames: asyncio.Queue[ViewerFrame] = asyncio.Queue()
         self.events: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        self.status_conflicts: list[bool] = []
         self.attachment: str | None = None
         self.source: ViewerFrame | None = None
 
@@ -93,6 +94,8 @@ class Transport:
             await self.frames.put(decode_viewer_frame(data))
         else:
             value = json.loads(data)
+            if value["type"] == "status":
+                self.status_conflicts.append(value["conflict"])
             self.attachment = value["attachment_id"]
             await self.events.put(value)
 
@@ -725,6 +728,61 @@ async def test_viewer_navigation_denies_readonly_and_other_active_actor(
     finally:
         await stop(tasks[0], read)
         await stop(tasks[1], active)
+
+
+@pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)
+async def test_reload_is_owned_by_requesting_attachment_not_reported_as_conflict(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    site: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    viewer = RunnerBrowserViewer(manager, Budget())
+    owner, other = Transport(), Transport()
+    running = [
+        asyncio.create_task(viewer.run(authority, owner.receive, owner.send)),
+        asyncio.create_task(viewer.run(authority, other.receive, other.send)),
+    ]
+    entered, release = asyncio.Event(), asyncio.Event()
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    original = native.reload
+
+    async def paused_reload(*, wait_until: str, timeout: int) -> None:
+        assert wait_until == "domcontentloaded" and timeout == 10000
+        entered.set()
+        await release.wait()
+        await original(wait_until="domcontentloaded", timeout=timeout)
+
+    monkeypatch.setattr(native, "reload", paused_reload)
+    navigation: asyncio.Task[dict[str, object]] | None = None
+    try:
+        await owner.frame()
+        await other.frame()
+        navigation = asyncio.create_task(
+            owner.input(1, {"kind": "navigation", "action": "reload", "url": None})
+        )
+        async with asyncio.timeout(10):
+            await entered.wait()
+        assert manager.tasks[authority.task_id].guard.actor == owner.attachment
+        while not (await other.event("status"))["conflict"]:
+            pass
+        rejected = await other.input(
+            1, {"kind": "navigation", "action": "reload", "url": None}
+        )
+        assert rejected["accepted"] is False
+        assert rejected["reason_code"] == "browser_dialog_pending"
+        release.set()
+        assert (await navigation)["accepted"] is True
+        await owner.frame()
+        assert owner.status_conflicts and not any(owner.status_conflicts)
+        assert manager.tasks[authority.task_id].guard.actor is None
+    finally:
+        release.set()
+        if navigation is not None:
+            await asyncio.gather(navigation, return_exceptions=True)
+        await stop(running[0], owner)
+        await stop(running[1], other)
 
 
 @pytest.mark.parametrize("manager", tuple(BrowserImplementation), indirect=True)

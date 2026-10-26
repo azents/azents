@@ -641,7 +641,7 @@ class _Attachment:
                     "Finish the current Browser interaction before navigation",
                 )
             concrete = self.manager.viewer_authority(self.authority)
-            await self.manager.execute(
+            await self.manager.execute_viewer_navigation(
                 BrowserActCommand(
                     concrete,
                     _target(self.authority),
@@ -665,7 +665,8 @@ class _Attachment:
                         expect=None,
                         timeout_ms=10000,
                     ),
-                )
+                ),
+                self.id,
             )
             await self.cleanup()
             self.page.popup_interest = self.id
