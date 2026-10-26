@@ -1094,6 +1094,10 @@ MCP-backed toolkits must keep `list_tools` discovery off the normal run preparat
   calls share initialization and one complete paginated tool listing, warming the
   SDK result-schema cache before execution. Up to 16 independent calls per
   connection are admitted, with readiness/capacity bounded by the call timeout.
+- Preparation timeout closes entered SDK contexts without injecting that timeout
+  into their task groups. A timeout alone, including one wrapped in singleton SDK
+  exception groups during entry, is reported as a timeout. Mixed groups retain
+  every failure; cleanup errors and caller cancellation are not discarded.
 - Authority and current credentials are checked per call and again after waits at
   dispatch. HTTP auth behavior and 401 observation are request-local; shared client
   defaults are not mutated. Credential rotation selects a new session and retires

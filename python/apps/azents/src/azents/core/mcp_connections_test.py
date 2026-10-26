@@ -416,6 +416,83 @@ async def test_cancelled_preparation_waiter_does_not_cancel_other_waiters(
         await connections.close()
 
 
+async def test_preparation_timeout_does_not_enter_sdk_task_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The timeout crosses the SDK context only during cleanup."""
+    session = AsyncMock(spec=ClientSession)
+    session.list_tools = AsyncMock(side_effect=TimeoutError("preparation"))
+
+    @asynccontextmanager
+    async def open_session(
+        *args: object, **kwargs: object
+    ) -> AsyncGenerator[ClientSession]:
+        try:
+            yield session
+        except TimeoutError as exc:
+            raise ExceptionGroup("sdk cleanup", [exc]) from exc
+
+    monkeypatch.setattr(mcp_connections, "_mcp_session", open_session)
+    connections = McpConnections()
+    try:
+        with pytest.raises(TimeoutError, match="preparation"):
+            await _list(connections)
+    finally:
+        await connections.close()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ExceptionGroup("sdk", [TimeoutError("preparation")]),
+        ExceptionGroup(
+            "outer", [ExceptionGroup("inner", [TimeoutError("preparation")])]
+        ),
+    ],
+)
+async def test_preparation_timeout_wrapped_during_sdk_enter_is_preserved(
+    monkeypatch: pytest.MonkeyPatch, error: ExceptionGroup
+) -> None:
+    @asynccontextmanager
+    async def open_session(
+        *args: object, **kwargs: object
+    ) -> AsyncGenerator[ClientSession]:
+        raise error
+        yield
+
+    monkeypatch.setattr(mcp_connections, "_mcp_session", open_session)
+    connections = McpConnections()
+    try:
+        with pytest.raises(TimeoutError, match="preparation"):
+            await _list(connections)
+    finally:
+        await connections.close()
+
+
+async def test_mixed_sdk_enter_errors_are_not_discarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = ExceptionGroup(
+        "mixed", [TimeoutError("preparation"), ValueError("cleanup failed")]
+    )
+
+    @asynccontextmanager
+    async def open_session(
+        *args: object, **kwargs: object
+    ) -> AsyncGenerator[ClientSession]:
+        raise error
+        yield
+
+    monkeypatch.setattr(mcp_connections, "_mcp_session", open_session)
+    connections = McpConnections()
+    try:
+        with pytest.raises(ExceptionGroup) as caught:
+            await _list(connections)
+        assert caught.value is error
+    finally:
+        await connections.close()
+
+
 async def test_readiness_and_cleanup_are_bounded(server: _Server) -> None:
     connections = McpConnections()
     server.listing_release = asyncio.Event()
