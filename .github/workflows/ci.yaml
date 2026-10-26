@@ -192,7 +192,7 @@ jobs:
           uv sync
       - name: Select Ubuntu archive for Runner browser dependencies
         if: matrix.project == 'python/apps/azents-runtime-runner'
-        run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt
+        run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt --require-selected
       - name: Install Runner Chromium engine
         if: matrix.project == 'python/apps/azents-runtime-runner'
         working-directory: python/apps/azents-runtime-runner
@@ -895,7 +895,7 @@ jobs:
           name: typescript-web
           directory: ${{ runner.temp }}/web-node-tests
       - name: Select Ubuntu archive for component browser dependencies
-        run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt
+        run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt --require-selected
       - name: Install component browser
         run: cd typescript && pnpm --filter @azents/web exec playwright install --with-deps chromium
       - name: Web component contracts

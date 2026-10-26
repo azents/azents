@@ -438,6 +438,12 @@ Always-on required CI does not depend on external credentials.
   Ubuntu archive instead of the Azure Ubuntu mirror for browser system dependencies.
   This changes only
   the exact mirror URI, preserving suites, components and repository signing keys.
+  GitHub-hosted sources that reference the exact
+  `mirror+file:/etc/apt/apt-mirrors.txt` list are mapped directly to the same official
+  archive without reading or rewriting arbitrary mirror lists. The selector requires
+  an enabled official Ubuntu source after rewriting, so an unsupported layout cannot
+  silently continue with zero selected sources. Already-selected official sources
+  remain valid and idempotent.
   Chromium installation, Firefox system dependencies, and pinned Camoufox/model
   installation remain ordered, mandatory steps with separate timings. The component
   job still runs the unchanged Playwright Chromium dependency installer and complete

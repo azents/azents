@@ -8,6 +8,138 @@ from scripts.ci.apt_mirror import use_ubuntu_archive
 
 
 class AptMirrorTests(unittest.TestCase):
+    def test_hosted_list_reference_selects_archive_without_touching_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "sources.list.d"
+            directory.mkdir()
+            path = directory / "ubuntu.sources"
+            original = (
+                "Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\n"
+                "Suites: noble noble-updates noble-backports noble-security\n"
+                "Components: main restricted universe multiverse\n"
+                "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
+            )
+            path.write_text(original)
+            mirror_list = root / "apt-mirrors.txt"
+            mirrors = (
+                "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n"
+                "https://archive.ubuntu.com/ubuntu/\tpriority:2\n"
+                "https://security.ubuntu.com/ubuntu/\tpriority:3\n"
+            )
+            mirror_list.write_text(mirrors)
+            result = use_ubuntu_archive(root, require_selected=True)
+            self.assertEqual(result.replaced_uris, 1)
+            self.assertEqual(result.selected_uris, 1)
+            self.assertEqual(
+                path.read_text(),
+                original.replace(
+                    "mirror+file:/etc/apt/apt-mirrors.txt",
+                    "https://archive.ubuntu.com/ubuntu",
+                ),
+            )
+            self.assertEqual(mirror_list.read_text(), mirrors)
+            repeated = use_ubuntu_archive(root, require_selected=True)
+            self.assertEqual(repeated.replaced_uris, 0)
+            self.assertEqual(repeated.selected_uris, 1)
+
+    def test_legacy_list_and_deb822_continuation_preserve_other_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            legacy = root / "sources.list"
+            legacy.write_text(
+                "deb [signed-by=/keys/ubuntu.gpg] "
+                "mirror+file:/etc/apt/apt-mirrors.txt noble main\n"
+                "deb mirror+file:/etc/apt/other-mirrors.txt noble main\n"
+                "deb mirror+file:/etc/apt/apt-mirrors.txt.other noble main\n"
+            )
+            directory = root / "sources.list.d"
+            directory.mkdir()
+            source = directory / "ubuntu.sources"
+            source.write_text(
+                "Types: deb\nURIs:\n"
+                " mirror+file:/etc/apt/apt-mirrors.txt\nSuites: noble\n"
+                "Signed-By: /keys/ubuntu.gpg\n"
+            )
+            result = use_ubuntu_archive(root, require_selected=True)
+            self.assertEqual(result.replaced_uris, 2)
+            self.assertEqual(result.selected_uris, 2)
+            self.assertIn(
+                "deb [signed-by=/keys/ubuntu.gpg] "
+                "https://archive.ubuntu.com/ubuntu noble main",
+                legacy.read_text(),
+            )
+            self.assertIn("mirror+file:/etc/apt/other-mirrors.txt", legacy.read_text())
+            self.assertIn(
+                "mirror+file:/etc/apt/apt-mirrors.txt.other", legacy.read_text()
+            )
+            self.assertIn(
+                "URIs:\n https://archive.ubuntu.com/ubuntu\n", source.read_text()
+            )
+
+    def test_required_selection_rejects_disabled_or_unknown_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "sources.list.d"
+            directory.mkdir()
+            path = directory / "ubuntu.sources"
+            original = (
+                "# URIs: https://archive.ubuntu.com/ubuntu\n"
+                "Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\n"
+                "Suites: noble\nEnabled: no # disabled source\n\n"
+                "Types: deb\nURIs: mirror+file:/etc/apt/unknown.txt\n"
+                "Suites: noble\n"
+            )
+            path.write_text(original)
+            with self.assertRaisesRegex(ValueError, "No enabled official"):
+                use_ubuntu_archive(root, require_selected=True)
+            self.assertEqual(path.read_text(), original)
+
+    def test_deb822_disabled_boolean_aliases_cannot_satisfy_selection(self) -> None:
+        for enabled in ("no", "false", "0", "off", "FALSE"):
+            with (
+                self.subTest(enabled=enabled),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                directory = root / "sources.list.d"
+                directory.mkdir()
+                path = directory / "ubuntu.sources"
+                original = (
+                    "Types:deb\nURIs:mirror+file:/etc/apt/apt-mirrors.txt\n"
+                    f"Suites:noble\nEnabled:{enabled} # disabled\n"
+                )
+                path.write_text(original)
+                with self.assertRaisesRegex(ValueError, "No enabled official"):
+                    use_ubuntu_archive(root, require_selected=True)
+                self.assertEqual(path.read_text(), original)
+
+    def test_deb822_uri_value_needs_no_whitespace_after_field_colon(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "sources.list.d"
+            directory.mkdir()
+            path = directory / "ubuntu.sources"
+            original = (
+                "Types:deb\nURIs:mirror+file:/etc/apt/apt-mirrors.txt\n"
+                "Suites:noble\nComponents:main\nEnabled:true\n"
+                "Signed-By:/keys/ubuntu.gpg\n"
+            )
+            path.write_text(original)
+            result = use_ubuntu_archive(root, require_selected=True)
+            self.assertEqual(result.selected_uris, 1)
+            self.assertEqual(result.replaced_uris, 1)
+            self.assertEqual(
+                path.read_text(),
+                original.replace(
+                    "mirror+file:/etc/apt/apt-mirrors.txt",
+                    "https://archive.ubuntu.com/ubuntu",
+                ),
+            )
+            self.assertEqual(
+                use_ubuntu_archive(root, require_selected=True).selected_uris, 1
+            )
+
     def test_deb822_changes_only_the_exact_uri_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

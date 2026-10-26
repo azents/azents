@@ -42,7 +42,8 @@ def test_runner_browser_install_preserves_commands_and_uses_official_apt_mirror(
         assert "continue-on-error:" not in block
         assert "timeout-minutes:" not in block
     assert (
-        "sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt" in blocks[0]
+        "sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt "
+        "--require-selected" in blocks[0]
     )
     for block, command in zip(
         blocks[1:],
@@ -73,7 +74,8 @@ def test_component_browser_install_uses_official_mirror_and_keeps_contracts() ->
     assert positions == sorted(positions)
     mirror, install, contracts = [_step_block(job, name) for name in names]
     assert mirror.splitlines()[-1].strip() == (
-        "run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt"
+        "run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt "
+        "--require-selected"
     )
     assert install.splitlines()[-1].strip() == (
         "run: cd typescript && pnpm --filter @azents/web exec "
