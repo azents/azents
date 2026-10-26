@@ -6,6 +6,12 @@ from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Playwright
 
+from azents_runtime_runner.browser_mobile import (
+    FIREFOX_MOBILE_USER_AGENT,
+    MOBILE_HEIGHT,
+    MOBILE_WIDTH,
+)
+
 
 class CamoufoxInstallationError(RuntimeError):
     """The immutable browser distribution is missing or unsupported."""
@@ -89,17 +95,32 @@ async def open_camoufox_context(
         exclude_addons=list(DefaultAddons),
         env=environment,
         proxy=proxy,
-        firefox_user_prefs=_proxy_preferences(proxy),
+        firefox_user_prefs={
+            **(_proxy_preferences(proxy) or {}),
+            "dom.meta-viewport.enabled": True,
+            "dom.w3c_touch_events.enabled": 1,
+            "ui.primaryPointerCapabilities": 1,
+            "ui.allPointerCapabilities": 1,
+        },
+        has_touch=True,
+        device_scale_factor=1,
         accept_downloads=True,
         # Keep the native window large enough for the fixed SDK input plane.
         # A generated smaller outer window clips otherwise valid native clicks.
         config={
-            "window.outerWidth": 1280,
-            "window.outerHeight": 900,
-            "window.innerWidth": 1280,
-            "window.innerHeight": 800,
+            "window.outerWidth": MOBILE_WIDTH,
+            "window.outerHeight": MOBILE_HEIGHT + 100,
+            "window.innerWidth": MOBILE_WIDTH,
+            "window.innerHeight": MOBILE_HEIGHT,
+            "screen.width": MOBILE_WIDTH,
+            "screen.height": MOBILE_HEIGHT,
+            "screen.availWidth": MOBILE_WIDTH,
+            "screen.availHeight": MOBILE_HEIGHT,
+            "navigator.userAgent": FIREFOX_MOBILE_USER_AGENT,
+            "navigator.platform": "Linux armv8l",
+            "navigator.maxTouchPoints": 5,
         },
-        viewport={"width": 1280, "height": 800},
+        viewport={"width": MOBILE_WIDTH, "height": MOBILE_HEIGHT},
     )
     if not isinstance(context, BrowserContext):
         await context.close()

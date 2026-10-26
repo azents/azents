@@ -1,11 +1,14 @@
 """Native receiver rectangles stay inside rounded controls and reject occlusion."""
 
 from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock
 
 import pytest
-from patchright.async_api import Page, async_playwright
+from patchright.async_api import Error, Page, async_playwright
 
+from azents_runtime_runner import browser_editables
 from azents_runtime_runner.browser_editables import BrowserEditableRegions
+from azents_runtime_runner.browser_geometry import BrowserVisualGeometry
 
 
 @pytest.fixture
@@ -15,6 +18,61 @@ async def geometry_page() -> AsyncIterator[Page]:
         page = await browser.new_page(viewport={"width": 800, "height": 600})
         yield page
         await browser.close()
+
+
+@pytest.mark.parametrize(
+    "message,transient",
+    [
+        ("Execution context was destroyed during navigation", True),
+        ("Protocol error", False),
+    ],
+)
+async def test_visual_geometry_context_loss_is_transient_only(
+    geometry_page: Page,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    transient: bool,
+) -> None:
+    regions = BrowserEditableRegions(geometry_page)
+    monkeypatch.setattr(
+        geometry_page, "evaluate", AsyncMock(side_effect=Error(message))
+    )
+    if transient:
+        assert await regions.read() == ()
+    else:
+        with pytest.raises(Error, match="Protocol error"):
+            await regions.read()
+
+
+@pytest.mark.parametrize(
+    "left,width,visible_left,visible_width",
+    [(20, 100, 0, 140), (350, 200, 600, 200)],
+)
+async def test_visual_scale_and_offset_clip_partially_visible_receivers(
+    geometry_page: Page,
+    monkeypatch: pytest.MonkeyPatch,
+    left: int,
+    width: int,
+    visible_left: int,
+    visible_width: int,
+) -> None:
+    await geometry_page.set_content(
+        '<input style="position:absolute;box-sizing:border-box;'
+        f'left:{left}px;top:100px;width:{width}px;height:40px">'
+    )
+    monkeypatch.setattr(
+        browser_editables,
+        "browser_visual_geometry",
+        AsyncMock(return_value=BrowserVisualGeometry(2, 50, 25)),
+    )
+    regions = BrowserEditableRegions(geometry_page)
+    try:
+        region = (await regions.read())[0]
+        assert region.x == visible_left
+        assert region.width == visible_width
+        assert region.y == 150 and region.height == 80
+    finally:
+        await regions.close()
 
 
 @pytest.mark.parametrize(

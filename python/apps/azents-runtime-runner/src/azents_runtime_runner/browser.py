@@ -45,6 +45,11 @@ from azents_runtime_runner.browser_camoufox import (
 )
 from azents_runtime_runner.browser_display import BrowserDisplay, BrowserDisplayError
 from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey
+from azents_runtime_runner.browser_mobile import (
+    CHROMIUM_MOBILE_USER_AGENT,
+    MOBILE_HEIGHT,
+    MOBILE_WIDTH,
+)
 from azents_runtime_runner.browser_sdk import (
     BROWSER_SDK_ERRORS,
     BROWSER_SDK_TIMEOUTS,
@@ -404,7 +409,12 @@ class RunnerBrowserManager:
                             proxy=None
                             if self.proxy is None
                             else {"server": self.proxy, "bypass": "<-loopback>"},
-                            viewport={"width": 1280, "height": 800},
+                            viewport={"width": MOBILE_WIDTH, "height": MOBILE_HEIGHT},
+                            screen={"width": MOBILE_WIDTH, "height": MOBILE_HEIGHT},
+                            user_agent=CHROMIUM_MOBILE_USER_AGENT,
+                            is_mobile=True,
+                            has_touch=True,
+                            device_scale_factor=1,
                             accept_downloads=True,
                         )
                         browser = context.browser

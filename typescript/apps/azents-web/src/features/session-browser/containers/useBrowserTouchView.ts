@@ -9,6 +9,7 @@ import {
 } from "react";
 import { browserPoint, browserReleaseFrame } from "../input";
 import { useBrowserDirectTouch } from "./useBrowserDirectTouch";
+import type { BrowserInteractionHandlers } from "../components/SessionBrowserPanel";
 import type { BrowserCoordinateAction, BrowserFrame } from "../types";
 import type { BrowserDirectTouchControls } from "./useBrowserDirectTouch";
 import type { PointerEventHandler, RefObject } from "react";
@@ -56,6 +57,7 @@ interface Options {
   onAction: (frame: BrowserFrame, action: BrowserCoordinateAction) => boolean;
   keyboardRef: RefObject<HTMLTextAreaElement | null>;
   cancelInput: () => void;
+  mouse: BrowserInteractionHandlers | null;
 }
 
 export interface BrowserTouchView {
@@ -64,6 +66,7 @@ export interface BrowserTouchView {
   cancel: () => void;
   viewWindowRef: RefObject<HTMLDivElement | null>;
   touch: BrowserTouchHandlers;
+  pan: BrowserTouchHandlers;
   touchFeedback: BrowserTouchFeedback | null;
   onTouchFeedbackEnd: () => void;
 }
@@ -87,13 +90,15 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
   latest.current = options;
   const viewWindowRef = useRef<HTMLDivElement>(null);
   const fingers = useRef(new Map<number, Point>());
+  const remoteMouse = useRef(new Set<number>());
   const gesture = useRef<Gesture>({ type: "idle" });
-  const pendingScroll = useRef<Point | null>(null);
+  const pendingScroll = useRef<{ anchor: Point; client: Point } | null>(null);
   const feedbackSequence = useRef(0);
   const [touchFeedback, setTouchFeedback] =
     useState<BrowserTouchFeedback | null>(null);
   const clear = useCallback((): void => {
     fingers.current.clear();
+    remoteMouse.current.clear();
     gesture.current = { type: "idle" };
     pendingScroll.current = null;
     setTouchFeedback(null);
@@ -120,10 +125,90 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
     const scroll = pendingScroll.current;
     pendingScroll.current = null;
     if (window !== null && scroll !== null) {
-      window.scrollLeft = scroll.x;
-      window.scrollTop = scroll.y;
+      const bounds = window.firstElementChild?.getBoundingClientRect() ?? null;
+      if (bounds !== null) {
+        window.scrollLeft +=
+          bounds.left + bounds.width * scroll.anchor.x - scroll.client.x;
+        window.scrollTop +=
+          bounds.top + bounds.height * scroll.anchor.y - scroll.client.y;
+      }
+    } else if (window !== null && options.zoom === 1) {
+      window.scrollLeft = 0;
+      window.scrollTop = 0;
     }
   }, [options.zoom]);
+  // Capture non-passively so Ctrl+wheel never zooms the host or scrolls the site.
+  useEffect(() => {
+    if (!options.enabled) {
+      return;
+    }
+    const wheel = (event: WheelEvent): void => {
+      const view = viewWindowRef.current;
+      if (
+        !event.ctrlKey ||
+        view === null ||
+        !(event.target instanceof Node) ||
+        !view.contains(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const current = latest.current;
+      const bounds = view.firstElementChild?.getBoundingClientRect() ?? null;
+      if (
+        bounds === null ||
+        bounds.width <= 0 ||
+        bounds.height <= 0 ||
+        !Number.isFinite(event.deltaY) ||
+        direct.controls.pressed ||
+        direct.controls.sending
+      ) {
+        return;
+      }
+      const delta =
+        event.deltaY *
+        (event.deltaMode === 1
+          ? 16
+          : event.deltaMode === 2
+            ? view.clientHeight
+            : 1);
+      const zoom = Math.max(
+        1,
+        Math.min(3, current.zoom * Math.exp(-delta * 0.002)),
+      );
+      if (zoom === current.zoom) {
+        return;
+      }
+      clear();
+      pendingScroll.current = {
+        anchor: {
+          x: Math.max(
+            0,
+            Math.min(1, (event.clientX - bounds.left) / bounds.width),
+          ),
+          y: Math.max(
+            0,
+            Math.min(1, (event.clientY - bounds.top) / bounds.height),
+          ),
+        },
+        client: { x: event.clientX, y: event.clientY },
+      };
+      current.cancelInput();
+      current.onZoomChange(zoom);
+    };
+    document.addEventListener("wheel", wheel, {
+      passive: false,
+      capture: true,
+    });
+    return () =>
+      document.removeEventListener("wheel", wheel, { capture: true });
+  }, [
+    options.enabled,
+    direct.controls.pressed,
+    direct.controls.sending,
+    clear,
+  ]);
 
   const touch: BrowserTouchHandlers = {
     onPointerDown: (event) => {
@@ -163,14 +248,14 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
         if (a === null || b === null) {
           return;
         }
-        const bounds = window.getBoundingClientRect();
+        const bounds = event.currentTarget.getBoundingClientRect();
         gesture.current = {
           type: "pinch",
           distance: Math.max(1, distance(a, b)),
           zoom: current.zoom,
           anchor: {
-            x: window.scrollLeft + (a.x + b.x) / 2 - bounds.left,
-            y: window.scrollTop + (a.y + b.y) / 2 - bounds.top,
+            x: ((a.x + b.x) / 2 - bounds.left) / bounds.width,
+            y: ((a.y + b.y) / 2 - bounds.top) / bounds.height,
           },
         };
       } else {
@@ -204,17 +289,20 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
           1,
           Math.min(3, (held.zoom * distance(a, b)) / held.distance),
         );
-        const bounds = window.getBoundingClientRect();
         pendingScroll.current = {
-          x:
-            (held.anchor.x * zoom) / held.zoom -
-            ((a.x + b.x) / 2 - bounds.left),
-          y:
-            (held.anchor.y * zoom) / held.zoom - ((a.y + b.y) / 2 - bounds.top),
+          anchor: held.anchor,
+          client: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
         };
         if (zoom === current.zoom) {
-          window.scrollLeft = pendingScroll.current.x;
-          window.scrollTop = pendingScroll.current.y;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          window.scrollLeft +=
+            bounds.left +
+            bounds.width * held.anchor.x -
+            pendingScroll.current.client.x;
+          window.scrollTop +=
+            bounds.top +
+            bounds.height * held.anchor.y -
+            pendingScroll.current.client.y;
           pendingScroll.current = null;
         } else {
           current.onZoomChange(zoom);
@@ -285,7 +373,7 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
             source,
           );
           if (point !== null) {
-            if (!held.nativeInput) {
+            if (!held.nativeInput && event.pointerType === "touch") {
               current.keyboardRef.current?.blur();
             } else if (
               held.receiver !== null &&
@@ -296,12 +384,14 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
               // Keep focus inside this completed trusted tap, including after a modal closes.
               held.receiver.focus({ preventScroll: true });
             }
-            feedbackSequence.current += 1;
-            setTouchFeedback({
-              id: feedbackSequence.current,
-              x: ((event.clientX - bounds.left) / bounds.width) * 100,
-              y: ((event.clientY - bounds.top) / bounds.height) * 100,
-            });
+            if (event.pointerType === "touch") {
+              feedbackSequence.current += 1;
+              setTouchFeedback({
+                id: feedbackSequence.current,
+                x: ((event.clientX - bounds.left) / bounds.width) * 100,
+                y: ((event.clientY - bounds.top) / bounds.height) * 100,
+              });
+            }
             if (current.canInput) {
               if (
                 current.onAction(source, {
@@ -327,6 +417,13 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
                   });
                 }
               }
+            }
+            if (event.pointerType !== "touch" && !held.nativeInput) {
+              event.currentTarget
+                .querySelector<HTMLTextAreaElement>(
+                  "textarea:not([data-browser-native-input])",
+                )
+                ?.focus({ preventScroll: true });
             }
           }
         }
@@ -356,6 +453,53 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
       direct.cancel();
     },
     viewWindowRef,
+    pan: {
+      onPointerDown: (event) => {
+        if (
+          event.button !== 0 ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
+          remoteMouse.current.add(event.pointerId);
+          latest.current.mouse?.onPointerDown(event);
+        } else {
+          touch.onPointerDown(event);
+        }
+      },
+      onPointerMove: (event) => {
+        if (
+          remoteMouse.current.has(event.pointerId) ||
+          !fingers.current.has(event.pointerId)
+        ) {
+          latest.current.mouse?.onPointerMove(event);
+        } else {
+          touch.onPointerMove(event);
+        }
+      },
+      onPointerUp: (event) => {
+        if (remoteMouse.current.delete(event.pointerId)) {
+          latest.current.mouse?.onPointerUp(event);
+        } else {
+          touch.onPointerUp(event);
+        }
+      },
+      onPointerCancel: (event) => {
+        if (remoteMouse.current.delete(event.pointerId)) {
+          latest.current.mouse?.onPointerCancel(event);
+        } else {
+          touch.onPointerCancel(event);
+        }
+      },
+      onLostPointerCapture: (event) => {
+        if (remoteMouse.current.delete(event.pointerId)) {
+          latest.current.mouse?.onLostPointerCapture(event);
+        } else {
+          touch.onLostPointerCapture(event);
+        }
+      },
+    },
     touch: direct.controls.active ? direct.touch : touch,
     touchFeedback,
     onTouchFeedbackEnd: () => setTouchFeedback(null),

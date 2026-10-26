@@ -13,6 +13,8 @@ code_paths:
   - python/apps/azents/src/azents/api/public/agent/v1/browser_configuration.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_controller.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_camoufox.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_mobile.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_geometry.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_install.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_sdk.py
   - typescript/apps/azents-web/src/features/agents/AgentBrowserChoiceSection.tsx
@@ -77,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-25
+last_verified_at: 2026-10-26
 spec_version: 1
 ---
 
@@ -249,7 +251,7 @@ invalidates that frame's element references without replacing the main-page view
 identity, so an independently navigating embedded frame does not invalidate
 text input on an unchanged main page.
 
-Focused viewing is an independent body-level modal that covers the global app bar and fills the visual viewport, without outer margins. Safe-area padding and visual viewport resize/scroll observations keep its explicit text Exit focused view button reachable when the mobile keyboard changes available space. That control is separate from per-tab closure. Focus is contained locally and Escape exits unless an IME composition is active. Modal presentation does not reopen the Browser attachment or resize the native page. Local viewer zoom ranges from 100% fitted width to 300%, through continuous pinch or 25% menu steps. Scrollbars reveal the enlarged image and coordinates use its actual geometry. The image keeps its native aspect ratio without input-active letterbox space.
+Focused viewing is an independent body-level modal that covers the global app bar and fills the visual viewport, without outer margins. Safe-area padding and visual viewport resize/scroll observations keep its explicit text Exit focused view button reachable when the mobile keyboard changes available space. That control is separate from per-tab closure. Focus is contained locally and Escape exits unless an IME composition is active. Modal presentation does not reopen the Browser attachment or resize the native page. Both preview and focused viewing aspect-fit the complete source image to the available width and height at 100%, preserving its native ratio and centering unused letterbox space outside the input plane. The native page does not resize when its container changes. Focused local viewer zoom ranges from 100% of that fitted size to 300%, through continuous pinch, Ctrl+wheel, or 25% menu steps. Ctrl+wheel is intercepted only within an enabled focused viewer, prevents host-page zoom, and sends no remote wheel action; ordinary wheel remains remote page scrolling. Zoom anchors use the actual image geometry, including letterbox offsets. Enlarged content is locally panned by touch or left-mouse dragging; stationary mouse taps still activate the remote page. The viewer container hides scrollbars and does not expose ordinary container scrolling. Reset restores the fitted frame and clears local pan offsets. All remote coordinates use the actual image bounds, never unused letterbox space.
 
 Default touch input has an attachment/navigation-scoped tap/pan/pinch state machine. A stationary single-finger tap sends one source-fenced remote down/up pair. Only a directly touched known editable receiver uses native trusted touch focus; other image taps do not request the software keyboard. Repeated input taps do not blur/refocus the receiver. Beginning a single-finger image gesture retains the current native receiver's focus so a pan can scroll while the keyboard stays open; only a completed non-editable tap or a two-finger pinch blurs it. No remote press is held while waiting to distinguish a tap from a gesture. One-finger movement scrolls the remote page at 100% or pans the local enlarged image above 100%. Two fingers pinch the local image around their midpoint, sending no remote click. Pinch completion, cancellation, target/navigation changes, access changes and disconnect discard incomplete gestures. Only completed finger taps show the brief circular feedback; mouse clicks and pinch/pan do not. A fixed-size central dot marks the exact tap coordinate while the surrounding ring expands; the dot holds its position and size until fading out with the feedback. Feedback never intercepts input and reduced motion uses a static fade. The feedback denotes the physical tap, not confirmed remote action success.
 
@@ -388,10 +390,7 @@ One RunnerBrowserManager belongs to the current Runner connection lifecycle. Reg
 
 Each concrete Session and selected engine has a separate native persistent BrowserContext/profile under the current Runner Workspace. Tasks within that Session/engine reuse its site state. Existing Patchright profiles retain their location; Camoufox uses a distinct engine-specific location. Session working-folder association cannot change during a live manager's identity. Task-owned pages/popups and frames remain in a live registry with exact resource incarnations, not a durable help/task ownership table.
 
-Camoufox fixes its content coordinate plane at 1280×800 CSS pixels and its native
-outer window at 1280×900, leaving room for browser chrome. Generated fingerprint
-window dimensions cannot shrink the native window and clip input that is inside
-the SDK viewport. Patchright retains its existing native sizing behavior.
+Both engines launch a fixed 400×560 CSS-pixel portrait content plane with a mobile user agent, matching screen dimensions, touch capability and device scale factor 1. Patchright uses Chromium's native mobile emulation. Camoufox uses its native navigator/screen/window configuration and Firefox touch, meta-viewport and coarse-pointer preferences; it remains the selected desktop Firefox engine, not an Android browser binary. Camoufox's outer window is 400×660, leaving room for native chrome, and generated window dimensions cannot clip the input plane. Existing persistent profile bytes are retained. Local aspect fit, focus, container resize and viewer zoom never change this remote geometry. These settings do not promise compatibility with site security challenges. On mobile Chromium pages without a responsive viewport declaration, the SDK layout viewport may be wider than the captured content plane. Viewer pointer/wheel coordinates are converted through the native visual viewport scale and offsets before SDK dispatch; native editable rectangles are inversely projected into captured-frame pixels after frame-to-main-page projection. Structured Agent element actions retain their native SDK coordinates.
 
 Native profile bytes remain under existing Runtime persistence; manager/Runner shutdown closes live contexts and invalidates handles without deleting those bytes. Normal Run completion is not profile cleanup. No backup, profile export/replay, retention sweeper or restoration of old live pages exists. Task/page close affects only the intended task resources, not all contexts or other Sessions.
 

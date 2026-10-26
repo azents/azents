@@ -61,6 +61,7 @@ from azents_runtime_runner.browser_editables import (
     BrowserEditableRegions,
     EditableFieldSnapshot,
 )
+from azents_runtime_runner.browser_geometry import browser_visual_geometry
 from azents_runtime_runner.browser_sdk import (
     BROWSER_SDK_ERRORS,
     BrowserSDKError,
@@ -710,9 +711,12 @@ class _Attachment:
                 case ViewerPointer():
                     if action.phase != "cancel":
                         self.coordinate(action.x, action.y)
+                        geometry = await browser_visual_geometry(self.page.page)
+                        native_x = geometry.native_x(action.x)
+                        native_y = geometry.native_y(action.y)
                     if action.phase == "move":
                         await self.effect(
-                            lambda: self.page.page.mouse.move(action.x, action.y)
+                            lambda: self.page.page.mouse.move(native_x, native_y)
                         )
                     elif action.phase == "down":
                         if action.button is None or action.button in self.buttons:
@@ -731,7 +735,7 @@ class _Attachment:
                             else None
                         )
                         await self.effect(
-                            lambda: self.page.page.mouse.move(action.x, action.y)
+                            lambda: self.page.page.mouse.move(native_x, native_y)
                         )
                         await self.effect(
                             lambda: self.page.page.mouse.down(button=action.button)
@@ -742,7 +746,7 @@ class _Attachment:
                                 "browser_stale_input", "Browser pointer is not pressed"
                             )
                         await self.effect(
-                            lambda: self.page.page.mouse.move(action.x, action.y)
+                            lambda: self.page.page.mouse.move(native_x, native_y)
                         )
                         self.buttons.discard(action.button)
                         await self.effect(
@@ -752,12 +756,16 @@ class _Attachment:
                         await self.cleanup()
                 case ViewerWheel():
                     self.coordinate(action.x, action.y)
+                    geometry = await browser_visual_geometry(self.page.page)
+                    native_x = geometry.native_x(action.x)
+                    native_y = geometry.native_y(action.y)
                     await self.effect(
-                        lambda: self.page.page.mouse.move(action.x, action.y)
+                        lambda: self.page.page.mouse.move(native_x, native_y)
                     )
                     await self.effect(
                         lambda: self.page.page.mouse.wheel(
-                            action.delta_x, action.delta_y
+                            action.delta_x / geometry.scale,
+                            action.delta_y / geometry.scale,
                         )
                     )
                 case ViewerKey():

@@ -294,7 +294,7 @@ async def test_dom_glance_raw_and_capture_original(
     assert capture.capture is not None
     png = Path(capture.capture.path).read_bytes()
     assert png.startswith(b"\x89PNG") and capture.capture.size == len(png)
-    assert capture.capture.width == 1280 and capture.capture.height == 800
+    assert capture.capture.width == 400 and capture.capture.height == 560
 
 
 async def test_popup_download_upload_frame_and_scoped_close(

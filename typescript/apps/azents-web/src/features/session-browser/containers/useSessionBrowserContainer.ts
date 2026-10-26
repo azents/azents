@@ -431,6 +431,7 @@ export function useSessionBrowserContainer(
       live.state.connection === "connected" &&
       status.dialog === null,
     canInput: interaction.interaction !== null,
+    mouse: interaction.interaction,
     pendingInputs: live.state.pendingInputs,
     interrupted: live.state.conflict || live.state.outcomeUnknown,
     frame: source,

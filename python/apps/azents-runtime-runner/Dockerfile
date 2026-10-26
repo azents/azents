@@ -148,6 +148,7 @@ COPY python/apps/azents-runtime-runner/uv.lock ./
 COPY python/libs/azents-runtime-control /workspace/python/libs/azents-runtime-control
 COPY python/apps/azents-runtime-runner/src/azents_runtime_runner/__init__.py \
      python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_camoufox.py \
+     python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_mobile.py \
      python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_install.py \
      ./src/azents_runtime_runner/
 
