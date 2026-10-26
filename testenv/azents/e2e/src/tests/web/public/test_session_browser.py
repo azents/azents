@@ -13,7 +13,7 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
-from azents_runtime_control.browser_viewer_contract import ViewerTarget
+from azents_runtime_control.browser_viewer_contract import ViewerSource, ViewerTarget
 from azentspublicclient.models.browser_page_response import BrowserPageResponse
 from azentspublicclient.models.browser_projection_response import (
     BrowserProjectionResponse,
@@ -247,6 +247,7 @@ def _verify_live_panel(
     agent_id: str,
     session_id: str,
     target: ViewerTarget,
+    source: ViewerSource,
 ) -> None:
     """Cross the real login, BFF, public socket and native input boundaries."""
     _login_main_web(driver, base_url=web_url, email=email)
@@ -296,13 +297,14 @@ def _verify_live_panel(
             )
         )
     )
-    width = dimensions.width
+    assert dimensions.width == source.width * 2
+    assert dimensions.height == source.height * 2
 
     def click_native(x: int, y: int) -> None:
         rect = viewport.rect
-        scale = rect["width"] / width
+        scale = rect["width"] / source.width
         # WebDriver's element origin clips the center of a scrollable image.
-        # Native coordinates are relative to the full image, not its visible center.
+        # Native coordinates use the logical input plane, not raster density.
         mouse = ActionBuilder(driver)
         mouse.pointer_action.move_to_location(
             int(rect["x"] + x * scale), int(rect["y"] + y * scale)
@@ -878,6 +880,7 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         agent_id=workspace.agent_id,
         session_id=workspace.session_id,
         target=target,
+        source=socket.frame.source,
     )
     reconnected = BrowserSocket.open(
         public_url=azents_public_server_url,

@@ -39,6 +39,7 @@ import { useTranslations } from "next-intl";
 import {
   browserAddress,
   browserFrameMatchesStatus,
+  browserImageMatchesFrame,
   sameBrowserTarget,
 } from "../input";
 import { BrowserFieldEditor } from "./BrowserFieldEditor";
@@ -844,8 +845,13 @@ export function SessionBrowserPanel({
                 draggable={false}
                 onLoad={(event) => {
                   if (
-                    event.currentTarget.naturalWidth !== image.frame.width ||
-                    event.currentTarget.naturalHeight !== image.frame.height
+                    !browserImageMatchesFrame(
+                      {
+                        width: event.currentTarget.naturalWidth,
+                        height: event.currentTarget.naturalHeight,
+                      },
+                      image.frame,
+                    )
                   ) {
                     onFrameError(image);
                     return;

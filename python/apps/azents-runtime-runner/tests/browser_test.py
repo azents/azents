@@ -294,7 +294,50 @@ async def test_dom_glance_raw_and_capture_original(
     assert capture.capture is not None
     png = Path(capture.capture.path).read_bytes()
     assert png.startswith(b"\x89PNG") and capture.capture.size == len(png)
-    assert capture.capture.width == 400 and capture.capture.height == 560
+    assert capture.capture.width == 800 and capture.capture.height == 1120
+
+
+@pytest.mark.parametrize("height", [10001, 32000])
+async def test_full_page_capture_rejects_excess_device_pixels_before_screenshot(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    height: int,
+) -> None:
+    actor = authority(tmp_path)
+    opened = await manager.execute(BrowserOpenCommand(actor, None, None, None))
+    current = target(opened)
+    page = manager.tasks[current.task_id].pages[current.page_id].page
+    await page.set_content(
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<style>html,body{{margin:0;width:400px;height:{height}px}}</style>"
+    )
+    screenshot = AsyncMock()
+    monkeypatch.setattr(page, "screenshot", screenshot)
+    with pytest.raises(BrowserFailure, match="pixel bound") as error:
+        await manager.execute(
+            BrowserObserveCommand(actor, current, "image", True, 10000)
+        )
+    assert error.value.code == "browser_capture_oversized"
+    screenshot.assert_not_awaited()
+
+
+async def test_full_page_capture_accepts_device_pixel_boundary(
+    manager: RunnerBrowserManager, tmp_path: Path
+) -> None:
+    actor = authority(tmp_path)
+    opened = await manager.execute(BrowserOpenCommand(actor, None, None, None))
+    current = target(opened)
+    page = manager.tasks[current.task_id].pages[current.page_id].page
+    await page.set_content(
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        "<style>html,body{margin:0;width:400px;height:10000px}</style>"
+    )
+    result = await manager.execute(
+        BrowserObserveCommand(actor, current, "image", True, 10000)
+    )
+    assert result.capture is not None
+    assert (result.capture.width, result.capture.height) == (800, 20000)
 
 
 async def test_popup_download_upload_frame_and_scoped_close(

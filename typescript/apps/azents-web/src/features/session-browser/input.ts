@@ -18,6 +18,23 @@ export interface BrowserDisplayRect {
   height: number;
 }
 
+/** Raster density is independent of the logical input plane. */
+export function browserImageMatchesFrame(
+  pixels: { width: number; height: number },
+  frame: { width: number; height: number },
+): boolean {
+  if (
+    ![pixels.width, pixels.height, frame.width, frame.height].every(
+      (value) => Number.isSafeInteger(value) && value > 0,
+    ) ||
+    pixels.width * pixels.height > 16_000_000
+  ) {
+    return false;
+  }
+  const scale = pixels.width / frame.width;
+  return (scale === 1 || scale === 2) && pixels.height === frame.height * scale;
+}
+
 export interface BrowserKeyModifiers {
   control: boolean;
   meta: boolean;
