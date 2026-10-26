@@ -17,6 +17,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.repos.agent_runtime.data import (
     AgentRuntime,
     AgentRuntimeActions,
@@ -196,6 +197,18 @@ class RuntimeOperationTarget:
     configuration_sequence: int
     configuration_digest: str
     workspace_path: str
+
+    @property
+    def admission_authority(self) -> RuntimeAdmissionAuthority:
+        """Freeze authority independently from a replaceable connection."""
+        return RuntimeAdmissionAuthority(
+            runtime_id=self.id,
+            capability_version=self.runtime_capability_version,
+            desired_generation=self.desired_generation,
+            configuration_sequence=self.configuration_sequence,
+            configuration_digest=self.configuration_digest,
+            workspace_path=self.workspace_path,
+        )
 
 
 class RuntimeOperationTargetResolver(Protocol):

@@ -6,6 +6,7 @@ from typing import NamedTuple
 
 import pytest
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
 from azents.engine.tools.runtime_io import (
@@ -32,6 +33,7 @@ class _FakeRunnerOperations:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         old_string: str,
@@ -78,7 +80,9 @@ def _make_tool(
     )
 
     async def resolve_runtime_target() -> RuntimeEditTarget:
-        return RuntimeEditTarget(runtime_id="runtime-1", runner_generation=7)
+        return RuntimeEditTarget(
+            runtime_id="runtime-1", runner_generation=7, admission_authority=None
+        )
 
     tool = make_edit_tool(
         runner_operations=runner_operations,

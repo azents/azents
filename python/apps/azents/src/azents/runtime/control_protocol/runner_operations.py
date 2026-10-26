@@ -28,10 +28,15 @@ from azents_runtime_control.process_observation import ProcessObservation
 from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
 
 from azents.core.browser_configuration import BrowserConfigurationIntentReader
+from azents.core.runtime_admission import (
+    RuntimeAdmissionAuthority,
+    RuntimeAdmissionReader,
+    RuntimeAdmissionReady,
+    RuntimeAdmissionRejected,
+)
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
-    RuntimeProtocolStaleGeneration,
     RuntimeRunnerOperation,
 )
 from azents.runtime.control_protocol.service import (
@@ -51,6 +56,26 @@ from azents.runtime.observability import RuntimeReplyDeliveryMetrics
 _MAX_REPLY_WAIT_SECONDS = 1.0
 _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS = 1.0
 _DEFAULT_BODY_CHUNK_SIZE_BYTES = 1024 * 1024
+_CONNECTION_REBIND_OPERATIONS = frozenset(
+    {
+        "bash",
+        "process.start",
+        "file.read",
+        "file.read_text",
+        "file.write",
+        "file.apply_patch",
+        "file.edit",
+        "file.delete",
+        "file.bulk_delete",
+        "file.mkdir",
+        "file.move",
+        "file.bulk_move",
+        "file.list",
+        "file.glob",
+        "file.stat",
+        "file.grep",
+    }
+)
 
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
 type RuntimeOperationTextCallback = Callable[
@@ -535,6 +560,7 @@ class RuntimeRunnerOperationClient:
         coordination_store: RuntimeCoordinationStore,
         metrics: RuntimeReplyDeliveryMetrics,
         browser_configuration: BrowserConfigurationIntentReader | None,
+        admission_reader: RuntimeAdmissionReader | None,
         body_chunk_size_bytes: int = _DEFAULT_BODY_CHUNK_SIZE_BYTES,
     ) -> None:
         """Initialize the Runner operation client."""
@@ -545,6 +571,7 @@ class RuntimeRunnerOperationClient:
         self.metrics = metrics
         self._body_chunk_size_bytes = body_chunk_size_bytes
         self.browser_configuration = browser_configuration
+        self.admission_reader = admission_reader
 
     async def run_browser_command(
         self,
@@ -577,7 +604,9 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         record = await self._read_until_final(
             dispatch.reply_stream_id,
@@ -585,7 +614,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
         try:
@@ -621,7 +650,9 @@ class RuntimeRunnerOperationClient:
                 else encode_browser_configuration(request),
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         record = await self._read_until_final(
             dispatch.reply_stream_id,
@@ -629,7 +660,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
         if set(record.event.payload) != {"browser_configuration"}:
@@ -646,6 +677,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         command: str,
         timeout_seconds: int,
@@ -670,7 +702,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=cancel_check,
         )
         return await self.resume_bash(
             reply_stream_id=dispatch.reply_stream_id,
@@ -678,7 +712,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             cancel_check=cancel_check,
         )
@@ -688,6 +722,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         offset: int,
@@ -708,7 +743,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_read(
             reply_stream_id=dispatch.reply_stream_id,
@@ -716,7 +753,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -725,6 +762,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         character_offset: int,
@@ -747,7 +785,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_text_read(
             reply_stream_id=dispatch.reply_stream_id,
@@ -755,7 +795,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -764,6 +804,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         data: bytes,
@@ -775,6 +816,7 @@ class RuntimeRunnerOperationClient:
             body_stream_id=body_stream_id,
             request_id=body_stream_id,
             data=data,
+            deadline_at=deadline_at,
         )
         dispatch = await self._dispatch_runner_operation(
             RuntimeRunnerOperation(
@@ -788,7 +830,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=body_stream_id,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_write(
             reply_stream_id=dispatch.reply_stream_id,
@@ -796,7 +840,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -805,6 +849,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         base_path: str,
         patch: bytes,
@@ -817,6 +862,7 @@ class RuntimeRunnerOperationClient:
             body_stream_id=body_stream_id,
             request_id=body_stream_id,
             data=patch,
+            deadline_at=deadline_at,
         )
         dispatch = await self._dispatch_runner_operation(
             RuntimeRunnerOperation(
@@ -831,7 +877,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=body_stream_id,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         resume_task = asyncio.create_task(
             self.resume_file_apply_patch(
@@ -840,7 +888,7 @@ class RuntimeRunnerOperationClient:
                 request_id=dispatch.request_id,
                 operation_id=dispatch.operation_id,
                 runtime_id=runtime_id,
-                generation=runner_generation,
+                generation=dispatch.generation,
                 deadline_at=deadline_at,
             )
         )
@@ -857,7 +905,7 @@ class RuntimeRunnerOperationClient:
                 cancel_requested = True
                 await self.control_protocol.request_runner_operation_cancel(
                     runtime_id=runtime_id,
-                    runner_generation=runner_generation,
+                    runner_generation=dispatch.generation,
                     operation_id=dispatch.operation_id,
                     created_at=datetime.now(timezone.utc),
                 )
@@ -867,6 +915,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         old_string: str,
@@ -889,7 +938,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_edit(
             reply_stream_id=dispatch.reply_stream_id,
@@ -897,7 +948,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -906,6 +957,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool,
@@ -921,7 +973,9 @@ class RuntimeRunnerOperationClient:
                 payload={"path": path, "recursive": recursive},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_delete(
             reply_stream_id=dispatch.reply_stream_id,
@@ -929,7 +983,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -938,6 +992,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         paths: list[str],
         recursive: bool,
@@ -953,7 +1008,9 @@ class RuntimeRunnerOperationClient:
                 payload={"paths": list(paths), "recursive": recursive},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_bulk_delete(
             reply_stream_id=dispatch.reply_stream_id,
@@ -961,7 +1018,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -970,6 +1027,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         parents: bool,
@@ -985,7 +1043,9 @@ class RuntimeRunnerOperationClient:
                 payload={"path": path, "parents": parents},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_mkdir(
             reply_stream_id=dispatch.reply_stream_id,
@@ -993,7 +1053,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1002,6 +1062,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         source_path: str,
         destination_path: str,
@@ -1022,7 +1083,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_move(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1030,7 +1093,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1039,6 +1102,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         source_paths: list[str],
         destination_directory: str,
@@ -1059,7 +1123,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_bulk_move(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1067,7 +1133,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1076,6 +1142,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool = False,
@@ -1095,7 +1162,9 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_list(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1103,7 +1172,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1112,6 +1181,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         pattern: str,
         exclude_patterns: list[str] | None,
@@ -1130,7 +1200,9 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_glob(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1138,7 +1210,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1147,6 +1219,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime,
@@ -1161,7 +1234,9 @@ class RuntimeRunnerOperationClient:
                 payload={"path": path},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_file_stat(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1169,7 +1244,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1178,6 +1253,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         pattern: str,
@@ -1212,7 +1288,9 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_grep_files(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1220,7 +1298,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1244,7 +1322,9 @@ class RuntimeRunnerOperationClient:
                 payload={"source_project_path": source_project_path},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_git_refs(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1252,7 +1332,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             text_output_callback=text_output_callback,
         )
@@ -1285,7 +1365,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_git_create_worktree(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1293,7 +1375,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             text_output_callback=text_output_callback,
         )
@@ -1316,7 +1398,9 @@ class RuntimeRunnerOperationClient:
                 payload={},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_discover_managed_git_worktrees(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1324,7 +1408,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1353,7 +1437,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_remove_discovered_git_worktree(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1361,7 +1447,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
 
@@ -1393,7 +1479,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_git_remove_worktree(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1401,7 +1489,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             text_output_callback=text_output_callback,
         )
@@ -1432,7 +1520,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_git_inspect_worktree(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1440,7 +1530,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             text_output_callback=text_output_callback,
         )
@@ -1469,7 +1559,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_git_delete_branch(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1477,7 +1569,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             text_output_callback=text_output_callback,
         )
@@ -1487,6 +1579,7 @@ class RuntimeRunnerOperationClient:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         command: str,
         fire_and_forget: bool,
         workdir: str | None,
@@ -1517,7 +1610,9 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=admission_authority,
+            ),
+            cancel_check=None,
         )
         return await self.resume_process(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1525,7 +1620,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             process_output_callback=process_output_callback,
         )
@@ -1550,7 +1645,9 @@ class RuntimeRunnerOperationClient:
                 payload={"after_revision": after_revision, "timeout_ms": timeout_ms},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         final = await self._read_until_final(
             dispatch.reply_stream_id,
@@ -1558,7 +1655,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
         return ProcessObservation.from_payload(
@@ -1593,7 +1690,9 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         return await self.resume_process(
             reply_stream_id=dispatch.reply_stream_id,
@@ -1601,7 +1700,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
             process_output_callback=process_output_callback,
         )
@@ -1624,7 +1723,9 @@ class RuntimeRunnerOperationClient:
                 payload={"owner_session_id": owner_session_id},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-            )
+                admission_authority=None,
+            ),
+            cancel_check=None,
         )
         final = await self._read_until_final(
             dispatch.reply_stream_id,
@@ -1632,7 +1733,7 @@ class RuntimeRunnerOperationClient:
             request_id=dispatch.request_id,
             operation_id=dispatch.operation_id,
             runtime_id=runtime_id,
-            generation=runner_generation,
+            generation=dispatch.generation,
             deadline_at=deadline_at,
         )
         _decode_completion(_ProcessTerminationCompletion, final, derived=None)
@@ -2233,22 +2334,150 @@ class RuntimeRunnerOperationClient:
     async def _dispatch_runner_operation(
         self,
         operation: RuntimeRunnerOperation,
+        *,
+        cancel_check: RuntimeOperationCancelCheck | None,
     ) -> RuntimeDispatchResult:
-        result = await self.control_protocol.dispatch_runner_operation(
-            operation,
-            created_at=datetime.now(timezone.utc),
-        )
-        if isinstance(result, RuntimeProtocolRouteUnavailable):
-            raise RuntimeRunnerOperationUnavailable(
-                f"Runner operation route unavailable: {result.subject_id}"
+        authority = operation.admission_authority
+        if authority is not None and (
+            operation.operation_type not in _CONNECTION_REBIND_OPERATIONS
+            or authority.runtime_id != operation.runtime_id
+            or self.admission_reader is None
+        ):
+            raise RuntimeRunnerOperationFailedError(
+                "Runtime operation authority does not permit admission.",
+                code="runtime_authority_changed",
             )
-        if isinstance(result, RuntimeProtocolStaleGeneration):
-            raise RuntimeRunnerOperationGenerationError(
-                f"Runner generation is stale: {result.subject_id}:{result.generation}"
+        while True:
+            now = datetime.now(timezone.utc)
+            if now >= operation.deadline_at:
+                raise RuntimeRunnerOperationFailedError(
+                    "Runtime operation was not submitted before its deadline.",
+                    code="runner_admission_timeout",
+                )
+            await self._check_admission_cancel(cancel_check, operation.deadline_at)
+            ready = True
+            if authority is not None:
+                assert self.admission_reader is not None
+                try:
+                    async with asyncio.timeout(
+                        (
+                            operation.deadline_at - datetime.now(timezone.utc)
+                        ).total_seconds()
+                    ):
+                        state = await self.admission_reader.resolve(authority)
+                except TimeoutError:
+                    raise RuntimeRunnerOperationFailedError(
+                        "Runtime operation was not submitted before its deadline.",
+                        code="runner_admission_timeout",
+                    ) from None
+                if isinstance(state, RuntimeAdmissionRejected):
+                    raise RuntimeRunnerOperationFailedError(
+                        "Runtime operation authority changed before submission.",
+                        code="runtime_authority_changed",
+                    )
+                ready = isinstance(state, RuntimeAdmissionReady)
+                if isinstance(state, RuntimeAdmissionReady):
+                    operation = dataclasses.replace(
+                        operation, runner_generation=state.runner_generation
+                    )
+            if ready:
+                if datetime.now(timezone.utc) >= operation.deadline_at:
+                    continue
+                await self._check_admission_cancel(cancel_check, operation.deadline_at)
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise asyncio.CancelledError
+                now = datetime.now(timezone.utc)
+                if now >= operation.deadline_at:
+                    continue
+                try:
+                    async with asyncio.timeout(
+                        (operation.deadline_at - now).total_seconds()
+                    ):
+                        result = await self.control_protocol.dispatch_runner_operation(
+                            operation,
+                            created_at=now,
+                        )
+                except TimeoutError:
+                    raise RuntimeRunnerOperationFailedError(
+                        "Runtime submission outcome is unknown; "
+                        "the operation was not resubmitted.",
+                        code="runtime_submission_unknown",
+                    ) from None
+                if isinstance(result, RuntimeDispatchResult):
+                    return result
+                if authority is None:
+                    if isinstance(result, RuntimeProtocolRouteUnavailable):
+                        raise RuntimeRunnerOperationUnavailable(
+                            f"Runner operation route unavailable: {result.subject_id}"
+                        )
+                    raise RuntimeRunnerOperationGenerationError(
+                        "Runner generation is stale: "
+                        f"{result.subject_id}:{result.generation}"
+                    )
+                # Only typed atomic no-append rejections reach this wait.
+            await self._wait_for_admission(operation.deadline_at)
+
+    async def _wait_for_admission(self, deadline_at: datetime) -> None:
+        """Wait within the unchanged deadline without scheduling later work."""
+        remaining = (deadline_at - datetime.now(timezone.utc)).total_seconds()
+        if remaining > 0:
+            await asyncio.sleep(min(1.0, remaining))
+
+    async def _check_admission_cancel(
+        self,
+        cancel_check: RuntimeOperationCancelCheck | None,
+        deadline_at: datetime,
+    ) -> None:
+        """Bound caller cancellation evidence by the same submission deadline."""
+        remaining = (deadline_at - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            raise RuntimeRunnerOperationFailedError(
+                "Runtime operation was not submitted before its deadline.",
+                code="runner_admission_timeout",
             )
-        return result
+        if cancel_check is None:
+            return
+        try:
+            async with asyncio.timeout(remaining):
+                cancelled = await cancel_check()
+        except TimeoutError:
+            raise RuntimeRunnerOperationFailedError(
+                "Runtime operation was not submitted before its deadline.",
+                code="runner_admission_timeout",
+            ) from None
+        if cancelled:
+            raise RuntimeRunnerOperationCanceledError(
+                "Runtime operation cancelled before submission."
+            )
 
     async def _append_body_chunks(
+        self,
+        *,
+        body_stream_id: str,
+        request_id: str,
+        data: bytes,
+        deadline_at: datetime,
+    ) -> None:
+        """Stage once within the unchanged operation budget, before submission."""
+        remaining = (deadline_at - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            raise RuntimeRunnerOperationFailedError(
+                "Runtime operation expired before body staging.",
+                code="runner_admission_timeout",
+            )
+        try:
+            async with asyncio.timeout(remaining):
+                await self._stage_body_chunks(
+                    body_stream_id=body_stream_id, request_id=request_id, data=data
+                )
+        except TimeoutError:
+            raise RuntimeRunnerOperationFailedError(
+                "Runtime operation was not submitted before its deadline.",
+                code="runner_admission_timeout",
+            ) from None
+
+    async def _stage_body_chunks(
         self,
         *,
         body_stream_id: str,

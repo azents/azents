@@ -7,6 +7,7 @@ from typing import TypeVar
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
 from azents_runtime_control.process_observation import ProcessObservation
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.engine.tools import runtime_io as engine_runtime_io
 from azents.engine.tools.runtime_io import (
     RuntimeBashResult,
@@ -72,6 +73,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         command: str,
         timeout_seconds: int,
@@ -90,6 +92,7 @@ class RuntimeRunnerOperationAdapter:
                 env=env,
                 deadline_at=deadline_at,
                 cancel_check=cancel_check,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeBashResult(
@@ -104,6 +107,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         command: str,
         fire_and_forget: bool,
         workdir: str | None,
@@ -130,6 +134,7 @@ class RuntimeRunnerOperationAdapter:
                 process_output_callback=_control_process_output_callback(
                     process_output_callback
                 ),
+                admission_authority=admission_authority,
             )
         )
         return _process_result(result)
@@ -210,6 +215,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         offset: int,
@@ -226,6 +232,7 @@ class RuntimeRunnerOperationAdapter:
                 offset=offset,
                 max_bytes=max_bytes,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeFileReadResult(data=result.data, final_cursor=result.final_cursor)
@@ -235,6 +242,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         character_offset: int,
@@ -253,6 +261,7 @@ class RuntimeRunnerOperationAdapter:
                 max_characters=max_characters,
                 encoding=encoding,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeFileTextReadResult(
@@ -268,6 +277,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         data: bytes,
@@ -282,6 +292,7 @@ class RuntimeRunnerOperationAdapter:
                 path=path,
                 data=data,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeFileWriteResult(
@@ -294,6 +305,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         base_path: str,
         patch: bytes,
@@ -310,6 +322,7 @@ class RuntimeRunnerOperationAdapter:
                 patch=patch,
                 schema_version=schema_version,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeFileApplyPatchResult(
@@ -331,6 +344,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         old_string: str,
@@ -349,6 +363,7 @@ class RuntimeRunnerOperationAdapter:
                 new_string=new_string,
                 replace_all=replace_all,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeFileEditResult(
@@ -361,6 +376,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         recursive: bool = False,
@@ -377,6 +393,7 @@ class RuntimeRunnerOperationAdapter:
                 recursive=recursive,
                 exclude_patterns=exclude_patterns,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return _file_list_result(result)
@@ -386,6 +403,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         pattern: str,
         exclude_patterns: list[str] | None,
@@ -400,6 +418,7 @@ class RuntimeRunnerOperationAdapter:
                 pattern=pattern,
                 exclude_patterns=exclude_patterns,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return _file_list_result(result)
@@ -409,6 +428,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime,
@@ -421,6 +441,7 @@ class RuntimeRunnerOperationAdapter:
                 owner_session_id=owner_session_id,
                 path=path,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeFileStatResult(
@@ -438,6 +459,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         pattern: str,
@@ -464,6 +486,7 @@ class RuntimeRunnerOperationAdapter:
                 max_searched_files=max_searched_files,
                 max_scanned_bytes=max_scanned_bytes,
                 deadline_at=deadline_at,
+                admission_authority=admission_authority,
             )
         )
         return RuntimeGrepResult(

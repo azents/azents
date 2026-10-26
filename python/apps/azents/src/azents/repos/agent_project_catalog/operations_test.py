@@ -14,6 +14,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import AgentProjectCatalogStatus, AgentRuntimeCapability
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_project_catalog import RDBAgentProjectCatalogEntry
 from azents.rdb.models.workspace import RDBWorkspace
@@ -318,6 +319,7 @@ async def test_runtime_resolution_and_probes_run_outside_catalog_transactions(
             *,
             runtime_id: str,
             runner_generation: int,
+            admission_authority: RuntimeAdmissionAuthority | None,
             owner_session_id: str | None = None,
             path: str,
             deadline_at: datetime.datetime,

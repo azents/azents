@@ -412,6 +412,7 @@ async def test_claimed_runner_request_can_be_reclaimed_until_acked() -> None:
             payload={"command": "echo ok"},
             deadline_at=now + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=now,
     )
@@ -509,6 +510,7 @@ async def test_dispatch_runner_operation_supports_resume_after_reply_cursor() ->
             payload={"command": "echo ok"},
             deadline_at=now + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=now,
     )
@@ -712,6 +714,7 @@ async def test_runner_reconnect_does_not_replay_previous_generation_requests() -
             payload={"command": "echo ok"},
             deadline_at=now + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=now,
     )
@@ -869,6 +872,7 @@ async def test_operation_ttl_keeps_deadline_buffer() -> None:
             payload={"command": "echo short"},
             deadline_at=created_at + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=created_at,
     )
@@ -883,6 +887,7 @@ async def test_operation_ttl_keeps_deadline_buffer() -> None:
             payload={"command": "echo long"},
             deadline_at=created_at + timedelta(seconds=1200),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=created_at,
     )
@@ -908,6 +913,7 @@ async def test_late_final_reply_does_not_replace_canceled_cursor() -> None:
             payload={"command": "echo late"},
             deadline_at=now + timedelta(seconds=30),
             body_stream_id=None,
+            admission_authority=None,
         ),
         created_at=now,
     )
@@ -1008,6 +1014,7 @@ def _runner_operation(*, generation: int, now: datetime) -> RuntimeRunnerOperati
         payload={"command": "pwd"},
         deadline_at=now + timedelta(seconds=30),
         body_stream_id=None,
+        admission_authority=None,
     )
 
 

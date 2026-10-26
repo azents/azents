@@ -535,14 +535,12 @@ class AgentRuntimeService:
             agent_id,
             expected_version=capability_version,
         )
-        command = await self.operations.set_current_desired_state(
+        command = await self.operations.start_or_join_automatically(
             runtime_id=runtime.id,
-            command_type=RuntimeLifecycleCommandType.START,
-            desired_state=RuntimeDesiredState.RUNNING,
+            expected_capability_version=capability_version,
             expected_configuration_sequence=resolution.desired.sequence,
             expected_digest=resolution.desired.digest,
             expected_generation=runtime.desired_generation,
-            reset_final_desired_state=None,
         )
         if command is None:
             raise RuntimeProfileResolutionUnavailable(
@@ -550,7 +548,33 @@ class AgentRuntimeService:
                 provider_id=runtime.runtime_provider_id,
                 message=("Runtime configuration changed before start could be stored."),
             )
-        return (await self._ensure_runtime_for_agent(agent_id)).runtime
+        return command.runtime
+
+    async def _start_operation_runtime(
+        self,
+        *,
+        runtime_id: str,
+        capability_version: int,
+        authority: RuntimeOperationAuthority,
+    ) -> RuntimeOperationAuthority:
+        """Follow only an exact committed ordinary-start successor."""
+        command = await self.operations.start_or_join_automatically(
+            runtime_id=runtime_id,
+            expected_capability_version=capability_version,
+            expected_configuration_sequence=authority.configuration_sequence,
+            expected_digest=authority.configuration_digest,
+            expected_generation=authority.desired_generation,
+        )
+        if command is None:
+            raise RuntimeStorageError(
+                "Runtime configuration changed since the operation context "
+                "was assembled."
+            )
+        return RuntimeOperationAuthority(
+            configuration_sequence=command.runtime.configuration_sequence,
+            configuration_digest=authority.configuration_digest,
+            desired_generation=command.desired_generation,
+        )
 
     async def resolve_operation_target(
         self,
@@ -567,6 +591,7 @@ class AgentRuntimeService:
         last_resolution: RuntimeProfileResolutionResult | None = None
         expected_desired_generation: int | None = None
         expected_configuration_sequence: int | None = None
+        handoff_available = start_if_stopped
         while True:
             await self._require_runtime_operation_capability(
                 agent_id,
@@ -583,10 +608,32 @@ class AgentRuntimeService:
                 resolution,
                 expected_authority,
             ):
-                raise RuntimeStorageError(
-                    "Runtime configuration changed since the operation context "
-                    "was assembled."
+                if (
+                    not handoff_available
+                    or resolution.desired.digest
+                    != expected_authority.configuration_digest
+                    or resolution.runtime.desired_state
+                    is not RuntimeDesiredState.RUNNING
+                    or resolution.desired.sequence
+                    != expected_authority.configuration_sequence + 1
+                    or resolution.runtime.desired_generation
+                    != expected_authority.desired_generation + 1
+                ):
+                    raise RuntimeStorageError(
+                        "Runtime configuration changed since the operation context "
+                        "was assembled."
+                    )
+                expected_authority = await self._start_operation_runtime(
+                    runtime_id=resolution.runtime.id,
+                    capability_version=capability_version,
+                    authority=expected_authority,
                 )
+                handoff_available = False
+                resolution = await self._ensure_runtime_for_agent(agent_id)
+                if not self._matches_expected_authority(resolution, expected_authority):
+                    raise RuntimeStorageError(
+                        "Runtime configuration changed during automatic start."
+                    )
             runtime = resolution.runtime
             if runtime.desired_state is not RuntimeDesiredState.RUNNING:
                 if not start_if_stopped:
@@ -596,16 +643,18 @@ class AgentRuntimeService:
                     raise RuntimeStorageError(
                         f"Runtime Profile is unavailable: {blocked.code}"
                     )
-                try:
-                    await self._require_runtime_operation_capability(
-                        agent_id,
-                        expected_version=capability_version,
-                    )
-                    await self.ensure_started_for_agent(agent_id)
-                except RuntimeProfileResolutionUnavailable as error:
-                    raise RuntimeStorageError(
-                        f"Runtime Profile is unavailable: {error.code}"
-                    ) from error
+                assert resolution.desired.digest is not None
+                expected_authority = await self._start_operation_runtime(
+                    runtime_id=runtime.id,
+                    capability_version=capability_version,
+                    authority=expected_authority
+                    or RuntimeOperationAuthority(
+                        configuration_sequence=resolution.desired.sequence,
+                        configuration_digest=resolution.desired.digest,
+                        desired_generation=runtime.desired_generation,
+                    ),
+                )
+                handoff_available = False
                 resolution = await self._ensure_runtime_for_agent(agent_id)
                 last_resolution = resolution
                 blocked = self.configuration_blocking_error(resolution)
@@ -624,6 +673,7 @@ class AgentRuntimeService:
                         "Runtime configuration changed since the operation context "
                         "was assembled."
                     )
+            handoff_available = False
             if expected_desired_generation is None:
                 expected_desired_generation = runtime.desired_generation
                 expected_configuration_sequence = resolution.desired.sequence

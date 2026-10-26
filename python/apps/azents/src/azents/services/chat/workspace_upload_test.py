@@ -26,6 +26,7 @@ from azents.core.enums import (
     AgentType,
     WorkspaceUserRole,
 )
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.repos.agent.data import Agent
 from azents.repos.workspace_upload_authority.data import (
     WorkspaceUploadRequesterAccessDenied,
@@ -204,6 +205,7 @@ class _RunnerOperations:
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         deadline_at: datetime.datetime,

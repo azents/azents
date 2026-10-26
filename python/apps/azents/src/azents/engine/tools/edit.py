@@ -8,6 +8,7 @@ from typing import NamedTuple, Protocol
 
 from pydantic import BaseModel, Field
 
+from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
@@ -51,6 +52,7 @@ class RuntimeEditTarget:
 
     runtime_id: str
     runner_generation: int
+    admission_authority: RuntimeAdmissionAuthority | None
 
 
 type RuntimeEditTargetResolver = Callable[[], Awaitable[RuntimeEditTarget]]
@@ -64,6 +66,7 @@ class RuntimeEditOperationClient(Protocol):
         *,
         runtime_id: str,
         runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
         owner_session_id: str | None,
         path: str,
         old_string: str,
@@ -100,6 +103,7 @@ def make_edit_tool(
                 + timedelta(
                     seconds=_EDIT_TIMEOUT_SECONDS + _OPERATION_RESULT_GRACE_SECONDS
                 ),
+                admission_authority=target.admission_authority,
             )
         except RuntimeStorageError as exc:
             raise FunctionToolError(str(exc)) from None
