@@ -4,6 +4,7 @@ import {
   browserAddress,
   browserDialogInput,
   browserFrameMatchesStatus,
+  browserImageMatchesFrame,
   browserInput,
   browserKey,
   browserPasteAction,
@@ -43,6 +44,32 @@ const status = {
   conflict: false,
   opened_target: null,
 };
+
+void test("image pixel density preserves the CSS input plane within a decoded bound", () => {
+  const css = { width: 400, height: 560 };
+  assert.equal(browserImageMatchesFrame(css, css), true);
+  assert.equal(
+    browserImageMatchesFrame({ width: 800, height: 1120 }, css),
+    true,
+  );
+  for (const pixels of [
+    { width: 1200, height: 1680 },
+    { width: 800, height: 560 },
+    { width: 600, height: 840 },
+    { width: 0, height: 0 },
+    { width: NaN, height: 1120 },
+    { width: 800.5, height: 1120 },
+  ]) {
+    assert.equal(browserImageMatchesFrame(pixels, css), false);
+  }
+  assert.equal(
+    browserImageMatchesFrame(
+      { width: 8192, height: 8192 },
+      { width: 4096, height: 4096 },
+    ),
+    false,
+  );
+});
 
 void test("address entry supports web destinations without embedded credentials", () => {
   assert.equal(

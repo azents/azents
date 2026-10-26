@@ -3,11 +3,12 @@
 import calendar
 import datetime
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from textwrap import dedent
 from zoneinfo import ZoneInfo
 
 from azents.core.enums import ScheduledTaskScheduleType
+from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.schedule import (
     CanonicalSchedule,
     canonical_schedule_text,
@@ -34,6 +35,25 @@ class ScheduledTaskSchedulePresentation:
     canonical: str
     occurrence: str
     occurrence_canonical: str
+
+
+def localize_scheduled_task_registration(
+    task: ScheduledTask,
+    *,
+    at: str | None,
+) -> ScheduledTask:
+    """Copy a committed Task into its validated registration input's offset."""
+    if task.schedule_type is not ScheduledTaskScheduleType.ONCE or at is None:
+        return task
+    zone = datetime.datetime.fromisoformat(at).tzinfo
+    if zone is None:
+        raise ValueError("Scheduled Task registration time must be timezone-aware.")
+    assert task.scheduled_at is not None
+    return replace(
+        task,
+        scheduled_at=task.scheduled_at.astimezone(zone),
+        next_eligible_at=task.next_eligible_at.astimezone(zone),
+    )
 
 
 def render_scheduled_task_schedule(

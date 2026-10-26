@@ -1860,6 +1860,53 @@ export const FocusedLandscapePageMobile = {
   parameters: { viewport: { defaultViewport: "mobile1" } },
 } satisfies Story;
 
+export const HighDensityFrame = {
+  tags: ["ci-contract"],
+  args: {
+    state: {
+      ...ready,
+      image: {
+        url: `data:image/svg+xml,${encodeURIComponent(svg.replace('width="800" height="900"', 'width="1600" height="1800"'))}`,
+        frame,
+      },
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const image = canvas.getByRole<HTMLImageElement>("img", {
+      name: "Browser page: Synthetic order",
+    });
+    await waitFor(() => expect(image.naturalWidth).toBe(1600));
+    await expect(image.naturalHeight).toBe(1800);
+    await waitFor(() => expect(args.onFrameDisplayed).toHaveBeenCalled());
+    await expect(args.onFrameError).not.toHaveBeenCalled();
+    const surface = canvas.getByRole("region", { name: "Remote browser page" });
+    const bounds = surface.getBoundingClientRect();
+    surface.setPointerCapture = fn();
+    surface.hasPointerCapture = (): boolean => false;
+    await fireEvent.pointerDown(surface, {
+      pointerType: "mouse",
+      pointerId: 110,
+      button: 0,
+      clientX: bounds.left + bounds.width / 2,
+      clientY: bounds.top + bounds.height / 2,
+    });
+    await expect(actions).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 800, height: 900 }),
+      expect.objectContaining({
+        kind: "pointer",
+        phase: "down",
+        x: 400,
+        y: 450,
+      }),
+    );
+    await fireEvent.pointerCancel(surface, {
+      pointerId: 110,
+      pointerType: "mouse",
+    });
+  },
+} satisfies Story;
+
 export const Connected = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
