@@ -434,12 +434,14 @@ Always-on required CI does not depend on external credentials.
   behavioral coverage, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
-- The existing Runner Python job uses the official HTTPS Ubuntu archive instead
-  of the Azure Ubuntu mirror for browser system dependencies. This changes only
+- The existing Runner Python and TypeScript component jobs use the official HTTPS
+  Ubuntu archive instead of the Azure Ubuntu mirror for browser system dependencies.
+  This changes only
   the exact mirror URI, preserving suites, components and repository signing keys.
   Chromium installation, Firefox system dependencies, and pinned Camoufox/model
-  installation remain ordered, mandatory steps with separate timings; no dependency
-  installation, browser engine or native test is skipped.
+  installation remain ordered, mandatory steps with separate timings. The component
+  job still runs the unchanged Playwright Chromium dependency installer and complete
+  selected component portfolio; no dependency, browser engine or native test is skipped.
 - Active CI optimization failures require diagnosis and repair rather than stopping
   at a failure report. When an experiment ends failed, rejected or inconclusive,
   durable reports retain its evidence; the unsuccessful PR is closed and its remote

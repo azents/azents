@@ -58,6 +58,34 @@ def test_runner_browser_install_preserves_commands_and_uses_official_apt_mirror(
     assert "      - name: Pytest\n" in job
 
 
+def test_component_browser_install_uses_official_mirror_and_keeps_contracts() -> None:
+    """The existing Web job uses the same verified mirror and unchanged SDK install."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    job = workflow.split("  ci_typescript_run:\n", 1)[1].split(
+        "\n  ci-typescript:\n", 1
+    )[0]
+    names = (
+        "Select Ubuntu archive for component browser dependencies",
+        "Install component browser",
+        "Web component contracts",
+    )
+    positions = [job.index(f"      - name: {name}\n") for name in names]
+    assert positions == sorted(positions)
+    mirror, install, contracts = [_step_block(job, name) for name in names]
+    assert mirror.splitlines()[-1].strip() == (
+        "run: sudo -n python3 scripts/ci/apt_mirror.py --sources-root /etc/apt"
+    )
+    assert install.splitlines()[-1].strip() == (
+        "run: cd typescript && pnpm --filter @azents/web exec "
+        "playwright install --with-deps chromium"
+    )
+    assert "scripts.ci.run_component_tests" in contracts
+    for block in (mirror, install, contracts):
+        assert "continue-on-error:" not in block
+        assert "timeout-minutes:" not in block
+        assert "\n        if:" not in block
+
+
 def test_general_report_can_checkout_and_keeps_forks_read_only() -> None:
     """Job-scoped permissions retain source reads and bound comment publication."""
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
