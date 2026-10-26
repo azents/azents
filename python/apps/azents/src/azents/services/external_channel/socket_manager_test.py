@@ -309,7 +309,8 @@ async def test_owned_socket_schedules_controls_without_waiting_for_completion() 
     attempted = asyncio.Event()
     attempt_count = 0
 
-    async def attempt(_plan: object) -> None:
+    async def attempt(_plan: object, *, preparation_boundary: object) -> None:
+        assert preparation_boundary is None
         nonlocal attempt_count
         attempt_count += 1
         if attempt_count == len(plans):

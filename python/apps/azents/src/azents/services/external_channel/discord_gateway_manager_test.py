@@ -695,7 +695,8 @@ async def test_gateway_schedules_every_control_without_waiting_for_completion() 
     all_attempts_started = asyncio.Event()
     attempted_plans: list[object] = []
 
-    async def attempt(plan: object) -> None:
+    async def attempt(plan: object, *, preparation_boundary: object) -> None:
+        assert preparation_boundary is None
         attempted_plans.append(plan)
         if len(attempted_plans) == len(plans):
             all_attempts_started.set()

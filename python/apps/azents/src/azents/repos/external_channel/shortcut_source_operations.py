@@ -103,6 +103,7 @@ class ExternalChannelShortcutSourceOperations:
                 trigger_provider_message_id=trigger_provider_message_id,
                 trigger_position=trigger_position,
                 range_start_position=position.read_through_position,
+                expected_file_count=None,
             )
         )
         claim = await self.repository.lock_nonterminal_setup_claim(

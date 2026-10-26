@@ -1419,6 +1419,7 @@ class ExternalChannelMailboxIngestionRepository:
                 ),
                 trigger_position=history.trigger_position,
                 range_start_position=history.range_start_position,
+                expected_file_count=request.locator.expected_file_count,
             )
         )
         claim = await self.repository.lock_nonterminal_setup_claim(

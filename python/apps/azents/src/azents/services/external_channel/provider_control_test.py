@@ -60,8 +60,10 @@ async def test_attempt_delegates_exactly_once_without_drain() -> None:
     )
     plan = _plan()
 
-    result = await service.attempt(plan)
+    result = await service.attempt(plan, preparation_boundary=None)
 
     assert result is not None
     assert result.status == "delivered"
-    action_service.execute_direct_control.assert_awaited_once_with(plan)
+    action_service.execute_direct_control.assert_awaited_once_with(
+        plan, preparation_boundary=None
+    )

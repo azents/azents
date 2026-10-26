@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import logging
 from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
@@ -32,7 +33,11 @@ from azents.core.external_channel_provider_effect import (
     ProviderMutationStatus,
 )
 from azents.job_runtime.local import JobRuntimeClosedError
+from azents.repos.external_channel.action_operations import (
+    ExternalChannelActionOperations,
+)
 from azents.repos.external_channel.setup_preparation import SetupPreparationAttempt
+from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.external_channel.setup_preparation import (
     ExternalChannelSetupPreparationService,
 )
@@ -40,6 +45,7 @@ from azents.services.external_channel.setup_preparation_job import (
     build_setup_preparation_job,
 )
 from azents.testing.external_channel import make_provider_effect_plan
+from azents.testing.types import require_instance
 
 
 def _request() -> ExternalChannelIngestionRequest:
@@ -92,6 +98,7 @@ def _request() -> ExternalChannelIngestionRequest:
             claim_generation=1,
             source_revision=1,
             preparation_owner="owner",
+            configuration_generation=1,
         ),
         initial_title_eligible=False,
     )
@@ -161,7 +168,10 @@ async def test_dispatch_is_committed_before_provider_effect_and_unknown_is_not_r
         connection_id="connection",
     )
 
-    async def deliver(_plan: object) -> ProviderMutationOutcome:
+    async def deliver(
+        _plan: object, *, preparation_boundary: ExternalChannelSetupPreparationBoundary
+    ) -> ProviderMutationOutcome:
+        assert preparation_boundary == request.replay_boundary
         calls = fixture.operations.transition.await_args_list
         assert calls[-1].kwargs["dispatch"] is True
         return ProviderMutationOutcome(
@@ -173,7 +183,9 @@ async def test_dispatch_is_committed_before_provider_effect_and_unknown_is_not_r
 
     fixture.controls.attempt.side_effect = deliver
     await service.process("claim", deadline=request.deadline)
-    fixture.controls.attempt.assert_awaited_once_with(plan)
+    fixture.controls.attempt.assert_awaited_once_with(
+        plan, preparation_boundary=request.replay_boundary
+    )
     assert fixture.operations.transition.await_args_list[-1].kwargs["retry"] == (
         delivery == "failed"
     )
@@ -227,3 +239,63 @@ def test_setup_job_is_content_free_and_not_bound_to_gateway_lease() -> None:
     job = build_setup_preparation_job("claim", now=now)
     assert job.payload == {"claim_id": "claim"}
     assert job.deadline - now == datetime.timedelta(minutes=2)
+
+
+@pytest.mark.asyncio
+async def test_terminal_rejection_logs_sanitized_evidence_and_does_not_retry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    request = _request()
+    fixture = _service(request)
+    fixture.ingestion.ingest.return_value = ExternalChannelIngestionOutcome(
+        kind=ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
+        reason=ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
+        mailbox_item_id=None,
+        control_plans=(),
+        connection_id=None,
+    )
+    with caplog.at_level(logging.WARNING):
+        await fixture.service.process("claim", deadline=request.deadline)
+    fixture.controls.attempt.assert_not_awaited()
+    fixture.operations.transition.assert_awaited_once()
+    assert fixture.operations.transition.await_args.kwargs["retry"] is False
+    assert fixture.operations.transition.await_args.kwargs["dispatch"] is False
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "Setup preparation rejected permanently"
+    ]
+    assert len(records) == 1
+    assert records[0].__dict__["failure_code"] == "invalid_replay_boundary"
+    assert records[0].__dict__["external_channel_setup_claim_id"] == "claim"
+
+
+@pytest.mark.asyncio
+async def test_changed_dispatch_boundary_never_calls_provider() -> None:
+    request = _request()
+    boundary = request.replay_boundary
+    assert isinstance(boundary, ExternalChannelSetupPreparationBoundary)
+    plan = make_provider_effect_plan()
+    operations = AsyncMock(spec=ExternalChannelActionOperations)
+    operations.revalidate_direct_control.return_value = None
+    deliver = AsyncMock()
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
+            operations=operations,
+            _deliver=deliver,
+        ),
+        ExternalChannelActionService,
+    )
+    assert (
+        await ExternalChannelActionService.execute_direct_control(
+            service,
+            plan,
+            preparation_boundary=boundary,
+        )
+        is None
+    )
+    operations.revalidate_direct_control.assert_awaited_once_with(
+        plan=plan, preparation_boundary=boundary
+    )
+    deliver.assert_not_awaited()

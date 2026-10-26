@@ -1220,7 +1220,9 @@ class ExternalChannelManagementService:
                 now=now,
             )
         if result.control_delete_plan is not None:
-            await self.action_service.execute_direct_control(result.control_delete_plan)
+            await self.action_service.execute_direct_control(
+                result.control_delete_plan, preparation_boundary=None
+            )
         return await self.get_approval(
             access_request_id=access_request_id,
             user_id=user_id,

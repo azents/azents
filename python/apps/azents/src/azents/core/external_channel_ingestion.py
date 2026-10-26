@@ -294,6 +294,7 @@ class ExternalChannelSetupPreparationBoundary(ExternalChannelReplayBoundary):
     claim_generation: int
     source_revision: int
     preparation_owner: str
+    configuration_generation: int
 
 
 @dataclasses.dataclass(frozen=True, repr=False)

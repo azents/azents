@@ -51,6 +51,7 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.ingress_drain import _authority_current
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.setup_preparation_fence import preparation_owned
 
 _PENDING = (
     ExternalChannelSetupClaimStatus.PENDING_AGENT,
@@ -67,24 +68,6 @@ class SetupPreparationAttempt:
 
     request: ExternalChannelIngestionRequest | None
     failure_code: str | None
-
-
-def preparation_owned(
-    claim: RDBExternalChannelSetupClaim,
-    boundary: ExternalChannelSetupPreparationBoundary,
-    *,
-    now: datetime.datetime,
-) -> bool:
-    """Require current source, selection, execution ownership and expiry."""
-    return (
-        claim.status in _PENDING
-        and claim.claim_generation == boundary.claim_generation
-        and claim.source_revision == boundary.source_revision
-        and claim.preparation_lease_owner == boundary.preparation_owner
-        and claim.preparation_lease_until is not None
-        and claim.preparation_lease_until > now
-        and claim.expires_at > now
-    )
 
 
 async def setup_preparation_current(
@@ -269,6 +252,7 @@ class ExternalChannelSetupPreparationRepository:
                 trigger_provider_message_id=locator.trigger_provider_message_id,
                 trigger_position=locator.trigger_position,
                 range_start_position=position.read_through_position,
+                expected_file_count=locator.expected_file_count,
             )
             claim = await self.repository.lock_nonterminal_setup_claim(
                 session, connection_id=connection.id, provider_parent_channel_id=parent
@@ -441,6 +425,7 @@ class ExternalChannelSetupPreparationRepository:
                 claim_generation=row.claim_generation,
                 source_revision=row.source_revision,
                 preparation_owner=owner,
+                configuration_generation=connection.configuration_generation,
             )
             request = ExternalChannelIngestionRequest(
                 locator=ExternalChannelTriggerLocator(
@@ -458,7 +443,7 @@ class ExternalChannelSetupPreparationRepository:
                     trigger_position=source.trigger_position,
                     provider_user_id=principal.provider_user_id,
                     invocation=True,
-                    expected_file_count=None,
+                    expected_file_count=source.expected_file_count,
                 ),
                 scope=ExternalChannelConversationScope(
                     connection_id=connection.id,

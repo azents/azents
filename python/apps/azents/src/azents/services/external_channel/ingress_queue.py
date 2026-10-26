@@ -233,7 +233,7 @@ class ExternalChannelIngressDrainService:
         """Attempt committed Binding controls once without gating queue readiness."""
         for plan in plans:
             try:
-                await self.provider_control.attempt(plan)
+                await self.provider_control.attempt(plan, preparation_boundary=None)
             except Exception:
                 logger.exception(
                     "External Channel ingress provider control attempt failed"

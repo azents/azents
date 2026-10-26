@@ -14,6 +14,9 @@ from azents.core.enums import (
     ExternalChannelActionMode,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_ingestion import (
+    ExternalChannelSetupPreparationBoundary,
+)
 from azents.core.external_channel_navigation import (
     ChannelNavigationContext,
     ChannelNavigationLink,
@@ -261,12 +264,14 @@ class ExternalChannelActionOperations:
         self,
         *,
         plan: ProviderEffectPlan,
+        preparation_boundary: ExternalChannelSetupPreparationBoundary | None,
     ) -> ProviderEffectPlan | None:
         """Complete direct-control admission before provider execution."""
         async with self.session_manager() as session:
             result = await self.repository.revalidate_direct_control(
                 session,
                 plan=plan,
+                preparation_boundary=preparation_boundary,
             )
             await session.write_session.commit()
         return result

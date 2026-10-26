@@ -13,6 +13,7 @@ from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
 )
+from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
 from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionRequest,
@@ -48,6 +49,7 @@ class ExternalChannelSetupSourceProjection(BaseModel):
     trigger_provider_message_id: str = Field(min_length=1)
     trigger_position: str = Field(min_length=1)
     range_start_position: str | None
+    expected_file_count: int | None = Field(ge=0, le=MAX_EXTERNAL_CHANNEL_FILES)
 
     def __repr__(self) -> str:
         """Exclude provider coordinates from diagnostic representations."""
@@ -66,7 +68,10 @@ def setup_source_from_projection(
     value = projection.get("setup_source")
     if not isinstance(value, dict):
         raise ValueError("External Channel setup source is unavailable.")
-    return ExternalChannelSetupSourceProjection.model_validate(value)
+    # Older claims have no callback-observed attachment count evidence.
+    return ExternalChannelSetupSourceProjection.model_validate(
+        {"expected_file_count": None, **value}
+    )
 
 
 def projection_with_setup_source(
@@ -115,7 +120,7 @@ def build_setup_continuation_request(
             trigger_position=source.trigger_position,
             provider_user_id=principal.provider_user_id,
             invocation=True,
-            expected_file_count=None,
+            expected_file_count=source.expected_file_count,
         ),
         scope=ExternalChannelConversationScope(
             connection_id=configuration.id,

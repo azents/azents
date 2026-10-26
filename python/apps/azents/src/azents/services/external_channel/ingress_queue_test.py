@@ -966,8 +966,8 @@ async def test_preparation_claims_owners_before_plain_trigger_capture() -> None:
         initial_title_eligible=True,
     )
     assert provider_control.attempt.await_args_list == [
-        ((presence_plan,), {}),
-        ((progress_plan,), {}),
+        ((presence_plan,), {"preparation_boundary": None}),
+        ((progress_plan,), {"preparation_boundary": None}),
     ]
 
 
@@ -1379,7 +1379,7 @@ async def test_explicit_followup_controls_precede_wake(
         work_cycle_id="work-followup",
     )
     assert provider_control.attempt.await_args_list == (
-        [((progress_plan,), {})] if projects_tracker else []
+        [((progress_plan,), {"preparation_boundary": None})] if projects_tracker else []
     )
     wake_dispatcher.dispatch.assert_awaited_once()
 
@@ -1830,7 +1830,9 @@ async def test_tracker_control_failure_does_not_gate_wake(
 
     assert stale is False
     transaction.commit_mock.assert_awaited_once()
-    assert provider_control.attempt.await_args_list == [((progress_plan,), {})]
+    assert provider_control.attempt.await_args_list == [
+        ((progress_plan,), {"preparation_boundary": None})
+    ]
     wake_dispatcher.dispatch.assert_awaited_once()
 
 

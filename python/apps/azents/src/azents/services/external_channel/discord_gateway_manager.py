@@ -608,7 +608,9 @@ class DiscordGatewayManagerService:
     ) -> None:
         """Run direct controls after canonical Gateway admission."""
         for plan in outcome.control_plans:
-            task = asyncio.create_task(self.provider_control.attempt(plan))
+            task = asyncio.create_task(
+                self.provider_control.attempt(plan, preparation_boundary=None)
+            )
             self.control_tasks.add(task)
             task.add_done_callback(self.control_tasks.discard)
             task.add_done_callback(_log_provider_control_task_failure)

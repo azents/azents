@@ -790,7 +790,7 @@ class ExternalChannelInteractionProcessor:
                 settings = mutation.settings
                 cleanup_plans = mutation.cleanup_plans
             for plan in cleanup_plans:
-                await self.provider_control.attempt(plan)
+                await self.provider_control.attempt(plan, preparation_boundary=None)
             view = _settings_confirmation_view(settings)
         except ExternalChannelParticipationError as error:
             view = _settings_notice_view(str(error))
@@ -938,7 +938,7 @@ class ExternalChannelInteractionProcessor:
     ) -> None:
         """Attempt one post-commit access control through the provider adapter."""
         del connection_id
-        await self.provider_control.attempt(plan)
+        await self.provider_control.attempt(plan, preparation_boundary=None)
 
     async def _load_scope(
         self, handoff: ExternalChannelInteractionHandoff, *, now: datetime.datetime

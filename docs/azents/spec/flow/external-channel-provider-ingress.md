@@ -7,6 +7,7 @@ owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
   - python/apps/azents/src/azents/repos/external_channel/setup_preparation.py
+  - python/apps/azents/src/azents/repos/external_channel/setup_preparation_fence.py
   - python/apps/azents/src/azents/services/external_channel/setup_preparation.py
   - python/apps/azents/src/azents/services/external_channel/setup_preparation_job.py
   - python/apps/azents/src/azents/repos/session_working_folder_setup.py
@@ -411,9 +412,17 @@ resubmits due claims and reclaims expired execution ownership. Ordinary Gateway
 replacement does not revoke committed preparation; current configuration, claim/source
 revision, selection, active block and connected-conversation state remain authoritative.
 No Binding, Session or AgentRun is created by preparation. Existing controls and
-selected-setup replay retain their authority.
+selected-setup replay retain their authority. The content-free source projection
+preserves the bounded callback-observed attachment count through preparation retry
+and selected-setup replay, so incomplete provider history remains retryable.
 
-Control dispatch is recorded before provider mutation. Expired dispatch ownership or
+Control dispatch is recorded before provider mutation. Immediately before delivery,
+direct-control revalidation checks the exact claim/source/configuration generations,
+principal and position identity, dispatch status, owner and lease expiry, current
+selection, active participation setting and connected Binding. A changed fence
+rejects the plan without provider I/O. Permanent ingestion rejection emits its
+sanitized terminal reason before clearing preparation ownership.
+Expired dispatch ownership or
 an observed unknown result terminates preparation with a sanitized uncertain outcome,
 not a blind create retry. Definite failures can retry within the same bounded lifecycle.
 No second inbox or durable generic job table owns setup state; existing setup-claim
@@ -758,7 +767,8 @@ persistent provider connections.
 ## Changelog
 
 - **2026-10-26** (spec_version 74) — Added claim-owned recoverable first-Discord-mention
-  preparation and bounded Gateway task waiting from callback receipt.
+  preparation, final dispatch fencing, callback attachment-count preservation,
+  terminal diagnostics and bounded Gateway task waiting from callback receipt.
 
 - **2026-10-26** (spec_version 73) — Detached ordered Discord message processing from
   SDK callbacks with a bounded process-local lifetime and independent processing budget.

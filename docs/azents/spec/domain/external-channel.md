@@ -291,6 +291,10 @@ provider effects and durable-ingestion orchestration run after completion.
   connection and provider parent channel. A later eligible explicit mention replaces
   the pending claim's source and increments its revision. The first valid location
   selection freezes the latest revision and releases exactly one canonical continuation.
+  The setup source retains the bounded callback-observed attachment count through
+  recovery and selected continuation. Preparation control delivery revalidates exact
+  claim/source/configuration and execution ownership immediately before provider I/O;
+  permanent preparation rejection emits a sanitized reason before ownership is cleared.
 - Critical durable execution output uses the exact current Session owner mutation
   fence. Private Channel Work/progress payloads use their existing cycle/revision
   CAS rather than a generic execution transaction manager.
@@ -730,7 +734,8 @@ ordinary External Channel Work or add a destination selector.
 ## Changelog
 
 - **2026-10-26** (spec_version 88) — Added claim-owned first-Discord-mention
-  preparation metadata, bounded recovery and atomic control-dispatch reservation.
+  preparation metadata, bounded recovery, attachment-count preservation, terminal
+  diagnostics and atomic control-dispatch reservation with final authority checks.
 
 - 2026-10-19: Document Session Primary authority and independent Routine
   notification, including no-fallback/no-retry delivery.

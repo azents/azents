@@ -125,6 +125,14 @@ class ExternalChannelSetupPreparationService:
         dispatch_started = False
         try:
             outcome = await self.ingestion_service.ingest(request)
+            if outcome.kind is ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION:
+                logger.warning(
+                    "Setup preparation rejected permanently",
+                    extra={
+                        "external_channel_setup_claim_id": claim_id,
+                        "failure_code": outcome.reason.value,
+                    },
+                )
             if outcome.kind is ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE:
                 await self.operations.transition(
                     boundary=boundary,
@@ -143,7 +151,9 @@ class ExternalChannelSetupPreparationService:
                     return
                 dispatch_started = True
                 for plan in outcome.control_plans:
-                    delivered = await self.provider_control.attempt(plan)
+                    delivered = await self.provider_control.attempt(
+                        plan, preparation_boundary=boundary
+                    )
                     if delivered is not None and delivered.status == "unknown":
                         logger.warning(
                             "Setup control dispatch is uncertain",

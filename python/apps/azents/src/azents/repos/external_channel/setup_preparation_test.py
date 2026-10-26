@@ -10,34 +10,50 @@ import sqlalchemy as sa
 
 from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelParticipationSettingStatus,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
     ExternalChannelSetupClaimStatus,
     ExternalChannelSetupPreparationStatus,
     ExternalChannelWorkProjectionStatus,
 )
 from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationScope,
+    ExternalChannelHistoryTemporaryFailure,
     ExternalChannelOperationDeadline,
 )
 from azents.core.external_channel_ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
     ExternalChannelSetupPreparationBoundary,
     ExternalChannelTriggerLocator,
 )
+from azents.core.external_channel_participation_state import (
+    build_setup_continuation_request,
+    setup_source_from_projection,
+)
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
     RDBExternalChannelConnection,
+    RDBExternalChannelParticipationSetting,
     RDBExternalChannelSetupClaim,
 )
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
-from azents.repos.external_channel.data import ExternalChannelAccessRequestCreate
+from azents.repos.external_channel.data import (
+    ExternalChannelAccessRequestCreate,
+    ExternalChannelParticipationSetting,
+)
 from azents.repos.external_channel.mailbox_ingestion import (
     _commit_prepared_setup_control,
 )
@@ -49,7 +65,13 @@ from azents.repos.external_channel.setup_preparation import (
     ExternalChannelSetupPreparationRepository,
     setup_preparation_current,
 )
+from azents.repos.external_channel.setup_preparation_fence import (
+    setup_preparation_dispatch_current,
+)
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.services.external_channel.ingestion_history import (
+    _validate_trigger_file_count,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -538,3 +560,191 @@ async def test_invalidated_selection_cannot_dispatch_prepared_control(
     assert not await c.operations.transition(
         boundary=boundary, dispatch=True, retry=False, now=_at(3)
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change",
+    [
+        "source",
+        "selection",
+        "invalidation",
+        "configuration",
+        "disconnect",
+        "owner",
+        "lease",
+        "status",
+        "expiry",
+        "setting",
+    ],
+)
+async def test_final_dispatch_rejects_changes_after_dispatch_commit(
+    preparation_context: _Context,
+    change: str,
+) -> None:
+    c = preparation_context
+    claim_id = await c.operations.admit(request=c.request, now=_at(2))
+    assert claim_id is not None
+    attempt = await c.operations.claim(
+        claim_id=claim_id,
+        owner="owner",
+        now=_at(2),
+        deadline=ExternalChannelOperationDeadline(_at(4)),
+    )
+    assert attempt.request is not None
+    boundary = attempt.request.replay_boundary
+    assert isinstance(boundary, ExternalChannelSetupPreparationBoundary)
+    plan = await _reserve_access_control(c, attempt.request)
+    async with c.sessions() as session:
+        assert await setup_preparation_dispatch_current(
+            session, boundary=boundary, now=_at(3)
+        )
+        with patch("azents.repos.external_channel.work.datetime") as clock:
+            clock.datetime.now.return_value = _at(3)
+            assert (
+                await ExternalChannelWorkRepository().revalidate_direct_control(
+                    session, plan=plan, preparation_boundary=boundary
+                )
+                is not None
+            )
+        row = await session.write_session.get(RDBExternalChannelSetupClaim, claim_id)
+        connection = await session.write_session.get(
+            RDBExternalChannelConnection, boundary.connection_id
+        )
+        assert row is not None and connection is not None
+        if change == "source":
+            row.source_revision += 1
+        elif change == "selection":
+            row.claim_generation += 1
+        elif change == "invalidation":
+            row.status = ExternalChannelSetupClaimStatus.INVALIDATED
+        elif change == "configuration":
+            connection.configuration_generation += 1
+        elif change == "disconnect":
+            connection.disconnected_at = _at(3)
+        elif change == "owner":
+            row.preparation_lease_owner = "replacement"
+        elif change == "lease":
+            row.preparation_lease_until = _at(3)
+        elif change == "status":
+            row.preparation_status = ExternalChannelSetupPreparationStatus.RUNNING
+        elif change == "expiry":
+            row.expires_at = _at(3)
+        elif change == "setting":
+            assert row.route_id is not None
+            session.write_session.add(
+                RDBExternalChannelParticipationSetting(
+                    connection_id=row.connection_id,
+                    provider_parent_channel_id=row.provider_parent_channel_id,
+                    route_id=row.route_id,
+                    location=ExternalChannelConversationLocation.THREADS,
+                    response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+                    settings_generation=1,
+                    status=ExternalChannelParticipationSettingStatus.ACTIVE,
+                    configured_by_principal_id=row.principal_id,
+                )
+            )
+        else:
+            raise AssertionError(change)
+        await session.write_session.commit()
+    async with c.sessions() as session:
+        assert not await setup_preparation_dispatch_current(
+            session, boundary=boundary, now=_at(3)
+        )
+        with patch("azents.repos.external_channel.work.datetime") as clock:
+            clock.datetime.now.return_value = _at(3)
+            assert (
+                await ExternalChannelWorkRepository().revalidate_direct_control(
+                    session, plan=plan, preparation_boundary=boundary
+                )
+                is None
+            )
+
+
+@pytest.mark.asyncio
+async def test_setup_recovery_preserves_callback_attachment_count(
+    preparation_context: _Context,
+) -> None:
+    c = preparation_context
+    request = dataclasses.replace(
+        c.request, locator=dataclasses.replace(c.request.locator, expected_file_count=2)
+    )
+    claim_id = await c.operations.admit(request=request, now=_at(2))
+    assert claim_id is not None
+    attempt = await c.operations.claim(
+        claim_id=claim_id,
+        owner="owner",
+        now=_at(2),
+        deadline=ExternalChannelOperationDeadline(_at(4)),
+    )
+    assert attempt.request is not None
+    assert attempt.request.locator.expected_file_count == 2
+    incomplete_trigger = ExternalChannelCanonicalHistoryMessage(
+        provider_message_key=request.locator.trigger_provider_message_key,
+        provider_position=request.locator.trigger_position,
+        revision_key="revision",
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        provider_user_id="400",
+        sender_display_name=None,
+        normalized_body=None,
+        attachment_metadata=None,
+        reference_mappings=None,
+        normalized_size=0,
+        provider_created_at=None,
+        provider_updated_at=None,
+        original_url=None,
+    )
+    with pytest.raises(ExternalChannelHistoryTemporaryFailure):
+        _validate_trigger_file_count(
+            locator=attempt.request.locator, trigger=incomplete_trigger
+        )
+    boundary = attempt.request.replay_boundary
+    assert isinstance(boundary, ExternalChannelSetupPreparationBoundary)
+    assert await c.operations.transition(
+        boundary=boundary, dispatch=False, retry=True, now=_at(2)
+    )
+    retried = await c.operations.claim(
+        claim_id=claim_id,
+        owner="retry",
+        now=_at(3),
+        deadline=ExternalChannelOperationDeadline(_at(5)),
+    )
+    assert retried.request is not None
+    assert retried.request.locator.expected_file_count == 2
+    async with c.sessions() as session:
+        repository = c.operations.repository
+        claim = await repository.get_setup_claim(session, claim_id=claim_id)
+        configuration = await repository.get_connection_configuration(
+            session, connection_id=request.locator.connection_id
+        )
+        assert claim is not None and configuration is not None
+        resource = await repository.get_resource(
+            session, resource_id=claim.source_resource_id
+        )
+        principal = await repository.get_principal(
+            session, principal_id=claim.principal_id
+        )
+        assert resource is not None and principal is not None
+        selected = claim.model_copy(
+            update={
+                "selected_resource_id": resource.id,
+                "selected_source_revision": claim.source_revision,
+                "selected_setting_id": "setting",
+            }
+        )
+        continuation = build_setup_continuation_request(
+            configuration=configuration,
+            claim=selected,
+            setting=ExternalChannelParticipationSetting.model_construct(
+                id="setting",
+                settings_generation=1,
+                location=ExternalChannelConversationLocation.THREADS,
+            ),
+            source_resource=resource,
+            principal=principal,
+            source=setup_source_from_projection(claim.source_projection),
+            deadline=request.deadline,
+        )
+        assert continuation.locator.expected_file_count == 2
