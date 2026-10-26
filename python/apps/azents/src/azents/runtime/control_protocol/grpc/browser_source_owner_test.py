@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import grpc
 from azents_runtime_control.browser_source_contract import (
+    BrowserScopeState,
     BrowserSourceCredentialRequest,
 )
 from azents_runtime_control.grpc_browser_source_client import (
@@ -48,9 +49,9 @@ async def test_api_source_actual_owner_current_fence_and_fresh_connection_proof(
     runner = await plane.register_runner(accepted)
     current = True
 
-    async def validate(authority: BrowserStreamAuthority) -> bool:
+    async def validate(authority: BrowserStreamAuthority) -> BrowserScopeState:
         del authority
-        return current
+        return BrowserScopeState.CURRENT if current else BrowserScopeState.REVOKED
 
     plane.browser_scope_validator = validate
     server = grpc.aio.server()

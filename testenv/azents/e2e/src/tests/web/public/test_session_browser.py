@@ -14,6 +14,7 @@ import azentspublicclient
 import pytest
 import requests
 from azents_runtime_control.browser_viewer_contract import ViewerSource, ViewerTarget
+from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
 from azentspublicclient.models.browser_page_response import BrowserPageResponse
 from azentspublicclient.models.browser_projection_response import (
     BrowserProjectionResponse,
@@ -32,6 +33,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.core.container import DockerContainer
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 from websockets.typing import Origin, Subprotocol
@@ -89,7 +91,11 @@ value='reader@example.test'>
 onfocus="document.title='Browser manual focus verified'"
 oninput="document.title=this.value==='Synthetic manual input'?
 'Browser manual keyboard verified':'Browser manual input pending'">
+<button style="top:500px" onclick="document.title='Control memory '+
+window.controlCanary+':'+(++window.controlClicks)">Reconnect canary</button>
 <script>
+window.controlCanary = crypto.randomUUID();
+window.controlClicks = 0;
 if (navigator.webdriver || /HeadlessChrome/.test(navigator.userAgent) ||
     /HeadlessChrome/.test(navigator.appVersion) ||
     (navigator.userAgentData?.brands || []).some(b => /HeadlessChrome/.test(b.brand))) {
@@ -624,6 +630,7 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_runtime_provider_docker_container: object,
+    azents_runtime_control_container: DockerContainer,
     mock_openai_url: str,
     request: pytest.FixtureRequest,
     azents_main_web_url: str,
@@ -882,6 +889,76 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         target=target,
         source=socket.frame.source,
     )
+    # Each xdist worker owns its container network and runs its tests serially.
+    # Replace the former socket-only reconnect with a real Control-only loss;
+    # never restart the Runner or the native browser to manufacture recovery.
+    canary = BrowserSocket.open(
+        public_url=azents_public_server_url,
+        token=workspace.token,
+        resource_path=resource_path,
+        target=target,
+        origin=_ORIGIN,
+    )
+    try:
+        canary.click(x=100, y=520)
+    finally:
+        canary.close()
+
+    def canary_title() -> str | None:
+        response = requests.get(
+            f"{azents_public_server_url}{resource_path}",
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return None
+        current = BrowserProjectionResponse.model_validate(response.json())
+        for task in current.tasks:
+            for page in task.pages:
+                if page.id == target.page_id and page.title.startswith(
+                    "Control memory "
+                ):
+                    return page.title
+        return None
+
+    first_canary = wait_until(
+        canary_title, timeout=10, interval=0.2, message="Native canary was not set"
+    )
+    assert first_canary is not None
+    assert first_canary.endswith(":1")
+    runtime_url = (
+        f"{azents_public_server_url}/agent-runtime/v1/workspaces/{workspace.handle}"
+        f"/agents/{workspace.agent_id}/runtime"
+    )
+
+    def runtime_epoch() -> tuple[str, int, int] | None:
+        response = requests.get(runtime_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None
+        current = AgentRuntimeResponse.model_validate(response.json()).runtime
+        if current is None or current.runner_generation is None:
+            return None
+        return current.id, current.desired_generation, int(current.runner_generation)
+
+    before_epoch = runtime_epoch()
+    assert before_epoch is not None
+    azents_runtime_control_container.get_wrapped_container().restart(timeout=10)
+
+    def rejoined() -> bool:
+        current = runtime_epoch()
+        return (
+            current is not None
+            and current[:2] == before_epoch[:2]
+            and current[2] > before_epoch[2]
+            and canary_title() == first_canary
+        )
+
+    wait_until(
+        rejoined,
+        timeout=90,
+        interval=0.2,
+        message="Control reconnect did not preserve the original native tab",
+    )
     reconnected = BrowserSocket.open(
         public_url=azents_public_server_url,
         token=workspace.token,
@@ -894,6 +971,13 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         assert reconnected.status.attachment_id != first_attachment
         assert reconnected.frame is not None
         assert reconnected.frame.target == target
+        reconnected.click(x=100, y=520)
+        wait_until(
+            lambda: canary_title() == first_canary[:-1] + "2",
+            timeout=10,
+            interval=0.2,
+            message="Fresh Control authority did not preserve native page memory",
+        )
         logout = requests.post(
             f"{azents_public_server_url}/auth/v1/logout",
             headers=headers,

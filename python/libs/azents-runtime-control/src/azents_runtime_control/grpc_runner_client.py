@@ -2,7 +2,7 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -174,6 +174,12 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._receiver_task: asyncio.Task[None] | None = None
         self._connection_id: str | None = None
         self._heartbeat_sequence = 0
+        self.connected = False
+        self.disconnect_handler: Callable[[], None] | None = None
+
+    def set_disconnect_handler(self, handler: Callable[[], None]) -> None:
+        """Fence connection-owned effects synchronously when the stream ends."""
+        self.disconnect_handler = handler
 
     @classmethod
     def from_endpoint(
@@ -445,6 +451,10 @@ class GrpcRunnerControlClient(RunnerControlClient):
         except Exception as exc:
             self._fail_pending(exc)
             raise
+        finally:
+            self.connected = False
+            if self.disconnect_handler is not None:
+                self.disconnect_handler()
 
     async def _handle_control_message(
         self,
@@ -453,6 +463,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         payload = message.WhichOneof("payload")
         if payload == "register_accepted":
             accepted = _accepted(message.register_accepted)
+            self.connected = True
             if self._accepted is not None and not self._accepted.done():
                 self._accepted.set_result(accepted)
             return

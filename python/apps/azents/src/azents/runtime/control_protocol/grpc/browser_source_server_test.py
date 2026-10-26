@@ -7,6 +7,7 @@ from typing import NamedTuple
 
 import grpc
 import pytest
+from azents_runtime_control.browser_source_contract import BrowserScopeState
 from azents_runtime_control.grpc_browser_source_client import (
     BrowserSourceProtocolError,
     BrowserSourceScopeRevoked,
@@ -84,9 +85,9 @@ async def test_real_browser_source_rpc_tls_proof_frame_and_scoped_cleanup(
     plane, _ = _local_data_plane()
     admitted: list[BrowserStreamAuthority] = []
 
-    async def current(authority: BrowserStreamAuthority) -> bool:
+    async def current(authority: BrowserStreamAuthority) -> BrowserScopeState:
         admitted.append(authority)
-        return True
+        return BrowserScopeState.CURRENT
 
     async def handle(
         source: _SourceSession, envelope: pb.RuntimeStreamSessionEnvelope
@@ -171,7 +172,7 @@ async def test_real_browser_source_rpc_tls_proof_frame_and_scoped_cleanup(
     assert not plane.sources
 
 
-@pytest.mark.parametrize("phase", ["scope", "open"])
+@pytest.mark.parametrize("phase", ["scope", "scope-transient", "open"])
 async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
     monkeypatch: pytest.MonkeyPatch, phase: str
 ) -> None:
@@ -186,11 +187,11 @@ async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
         finally:
             cancelled.set()
 
-    async def current(authority: BrowserStreamAuthority) -> bool:
+    async def current(authority: BrowserStreamAuthority) -> BrowserScopeState:
         del authority
-        if phase == "scope":
+        if phase.startswith("scope"):
             await stall()
-        return True
+        return BrowserScopeState.CURRENT
 
     async def handle(
         source: _SourceSession, envelope: pb.RuntimeStreamSessionEnvelope
@@ -223,11 +224,17 @@ async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
     )
     assert isinstance(authority, BrowserStreamAuthority)
     authority = dataclasses.replace(
-        authority, open_deadline_at=datetime.now(UTC) + timedelta(seconds=0.5)
+        authority,
+        open_deadline_at=datetime.now(UTC)
+        + timedelta(seconds=5 if phase == "scope-transient" else 0.5),
     )
     try:
-        async with asyncio.timeout(2):
-            with pytest.raises(BrowserSourceScopeRevoked):
+        async with asyncio.timeout(4):
+            with pytest.raises(
+                BrowserSourceUnavailable
+                if phase == "scope-transient"
+                else BrowserSourceScopeRevoked
+            ):
                 await client.connect(authority=authority)
         assert entered.is_set() and cancelled.is_set()
         assert not plane.sources
@@ -280,7 +287,7 @@ async def test_disabled_plane_rejects_without_source_admission() -> None:
         KEY, clock=lambda: datetime.now(UTC)
     )
 
-    async def never(authority: BrowserStreamAuthority) -> bool:
+    async def never(authority: BrowserStreamAuthority) -> BrowserScopeState:
         raise AssertionError("Disabled common transport must not validate or allocate")
 
     add_runtime_browser_source_servicer(
@@ -318,9 +325,9 @@ async def test_current_scope_rejection_precedes_capacity(change: str) -> None:
         KEY, clock=lambda: datetime.now(UTC)
     )
 
-    async def denied(authority: BrowserStreamAuthority) -> bool:
+    async def denied(authority: BrowserStreamAuthority) -> BrowserScopeState:
         assert isinstance(authority, BrowserStreamAuthority)
-        return False
+        return BrowserScopeState.REVOKED
 
     add_runtime_browser_source_servicer(
         server,

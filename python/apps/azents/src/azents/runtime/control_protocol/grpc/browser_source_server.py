@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import grpc
 from azents_runtime_control.browser_source_contract import (
+    BrowserScopeState,
     BrowserSourceCredentialRequest,
 )
 from azents_runtime_control.proto import runtime_stream_session_pb2 as pb
@@ -26,7 +27,7 @@ from azents.runtime.control_protocol.grpc.runtime_stream_session_server import (
     _create_control_task,
 )
 
-ScopeValidator = Callable[[BrowserStreamAuthority], Awaitable[bool]]
+ScopeValidator = Callable[[BrowserStreamAuthority], Awaitable[BrowserScopeState]]
 
 
 class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
@@ -64,6 +65,7 @@ class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
             return
         source = None
         reader = None
+        authority: BrowserStreamAuthority | None = None
         try:
             setup_deadline = asyncio.get_running_loop().time() + 10
             nonce = secrets.token_hex(32)
@@ -110,9 +112,30 @@ class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
                             ),
                         )
                     )
-                    if not await self.validate_scope(authority):
+                    try:
+                        async with asyncio.timeout(2):
+                            scope = await self.validate_scope(authority)
+                    except asyncio.CancelledError:
+                        raise
+                    except TimeoutError:
+                        scope = (
+                            BrowserScopeState.EXPIRED
+                            if self.clock() >= authority.open_deadline_at
+                            else BrowserScopeState.UNAVAILABLE
+                        )
+                    if scope is not BrowserScopeState.CURRENT:
                         await context.abort(
-                            grpc.StatusCode.PERMISSION_DENIED,
+                            {
+                                BrowserScopeState.UNAVAILABLE: (
+                                    grpc.StatusCode.UNAVAILABLE
+                                ),
+                                BrowserScopeState.REVOKED: (
+                                    grpc.StatusCode.PERMISSION_DENIED
+                                ),
+                                BrowserScopeState.EXPIRED: (
+                                    grpc.StatusCode.DEADLINE_EXCEEDED
+                                ),
+                            }[scope],
                             "Browser scope is no longer current",
                         )
                         return
@@ -125,7 +148,17 @@ class RuntimeBrowserSourceGrpcServicer(rpc.RuntimeBrowserSourceSessionServicer):
                     )
                     request.validate(self.clock())
                     await plane.handle(source, request.open_envelope)
-            except ValueError, TimeoutError, StopAsyncIteration:
+            except TimeoutError:
+                await context.abort(
+                    grpc.StatusCode.UNAUTHENTICATED
+                    if authority is None
+                    else grpc.StatusCode.DEADLINE_EXCEEDED
+                    if self.clock() >= authority.open_deadline_at
+                    else grpc.StatusCode.UNAVAILABLE,
+                    "Browser source admission timed out",
+                )
+                return
+            except ValueError, StopAsyncIteration:
                 await context.abort(
                     grpc.StatusCode.UNAUTHENTICATED,
                     "Browser source admission is invalid or expired",

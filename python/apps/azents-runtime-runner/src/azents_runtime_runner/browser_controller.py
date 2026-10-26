@@ -16,6 +16,7 @@ from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_input import BrowserInputKey
+from azents_runtime_runner.browser_sdk import BROWSER_SDK_ERRORS
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     ViewerReceive,
@@ -50,6 +51,17 @@ class RunnerBrowserController:
         self.retirement_failed = False
         self.closed = False
 
+    def configuration_status(self) -> BrowserConfigurationStatus:
+        """Project cleanup uncertainty as failed evidence for the current intent."""
+        if self.manager is not None and self.manager.connection_cleanup_failed:
+            self.status = BrowserConfigurationStatus(
+                self.status.intent_id,
+                self.status.implementation,
+                "failed",
+                "browser_cleanup_failed",
+            )
+        return self.status
+
     def bind_runtime(
         self, runtime_id: str, generation: Callable[[], int | None]
     ) -> None:
@@ -74,6 +86,7 @@ class RunnerBrowserController:
     ) -> BrowserConfigurationStatus:
         if self.closed:
             raise BrowserFailure("browser_unavailable", "Browser controller is closed")
+        self.configuration_status()
         if request.intent_id == self.status.intent_id:
             if request.implementation != self.status.implementation:
                 raise BrowserFailure(
@@ -93,7 +106,8 @@ class RunnerBrowserController:
         if self.manager is not None:
             self.manager.closed = True
         for active in tuple(self.active):
-            active.cancel()
+            if not active.cancelling():
+                active.cancel()
         transition = asyncio.create_task(
             self._apply(request), name="browser-transition"
         )
@@ -166,7 +180,8 @@ class RunnerBrowserController:
     async def _retire(self) -> None:
         active = tuple(self.active)
         for task in active:
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
         await asyncio.gather(*active, return_exceptions=True)
         try:
             if self.viewer is not None:
@@ -205,6 +220,10 @@ class RunnerBrowserController:
             raise BrowserFailure(
                 "browser_unavailable", "Browser configuration is not ready"
             )
+        if self.manager.connection_cleanup_failed:
+            raise BrowserFailure(
+                "browser_cleanup_failed", "Browser connection cleanup is unconfirmed"
+            )
         return self.manager
 
     async def execute(self, intent_id: str, command: BrowserCommand) -> BrowserResult:
@@ -239,3 +258,35 @@ class RunnerBrowserController:
         await asyncio.gather(*self.transitions)
         self.transitions.clear()
         await self._retire()
+
+    def cancel_connection_operations(self) -> None:
+        """Fence admitted effects before asynchronous transport cleanup."""
+        for task in tuple(self.active):
+            if not task.cancelling():
+                task.cancel()
+        if self.manager is not None:
+            self.manager.cancel_connection_operations()
+
+    async def suspend_connection(self) -> None:
+        """Drain former attachment/input authority without retiring native resources."""
+        self.cancel_connection_operations()
+        await asyncio.gather(*tuple(self.active), return_exceptions=True)
+        # A shielded engine transition owns native retirement, even after its
+        # response connection is lost. Never cancel or compete with that transition.
+        async with self.transition_lock:
+            try:
+                if self.viewer is not None:
+                    await self.viewer.close()
+                if self.manager is not None:
+                    await self.manager.suspend_connection()
+            except asyncio.CancelledError:
+                raise
+            except (BrowserFailure, *BROWSER_SDK_ERRORS, TimeoutError):
+                if self.manager is not None:
+                    self.manager.connection_cleanup_failed = True
+                self.status = BrowserConfigurationStatus(
+                    self.status.intent_id,
+                    self.status.implementation,
+                    "failed",
+                    "browser_cleanup_failed",
+                )

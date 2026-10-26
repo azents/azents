@@ -380,13 +380,16 @@ def make_browser_tools(
             return result
         except asyncio.CancelledError:
             raise
-        except (
-            RuntimeRunnerOperationUnavailable,
-            RuntimeRunnerOperationGenerationError,
-        ) as exc:
+        except RuntimeRunnerOperationUnavailable as exc:
             raise FunctionToolError(
-                "Browser Runtime is unavailable or replaced. "
+                "Browser connection is unavailable. "
                 "Observe current state before retrying.",
+                metadata={"kind": "browser_runtime_unavailable"},
+            ) from exc
+        except RuntimeRunnerOperationGenerationError as exc:
+            raise FunctionToolError(
+                "Browser connection authority changed. Observe current state "
+                "with fresh authority; do not replay an uncertain action.",
                 metadata={"kind": "browser_runtime_unavailable"},
             ) from exc
         except RuntimeRunnerOperationFailedError as exc:

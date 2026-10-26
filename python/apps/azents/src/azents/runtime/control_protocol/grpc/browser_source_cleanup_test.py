@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
+from azents_runtime_control.browser_source_contract import BrowserScopeState
 from azents_runtime_control.proto import runtime_stream_session_pb2 as pb
 from azents_runtime_control.runtime_stream_authority_codec import (
     decode_stream_authority,
@@ -38,12 +39,12 @@ class _AuthorityGate:
         self.entered = asyncio.Event()
         self.resume = asyncio.Event()
 
-    async def __call__(self, authority: BrowserStreamAuthority) -> bool:
+    async def __call__(self, authority: BrowserStreamAuthority) -> BrowserScopeState:
         del authority
         if self.paused:
             self.entered.set()
             await self.resume.wait()
-        return True
+        return BrowserScopeState.CURRENT
 
 
 @dataclass(frozen=True)
@@ -271,13 +272,13 @@ async def test_stalled_browser_guard_does_not_block_independent_runner_responses
                 assert response.WhichOneof("payload") == "window_update"
             assert not f.runner.queue.closed
             # The validator is still stalled: its bounded monitoring deadline
-            # must revoke instead of waiting for the test to release it.
+            # must end the unavailable attachment without declaring access revoked.
             for source in (first, second):
                 async with asyncio.timeout(3):
                     response = await anext(source.queue.__aiter__())
                 assert response.WhichOneof("payload") == "reset"
                 assert response.reset.reason == (
-                    pb.RUNTIME_STREAM_SESSION_CLOSE_REASON_AUTHORITY_REVOKED
+                    pb.RUNTIME_STREAM_SESSION_CLOSE_REASON_TRANSPORT_UNAVAILABLE
                 )
         finally:
             finish.set()

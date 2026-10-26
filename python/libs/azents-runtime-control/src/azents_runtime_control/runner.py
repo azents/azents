@@ -536,6 +536,7 @@ class RunnerRunLoop:
                     continue
                 await self._wait_for_scheduler_wake(block_ms=block_ms)
         finally:
+            self._accepted = None
             await self._cancel_operations()
 
     async def _admit_operation(self, operation: RunnerOperationEnvelope) -> None:
@@ -981,7 +982,8 @@ class RunnerRunLoop:
     async def _cancel_operations(self) -> None:
         tasks = tuple(self._active_operation_tasks) + tuple(self._active_control_tasks)
         for task in tasks:
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._active_operation_tasks.clear()

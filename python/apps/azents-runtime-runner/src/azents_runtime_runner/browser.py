@@ -214,13 +214,14 @@ class RunnerBrowserManager:
         self.start_lock = asyncio.Lock()
         self.session_locks: dict[str, asyncio.Lock] = {}
         self.closed = False
+        self.connection_cleanup_failed = False
         self.runtime_id: str | None = None
         self.generation: Callable[[], int | None] | None = None
 
     def bind_runtime(
         self, runtime_id: str, generation: Callable[[], int | None]
     ) -> None:
-        """Bind one manager to its current Runner connection generation."""
+        """Bind the process-owned manager to current connection authority."""
         if self.runtime_id is not None:
             raise ValueError("Browser manager Runtime is already bound")
         self.runtime_id = runtime_id
@@ -241,6 +242,10 @@ class RunnerBrowserManager:
     def viewer_authority(self, authority: BrowserStreamAuthority) -> BrowserAuthority:
         """Resolve only an existing Session binding; attachment never creates state."""
         self.validate_operation(authority.runtime_id, authority.runner_generation)
+        if self.connection_cleanup_failed:
+            raise BrowserFailure(
+                "browser_cleanup_failed", "Browser cleanup is unconfirmed"
+            )
         task = self.tasks.get(authority.task_id)
         if self.closed or task is None or task.session_id != authority.session_id:
             raise BrowserFailure(
@@ -275,6 +280,10 @@ class RunnerBrowserManager:
     def _authority(self, authority: BrowserAuthority) -> Path:
         if self.closed:
             raise BrowserFailure("browser_unavailable", "Browser manager is closed")
+        if self.connection_cleanup_failed:
+            raise BrowserFailure(
+                "browser_cleanup_failed", "Browser cleanup is unconfirmed"
+            )
         directory = Path(authority.working_directory)
         if not directory.is_absolute():
             raise BrowserFailure(
@@ -1212,6 +1221,49 @@ class RunnerBrowserManager:
             None,
             None,
         )
+
+    def cancel_connection_operations(self) -> None:
+        """Cancel detached native dispatch waits without answering dialogs."""
+        for task in self.tasks.values():
+            for page in task.pages.values():
+                if page.pending is not None and not page.pending.cancelling():
+                    page.pending.cancel()
+
+    async def suspend_connection(self) -> None:
+        """Retire transient authority while preserving contexts and native pages."""
+        self.cancel_connection_operations()
+        pending = [
+            page.pending
+            for task in self.tasks.values()
+            for page in task.pages.values()
+            if page.pending is not None
+        ]
+        await asyncio.gather(*pending, return_exceptions=True)
+        handles: list[ElementHandle] = []
+        for task in self.tasks.values():
+            for page in task.pages.values():
+                handles.extend(ref.handle for ref in page.refs.values())
+                page.refs.clear()
+                page.pending = None
+                page.popup_interest = None
+                page.popup_selection = None
+                if page.dialog is not None:
+                    page.dialog_id = uuid.uuid4().hex
+        try:
+            async with asyncio.timeout(5):
+                for handle in handles:
+                    try:
+                        await handle.dispose()
+                    except asyncio.CancelledError:
+                        raise
+                    except BROWSER_SDK_ERRORS:
+                        self.connection_cleanup_failed = True
+        except TimeoutError:
+            self.connection_cleanup_failed = True
+        if self.connection_cleanup_failed:
+            raise BrowserFailure(
+                "browser_cleanup_failed", "Browser connection cleanup is unconfirmed"
+            )
 
     async def close(self) -> None:
         """Invalidate all live handles while retaining native profile bytes."""

@@ -12,6 +12,7 @@ from azents_runtime_control.browser_contract import (
     BrowserObserveCommand,
     BrowserTarget,
 )
+from azents_runtime_control.browser_source_contract import BrowserScopeState
 from azents_runtime_control.browser_viewer_contract import ViewerTarget
 from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 from pydantic import BaseModel, ConfigDict, StrictStr, ValidationError
@@ -268,8 +269,10 @@ class DatabaseRuntimeBrowserStreamScopeValidator:
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationCanceledError,
         ):
-            raise RuntimeBrowserTargetUnavailable() from None
+            raise RuntimeBrowserStreamUnavailable() from None
         except RuntimeRunnerOperationFailedError as error:
+            if error.code == "browser_stale_generation":
+                raise RuntimeBrowserStreamUnavailable() from None
             if error.code in {
                 "browser_stale_target",
                 "browser_invalid_target",
@@ -294,23 +297,31 @@ class DatabaseRuntimeBrowserStreamScopeValidator:
             resource=resource,
             resolved_at=self.clock(),
         )
+        if isinstance(refreshed, RuntimeBrowserAuthority):
+            if refreshed.allow_input != current.allow_input:
+                raise RuntimeBrowserRequestError(403, "Browser input access changed.")
+            if (
+                refreshed.authentication_session_expires_at
+                < current.authentication_session_expires_at
+            ):
+                raise RuntimeBrowserRequestError(401, "Browser authentication changed.")
         if refreshed != current:
-            raise RuntimeBrowserRequestError(409, "Browser authority changed.")
+            raise RuntimeBrowserStreamUnavailable()
         return current
 
-    async def __call__(self, authority: BrowserStreamAuthority) -> bool:
+    async def __call__(self, authority: BrowserStreamAuthority) -> BrowserScopeState:
         now = self.clock()
         if (
             authority.transport_deadline_at <= now
             or authority.transport_deadline_at > now + timedelta(hours=1)
             or not isinstance(authority.allow_input, bool)
         ):
-            return False
+            return BrowserScopeState.EXPIRED
         handle = await self.authority_repository.read_stream_workspace_handle(
             agent_id=authority.agent_id, session_id=authority.session_id
         )
         if handle is None:
-            return False
+            return BrowserScopeState.REVOKED
         try:
             # Native page admission belongs to admit(); live frames already reach
             # Runner's exact binding/target/source fence before any SDK effect.
@@ -325,14 +336,19 @@ class DatabaseRuntimeBrowserStreamScopeValidator:
                 resolved_at=now,
             )
         except RuntimeBrowserRequestError:
-            return False
+            return BrowserScopeState.REVOKED
         if isinstance(current, RuntimeBrowserUnavailable):
-            return False
-        return (
-            current.target.id == authority.runtime_id
-            and current.target.desired_generation == authority.desired_generation
-            and current.target.runner_generation == authority.runner_generation
-            and current.allow_input == authority.allow_input
-            and current.authentication_session_expires_at
-            >= authority.transport_deadline_at
-        )
+            if current.reason_code == "browser_disabled":
+                return BrowserScopeState.REVOKED
+            return BrowserScopeState.UNAVAILABLE
+        if current.authentication_session_expires_at < authority.transport_deadline_at:
+            return BrowserScopeState.EXPIRED
+        if current.allow_input != authority.allow_input:
+            return BrowserScopeState.REVOKED
+        if (
+            current.target.id != authority.runtime_id
+            or current.target.desired_generation != authority.desired_generation
+            or current.target.runner_generation != authority.runner_generation
+        ):
+            return BrowserScopeState.UNAVAILABLE
+        return BrowserScopeState.CURRENT
