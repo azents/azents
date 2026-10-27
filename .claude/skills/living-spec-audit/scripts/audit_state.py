@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 SCHEMA_VERSION = 1
 DEFAULT_STATE_PATH = ".claude/living-spec-audit-state.json"
@@ -71,6 +71,28 @@ class AuditState(TypedDict):
     ranges: dict[str, RangeCheckpoint]
 
 
+class PlannedRange(TypedDict):
+    file_count: int
+    file_specs: dict[str, list[str]]
+    files: list[str]
+    name: str
+    reason: str
+    scope_revision: str
+    specs: list[str]
+    unmapped_files: list[str]
+
+
+class DeletedCheck(TypedDict):
+    path: str
+    specs: list[str]
+    unmapped: bool
+
+
+class MissingCodePath(TypedDict):
+    pattern: str
+    spec: str
+
+
 class AuditPlan(TypedDict, total=False):
     """Validated disposable Living Spec audit execution plan."""
 
@@ -78,19 +100,19 @@ class AuditPlan(TypedDict, total=False):
     change_checkpoint_before: str | None
     generated_at: str
     head_commit: str
-    missing_code_paths: list[dict[str, str]]
+    missing_code_paths: list[MissingCodePath]
     mode: str
     state_sha256: str
     plan_sha256: str
     bootstrap: bool
-    changed_checks: list[dict[str, Any]]
+    changed_checks: list[PlannedRange]
     changed_specs: list[str]
-    deleted_checks: list[dict[str, Any]]
+    deleted_checks: list[DeletedCheck]
     deleted_specs: list[str]
-    full_ranges: list[dict[str, Any]]
+    full_ranges: list[PlannedRange]
     range_limit: int
     rotation_days: int | None
-    rotation_ranges: list[dict[str, Any]]
+    rotation_ranges: list[PlannedRange]
 
 
 def run_git(repo_root: Path, *args: str) -> str:
@@ -205,13 +227,99 @@ def load_state(state_path: Path) -> AuditState:
     )
 
 
+def _plan_object(value: object, fields: set[str]) -> dict[str, object]:
+    """Validate one exact JSON object at the plan boundary."""
+    if not isinstance(value, dict) or set(value) != fields:
+        raise AuditStateError("Audit plan has unknown or missing fields")
+    return {key: value[key] for key in fields}
+
+
+def _plan_text(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise AuditStateError("Audit plan requires a nonempty string")
+    return value
+
+
+def _plan_list(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise AuditStateError("Audit plan requires a list")
+    return list(value)
+
+
+def _plan_texts(value: object) -> list[str]:
+    return [_plan_text(item) for item in _plan_list(value)]
+
+
+def _plan_integer(value: object) -> int:
+    if type(value) is not int or value < 0:
+        raise AuditStateError("Audit plan requires a nonnegative integer")
+    return value
+
+
+def _plan_flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise AuditStateError("Audit plan requires a boolean")
+    return value
+
+
+def _decode_planned_range(value: object) -> PlannedRange:
+    raw = _plan_object(
+        value,
+        {
+            "file_count",
+            "file_specs",
+            "files",
+            "name",
+            "reason",
+            "scope_revision",
+            "specs",
+            "unmapped_files",
+        },
+    )
+    file_specs = raw["file_specs"]
+    if not isinstance(file_specs, dict):
+        raise AuditStateError("Audit plan requires a file-to-spec mapping")
+    decoded_specs = {
+        _plan_text(path): _plan_texts(specs) for path, specs in file_specs.items()
+    }
+    return PlannedRange(
+        file_count=_plan_integer(raw["file_count"]),
+        file_specs=decoded_specs,
+        files=_plan_texts(raw["files"]),
+        name=_plan_text(raw["name"]),
+        reason=_plan_text(raw["reason"]),
+        scope_revision=_plan_text(raw["scope_revision"]),
+        specs=_plan_texts(raw["specs"]),
+        unmapped_files=_plan_texts(raw["unmapped_files"]),
+    )
+
+
+def _decode_deleted_check(value: object) -> DeletedCheck:
+    raw = _plan_object(value, {"path", "specs", "unmapped"})
+    return DeletedCheck(
+        path=_plan_text(raw["path"]),
+        specs=_plan_texts(raw["specs"]),
+        unmapped=_plan_flag(raw["unmapped"]),
+    )
+
+
+def _decode_missing_path(value: object) -> MissingCodePath:
+    raw = _plan_object(value, {"pattern", "spec"})
+    return MissingCodePath(
+        pattern=_plan_text(raw["pattern"]), spec=_plan_text(raw["spec"])
+    )
+
+
 def load_plan(plan_path: Path) -> AuditPlan:
-    """Load and validate one disposable Living Spec audit plan."""
+    """Decode the complete plan shape before any completion logic consumes it."""
     try:
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        value = json.loads(plan_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise AuditStateError(f"Cannot read plan file: {exc}") from exc
-    allowed_fields = {
+    if not isinstance(value, dict) or value.get("mode") not in ("full", "incremental"):
+        raise AuditStateError("Unsupported or invalid audit plan")
+    mode = value["mode"]
+    fields = {
         "bootstrap",
         "change_checkpoint_before",
         "changed_checks",
@@ -224,36 +332,55 @@ def load_plan(plan_path: Path) -> AuditPlan:
         "missing_code_paths",
         "mode",
         "plan_sha256",
-        "range_limit",
-        "rotation_days",
         "rotation_ranges",
         "schema_version",
         "state_sha256",
     }
-    if (
-        not isinstance(plan, dict)
-        or set(plan) - allowed_fields
-        or plan.get("schema_version") != SCHEMA_VERSION
-        or not isinstance(plan.get("generated_at"), str)
-        or not isinstance(plan.get("head_commit"), str)
-        or plan.get("mode") not in {"full", "incremental"}
-        or not isinstance(plan.get("state_sha256"), str)
-        or not isinstance(plan.get("plan_sha256"), str)
-        or not all(
-            isinstance(plan.get(field), list)
-            for field in (
-                "changed_checks",
-                "changed_specs",
-                "deleted_checks",
-                "deleted_specs",
-                "full_ranges",
-                "missing_code_paths",
-                "rotation_ranges",
-            )
-        )
-    ):
+    if mode == "incremental":
+        fields |= {"range_limit", "rotation_days"}
+    raw = _plan_object(value, fields)
+    if _plan_integer(raw["schema_version"]) != SCHEMA_VERSION:
         raise AuditStateError("Unsupported or invalid audit plan")
-    return cast(AuditPlan, plan)
+    generated_at = _plan_text(raw["generated_at"])
+    try:
+        generated_time = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AuditStateError("Audit plan has invalid generated_at") from exc
+    if generated_time.tzinfo is None:
+        raise AuditStateError("Audit plan generated_at must include timezone")
+    checkpoint = raw["change_checkpoint_before"]
+    plan = AuditPlan(
+        schema_version=SCHEMA_VERSION,
+        bootstrap=_plan_flag(raw["bootstrap"]),
+        change_checkpoint_before=None if checkpoint is None else _plan_text(checkpoint),
+        generated_at=generated_at,
+        head_commit=_plan_text(raw["head_commit"]),
+        mode=mode,
+        state_sha256=_plan_text(raw["state_sha256"]),
+        plan_sha256=_plan_text(raw["plan_sha256"]),
+        changed_checks=[
+            _decode_planned_range(item) for item in _plan_list(raw["changed_checks"])
+        ],
+        changed_specs=_plan_texts(raw["changed_specs"]),
+        deleted_checks=[
+            _decode_deleted_check(item) for item in _plan_list(raw["deleted_checks"])
+        ],
+        deleted_specs=_plan_texts(raw["deleted_specs"]),
+        full_ranges=[
+            _decode_planned_range(item) for item in _plan_list(raw["full_ranges"])
+        ],
+        missing_code_paths=[
+            _decode_missing_path(item) for item in _plan_list(raw["missing_code_paths"])
+        ],
+        rotation_ranges=[
+            _decode_planned_range(item) for item in _plan_list(raw["rotation_ranges"])
+        ],
+    )
+    if mode == "incremental":
+        plan["range_limit"] = _plan_integer(raw["range_limit"])
+        days = raw["rotation_days"]
+        plan["rotation_days"] = None if days is None else _plan_integer(days)
+    return plan
 
 
 def serialize_json(value: Mapping[str, Any]) -> str:
