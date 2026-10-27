@@ -1475,35 +1475,29 @@ class ExternalChannelActionService:
         presentation: SlackAgentPresentation | None,
     ) -> SlackControlMessageResult:
         """Deliver one validated selector, notice, or approval control."""
-        payload = target.request_payload
         intent = target.decode_intent()
-        payload_tenant_id = payload.get("tenant_id")
-        if payload_tenant_id is not None and payload_tenant_id != tenant_id:
+        if not _slack_control_tenant_matches(target, tenant_id):
             return _invalid_payload()
         control_kind = intent.control_kind
         if control_kind in {
             "scheduled_task_registration",
             "scheduled_task_deletion",
         }:
-            text = payload.get("text")
-            blocks = _blocks(payload.get("blocks"))
-            if not isinstance(text, str) or blocks is None:
+            notice = _decode_slack_control_notice(target)
+            if notice is None:
                 return _invalid_payload()
             return await self.slack_client.post_blocks(
                 bot_token=bot_token,
                 tenant_id=tenant_id,
                 channel_id=channel_id,
                 thread_ts=thread_ts,
-                text=prepend_agent_fallback(presentation, text),
-                blocks=prepend_agent_blocks(presentation, blocks),
+                text=prepend_agent_fallback(presentation, notice.text),
+                blocks=prepend_agent_blocks(presentation, list(notice.blocks)),
                 icon_url=(None if presentation is None else presentation.icon_url),
             )
         if control_kind == "agent_selector":
-            selector_interaction_id = payload.get("selector_interaction_id")
-            if (
-                not isinstance(selector_interaction_id, str)
-                or not selector_interaction_id
-            ):
+            selector_interaction_id = _decode_slack_selector(target)
+            if selector_interaction_id is None:
                 return _invalid_payload()
             selector = _render_agent_selector_control(selector_interaction_id)
             return await self.slack_client.post_blocks(
@@ -1576,9 +1570,7 @@ class ExternalChannelActionService:
             )
         if control_kind == "shortcut_already_bound":
             recorded_presentation = resolve_slack_agent_name_presentation(
-                payload.get("recorded_agent_name")
-                if isinstance(payload.get("recorded_agent_name"), str)
-                else None
+                _decode_slack_recorded_agent_name(target)
             )
             bound_presentation = presentation or recorded_presentation
             if bound_presentation is None:
@@ -1604,27 +1596,17 @@ class ExternalChannelActionService:
                 ),
                 icon_url=bound_presentation.icon_url,
             )
-        approval_url = payload.get("approval_url")
-        participant_provider_user_id = payload.get("participant_provider_user_id")
-        participant_label = payload.get("participant_label")
-        if (
-            not isinstance(approval_url, str)
-            or not approval_url
-            or not isinstance(participant_provider_user_id, str)
-            or not participant_provider_user_id
-            or not isinstance(participant_label, str)
-            or not participant_label
-            or thread_ts is None
-        ):
+        approval = _decode_slack_approval(target)
+        if approval is None or thread_ts is None:
             return _invalid_payload()
         return await self.slack_client.post_approval_control_message(
             bot_token=bot_token,
             tenant_id=tenant_id,
             channel_id=channel_id,
             thread_ts=thread_ts,
-            approval_url=approval_url,
-            participant_label=participant_label,
-            participant_provider_user_id=participant_provider_user_id,
+            approval_url=approval.url,
+            participant_label=approval.participant_label,
+            participant_provider_user_id=approval.participant_provider_user_id,
             agent_name=(
                 None
                 if presentation is None or not presentation.show_name
@@ -2141,6 +2123,63 @@ class _SlackProgress:
     text: str
     blocks: tuple[dict[str, object], ...]
     context: _SessionNavigationContext
+
+
+@dataclass(frozen=True)
+class _SlackControlNotice:
+    """Validated notice text and opaque provider blocks."""
+
+    text: str
+    blocks: tuple[dict[str, object], ...]
+
+
+@dataclass(frozen=True)
+class _SlackApproval:
+    """Validated approval control fields."""
+
+    url: str
+    participant_provider_user_id: str
+    participant_label: str
+
+
+def _slack_control_tenant_matches(target: ProviderTarget, tenant_id: str) -> bool:
+    value = target.request_payload.get("tenant_id")
+    return value is None or value == tenant_id
+
+
+def _decode_slack_control_notice(target: ProviderTarget) -> _SlackControlNotice | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    blocks = _blocks(payload.get("blocks"))
+    if not isinstance(text, str) or blocks is None:
+        return None
+    return _SlackControlNotice(text=text, blocks=tuple(blocks))
+
+
+def _decode_slack_selector(target: ProviderTarget) -> str | None:
+    value = target.request_payload.get("selector_interaction_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _decode_slack_recorded_agent_name(target: ProviderTarget) -> str | None:
+    value = target.request_payload.get("recorded_agent_name")
+    return value if isinstance(value, str) else None
+
+
+def _decode_slack_approval(target: ProviderTarget) -> _SlackApproval | None:
+    payload = target.request_payload
+    url = payload.get("approval_url")
+    user = payload.get("participant_provider_user_id")
+    label = payload.get("participant_label")
+    if not isinstance(url, str) or not url:
+        return None
+    if not isinstance(user, str) or not user:
+        return None
+    if not isinstance(label, str) or not label:
+        return None
+    return _SlackApproval(
+        url=url, participant_provider_user_id=user, participant_label=label
+    )
 
 
 def _decode_slack_progress(

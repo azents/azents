@@ -73,11 +73,16 @@ from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     _decode_discord_destination,
     _decode_discord_reply,
+    _decode_slack_approval,
+    _decode_slack_control_notice,
     _decode_slack_destination,
     _decode_slack_progress,
     _decode_slack_progress_message_ts,
+    _decode_slack_recorded_agent_name,
     _decode_slack_reply,
+    _decode_slack_selector,
     _provider_mutation_outcome,
+    _slack_control_tenant_matches,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
 from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
@@ -432,6 +437,44 @@ def test_slack_progress_decodes_content(
     assert _decode_slack_progress_message_ts(target) == "123.456"
     target.request_payload["provider_message_key"] = None
     assert _decode_slack_progress_message_ts(target) is None
+
+
+def test_slack_control_decoders_preserve_input_contracts() -> None:
+    """Control variants validate only their consumed fields."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    assert _slack_control_tenant_matches(target, "T1")
+    target.request_payload["tenant_id"] = "other"
+    assert not _slack_control_tenant_matches(target, "T1")
+    target.request_payload["tenant_id"] = None
+    assert _slack_control_tenant_matches(target, "T1")
+    notice = _decode_slack_control_notice(target)
+    assert notice is not None
+    assert list(notice.blocks) == target.request_payload["blocks"]
+    target.request_payload["blocks"] = [1]
+    assert _decode_slack_control_notice(target) is None
+    target.request_payload["selector_interaction_id"] = "selector"
+    assert _decode_slack_selector(target) == "selector"
+    target.request_payload["selector_interaction_id"] = ""
+    assert _decode_slack_selector(target) is None
+    target.request_payload["recorded_agent_name"] = ""
+    assert _decode_slack_recorded_agent_name(target) == ""
+    target.request_payload["recorded_agent_name"] = 1
+    assert _decode_slack_recorded_agent_name(target) is None
+    target.request_payload.update(
+        approval_url="https://example.test/approval",
+        participant_provider_user_id="U1",
+        participant_label="Member",
+    )
+    approval = _decode_slack_approval(target)
+    assert approval is not None
+    assert approval.url == "https://example.test/approval"
+    assert approval.participant_provider_user_id == "U1"
+    assert approval.participant_label == "Member"
+    target.request_payload["participant_label"] = ""
+    assert _decode_slack_approval(target) is None
 
 
 def test_slack_file_reply_ignores_blocks() -> None:
