@@ -1,5 +1,6 @@
 """Durable Session-bound External Channel ingress admission and draining."""
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -234,6 +235,8 @@ class ExternalChannelIngressDrainService:
         for plan in plans:
             try:
                 await self.provider_control.attempt(plan, preparation_boundary=None)
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 logger.exception(
                     "External Channel ingress provider control attempt failed"

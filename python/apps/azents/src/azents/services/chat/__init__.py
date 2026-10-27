@@ -1,5 +1,6 @@
 """Chat sequencing over completed DB operations and external effects."""
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -527,6 +528,8 @@ class ChatSessionService:
                 root_session_id=session_id,
                 subtree_session_ids=session_ids,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(
                 "Archived Session Git worktree cleanup failed",
@@ -674,6 +677,8 @@ class ChatSessionService:
                 summary="Session working-folder cleanup failed: runtime_unavailable.",
             )
             return
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(
                 "Archived Session working-folder cleanup failed unexpectedly",
@@ -712,6 +717,8 @@ class ChatSessionService:
                 L.error(
                     "Archived Session working-folder cleanup terminal state was lost",
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             L.exception(
                 "Archived Session working-folder cleanup terminal state failed",
