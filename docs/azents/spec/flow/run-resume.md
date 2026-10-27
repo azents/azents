@@ -143,9 +143,12 @@ the Session owner generation before loading one immutable PostgreSQL canonical s
 non-locking Session read. Before reading mailbox state or recoverable execution work, the Worker
 requires the durable Session `run_state` to be `running`. The snapshot then validates the
 Session, Agent, Workspace, root tree/context, pending command, recoverable Run, and idle continuation.
-An archived Session can recover only the preserved started Scheduled Task or Routine work
-described in their domain specs. For this archived work, the Agent may also be
-decommissioning, but must remain enabled; the same owner and lineage checks still apply.
+For an archived Session, Scheduled Task admission requires the oldest mailbox item to be a
+continuation for a started cycle with matching Workspace, Agent, and Session. Routine admission
+can also validate a matching preserved Run or idle continuation when the mailbox is empty. The
+stuck-running scan selects archived Routine work, not archived Scheduled Task work. For eligible
+archived work, the Agent may be decommissioning but must remain enabled; the same owner and
+lineage checks still apply.
 Mailbox state is not captured in this snapshot, although the oldest item participates in the
 archived-work eligibility check. The leased Session runner reads and consumes the current FIFO
 directly, so producer appends remain ordinary queue activity rather than invalidating the snapshot. The snapshot has no User identity: a requester, Human sender, provider
