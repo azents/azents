@@ -29,8 +29,6 @@ python .agents/skills/living-spec-audit/scripts/audit_state.py plan \
   --output /tmp/living-spec-audit-plan.json
 ```
 
-Do not complete a full plan unless every planned range was inspected.
-
 ### Incremental audit
 
 Use incremental mode for recurring audits. It checks:
@@ -72,19 +70,21 @@ The plan is disposable execution data and must remain outside the repository.
 - Each range contains exact files, matched specs, per-file spec mappings, and
   unmapped implementation files.
 
-New implementation files receive a deterministic path-based range automatically.
-Unmapped files are findings to classify, not files to silently discard.
-
-For every planned range or changed check:
+Inspect every plan item: changed and deleted implementation paths, changed and
+deleted specs, missing `code_paths`, and the selected full or rotation ranges.
+For each relevant path or spec:
 
 1. Read `docs/azents/AGENTS.md` and the applicable path instructions.
-2. Run mechanical checks first: missing paths, moved symbols, routes, models,
+2. Check mechanically for missing paths, moved symbols, routes, models,
    configuration keys, state values, and deleted behavior.
-3. Inspect reachable production call paths. Use tests as evidence, not as authority.
-4. Compare current behavior, APIs, data models, permissions, state transitions,
-   errors, recovery, and user-visible behavior with the matched specs.
-5. Search adjacent callers and tests only as needed to establish actual behavior.
-6. Ground every finding in exact implementation and spec locations.
+3. Read reachable production call paths and compare their relevant behavior,
+   contracts, permissions, state transitions, errors, and recovery with the specs.
+4. Consult adjacent callers and existing tests when they help resolve a specific
+   question. Tests are supporting evidence, not the authority for current behavior.
+   Do not run tests by default or as a substitute for the code-to-spec comparison.
+   Run a focused test only when needed to resolve a concrete uncertainty or when
+   the requester asks; report its scope and limitations.
+5. Ground findings in exact implementation and spec locations.
 
 For unmapped implementation files, determine whether they introduce or change
 material current behavior. Add them to an existing spec's `code_paths`, create a
@@ -157,9 +157,9 @@ python .agents/skills/living-spec-audit/scripts/audit_state.py complete \
 rm /tmp/living-spec-audit-plan.json
 ```
 
-The completion command rejects a dirty audit checkout, a modified or incomplete
-plan, a changed HEAD, a changed state file, changed Living Spec scope, or changed
-required work.
+The completion command validates checkout cleanliness, plan integrity and coverage,
+HEAD, state, and current scope. It cannot verify that the planned work was actually
+inspected; the auditor must establish that before invoking it.
 
 After completion writes the state file, submit that checkpoint through the normal
 pull request workflow. Include it in the spec correction PR or use a state-only PR
