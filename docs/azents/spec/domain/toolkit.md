@@ -151,7 +151,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-27
-spec_version: 156
+spec_version: 157
 ---
 
 # Toolkit
@@ -1130,6 +1130,10 @@ MCP-backed toolkits must keep `list_tools` discovery off the normal run preparat
   DELETE when supported). Cleanup waits at most 10 seconds before cancelling a
   remaining owner task and reporting the deadline. Worker restart prepares fresh
   sessions rather than restoring live connections from metadata.
+- Toolkit teardown distinguishes an owned discovery task's cancellation from
+  cancellation of the teardown caller. When connection cleanup succeeds, caller
+  cancellation propagates; GitHub installation bindings each receive cleanup
+  even when another binding's teardown is interrupted.
 - `update_context()` reads the latest successful session-bound Toolkit State snapshot and returns immediately.
 - If no successful snapshot exists, the toolkit exposes no MCP tools.
 - Background refresh lists tools, sorts them deterministically, builds a complete serializable snapshot, then atomically replaces the stored snapshot.
@@ -1908,6 +1912,9 @@ idle continuation hooks preserve incomplete admitted objectives without
 introducing an independent Routine execution owner.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 157) — Preserve caller cancellation while cleaning
+  up Toolkit discovery tasks and owned MCP connections.
 
 - **2026-10-27** (spec_version 156) — Return sanitized MCP connection-test failure
   results for protocol-only errors while preserving mixed failures and cancellation.

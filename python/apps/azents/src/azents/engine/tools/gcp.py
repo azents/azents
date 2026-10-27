@@ -59,6 +59,7 @@ from azents.engine.run.types import (
 from azents.engine.tooling.personal_admission import publish_tool_snapshot
 from azents.engine.tools.background_discovery import (
     DISCOVERY_ERRORS,
+    cancel_owned_discovery,
     observe_discovery_failure,
     require_expected_discovery_failure,
 )
@@ -396,14 +397,11 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
     async def __aexit__(self, *exc: object) -> None:
         """Cancel background refresh task."""
         self._entered = False
-        if self._bg_task is not None and not self._bg_task.done():
-            self._bg_task.cancel()
-            try:
-                await self._bg_task
-            except asyncio.CancelledError:
-                pass
-        self._bg_task = None
-        await self.connections.close()
+        try:
+            await cancel_owned_discovery(self._bg_task)
+        finally:
+            self._bg_task = None
+            await self.connections.close()
 
     def _ensure_refresh_task(self) -> None:
         """Start background refresh unless one is already running."""

@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import AsyncContextManager, NamedTuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2 as httpx
 import pytest
@@ -19,6 +19,7 @@ from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import GitHubToolkitConfig, McpToolkitConfig, TurnContext
 from azents.engine.run.types import FunctionTool
 from azents.engine.tools.github import GitHubInstallationBinding, GitHubToolkit
+from azents.engine.tools.mcp import McpToolkit
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.toolkit_state.engine import McpToolSnapshotStore
@@ -242,6 +243,109 @@ def _binding(
 async def _never() -> None:
     """Never-completing task fixture."""
     await asyncio.Event().wait()
+
+
+async def test_exit_cancellation_closes_all_installation_connections() -> None:
+    async def provide_token() -> str:
+        return "token"
+
+    first = _binding(
+        target=_target("101", "first"),
+        state_name="first",
+        token_provider=provide_token,
+    )
+    second = _binding(
+        target=_target("202", "second"),
+        state_name="second",
+        token_provider=provide_token,
+    )
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+
+    async def discovery() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await asyncio.Event().wait()
+
+    first.lazy_mcp_task = asyncio.create_task(discovery())
+    await started.wait()
+    toolkit = GitHubToolkit(
+        config=_make_config(), installation_bindings=[first, second]
+    )
+    with (
+        patch.object(first.connections, "close", new_callable=AsyncMock) as close_first,
+        patch.object(
+            second.connections, "close", new_callable=AsyncMock
+        ) as close_second,
+    ):
+        exit_task = asyncio.create_task(toolkit.__aexit__())
+        await cleaning.wait()
+        exit_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await exit_task
+        close_first.assert_awaited_once()
+        close_second.assert_awaited_once()
+
+
+async def test_exit_propagates_cancellation_during_legacy_lazy_cleanup() -> None:
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+
+    async def discovery() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await asyncio.Event().wait()
+
+    toolkit = GitHubToolkit(config=_make_config())
+    toolkit._lazy_mcp_task = asyncio.create_task(discovery())
+    await started.wait()
+    exit_task = asyncio.create_task(toolkit.__aexit__())
+    await cleaning.wait()
+    exit_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await exit_task
+
+
+async def test_exit_closes_toolkit_created_during_lazy_task_cleanup() -> None:
+    async def provide_token() -> str:
+        return "token"
+
+    binding = _binding(
+        target=_target("101", "first"),
+        state_name="first",
+        token_provider=provide_token,
+    )
+    created = McpToolkit(
+        config=McpToolkitConfig(server_url=_GITHUB_MCP_URL, auth_type="none"),
+        snapshot_factory=binding.snapshot_factory,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    started = asyncio.Event()
+
+    async def discovery() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            binding.mcp_toolkit = created
+
+    binding.lazy_mcp_task = asyncio.create_task(discovery())
+    await started.wait()
+    toolkit = GitHubToolkit(config=_make_config(), installation_bindings=[binding])
+    with (
+        patch.object(McpToolkit, "__aexit__", new_callable=AsyncMock) as close_toolkit,
+        patch.object(binding.connections, "close", new_callable=AsyncMock) as close,
+    ):
+        await toolkit.__aexit__()
+        close_toolkit.assert_awaited_once()
+        close.assert_awaited_once()
 
 
 def _find_tool(tools: list[FunctionTool], name: str) -> FunctionTool:

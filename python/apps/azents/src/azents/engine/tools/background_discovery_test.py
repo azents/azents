@@ -50,6 +50,33 @@ def _snapshot_storage(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("kind", ["aws", "gcp"])
+async def test_exit_propagates_caller_cancellation_and_closes(
+    kind: Literal["aws", "gcp"],
+) -> None:
+    toolkit = _aws_toolkit() if kind == "aws" else _gcp_toolkit()
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+
+    async def discovery() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await asyncio.Event().wait()
+
+    toolkit._bg_task = asyncio.create_task(discovery())
+    await started.wait()
+    with patch.object(toolkit.connections, "close", new_callable=AsyncMock) as close:
+        exit_task = asyncio.create_task(toolkit.__aexit__())
+        await cleaning.wait()
+        exit_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await exit_task
+        close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("kind", ["aws", "gcp"])
 @pytest.mark.parametrize("failure", ["network", "unexpected", "mixed", "cancel"])
 async def test_concrete_refresh_error_classification(
     kind: Literal["aws", "gcp"],
