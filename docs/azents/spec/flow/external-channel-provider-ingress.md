@@ -196,14 +196,13 @@ Slack sends HTTP callbacks to the single fixed endpoint
    row lock. The final canonical mailbox transaction conditionally transitions only
    an active, non-stopping Session to its wake state; failure rolls back the prepared
    mailbox input and leaves the ingress item recoverable.
-7. The callback acknowledges after the ingress transaction commits. For an admitted
-   queue owner, the handler awaits a best-effort Local Job Runtime submission before
-   returning; a closed Runtime is logged and the durable queue remains recoverable.
-   Submission schedules or coalesces the job without waiting for its completion.
-   The callback does not wait for provider exact/history I/O, mailbox admission,
-   conversation-position advancement, Session wake, or provider-control delivery.
-   Provider-resolution and wake failures are recovered from the durable active queue
-   and canonical mailbox state rather than by withholding the transport response.
+7. For an admitted queue owner, the callback awaits durable admission and a
+   best-effort Local Job Runtime submission before acknowledging. A closed Runtime
+   is logged and the durable queue remains recoverable. Submission schedules or
+   coalesces the job without waiting for its provider I/O, mailbox admission, or
+   Session wake. If queue admission falls back to synchronous ingestion, the callback
+   can instead wait for provider history and preparation, including setup resolution,
+   before returning. Provider-control delivery remains a background operation.
 
 Payload App/Team identity is an index key, not authentication. Missing, unknown, or
 ambiguous candidates fail closed, and ordinary events never pass admission without
@@ -771,7 +770,7 @@ persistent provider connections.
 ## Changelog
 
 - **2026-10-27** (spec_version 75) — Corrected Slack ingress acknowledgement to
-  distinguish awaiting job submission from awaiting the submitted work.
+  distinguish queued submission from synchronous fallback ingestion.
 
 - **2026-10-26** (spec_version 74) — Added claim-owned recoverable first-Discord-mention
   preparation, final dispatch fencing, callback attachment-count preservation,
