@@ -279,6 +279,9 @@ class TestEventExecutionRepositories:
             (2, "runtime-2", "completed", False, 99),
             (2, "runtime-1", "failed", False, 99),
             (2, "runtime-1", "completed", True, 99),
+            (281474976711907, "runtime-1", "completed", False, 4294967297),
+            (281474976711907, "runtime-1", "completed", False, 4294967299),
+            (281474976711908, "runtime-1", "completed", False, 9999999999),
         ):
             event = RDBEvent(
                 session_id=event_session.id,
@@ -309,6 +312,12 @@ class TestEventExecutionRepositories:
         )
         assert await repository.process_revision(event_session.id, "runtime-1", 2) == 9
         assert await repository.process_revision(event_session.id, "runtime-1", 4) == 0
+        assert (
+            await repository.process_revision(
+                event_session.id, "runtime-1", 281474976711907
+            )
+            == 4294967299
+        )
 
     async def test_user_message_default_effort_round_trip(
         self,

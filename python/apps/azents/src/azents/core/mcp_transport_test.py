@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import httpx2 as httpx
 import pytest
 from mcp import MCPError
+from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
 from azents.core import mcp_transport
 from azents.core.mcp_transport import (
@@ -189,3 +190,36 @@ async def test_cancelled_transport_does_not_fallback_retry_or_report_failure(
     assert caught.value is failure
     assert len(factory_calls) == 1
     sleep.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        MCPError(-32000, "secret provider message"),
+        MCPError(CONNECTION_CLOSED, "closed with private detail"),
+        MCPError(REQUEST_TIMEOUT, "timeout with private detail"),
+        ExceptionGroup(
+            "transport", [ExceptionGroup("session", [MCPError(-32000, "secret")])]
+        ),
+    ],
+)
+async def test_connection_test_reports_protocol_rejection_without_provider_details(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    monkeypatch.setattr(mcp_transport, "list_tools", AsyncMock(side_effect=failure))
+    result = await mcp_transport.test_mcp_transport("https://example.invalid", {}, 30)
+    assert not result.success
+    assert result.message == "MCP connection test failed."
+    assert "secret" not in result.message
+
+
+async def test_connection_test_preserves_mixed_protocol_and_internal_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = ExceptionGroup(
+        "mixed", [MCPError(-32000, "rejected"), ValueError("internal failure")]
+    )
+    monkeypatch.setattr(mcp_transport, "list_tools", AsyncMock(side_effect=failure))
+    with pytest.raises(ExceptionGroup) as caught:
+        await mcp_transport.test_mcp_transport("https://example.invalid", {}, 30)
+    assert caught.value is failure
