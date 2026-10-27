@@ -66,6 +66,8 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/api/chat/upload/[uploadId]/finalize/**
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/rdb/models/exchange_upload_operation.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/9462aab292cc_add_exchange_browser_upload_operations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/0c18705eb6cb_retain_completed_exchange_upload_.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py

@@ -71,6 +71,10 @@ code_paths:
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/cda14157c46c_allow_duplicate_toolkit_slugs.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/716e7468e1f5_add_user_toolkit_ownership_and_access_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/af654664e6b6_add_toolkit_namespace_reservations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/a0dac2fe3ca2_reconcile_toolkit_namespace_reservations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/7b6d0eb501fb_remove_obsolete_toolkit_visibility_.py
   - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_web/**

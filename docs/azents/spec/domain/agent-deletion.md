@@ -19,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_mutation_guard.py
   - python/apps/azents/src/azents/core/agent_mutation.py
   - python/apps/azents/src/azents/rdb/models/agent_decommission.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/2944b0e66140_retain_agent_deletion_failure_boundary.py
   - python/apps/azents/src/azents/rdb/models/historical_memory_legacy_audit.py
   - python/apps/azents/src/azents/core/historical_memory_legacy_audit.py
   - python/apps/azents/src/azents/repos/agent_decommission/**
