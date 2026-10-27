@@ -7,6 +7,8 @@ domain: external-channel
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/external_channel_impact.py
+  - python/apps/azents/src/azents/core/external_channel_limits.py
+  - python/apps/azents/src/azents/core/external_channel_labels.py
   - python/apps/azents/src/azents/core/external_channel_management.py
   - python/apps/azents/src/azents/core/external_channel_management_errors.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
@@ -30,6 +32,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/e4cd231524e4_add_setup_claim_preparation_ownership.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/43a0fbdc96fe_retire_external_channel_inbound_file_.py
   - python/apps/azents/src/azents/core/external_account_link.py
   - python/apps/azents/src/azents/core/external_account_oauth.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
@@ -117,13 +121,13 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/url-preview-suppression
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
-  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{handoff_id}
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{interaction_id}
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-10-27
-spec_version: 89
+spec_version: 90
 ---
 
 # External Channel
@@ -735,7 +739,12 @@ ordinary External Channel Work or add a destination selector.
 
 ## Changelog
 
-- **2026-10-27** (spec_version 89) — Validate Discord reply content and supported file combinations before provisioning a delivery thread.
+- **2026-10-27** (spec_version 90) — Validate Discord reply content and supported
+  file combinations before provisioning a delivery thread.
+
+- **2026-10-27** (spec_version 89) — Corrected the Slack management handoff
+  route's interaction identifier parameter.
+
 - **2026-10-26** (spec_version 88) — Added claim-owned first-Discord-mention
   preparation metadata, bounded recovery, attachment-count preservation, terminal
   diagnostics and atomic control-dispatch reservation with final authority checks.
