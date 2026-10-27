@@ -6,6 +6,7 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/042a6603f202_add_compacted_event_retention.py
   - typescript/apps/azents-web/src/shared/components/ScrollContainedViewport.tsx
   - typescript/apps/azents-web/src/shared/components/ScrollContainedViewport.module.css
   - typescript/apps/azents-web/src/shared/components/AppLayout.tsx
