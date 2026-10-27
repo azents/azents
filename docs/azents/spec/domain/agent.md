@@ -39,6 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/vfs_read_authority.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/agent.py
+  - python/apps/azents/src/azents/core/upload_images.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py

@@ -36,6 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution_file.py
   - python/apps/azents/src/azents/repos/memory_execution_events.py
   - python/apps/azents/src/azents/services/session_execution_files.py
+  - python/apps/azents/src/azents/services/vfs_text.py
   - python/apps/azents/src/azents/worker/run/memory_execution.py
   - python/apps/azents/src/azents/worker/session/runner.py
   - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
