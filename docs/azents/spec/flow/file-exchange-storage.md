@@ -58,6 +58,12 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/core/file_transfer.py
   - python/apps/azents/src/azents/core/exchange_upload.py
+  - typescript/apps/azents-web/src/shared/file-upload/fileHash.ts
+  - typescript/apps/azents-web/src/shared/file-upload/fileHash.worker.ts
+  - typescript/apps/azents-web/src/shared/file-upload/incrementalSha256.ts
+  - typescript/apps/azents-web/src/shared/file-upload/browserFileUpload.ts
+  - typescript/apps/azents-web/src/shared/file-upload/fileUploadCancellation.ts
+  - typescript/apps/azents-web/src/app/(app)/api/chat/upload/[uploadId]/finalize/**
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/rdb/models/exchange_upload_operation.py
   - python/apps/azents/src/azents/engine/run/resolve.py
