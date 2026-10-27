@@ -122,8 +122,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-26
-spec_version: 108
+last_verified_at: 2026-10-27
+spec_version: 109
 ---
 
 # Agent Runtime Control
@@ -883,6 +883,12 @@ command history, verification caches, and NetworkPolicy state do not rewrite an 
 Pod to `starting`. Watch, initial-resync, and failover reports may omit reconciliation evidence and
 remain valid current-protocol lifecycle observations.
 
+The Kubernetes Provider's Pod watch validates ownership metadata before emitting
+reports and skips invalid resource events. It reconnects after Kubernetes API or
+HTTP client failures. Cancellation, Control stream failures and unexpected errors
+propagate instead of being treated as watch retries; malformed watch Status
+responses are errors, not valid lifecycle observations.
+
 After an explicit lifecycle or configuration command, Kubernetes Provider v3 may attach one
 structured aggregate `network_enforcement` reconciliation observation. `in_sync` confirms every
 mode-required resource and readiness fence; `drifted` reports bounded mismatch evidence without
@@ -1522,6 +1528,9 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 109) — Recorded Pod watch validation and
+  error-specific reconnect boundaries.
 
 - **2026-10-11** (spec_version 105) — Recorded strict Provider command
   authentication ingress with preserved optional settings and protobuf authority.
