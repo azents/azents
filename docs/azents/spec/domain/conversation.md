@@ -6,6 +6,7 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/042a6603f202_add_compacted_event_retention.py
   - typescript/apps/azents-web/src/shared/components/ScrollContainedViewport.tsx
   - typescript/apps/azents-web/src/shared/components/ScrollContainedViewport.module.css
   - typescript/apps/azents-web/src/shared/components/AppLayout.tsx
@@ -30,6 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/core/action_execution_data.py
   - python/apps/azents/src/azents/core/agent_session_data.py
   - python/apps/azents/src/azents/core/mailbox_data.py
+  - python/apps/azents/src/azents/repos/mailbox_database.py
   - python/apps/azents/src/azents/core/session_workspace_project.py
   - python/apps/azents/src/azents/core/json_value.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
