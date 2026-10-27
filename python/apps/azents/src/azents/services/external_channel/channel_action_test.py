@@ -75,7 +75,8 @@ from azents.services.external_channel.channel_action import (
     _decode_discord_reply,
     _decode_slack_destination,
     _decode_slack_progress,
-    _decode_slack_progress_message_ts,
+    _decode_slack_progress_delete,
+    _decode_slack_progress_update,
     _decode_slack_reply,
     _provider_mutation_outcome,
 )
@@ -429,9 +430,18 @@ def test_slack_progress_decodes_content(
     if progress is not None:
         assert list(progress.blocks) == blocks
         assert progress.context.session_url == _SESSION_URL
-    assert _decode_slack_progress_message_ts(target) == "123.456"
+    update = _decode_slack_progress_update(target, web_url="https://azents.example")
+    assert (update is not None) is valid
+    if update is not None:
+        assert update.message_ts == "123.456"
+    deletion = _decode_slack_progress_delete(target)
+    assert deletion is not None
+    assert deletion.message_ts == "123.456"
     target.request_payload["provider_message_key"] = None
-    assert _decode_slack_progress_message_ts(target) is None
+    assert (
+        _decode_slack_progress_update(target, web_url="https://azents.example") is None
+    )
+    assert _decode_slack_progress_delete(target) is None
 
 
 def test_slack_file_reply_ignores_blocks() -> None:
