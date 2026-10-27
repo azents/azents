@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import dataclasses
+import logging
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ from wsproto.events import (
 from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
+_LOGGER = logging.getLogger(__name__)
 _WEBSOCKET_HANDSHAKE_HEADERS = frozenset(
     {
         b"connection",
@@ -469,6 +471,9 @@ class RunnerStreamSessionManager:
         async with self.lock:
             if self.client is not client:
                 return
+            receiver = client.receiver_task
+            if receiver is not None:
+                receiver.add_done_callback(_observe_detached_receiver)
             self.client = None
             self.offer = None
         await self.loopback.close()
@@ -522,6 +527,18 @@ class RunnerStreamSessionManager:
             self.consumed_offer_set.remove(expired)
         self.consumed_offers.append(offer_key)
         self.consumed_offer_set.add(offer_key)
+
+
+def _observe_detached_receiver(task: asyncio.Task[None]) -> None:
+    """Report a detached receiver failure at its final ownership boundary."""
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        _LOGGER.error(
+            "Runtime Web Runner session receiver failed",
+            extra={"error_type": type(error).__name__},
+        )
 
 
 def _hello(

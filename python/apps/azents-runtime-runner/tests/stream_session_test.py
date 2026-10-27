@@ -67,6 +67,67 @@ async def _failure_handler() -> None:
     pass
 
 
+async def test_detached_receiver_reports_stream_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    offer = _offer()
+    release = asyncio.Event()
+    observed = asyncio.Event()
+
+    async def stream(
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
+        *,
+        metadata: object = None,
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
+        del metadata
+        await anext(requests)
+        yield _accepted(offer)
+        await release.wait()
+        raise ConnectionError("synthetic disconnect")
+
+    def client_factory() -> GrpcRunnerStreamSessionClient:
+        return GrpcRunnerStreamSessionClient(
+            stream,
+            runner_auth_token="test-token",
+            channel=None,
+            outbound_resources=None,
+        )
+
+    manager = RunnerStreamSessionManager(
+        runtime_id="runtime-a",
+        runner_boot_id="runner-boot-a",
+        accepted_desired_generation=lambda: 3,
+        accepted_generation=lambda: 4,
+        loopback=RunnerWebLoopbackPool(maximum_connections=8),
+        client_factory=client_factory,
+    )
+
+    async def handler(
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+    ) -> None:
+        del envelope
+
+    assert await manager.accept_offer(offer, handler, _failure_handler)
+    assert manager.client is not None
+    receiver = manager.client.receiver_task
+    assert receiver is not None
+    receiver.add_done_callback(lambda _: observed.set())
+    release.set()
+    await observed.wait()
+    assert manager.client is None
+    assert manager.offer is None
+    assert any(
+        record.message == "Runtime Web Runner session receiver failed"
+        and record.error_type == "ConnectionError"
+        and record.exc_info is None
+        for record in caplog.records
+    )
+    assert "synthetic disconnect" not in caplog.text
+    await manager.close()
+
+
 def _unused_client_factory() -> GrpcRunnerStreamSessionClient:
     raise AssertionError("test must not create a Runner Web client")
 
