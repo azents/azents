@@ -287,15 +287,15 @@ def _wait_for_runtime_metrics(
     WebDriverWait(driver, timeout_seconds, poll_frequency=1).until(metrics_are_ready)
 
 
-def _start_runtime_and_wait_for_metrics(
+def _start_runtime(
     driver: WebDriver,
     *,
     runtime_api: AgentRuntimeV1Api,
     token: str,
     handle: str,
     agent_id: str,
-) -> None:
-    """Observe one UI admission separately within the existing readiness budget."""
+) -> float:
+    """Admit one UI activation and return the remaining 120-second budget."""
     before = runtime_api.agent_runtime_v1_get_agent_runtime(
         agent_id=agent_id, handle=handle, _headers=_headers(token)
     )
@@ -320,7 +320,9 @@ def _start_runtime_and_wait_for_metrics(
         last_state = (
             f"generation={lifecycle.desired_generation}, target={lifecycle.target}, "
             f"convergence={lifecycle.convergence}, "
-            f"availability={lifecycle.availability}"
+            f"availability={lifecycle.availability}, "
+            f"provider_resource={lifecycle.provider.resource}, "
+            f"runner_state={lifecycle.runner.state}"
         )
         return (
             lifecycle.desired_generation > prior_generation
@@ -335,7 +337,26 @@ def _start_runtime_and_wait_for_metrics(
             f"previous_generation={prior_generation}; {last_state}"
         ) from error
     remaining = deadline - time.monotonic()
-    assert remaining > 0, "Runtime Start exhausted the original metrics budget"
+    assert remaining > 0, "Runtime Start exhausted the original readiness budget"
+    return remaining
+
+
+def _start_runtime_and_wait_for_metrics(
+    driver: WebDriver,
+    *,
+    runtime_api: AgentRuntimeV1Api,
+    token: str,
+    handle: str,
+    agent_id: str,
+) -> None:
+    """Observe one admission and metrics within the original combined budget."""
+    remaining = _start_runtime(
+        driver,
+        runtime_api=runtime_api,
+        token=token,
+        handle=handle,
+        agent_id=agent_id,
+    )
     _wait_for_runtime_metrics(
         driver,
         runtime_api=runtime_api,
@@ -354,19 +375,34 @@ def _wait_for_runtime_ready(
     handle: str,
     agent_id: str,
     minimum_generation: int,
+    timeout_seconds: float,
 ) -> None:
     """Wait for one newer Runtime generation to regain full availability."""
+    last_state = "unobserved"
 
-    def runtime_is_ready(_: WebDriver) -> bool:
+    def runtime_is_ready(current: WebDriver) -> bool:
+        nonlocal last_state
+        assert current.current_window_handle, (
+            "Runtime Web browser session is unavailable"
+        )
         runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
             agent_id=agent_id,
             handle=handle,
             _headers=_headers(token),
         )
         lifecycle = runtime.lifecycle
+        if lifecycle is None:
+            last_state = "no lifecycle"
+            return False
+        last_state = (
+            f"generation={lifecycle.desired_generation}, target={lifecycle.target}, "
+            f"convergence={lifecycle.convergence}, "
+            f"availability={lifecycle.availability}, "
+            f"provider_resource={lifecycle.provider.resource}, "
+            f"runner_state={lifecycle.runner.state}"
+        )
         return (
-            lifecycle is not None
-            and lifecycle.desired_generation >= minimum_generation
+            lifecycle.desired_generation >= minimum_generation
             and lifecycle.target == "running"
             and lifecycle.convergence == "stable"
             and lifecycle.availability == "ready"
@@ -374,7 +410,13 @@ def _wait_for_runtime_ready(
             and lifecycle.runner.state == "ready"
         )
 
-    WebDriverWait(driver, 120, poll_frequency=1).until(runtime_is_ready)
+    try:
+        WebDriverWait(driver, timeout_seconds, poll_frequency=1).until(runtime_is_ready)
+    except TimeoutException as error:
+        raise AssertionError(
+            "Runtime generation did not regain full readiness; "
+            f"minimum_generation={minimum_generation}; {last_state}"
+        ) from error
 
 
 def _wait_for_runtime_stopped(
@@ -674,6 +716,7 @@ def test_runtime_free_add_and_remove_progress(
         handle=workspace.handle,
         agent_id=agent.id,
         minimum_generation=prior_generation + 1,
+        timeout_seconds=120,
     )
     sentinel_after_restart = workspace_api.chat_v1_read_agent_workspace_path(
         agent_id=agent.id,
@@ -748,7 +791,13 @@ def test_runtime_free_add_and_remove_progress(
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
     )
-    _click_button(browser_driver, "Start")
+    remaining = _start_runtime(
+        browser_driver,
+        runtime_api=runtime_api,
+        token=workspace.token,
+        handle=workspace.handle,
+        agent_id=agent.id,
+    )
     _wait_for_runtime_ready(
         browser_driver,
         runtime_api=runtime_api,
@@ -756,6 +805,7 @@ def test_runtime_free_add_and_remove_progress(
         handle=workspace.handle,
         agent_id=agent.id,
         minimum_generation=stopped_generation + 1,
+        timeout_seconds=remaining,
     )
     sentinel_after_stop_start = workspace_api.chat_v1_read_agent_workspace_path(
         agent_id=agent.id,
@@ -806,6 +856,7 @@ def test_runtime_free_add_and_remove_progress(
         handle=workspace.handle,
         agent_id=agent.id,
         minimum_generation=reset_generation + 1,
+        timeout_seconds=120,
     )
     with pytest.raises(ApiException) as reset_read_error:
         workspace_api.chat_v1_read_agent_workspace_path(

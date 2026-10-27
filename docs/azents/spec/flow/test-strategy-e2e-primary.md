@@ -63,7 +63,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-26
+last_verified_at: 2026-10-28
 spec_version: 87
 ---
 
@@ -731,6 +731,12 @@ Always-on required CI does not depend on external credentials.
   attachment bytes, vision continuation, credential failures, and text-only fallback
   assertions remain unchanged. Credential mutation and failure journeys remain serial.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
+- Runtime lifecycle Web checks observe the browser session during full-readiness
+  polling. Start and Stop-to-Start each activate once, require a newer authoritative
+  running generation, and share the original 120-second budget between admission
+  and readiness or metrics. Timeout diagnostics distinguish missing admission from
+  missing full readiness and retain bounded generation, target, convergence,
+  availability, Provider resource and Runner state without credentials.
 - Workspace Upload API E2E collects three public-API journeys against the real
   Docker Runtime Provider, Runtime Control, and HTTPS S3-compatible gateway:
   direct PUT followed by exact-byte download, destination conflict with explicit
