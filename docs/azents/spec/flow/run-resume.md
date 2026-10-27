@@ -52,8 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution/cutover_replay_operations.py
   - python/apps/azents/src/azents/repos/session_execution/cutover_replay_data.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-10-10
-spec_version: 43
+last_verified_at: 2026-10-27
+spec_version: 44
 ---
 
 # Run Resume
@@ -141,14 +141,20 @@ operation, or reservation authority.
 `SessionWakeUp(session_id)` is only a routing signal. On every ordinary recovery, the Worker claims
 the Session owner generation before loading one immutable PostgreSQL canonical snapshot through a
 non-locking Session read. Before reading mailbox state or recoverable execution work, the Worker
-requires the durable Session `run_state` to be `running`. The snapshot then validates the active
+requires the durable Session `run_state` to be `running`. The snapshot then validates the
 Session, Agent, Workspace, root tree/context, pending command, recoverable Run, and idle continuation.
-Mailbox state is not captured in this snapshot. The leased Session runner reads and consumes the
-current FIFO directly, so producer appends remain ordinary queue activity rather than invalidating
-execution authority. The snapshot has no User identity: a requester, Human sender, provider
+For an archived Session, Scheduled Task admission requires the oldest mailbox item to be a
+continuation for a started cycle with matching Workspace, Agent, and Session. Routine admission
+can also validate a matching preserved Run or idle continuation when the mailbox is empty. The
+stuck-running scan selects archived Routine work, not archived Scheduled Task work. For eligible
+archived work, the Agent may be decommissioning but must remain enabled; the same owner and
+lineage checks still apply.
+Mailbox state is not captured in this snapshot, although the oldest item participates in the
+archived-work eligibility check. The leased Session runner reads and consumes the current FIFO
+directly, so producer appends remain ordinary queue activity rather than invalidating the snapshot. The snapshot has no User identity: a requester, Human sender, provider
 principal, Agent creator, Workspace owner, viewer, approver, uploader, or fallback cannot supply
-execution authority. Any stale generation, inactive or cross-lineage Session, or drift in snapshotted
-non-mailbox work fails closed.
+execution authority. Any stale generation, ineligible Session or Agent, cross-lineage Session,
+or drift in snapshotted non-mailbox work fails closed.
 
 The coordinated Team Session cutover uses a separate bounded preflight/replay command. Candidate
 selection is PostgreSQL-only and considers pending InputBuffers, pending commands, recoverable Runs,
@@ -460,6 +466,9 @@ run to observe `check_stop()` as true.
 
 
 ## Changelog
+
+- **2026-10-27** (spec_version 44) — Clarified canonical recovery eligibility for
+  preserved started Scheduled Task and Routine work in archived Sessions.
 
 - **2026-10-10** (spec_version 43) — Removed a deleted action-execution service
   from source discovery; current repository and Worker ownership paths remain.
