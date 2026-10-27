@@ -1345,7 +1345,6 @@ class ExternalChannelActionService:
         provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> SlackControlMessageResult:
-        payload = target.request_payload
         intent = target.decode_intent()
         presentation = resolve_slack_agent_presentation(
             target,
@@ -1398,20 +1397,16 @@ class ExternalChannelActionService:
                     reply_broadcast=reply.broadcast,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_CREATE:
-                text = payload.get("text")
-                blocks = _blocks(payload.get("blocks"))
-                context = _session_navigation_context(
-                    target,
-                    web_url=self.config.web_url,
-                )
-                if not isinstance(text, str) or blocks is None or context is None:
+                progress = _decode_slack_progress(target, web_url=self.config.web_url)
+                if progress is None:
                     return _invalid_payload()
+                blocks = list(progress.blocks)
                 blocks.append(
                     _slack_progress_actions(
                         intent=intent,
                         target=target,
                         channel_id=channel_id,
-                        session_url=context.session_url,
+                        session_url=progress.context.session_url,
                         jwt_secret=self.config.auth.jwt.secret_key,
                     )
                 )
@@ -1420,31 +1415,22 @@ class ExternalChannelActionService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    text=prepend_agent_fallback(presentation, text),
+                    text=prepend_agent_fallback(presentation, progress.text),
                     blocks=prepend_agent_blocks(presentation, blocks),
                     icon_url=(None if presentation is None else presentation.icon_url),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
-                text = payload.get("text")
-                blocks = _blocks(payload.get("blocks"))
-                context = _session_navigation_context(
-                    target,
-                    web_url=self.config.web_url,
-                )
-                message_ts = _provider_message_ts(payload.get("provider_message_key"))
-                if (
-                    not isinstance(text, str)
-                    or blocks is None
-                    or context is None
-                    or message_ts is None
-                ):
+                progress = _decode_slack_progress(target, web_url=self.config.web_url)
+                message_ts = _decode_slack_progress_message_ts(target)
+                if progress is None or message_ts is None:
                     return _invalid_payload()
+                blocks = list(progress.blocks)
                 blocks.append(
                     _slack_progress_actions(
                         intent=intent,
                         target=target,
                         channel_id=channel_id,
-                        session_url=context.session_url,
+                        session_url=progress.context.session_url,
                         jwt_secret=self.config.auth.jwt.secret_key,
                     )
                 )
@@ -1453,11 +1439,11 @@ class ExternalChannelActionService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     message_ts=message_ts,
-                    text=prepend_agent_fallback(presentation, text),
+                    text=prepend_agent_fallback(presentation, progress.text),
                     blocks=prepend_agent_blocks(presentation, blocks),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-                message_ts = _provider_message_ts(payload.get("provider_message_key"))
+                message_ts = _decode_slack_progress_message_ts(target)
                 if message_ts is None:
                     return _invalid_payload()
                 return await self.slack_client.delete_message(
@@ -2146,6 +2132,31 @@ class _SlackReply:
     broadcast: bool
     files: tuple[ExternalChannelOutboundFileManifest, ...]
     blocks: tuple[dict[str, object], ...] | None
+
+
+@dataclass(frozen=True)
+class _SlackProgress:
+    """Validated progress content with opaque provider blocks."""
+
+    text: str
+    blocks: tuple[dict[str, object], ...]
+    context: _SessionNavigationContext
+
+
+def _decode_slack_progress(
+    target: ProviderTarget, *, web_url: str | None
+) -> _SlackProgress | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    blocks = _blocks(payload.get("blocks"))
+    context = _session_navigation_context(target, web_url=web_url)
+    if not isinstance(text, str) or blocks is None or context is None:
+        return None
+    return _SlackProgress(text=text, blocks=tuple(blocks), context=context)
+
+
+def _decode_slack_progress_message_ts(target: ProviderTarget) -> str | None:
+    return _provider_message_ts(target.request_payload.get("provider_message_key"))
 
 
 def _decode_slack_reply(

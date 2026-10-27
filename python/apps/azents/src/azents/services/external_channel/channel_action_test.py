@@ -74,6 +74,8 @@ from azents.services.external_channel.channel_action import (
     _decode_discord_destination,
     _decode_discord_reply,
     _decode_slack_destination,
+    _decode_slack_progress,
+    _decode_slack_progress_message_ts,
     _decode_slack_reply,
     _provider_mutation_outcome,
 )
@@ -402,6 +404,34 @@ def test_slack_reply_decodes_consumed_fields(
     if reply is not None and blocks is not None:
         assert reply.blocks is not None
         assert list(reply.blocks) == blocks
+
+
+@pytest.mark.parametrize(
+    ("text", "blocks", "valid"),
+    [
+        ("working", [{"type": "section", "extra": {"value": None}}], True),
+        (None, [], False),
+        ("working", None, False),
+        ("working", [1], False),
+    ],
+)
+def test_slack_progress_decodes_content(
+    text: object, blocks: object, valid: bool
+) -> None:
+    """Progress fields are validated without interpreting provider blocks."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    )
+    target.request_payload.update({"text": text, "blocks": blocks})
+    progress = _decode_slack_progress(target, web_url="https://azents.example")
+    assert (progress is not None) is valid
+    if progress is not None:
+        assert list(progress.blocks) == blocks
+        assert progress.context.session_url == _SESSION_URL
+    assert _decode_slack_progress_message_ts(target) == "123.456"
+    target.request_payload["provider_message_key"] = None
+    assert _decode_slack_progress_message_ts(target) is None
 
 
 def test_slack_file_reply_ignores_blocks() -> None:
