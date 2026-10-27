@@ -1,5 +1,6 @@
 """Agent Runtime control protocol foundation service."""
 
+import asyncio
 import dataclasses
 import logging
 import secrets
@@ -156,6 +157,8 @@ class RuntimeControlProtocolService:
                     runtime_id=runtime_id,
                     generation=generation,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 _LOGGER.exception(
                     "Runtime Runner revoke observer failed",

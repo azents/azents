@@ -1,5 +1,6 @@
 """Runtime control protocol service tests."""
 
+import asyncio
 import dataclasses
 from datetime import datetime, timedelta, timezone
 
@@ -50,6 +51,31 @@ from azents.testing.runtime_coordination import (
     FakeRuntimeControlProtocolService,
     publish_next_test_connection,
 )
+
+
+class _CancelledObserver:
+    async def on_runner_revoked(self, *, runtime_id: str, generation: int) -> None:
+        raise asyncio.CancelledError
+
+    async def on_runner_replaced(
+        self, *, runtime_id: str, previous_generation: int, generation: int
+    ) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_runner_revoke_propagates_observer_cancellation() -> None:
+    """Cancellation is not converted into an observer failure."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = FakeRuntimeControlProtocolService(store)
+    accepted = await service.register_runner(
+        _runner_registration(), registered_at=_now()
+    )
+    service.runner_generation_observer = _CancelledObserver()
+    with pytest.raises(asyncio.CancelledError):
+        await service.revoke_runner(
+            runtime_id="runtime-1", generation=accepted.generation
+        )
 
 
 class RecordingTtlStore(InMemoryRuntimeCoordinationStore):
