@@ -355,7 +355,12 @@ def path_matches(path: str, pattern: str) -> bool:
         return True
     if pattern.endswith("/**"):
         prefix = pattern[:-3].rstrip("/")
-        return path == prefix or path.startswith(f"{prefix}/")
+        if "*" not in prefix and "?" not in prefix:
+            return path == prefix or path.startswith(f"{prefix}/")
+        # Bracketed Next.js route directories are literal names, not character
+        # classes. Only * and ? are wildcards in recursive directory prefixes.
+        expression = re.escape(prefix).replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
+        return re.fullmatch(rf"{expression}(?:/.*)?", path) is not None
     return PurePosixPath(path).match(pattern)
 
 
