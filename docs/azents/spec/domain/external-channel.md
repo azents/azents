@@ -121,13 +121,13 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/url-preview-suppression
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
-  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{handoff_id}
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{interaction_id}
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-10-26
-spec_version: 88
+last_verified_at: 2026-10-27
+spec_version: 89
 ---
 
 # External Channel
@@ -736,6 +736,9 @@ fallback, uncertain replay or a second copy. Routine completion does not finish
 ordinary External Channel Work or add a destination selector.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 89) — Corrected the Slack management handoff
+  route's interaction identifier parameter.
 
 - **2026-10-26** (spec_version 88) — Added claim-owned first-Discord-mention
   preparation metadata, bounded recovery, attachment-count preservation, terminal

@@ -151,7 +151,7 @@ api_routes:
   - /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}
   - /runtime-profile/v1/workspaces/{handle}/default
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations
-  - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/models
+  - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-entries
   - /workspace-model-settings/v1/workspaces/{handle}
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
@@ -160,8 +160,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-23
-spec_version: 99
+last_verified_at: 2026-10-27
+spec_version: 100
 ---
 
 # Agent Domain Spec
@@ -433,7 +433,8 @@ authoritative when Redis is unavailable or restored empty.
 
 ### 1.3 Provider integration and model listing
 
-`LLMProviderIntegration` is workspace-scoped credential/config. `/models` endpoint returns normalized model candidates selectable with that integration.
+`LLMProviderIntegration` is workspace-scoped credential/config. Its
+`/catalog-entries` endpoint returns stored selectable model catalog entries.
 
 The stable `xai` provider uses generic encrypted API-key secrets with no plaintext provider config. It remains a separate integration identity from experimental `xai_oauth`. Generic integration CRUD persists fake or real keys without calling xAI for validation, omits secrets from every public response, and preserves the encrypted key when an alias or enabled-state update omits `secrets`.
 
@@ -627,10 +628,13 @@ PUT accepts Workspace default selectable model options and labels:
 ### 2.3 LLM provider integration models
 
 ```http
-GET /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/models
+GET /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-entries
 ```
 
-After verifying integration ownership and enabled state, returns normalized model candidate list. This endpoint is picker source for Agent/Workspace settings UI.
+The endpoint requires LLM integration read permission and resolves the integration
+within the Workspace. It returns paginated stored selectable entries with optional
+search and catalog status. The read does not call a provider; it can enqueue a
+stale-catalog refresh. Agent/Workspace settings use this projection for pickers.
 
 ### 2.3.1 Breaking-change upgrade guidance
 
@@ -928,6 +932,9 @@ Following contracts do not exist in current system.
 - legacy persistent subagent-Agent model inheritance
 
 ## 8. Change History
+
+- **2026-10-27** (spec_version 100) — Corrected the integration model picker
+  endpoint and its stored-catalog read semantics.
 
 - **2026-10-20** (spec_version 99) — Separated configurable Routine minimum
   action delay from tick, enforced the paired invariant, and transferred old
