@@ -16,6 +16,7 @@ from azents_runtime_provider_kubernetes import main as provider_main
 from azents_runtime_provider_kubernetes.kubernetes_http import (
     KubernetesApiRequestError,
     KubernetesHttpApi,
+    _decode_watch_status,
 )
 from azents_runtime_provider_kubernetes.provider import KubernetesRuntimeProvider
 
@@ -110,6 +111,18 @@ def _status_event(code: int | str) -> Mapping[str, object]:
             "code": code,
         },
     }
+
+
+def test_watch_status_decoder_preserves_extensions_and_nonerror_events() -> None:
+    """Decode consumed Status fields without interpreting other SDK events."""
+    event = dict(_status_event(410))
+    event["extra"] = {"future": True}
+    status = _decode_watch_status(json.dumps(event))
+    assert status is not None
+    assert status.code == 410
+    assert status.reason == "Expired"
+    assert status.message == "too old resource version"
+    assert _decode_watch_status('{"type":"ADDED","object":{"future":true}}') is None
 
 
 @pytest.mark.parametrize("code", [410, 500])
