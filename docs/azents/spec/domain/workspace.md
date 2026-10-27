@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_working_folder_setup.py
   - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_project_preset.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
