@@ -57,9 +57,13 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/run/contracts.py
+  - python/apps/azents/src/azents/engine/run/task_supervision.py
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/engine/run/model_transport.py
+  - python/apps/azents/src/azents/engine/model_factory_types.py
+  - python/apps/azents/src/azents/engine/model_factories.py
+  - python/apps/azents/src/azents/engine/provider_errors.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/run/client_tool_compatibility.py
   - python/apps/azents/src/azents/engine/run/failure.py
@@ -107,6 +111,9 @@ code_paths:
   - python/apps/azents/src/azents/core/model_operation.py
   - python/apps/azents/src/azents/core/model_capability_contract.py
   - python/apps/azents/src/azents/core/model_capability_projection.py
+  - python/apps/azents/src/azents/core/model_fact_resolution.py
+  - python/apps/azents/src/azents/core/model_provider_protocol.py
+  - python/apps/azents/src/azents/core/route_capability_constraints.py
   - python/apps/azents/src/azents/core/model_catalog_source.py
   - python/apps/azents/src/azents/core/catalog_price_rules.py
   - python/apps/azents/src/azents/core/image_generation_catalog.py
