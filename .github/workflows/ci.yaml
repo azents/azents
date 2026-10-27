@@ -1092,7 +1092,7 @@ jobs:
                 'test "$(id -u)" = 1000 &&
                  test "$(id -g)" = 1000 &&
                  /workspace/python/apps/azents-runtime-proxy/.venv/bin/mitmdump \
-                   --version | grep -F "Mitmproxy: 12.3.0"'
+                   --version | grep -F "Mitmproxy: 12.3.1"'
               ;;
             azents-runtime-engine)
               docker run --rm --entrypoint dockerd "${{ matrix.image }}" --version \
