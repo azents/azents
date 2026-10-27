@@ -24,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/core/historical_memory_output.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot.py
   - python/apps/azents/src/azents/core/historical_memory_consolidation.py
+  - python/apps/azents/src/azents/core/historical_memory_budget.py
   - python/apps/azents/src/azents/core/historical_memory_context.py
   - python/apps/azents/src/azents/core/historical_memory_publication.py
   - python/apps/azents/src/azents/core/tools.py
