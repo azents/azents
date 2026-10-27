@@ -75,7 +75,7 @@ dependencies = [
     "websockets==15.0.1",
     "discord-py==2.7.1",
     "slack-sdk==3.44.1",
-    "authlib==1.8.0",
+    "authlib==1.9.1",
     # Bounded document conversion and extraction (no OCR or macro execution)
     "markdown-it-py==4.2.0",
     "defusedxml==0.7.1",
