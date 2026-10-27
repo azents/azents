@@ -1351,33 +1351,24 @@ class ExternalChannelActionService:
             target,
             avatar_cdn_base_url=self.config.avatar_cdn_base_url,
         )
-        tenant_id = target.provider_tenant_id
-        channel_id = payload.get("channel_id")
-        thread_ts = payload.get("thread_ts")
-        conversation_scope = payload.get("conversation_scope")
-        if (
-            not isinstance(tenant_id, str)
-            or not tenant_id
-            or not isinstance(channel_id, str)
-            or (conversation_scope == "parent_channel" and thread_ts is not None)
-            or (
-                conversation_scope != "parent_channel"
-                and not isinstance(thread_ts, str)
-            )
-        ):
+        destination = _decode_slack_destination(target)
+        if destination is None:
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
                 error_kind="provider_target_invalid",
                 error_summary="Slack delivery target is incomplete.",
             )
+        tenant_id = destination.tenant_id
+        channel_id = destination.channel_id
+        thread_ts = destination.thread_ts
         match target.operation:
             case ExternalChannelDeliveryOperation.REPLY:
                 text = payload.get("text")
                 reply_broadcast = payload.get("reply_broadcast", False)
                 if not isinstance(text, str) or not isinstance(reply_broadcast, bool):
                     return _invalid_payload()
-                if reply_broadcast and conversation_scope != "thread":
+                if reply_broadcast and not destination.thread_scope:
                     return _invalid_payload()
                 files = _outbound_files(payload.get("files"))
                 if files is None:
@@ -2117,6 +2108,41 @@ def _discord_invalid_payload() -> DiscordDeliveryResult:
         provider_message_key=None,
         error_kind="provider_payload_invalid",
         error_summary="The committed Discord provider request is incomplete.",
+    )
+
+
+@dataclass(frozen=True)
+class _SlackDestination:
+    """Validated Slack target and explicit thread-scope predicate."""
+
+    tenant_id: str
+    channel_id: str
+    thread_ts: str | None
+    thread_scope: bool
+
+
+def _decode_slack_destination(target: ProviderTarget) -> _SlackDestination | None:
+    """Preserve the provider target's historical scope and null semantics."""
+    payload = target.request_payload
+    tenant = target.provider_tenant_id
+    channel = payload.get("channel_id")
+    thread = payload.get("thread_ts")
+    scope = payload.get("conversation_scope")
+    if (
+        not isinstance(tenant, str)
+        or not tenant
+        or not isinstance(channel, str)
+        or scope == "parent_channel"
+        and thread is not None
+        or scope != "parent_channel"
+        and not isinstance(thread, str)
+    ):
+        return None
+    return _SlackDestination(
+        tenant_id=tenant,
+        channel_id=channel,
+        thread_ts=thread if isinstance(thread, str) else None,
+        thread_scope=scope == "thread",
     )
 
 

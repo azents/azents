@@ -73,6 +73,7 @@ from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     _decode_discord_destination,
     _decode_discord_reply,
+    _decode_slack_destination,
     _provider_mutation_outcome,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
@@ -203,6 +204,34 @@ def _target(
         agent_avatar=None,
         request_payload=request_payload,
     )
+
+
+@pytest.mark.parametrize(
+    ("scope", "thread", "valid", "thread_scope"),
+    [
+        ("parent_channel", None, True, False),
+        ("parent_channel", "123", False, False),
+        ("thread", "123", True, True),
+        ("thread", None, False, False),
+        (None, "123", True, False),
+        ("other", "", True, False),
+        ([], "123", True, False),
+    ],
+)
+def test_slack_destination_scope(
+    scope: object, thread: object, valid: bool, thread_scope: bool
+) -> None:
+    """Preserve Slack target acceptance and explicit broadcast scope."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update({"conversation_scope": scope, "thread_ts": thread})
+    destination = _decode_slack_destination(target)
+    assert (destination is not None) is valid
+    if destination is not None:
+        assert destination.thread_scope is thread_scope
+        assert destination.thread_ts == thread
 
 
 @pytest.mark.parametrize(
