@@ -176,6 +176,115 @@ def test_load_plan_rejects_non_object_payload(tmp_path: Path) -> None:
         audit_state.load_plan(plan_path)
 
 
+def _valid_plan(mode: str) -> dict[str, object]:
+    plan: dict[str, object] = {
+        "schema_version": audit_state.SCHEMA_VERSION,
+        "bootstrap": False,
+        "change_checkpoint_before": None,
+        "generated_at": "2026-10-28T00:00:00Z",
+        "head_commit": "head",
+        "mode": mode,
+        "state_sha256": "state",
+        "plan_sha256": "seal",
+        "changed_checks": [],
+        "changed_specs": [],
+        "deleted_checks": [],
+        "deleted_specs": [],
+        "full_ranges": [],
+        "missing_code_paths": [],
+        "rotation_ranges": [],
+    }
+    if mode == "incremental":
+        plan.update(range_limit=1, rotation_days=None)
+    return plan
+
+
+@pytest.mark.parametrize("mode", ["full", "incremental"])
+def test_load_plan_roundtrips_complete_payload(tmp_path: Path, mode: str) -> None:
+    plan = _valid_plan(mode)
+    plan["changed_checks"] = [
+        {"name": "sample", "reason": "changed_files", **_range(file_path="source.py")}
+    ]
+    plan["deleted_checks"] = [{"path": "deleted.py", "specs": [], "unmapped": True}]
+    plan["missing_code_paths"] = [{"pattern": "missing/**", "spec": "example.md"}]
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+    assert audit_state.load_plan(path) == plan
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("mode", []),
+        ("schema_version", True),
+        ("bootstrap", 0),
+        ("generated_at", "not-a-date"),
+        ("generated_at", "2026-10-28T00:00:00"),
+        ("head_commit", ""),
+        ("change_checkpoint_before", []),
+        ("changed_specs", [False]),
+        ("deleted_specs", {}),
+        ("range_limit", True),
+        ("rotation_days", "30"),
+        ("changed_checks", [None]),
+        ("deleted_checks", [{"path": "a", "specs": [], "unmapped": 1}]),
+        ("missing_code_paths", [{"pattern": "a", "spec": []}]),
+        ("unexpected", True),
+    ],
+)
+def test_load_plan_rejects_malformed_fields(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    plan = _valid_plan("incremental")
+    plan[field] = value
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+    with pytest.raises(audit_state.AuditStateError):
+        audit_state.load_plan(path)
+
+
+@pytest.mark.parametrize(
+    "collection", ["changed_checks", "full_ranges", "rotation_ranges"]
+)
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("file_count", True),
+        ("file_count", -1),
+        ("file_specs", {"source.py": "not-a-list"}),
+        ("files", [None]),
+        ("name", []),
+        ("reason", ""),
+        ("scope_revision", {}),
+        ("specs", [False]),
+        ("unmapped_files", "not-a-list"),
+        ("unexpected", True),
+    ],
+)
+def test_load_plan_rejects_malformed_nested_ranges(
+    tmp_path: Path, collection: str, field: str, value: object
+) -> None:
+    item = {"name": "sample", "reason": "full_audit", **_range(file_path="source.py")}
+    item[field] = value
+    plan = _valid_plan("incremental")
+    plan[collection] = [item]
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+    with pytest.raises(audit_state.AuditStateError):
+        audit_state.load_plan(path)
+
+
+@pytest.mark.parametrize("mode", ["full", "incremental"])
+def test_load_plan_rejects_missing_required_fields(tmp_path: Path, mode: str) -> None:
+    for field in _valid_plan(mode):
+        plan = _valid_plan(mode)
+        del plan[field]
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps(plan))
+        with pytest.raises(audit_state.AuditStateError):
+            audit_state.load_plan(path)
+
+
 def test_discover_scope_rotates_only_declared_files_and_reports_missing_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -504,7 +613,7 @@ def test_completion_changes_only_selected_range(
         "checked_through_commit": "old",
         "checked_scope_revision": "current",
     }
-    state["ranges"]["legacy"] = dict(state["ranges"]["b"])
+    state["ranges"]["legacy"] = state["ranges"]["b"].copy()
     state_path, plan_path = tmp_path / "state.json", tmp_path / "plan.json"
     state_path.write_text(json.dumps(state))
     monkeypatch.setattr(audit_state, "ensure_tracked_tree_clean", lambda _root: None)
