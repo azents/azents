@@ -34,16 +34,19 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
+from testcontainers.postgres import PostgresContainer
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 from websockets.typing import Origin, Subprotocol
 
+from support.runtime_web_route_observations import wait_for_renewed_runtime_web_route
 from support.session_browser import BrowserSocket
 from support.utils import authenticate_user, unique, wait_until
 from tests.required.public.test_runtime_terminal import _TerminalWorkspace
 from tests.web.public.test_model_execution_options import _login_main_web
 from tests.web.public.test_runtime_web_gateway import (
     _create_workspace,
+    _read_runtime_web_route,
     _RuntimeApplicationCommands,
 )
 
@@ -631,6 +634,7 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
     azents_public_server_url: str,
     azents_runtime_provider_docker_container: object,
     azents_runtime_control_container: DockerContainer,
+    postgres_container: PostgresContainer,
     mock_openai_url: str,
     request: pytest.FixtureRequest,
     azents_main_web_url: str,
@@ -942,6 +946,9 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
 
     before_epoch = runtime_epoch()
     assert before_epoch is not None
+    previous_route = _read_runtime_web_route(postgres_container, before_epoch[0])
+    assert previous_route is not None
+    assert previous_route.runner_generation == before_epoch[2]
     azents_runtime_control_container.get_wrapped_container().restart(timeout=10)
 
     def rejoined() -> bool:
@@ -958,6 +965,19 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         timeout=90,
         interval=0.2,
         message="Control reconnect did not preserve the original native tab",
+    )
+    current_epoch = runtime_epoch()
+    assert current_epoch is not None
+    assert current_epoch[:2] == before_epoch[:2]
+    assert current_epoch[2] > before_epoch[2]
+    wait_for_renewed_runtime_web_route(
+        read=lambda: _read_runtime_web_route(postgres_container, before_epoch[0]),
+        previous=previous_route,
+        runner_generation=current_epoch[2],
+        clock=time.monotonic,
+        pause=time.sleep,
+        timeout_seconds=30,
+        interval_seconds=0.2,
     )
     reconnected = BrowserSocket.open(
         public_url=azents_public_server_url,
