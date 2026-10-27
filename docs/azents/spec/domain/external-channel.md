@@ -8,6 +8,7 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/external_channel_impact.py
   - python/apps/azents/src/azents/core/external_channel_limits.py
+  - python/apps/azents/src/azents/core/external_channel_labels.py
   - python/apps/azents/src/azents/core/external_channel_management.py
   - python/apps/azents/src/azents/core/external_channel_management_errors.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py

@@ -29,6 +29,8 @@ code_paths:
   - python/apps/azents/src/azents/core/toolkit_identifiers.py
   - python/apps/azents/src/azents/core/personal_toolkit.py
   - python/apps/azents/src/azents/core/personal_toolkit_runtime.py
+  - python/apps/azents/src/azents/repos/toolkit_namespace.py
+  - python/apps/azents/src/azents/repos/toolkit_namespace_data.py
   - python/apps/azents/src/azents/engine/tooling/personal_admission.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
