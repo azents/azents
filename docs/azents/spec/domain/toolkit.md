@@ -26,6 +26,8 @@ code_paths:
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/toolkit_errors.py
   - python/apps/azents/src/azents/core/toolkit_ownership.py
+  - python/apps/azents/src/azents/core/toolkit_identifiers.py
+  - python/apps/azents/src/azents/core/personal_toolkit.py
   - python/apps/azents/src/azents/core/personal_toolkit_runtime.py
   - python/apps/azents/src/azents/engine/tooling/personal_admission.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
