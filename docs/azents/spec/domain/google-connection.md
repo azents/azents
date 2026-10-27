@@ -19,6 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/google*.py
   - python/apps/azents/src/azents/engine/tools/deps.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/d1142f351e96_cut_over_google_workspace_direct_tool_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/e5bb444eed80_add_google_connection_authority.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/f512e037a843_add_google_tool_group_selections.py
   - typescript/apps/azents-web/src/shared/toolkits/google-*.ts
   - typescript/apps/azents-web/src/shared/toolkits/components/Google*.tsx
   - typescript/apps/azents-web/src/shared/toolkits/containers/useGoogle*.ts
