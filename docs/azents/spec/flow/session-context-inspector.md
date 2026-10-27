@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-10-22
-spec_version: 30
+last_verified_at: 2026-10-27
+spec_version: 31
 code_paths:
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/services/agent/**
@@ -54,7 +54,7 @@ surface; `?page=projects` redirects to that surface.
 Public chat API provides this endpoint.
 
 ```http
-GET /api/v1/chat/agents/{agent_id}/sessions/{session_id}/context?limit=300
+GET /chat/v1/agents/{agent_id}/sessions/{session_id}/context?limit=300
 ```
 
 Behavior:
@@ -213,6 +213,8 @@ navigation that restores list scroll and focus. Ordinary tools remain separate
 from the judgment observation.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 31) — Corrected the public context endpoint path.
 
 - 2026-10-19: Add isolated Routine judgment disclosure and read-only Session
   inspection without changing ordinary Context usage/prompt baselines.
