@@ -107,6 +107,49 @@ def test_path_matches_directory_glob() -> None:
     )
 
 
+def test_recursive_prefix_globs_preserve_literal_bracket_segments() -> None:
+    pattern = "web/(app)/agents/*/workspace/[handle]?/**"
+    assert audit_state.path_matches(
+        "web/(app)/agents/[agentId]/workspace/[handle]1/route.ts", pattern
+    )
+    assert audit_state.path_matches(
+        "web/(app)/agents/[agentId]/workspace/[handle]1/deep/route.ts", pattern
+    )
+    assert not audit_state.path_matches(
+        "web/(app)/agents/a/b/workspace/[handle]1/route.ts", pattern
+    )
+    assert not audit_state.path_matches(
+        "web/(app)/agents/a/workspace/h1/route.ts", pattern
+    )
+    assert audit_state.path_matches(
+        "web/(app)/w/[handle]/route.ts", "web/(app)/w/[handle]/**"
+    )
+
+
+def test_recursive_wildcard_maps_file_and_is_not_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    file_path = "typescript/apps/example/src/agents/[agentId]/download/route.ts"
+    spec_path = "docs/azents/spec/flow/example.md"
+    specs = (
+        audit_state.LivingSpec(
+            path=spec_path,
+            code_paths=("typescript/apps/example/src/agents/*/download/**",),
+        ),
+    )
+    monkeypatch.setattr(audit_state, "load_living_specs", lambda _root: specs)
+    monkeypatch.setattr(audit_state, "tracked_files", lambda _root: (file_path,))
+
+    scope = audit_state.discover_audit_scope(tmp_path)
+
+    assert scope.missing_code_paths == ()
+    assert audit_state.specs_for_path(file_path, specs) == [spec_path]
+    assert any(
+        item["file_specs"].get(file_path) == [spec_path]
+        for item in scope.ranges.values()
+    )
+
+
 def test_load_state_rejects_unknown_fields(tmp_path: Path) -> None:
     state = dict(audit_state.empty_state())
     state["unexpected"] = True

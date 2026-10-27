@@ -23,6 +23,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/services/xai_oauth/**
+  - python/apps/azents/src/azents/services/oauth_runtime_clients.py
   - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/subscription_usage/**
