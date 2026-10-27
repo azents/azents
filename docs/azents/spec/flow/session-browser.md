@@ -57,6 +57,16 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_browser/socket.py
   - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py
   - typescript/apps/azents-web/src/features/session-browser/SessionBrowserPage.tsx
+  - typescript/apps/azents-web/src/features/session-browser/input.ts
+  - typescript/apps/azents-web/src/features/session-browser/connection.ts
+  - typescript/apps/azents-web/src/features/session-browser/wire.ts
+  - typescript/apps/azents-web/src/features/session-browser/projection.ts
+  - typescript/apps/azents-web/src/features/session-browser/popup.ts
+  - typescript/apps/azents-web/src/features/session-browser/socketUrl.ts
+  - typescript/apps/azents-web/src/features/session-browser/types.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserAddressSelection.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserToolbarTouch.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserEditorViewport.ts
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useAgentChatContainer.ts
   - typescript/apps/azents-web/src/features/chat/session-panel/useSessionPanelState.ts
