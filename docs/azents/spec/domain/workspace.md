@@ -97,6 +97,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
+  - typescript/apps/azents-web/src/trpc/api-error.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/workspace-settings/**

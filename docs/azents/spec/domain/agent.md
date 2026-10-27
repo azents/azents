@@ -120,6 +120,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useLegacyAgentToolkitSection.ts
   - typescript/apps/azents-web/src/shared/toolkits/**
   - typescript/apps/azents-web/src/shared/model-options/model-selection.ts
+  - typescript/apps/azents-web/src/shared/model-options/catalog-query.ts
   - typescript/apps/azents-web/src/features/agents/terminalSettingsVisibility.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
