@@ -21,6 +21,7 @@ class RunnerDiagnosticReason(enum.StrEnum):
     WEB_PROTOCOL_FAILED = "runner_web_protocol_failed"
     WEB_RESOURCE_EXHAUSTED = "runner_web_resource_exhausted"
     WEB_LOOPBACK_FAILED = "runner_web_loopback_failed"
+    WEB_SESSION_RECEIVER_FAILED = "runner_web_session_receiver_failed"
     WEB_DEADLINE = "runner_web_deadline"
     TRANSFER_FAILED = "runner_transfer_failed"
     TRANSFER_DELIVERY_FAILED = "runner_transfer_delivery_failed"

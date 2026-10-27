@@ -19,6 +19,7 @@ from azents_runtime_control.runtime_stream_session import (
     RunnerSessionOffer,
 )
 
+from azents_runtime_runner.main import StructuredLogFormatter
 from azents_runtime_runner.stream_session import (
     RunnerStreamSessionManager,
     RunnerWebLoopbackPool,
@@ -65,6 +66,73 @@ def _accepted(
 
 async def _failure_handler() -> None:
     pass
+
+
+async def test_detached_receiver_reports_stream_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    offer = _offer()
+    release = asyncio.Event()
+    observed = asyncio.Event()
+
+    async def stream(
+        requests: AsyncIterator[
+            runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
+        *,
+        metadata: object = None,
+    ) -> AsyncIterator[runtime_stream_session_pb2.RuntimeStreamSessionEnvelope]:
+        del metadata
+        await anext(requests)
+        yield _accepted(offer)
+        await release.wait()
+        raise ConnectionError("synthetic disconnect")
+
+    def client_factory() -> GrpcRunnerStreamSessionClient:
+        return GrpcRunnerStreamSessionClient(
+            stream,
+            runner_auth_token="test-token",
+            channel=None,
+            outbound_resources=None,
+        )
+
+    manager = RunnerStreamSessionManager(
+        runtime_id="runtime-a",
+        runner_boot_id="runner-boot-a",
+        accepted_desired_generation=lambda: 3,
+        accepted_generation=lambda: 4,
+        loopback=RunnerWebLoopbackPool(maximum_connections=8),
+        client_factory=client_factory,
+    )
+
+    async def handler(
+        envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+    ) -> None:
+        del envelope
+
+    assert await manager.accept_offer(offer, handler, _failure_handler)
+    assert manager.client is not None
+    receiver = manager.client.receiver_task
+    assert receiver is not None
+    receiver.add_done_callback(lambda _: observed.set())
+    release.set()
+    await observed.wait()
+    assert manager.client is None
+    assert manager.offer is None
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Runtime Web Runner session receiver failed"
+    )
+    assert record.error_type == "ConnectionError"
+    assert any(frame["function"] == "stream" for frame in record.error_frames)
+    assert record.exc_info is not None
+    assert "synthetic disconnect" not in caplog.text
+    rendered = StructuredLogFormatter().format(record)
+    assert "synthetic disconnect" not in rendered
+    assert '"error_frames"' in rendered
+    assert "runner_web_session_receiver_failed" in rendered
+    await manager.close()
 
 
 def _unused_client_factory() -> GrpcRunnerStreamSessionClient:
