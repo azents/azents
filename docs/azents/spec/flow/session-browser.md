@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, session, toolkit, runtime]
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/f79f6654c302_add_agent_browser_enabled_setting.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/0701fb42b5ce_add_agent_browser_implementation_and_.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_configuration.py
   - python/apps/azents/src/azents/core/browser_configuration.py
   - python/apps/azents/src/azents/repos/browser_configuration.py
@@ -42,6 +44,9 @@ code_paths:
   - python/apps/azents/src/azents/resources/vfs/global/skills/browser/SKILL.md
   - python/apps/azents/src/azents/resources/vfs/global/skills/browser/scripts/encrypt.py
   - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/confidential-input.md
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/open-and-observe.md
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/actions-and-help.md
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/captures-and-files.md
   - python/apps/azents/src/azents/engine/tools/runtime_io.py
   - python/apps/azents/src/azents/runtime/control_protocol/runner_operations.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/runner_server.py
@@ -52,10 +57,21 @@ code_paths:
   - python/apps/azents/src/azents/core/runtime_browser_source_credential.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/browser_source_server.py
   - python/apps/azents/src/azents/services/runtime_browser/authority.py
+  - python/apps/azents/src/azents/services/runtime_browser/data.py
   - python/apps/azents/src/azents/services/runtime_browser/service.py
   - python/apps/azents/src/azents/services/runtime_browser/socket.py
   - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py
   - typescript/apps/azents-web/src/features/session-browser/SessionBrowserPage.tsx
+  - typescript/apps/azents-web/src/features/session-browser/input.ts
+  - typescript/apps/azents-web/src/features/session-browser/connection.ts
+  - typescript/apps/azents-web/src/features/session-browser/wire.ts
+  - typescript/apps/azents-web/src/features/session-browser/projection.ts
+  - typescript/apps/azents-web/src/features/session-browser/popup.ts
+  - typescript/apps/azents-web/src/features/session-browser/socketUrl.ts
+  - typescript/apps/azents-web/src/features/session-browser/types.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserAddressSelection.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserToolbarTouch.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserEditorViewport.ts
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useAgentChatContainer.ts
   - typescript/apps/azents-web/src/features/chat/session-panel/useSessionPanelState.ts

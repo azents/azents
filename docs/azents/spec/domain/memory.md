@@ -24,6 +24,10 @@ code_paths:
   - python/apps/azents/src/azents/core/historical_memory_output.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot.py
   - python/apps/azents/src/azents/core/historical_memory_consolidation.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/459a4285993c_create_historical_memory_sources.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/95521a5a1bbc_replace_historical_consolidation_with_.py
+  - python/apps/azents/src/azents/core/historical_memory_budget.py
+  - python/apps/azents/src/azents/core/session_execution_file.py
   - python/apps/azents/src/azents/core/historical_memory_context.py
   - python/apps/azents/src/azents/core/historical_memory_publication.py
   - python/apps/azents/src/azents/core/tools.py
@@ -34,6 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution_file.py
   - python/apps/azents/src/azents/repos/memory_execution_events.py
   - python/apps/azents/src/azents/services/session_execution_files.py
+  - python/apps/azents/src/azents/services/vfs_text.py
   - python/apps/azents/src/azents/worker/run/memory_execution.py
   - python/apps/azents/src/azents/worker/session/runner.py
   - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py

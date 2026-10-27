@@ -21,6 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chatgpt_oauth/**
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
   - python/apps/azents/src/azents/services/chatgpt_oauth/**
+  - python/apps/azents/src/azents/services/oauth_runtime_clients.py
   - python/apps/azents/src/azents/services/subscription_usage/**
   - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
