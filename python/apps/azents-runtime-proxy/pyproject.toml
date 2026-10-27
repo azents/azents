@@ -5,7 +5,7 @@ description = "Azents inspected Runtime forward proxy"
 requires-python = ">=3.14"
 dependencies = [
     "cryptography==50.0.2",
-    "mitmproxy==12.3.0",
+    "mitmproxy==12.3.1",
 ]
 
 [project.scripts]
