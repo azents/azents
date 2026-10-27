@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/routine_source_dispatch.py
   - python/apps/azents/src/azents/engine/routine_judgment*.py
   - python/apps/azents/src/azents/engine/tools/routine*.py
+  - python/apps/azents/src/azents/resources/vfs/toolkits/routine/skills/routines/SKILL.md
   - python/apps/azents/src/azents/worker/run/routine_judgment*.py
   - python/apps/azents/src/azents/worker/run/executor.py
   - python/apps/azents/src/azents/api/public/chat/v1/routine_api_test.py
