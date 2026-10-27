@@ -58,6 +58,7 @@ code_paths:
   - python/apps/azents/src/azents/core/runtime_connection_registration.py
   - python/apps/azents/src/azents/core/runtime_provider_control.py
   - python/apps/azents/src/azents/core/runtime_recreation.py
+  - python/apps/azents/src/azents/api/runtime_recreation.py
   - python/apps/azents/src/azents/repos/runtime_connection_registration_operations.py
   - python/apps/azents/src/azents/repos/runtime_runner_auth_operations.py
   - python/apps/azents/src/azents/repos/runtime_recreation_operations.py
