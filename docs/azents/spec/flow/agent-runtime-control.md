@@ -54,9 +54,12 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/core/runtime_provider_credential.py
   - python/apps/azents/src/azents/core/runtime_runner_credential.py
+  - python/apps/azents/src/azents/core/runtime_transfer_coordinator_credential.py
   - python/apps/azents/src/azents/core/runtime_connection_registration.py
   - python/apps/azents/src/azents/core/runtime_provider_control.py
   - python/apps/azents/src/azents/core/runtime_recreation.py
+  - python/apps/azents/src/azents/api/runtime_recreation.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/7a17e11b4260_preserve_runtime_recreation_history_.py
   - python/apps/azents/src/azents/repos/runtime_connection_registration_operations.py
   - python/apps/azents/src/azents/repos/runtime_runner_auth_operations.py
   - python/apps/azents/src/azents/repos/runtime_recreation_operations.py
@@ -120,7 +123,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-27
-spec_version: 108
+spec_version: 110
 ---
 
 # Agent Runtime Control
@@ -884,6 +887,12 @@ command history, verification caches, and NetworkPolicy state do not rewrite an 
 Pod to `starting`. Watch, initial-resync, and failover reports may omit reconciliation evidence and
 remain valid current-protocol lifecycle observations.
 
+The Kubernetes Provider's Pod watch validates ownership metadata before emitting
+reports and skips invalid resource events. It reconnects after Kubernetes API or
+HTTP client failures. Cancellation, Control stream failures and unexpected errors
+propagate instead of being treated as watch retries; malformed watch Status
+responses are errors, not valid lifecycle observations.
+
 After an explicit lifecycle or configuration command, Kubernetes Provider v3 may attach one
 structured aggregate `network_enforcement` reconciliation observation. `in_sync` confirms every
 mode-required resource and readiness fence; `drifted` reports bounded mismatch evidence without
@@ -1523,6 +1532,12 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 110) — Clarified Gateway and Control relay source
+  cleanup when handshake acceptance is cancelled.
+
+- **2026-10-27** (spec_version 109) — Recorded Pod watch validation and
+  error-specific reconnect boundaries.
 
 - **2026-10-11** (spec_version 105) — Recorded strict Provider command
   authentication ingress with preserved optional settings and protobuf authority.

@@ -37,7 +37,9 @@ class AgentWaitReadRepository:
         """Recover committed observation position, independent of compaction."""
         metadata = RDBEvent.payload["metadata"]
         statement = sa.select(
-            sa.func.max(metadata["shell_wait_revision"].as_integer())
+            sa.func.max(
+                sa.cast(metadata["shell_wait_revision"].as_string(), sa.BigInteger)
+            )
         ).where(
             RDBEvent.session_id == session_id,
             RDBEvent.kind == EventKind.CLIENT_TOOL_RESULT,
@@ -45,7 +47,8 @@ class AgentWaitReadRepository:
             RDBEvent.payload["name"].as_string() == "wait",
             RDBEvent.payload["status"].as_string() == "completed",
             metadata["shell_wait_runtime_id"].as_string() == runtime_id,
-            metadata["shell_wait_generation"].as_integer() == runner_generation,
+            sa.cast(metadata["shell_wait_generation"].as_string(), sa.BigInteger)
+            == runner_generation,
         )
         async with self.session_manager() as session:
             revision = await session.read_session.scalar(statement)

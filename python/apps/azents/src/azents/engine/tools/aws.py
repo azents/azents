@@ -715,6 +715,8 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
 
         try:
             credentials = await credential_provider.get_credentials()
+        except asyncio.CancelledError:
+            raise
         except (BotoCoreError, ClientError) as exc:
             return TestConnectionResult(
                 success=False,
@@ -745,6 +747,8 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
                 proxy_url=proxy_url,
                 auth=sigv4_auth,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             net_msg = extract_network_error(exc)
             if net_msg is None:

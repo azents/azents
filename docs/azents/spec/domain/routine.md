@@ -6,6 +6,11 @@ spec_type: domain
 domain: routine
 code_paths:
   - python/apps/azents/src/azents/core/routine*.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/e67a51c3c652_separate_routine_tick_and_minimum_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/08a588456917_add_session_routine_foundation.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/f18bc3d0bf09_add_agent_routine_check_interval.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/854782c43687_add_routine_judgment_observation_event.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/00a4743d1962_add_routine_execution_fifo_event_kinds.py
   - python/apps/azents/src/azents/core/model_operation.py
   - python/apps/azents/src/azents/rdb/models/routine*.py
   - python/apps/azents/src/azents/repos/routine/**
@@ -14,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/routine_source_dispatch.py
   - python/apps/azents/src/azents/engine/routine_judgment*.py
   - python/apps/azents/src/azents/engine/tools/routine*.py
+  - python/apps/azents/src/azents/resources/vfs/toolkits/routine/skills/routines/SKILL.md
   - python/apps/azents/src/azents/worker/run/routine_judgment*.py
   - python/apps/azents/src/azents/worker/run/executor.py
   - python/apps/azents/src/azents/api/public/chat/v1/routine_api_test.py
