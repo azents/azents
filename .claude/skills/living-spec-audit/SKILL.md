@@ -35,22 +35,22 @@ Do not complete a full plan unless every planned range was inspected.
 
 Use incremental mode for recurring audits. It checks:
 
-1. every current implementation file changed since the last successful change
-   checkpoint;
-2. deleted implementation paths and changed or deleted Living Specs;
-3. every current `code_paths` entry that matches no tracked file; and
-4. enough bounded legacy ranges to target one complete rotation every 14 days.
+1. one existing bounded range, selected by its range checkpoint, comparing its
+   mapped Living Specs with current reachable implementation; and
+2. independently, commits from the 24 hours ending at plan creation, checking
+   changed or deleted implementation and Living Specs for drift.
+
+Inspect missing `code_paths` in the selected scope and classify relevant unmapped
+changes. The old global change checkpoint does not extend the 24-hour window.
 
 ```bash
 python .agents/skills/living-spec-audit/scripts/audit_state.py plan \
   --mode incremental \
-  --rotation-days 14 \
   --output /tmp/living-spec-audit-plan.json
 ```
 
-Incremental mode may bootstrap from an empty checkpoint. The first completed plan
-establishes the change checkpoint while uninspected ranges remain visibly
-unchecked. Never invent or manually advance a starting commit.
+An empty range checkpoint means the range has not been audited. Do not mark
+uninspected ranges complete or advance the old global change checkpoint.
 
 Inspect rotation health with:
 
@@ -68,19 +68,20 @@ The plan is disposable execution data and must remain outside the repository.
 - `deleted_checks` identifies removed implementation paths and their mapped specs.
 - `missing_code_paths` identifies current patterns that match no tracked file.
 - `full_ranges` contains every range for full mode.
-- `rotation_ranges` contains bounded legacy work for incremental mode.
+- `rotation_ranges` contains exactly one selected range for incremental mode.
 - Each range contains exact files, matched specs, per-file spec mappings, and
   unmapped implementation files.
 
 New implementation files receive a deterministic path-based range automatically.
 Unmapped files are findings to classify, not files to silently discard.
 
-For every planned range or changed check:
+For the selected range and the recent changed checks:
 
 1. Read `docs/azents/AGENTS.md` and the applicable path instructions.
 2. Run mechanical checks first: missing paths, moved symbols, routes, models,
    configuration keys, state values, and deleted behavior.
-3. Inspect reachable production call paths. Use tests as evidence, not as authority.
+3. Inspect reachable production call paths. Do not run tests by default; use the
+   minimum targeted test only when needed to resolve a specific uncertainty.
 4. Compare current behavior, APIs, data models, permissions, state transitions,
    errors, recovery, and user-visible behavior with the matched specs.
 5. Search adjacent callers and tests only as needed to establish actual behavior.
@@ -159,7 +160,8 @@ rm /tmp/living-spec-audit-plan.json
 
 The completion command rejects a dirty audit checkout, a modified or incomplete
 plan, a changed HEAD, a changed state file, changed Living Spec scope, or changed
-required work.
+required work. It verifies plan integrity, not whether the inspection actually
+occurred; the auditor remains responsible for completing the planned review.
 
 After completion writes the state file, submit that checkpoint through the normal
 pull request workflow. Include it in the spec correction PR or use a state-only PR
@@ -168,6 +170,6 @@ when no documentation correction exists.
 ## State boundaries
 
 `.claude/living-spec-audit-state.json` is a bounded checkpoint snapshot, not a run
-log. It stores only the latest changed-file checkpoint and each current range's
-latest checked commit, time, and scope revision. It reconciles new or removed ranges
-and replaces checkpoints in place.
+log. It retains the historical change checkpoint and each range's latest checked
+commit, time, and scope revision. Incremental completion updates only the selected
+range; it does not claim the older unchecked changes were reviewed.
