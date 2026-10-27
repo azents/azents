@@ -111,6 +111,9 @@ code_paths:
   - python/apps/azents/src/azents/core/model_operation.py
   - python/apps/azents/src/azents/core/model_capability_contract.py
   - python/apps/azents/src/azents/core/model_capability_projection.py
+  - python/apps/azents/src/azents/core/model_fact_resolution.py
+  - python/apps/azents/src/azents/core/model_provider_protocol.py
+  - python/apps/azents/src/azents/core/route_capability_constraints.py
   - python/apps/azents/src/azents/core/model_catalog_source.py
   - python/apps/azents/src/azents/core/catalog_price_rules.py
   - python/apps/azents/src/azents/core/image_generation_catalog.py
