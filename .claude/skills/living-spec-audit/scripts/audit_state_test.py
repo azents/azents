@@ -529,6 +529,35 @@ def test_completion_changes_only_selected_range(
     assert result["ranges"]["a"]["checked_through_commit"] == "head"
 
 
+def test_empty_scope_plan_can_complete_without_marking_ranges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path, plan_path = tmp_path / "state.json", tmp_path / "plan.json"
+    state = audit_state.empty_state()
+    state_path.write_text(json.dumps(state))
+    monkeypatch.setattr(audit_state, "ensure_tracked_tree_clean", lambda _root: None)
+    monkeypatch.setattr(audit_state, "discover_audit_scope", lambda _root: _scope({}))
+    monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+    monkeypatch.setattr(
+        audit_state,
+        "changed_paths_in_day",
+        lambda *_args: audit_state.ChangedPaths(current=(), deleted=()),
+    )
+    plan = audit_state.build_plan(
+        tmp_path,
+        state_path,
+        mode="incremental",
+        range_limit=None,
+        rotation_days=None,
+    )
+    assert plan["rotation_ranges"] == []
+    assert plan["range_limit"] == 0
+    plan_path.write_text(json.dumps(plan))
+    audit_state.complete_plan(tmp_path, state_path, plan_path)
+    assert json.loads(state_path.read_text()) == state
+
+
 def test_status_reports_rotation_health() -> None:
     ranges = {
         "never": _range(file_path="python/apps/example/src/never.py"),

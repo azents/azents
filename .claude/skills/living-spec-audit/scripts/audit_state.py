@@ -738,7 +738,7 @@ def resolve_rotation_limit(
     """Select one existing range without expanding work for a rotation target."""
     if (
         isinstance(range_limit, bool)
-        or range_limit not in (None, 1)
+        or range_limit not in ((None, 0, 1) if range_count == 0 else (None, 1))
         or rotation_days is not None
     ):
         raise AuditStateError("Incremental audits select exactly one range")
