@@ -6,6 +6,7 @@ spec_type: domain
 domain: routine
 code_paths:
   - python/apps/azents/src/azents/core/routine*.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/e67a51c3c652_separate_routine_tick_and_minimum_.py
   - python/apps/azents/src/azents/core/model_operation.py
   - python/apps/azents/src/azents/rdb/models/routine*.py
   - python/apps/azents/src/azents/repos/routine/**

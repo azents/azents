@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, session, toolkit, runtime]
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/f79f6654c302_add_agent_browser_enabled_setting.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/0701fb42b5ce_add_agent_browser_implementation_and_.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_configuration.py
   - python/apps/azents/src/azents/core/browser_configuration.py
   - python/apps/azents/src/azents/repos/browser_configuration.py
