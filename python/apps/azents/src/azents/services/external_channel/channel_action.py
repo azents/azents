@@ -1364,24 +1364,18 @@ class ExternalChannelActionService:
         thread_ts = destination.thread_ts
         match target.operation:
             case ExternalChannelDeliveryOperation.REPLY:
-                text = payload.get("text")
-                reply_broadcast = payload.get("reply_broadcast", False)
-                if not isinstance(text, str) or not isinstance(reply_broadcast, bool):
+                reply = _decode_slack_reply(target, destination)
+                if reply is None:
                     return _invalid_payload()
-                if reply_broadcast and not destination.thread_scope:
-                    return _invalid_payload()
-                files = _outbound_files(payload.get("files"))
-                if files is None:
-                    return _invalid_payload()
-                if files:
+                if reply.files:
                     del file_storage
                     return await self._deliver_slack_files(
                         bot_token=bot_token,
                         tenant_id=tenant_id,
                         channel_id=channel_id,
                         thread_ts=thread_ts,
-                        markdown_text=prepend_agent_markdown(presentation, text),
-                        files=files,
+                        markdown_text=prepend_agent_markdown(presentation, reply.text),
+                        files=reply.files,
                         operation_key=operation_key,
                         agent_id=agent_id,
                         session_id=session_id,
@@ -1389,22 +1383,19 @@ class ExternalChannelActionService:
                         provider_delivery_service=provider_delivery_service,
                         resolve_runtime_target=resolve_runtime_target,
                     )
-                navigation_blocks = _blocks(payload.get("blocks"))
-                if payload.get("blocks") is not None and navigation_blocks is None:
-                    return _invalid_payload()
                 return await self.slack_client.post_message(
                     blocks=(
                         None
-                        if navigation_blocks is None
-                        else prepend_agent_blocks(presentation, navigation_blocks)
+                        if reply.blocks is None
+                        else prepend_agent_blocks(presentation, list(reply.blocks))
                     ),
                     bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    markdown_text=prepend_agent_markdown(presentation, text),
+                    markdown_text=prepend_agent_markdown(presentation, reply.text),
                     icon_url=(None if presentation is None else presentation.icon_url),
-                    reply_broadcast=reply_broadcast,
+                    reply_broadcast=reply.broadcast,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_CREATE:
                 text = payload.get("text")
@@ -2143,6 +2134,46 @@ def _decode_slack_destination(target: ProviderTarget) -> _SlackDestination | Non
         channel_id=channel,
         thread_ts=thread if isinstance(thread, str) else None,
         thread_scope=scope == "thread",
+    )
+
+
+@dataclass(frozen=True)
+class _SlackReply:
+    """Validated reply fields; provider blocks remain opaque egress data."""
+
+    destination: _SlackDestination
+    text: str
+    broadcast: bool
+    files: tuple[ExternalChannelOutboundFileManifest, ...]
+    blocks: tuple[dict[str, object], ...] | None
+
+
+def _decode_slack_reply(
+    target: ProviderTarget, destination: _SlackDestination
+) -> _SlackReply | None:
+    """Validate consumed reply fields, retaining file-reply block behavior."""
+    payload = target.request_payload
+    text = payload.get("text")
+    broadcast = payload.get("reply_broadcast", False)
+    files = _outbound_files(payload.get("files"))
+    if (
+        not isinstance(text, str)
+        or not isinstance(broadcast, bool)
+        or broadcast
+        and not destination.thread_scope
+        or files is None
+    ):
+        return None
+    raw_blocks = payload.get("blocks")
+    blocks = None if files else _blocks(raw_blocks)
+    if not files and raw_blocks is not None and blocks is None:
+        return None
+    return _SlackReply(
+        destination=destination,
+        text=text,
+        broadcast=broadcast,
+        files=files,
+        blocks=None if blocks is None else tuple(blocks),
     )
 
 

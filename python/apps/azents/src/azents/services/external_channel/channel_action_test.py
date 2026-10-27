@@ -74,6 +74,7 @@ from azents.services.external_channel.channel_action import (
     _decode_discord_destination,
     _decode_discord_reply,
     _decode_slack_destination,
+    _decode_slack_reply,
     _provider_mutation_outcome,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
@@ -370,6 +371,66 @@ def test_discord_reply_components_preserve_wire_values(
     assert [row.to_wire() for row in reply.components] == rows
     assert type(reply.components[0].row_type) is type(row_type)
     assert type(reply.components[0].buttons[0].button_type) is type(button_type)
+
+
+@pytest.mark.parametrize(
+    ("text", "broadcast", "blocks", "valid"),
+    [
+        ("hello", False, None, True),
+        ("hello", False, [{"type": "section", "text": {"text": "hi"}}], True),
+        ("hello", None, None, False),
+        (None, False, None, False),
+        ("hello", True, None, False),
+        ("hello", False, ["invalid"], False),
+    ],
+)
+def test_slack_reply_decodes_consumed_fields(
+    text: object, broadcast: object, blocks: object, valid: bool
+) -> None:
+    """Validate reply fields without changing opaque provider block contents."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {"text": text, "reply_broadcast": broadcast, "blocks": blocks}
+    )
+    destination = _decode_slack_destination(target)
+    assert destination is not None
+    reply = _decode_slack_reply(target, destination)
+    assert (reply is not None) is valid
+    if reply is not None and blocks is not None:
+        assert reply.blocks is not None
+        assert list(reply.blocks) == blocks
+
+
+def test_slack_file_reply_ignores_blocks() -> None:
+    """File delivery retains its existing behavior of not consuming blocks."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "text": "hello",
+            "blocks": ["invalid"],
+            "files": [
+                {
+                    "source": "exchange",
+                    "path": "exchange://file-1",
+                    "filename": "report.txt",
+                    "media_type": "text/plain",
+                    "expected_size": 12,
+                }
+            ],
+        }
+    )
+    destination = _decode_slack_destination(target)
+    assert destination is not None
+    reply = _decode_slack_reply(target, destination)
+    assert reply is not None
+    assert len(reply.files) == 1
+    assert reply.blocks is None
 
 
 def _effect(
