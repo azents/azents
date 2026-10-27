@@ -85,6 +85,26 @@ def source_request(now: datetime = NOW) -> BrowserSourceCredentialRequest:
     )
 
 
+@pytest.mark.parametrize("field", range(5))
+def test_browser_source_rejects_each_incompatible_profile_field(field: int) -> None:
+    """Every fixed profile dimension is independently enforced."""
+    request = source_request()
+    profile = request.hello.hello
+    match field:
+        case 0:
+            profile.maximum_data_frame_bytes += 1
+        case 1:
+            profile.request_stream_window_bytes += 1
+        case 2:
+            profile.response_stream_window_bytes += 1
+        case 3:
+            profile.request_session_window_bytes += 1
+        case 4:
+            profile.response_session_window_bytes += 1
+    with pytest.raises(ValueError, match="profile is incompatible"):
+        request.validate(NOW)
+
+
 def test_browser_proof_roundtrip_does_not_make_live_lifetime_proof_lifetime() -> None:
     request = source_request()
     verifier = RuntimeBrowserSourceCredentialVerifier(KEY, clock=lambda: NOW)
