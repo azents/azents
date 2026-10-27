@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_working_folder_setup.py
   - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_project_preset.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
@@ -55,6 +56,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/agent_automatic_project_operations.py
   - python/apps/azents/src/azents/repos/project_browser_manifest_read.py
+  - python/apps/azents/src/azents/services/project_browser_manifest.py
   - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_setting.py
@@ -91,10 +93,16 @@ code_paths:
   - python/apps/azents/src/azents/api/public/terminal/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
+  - typescript/apps/azents-web/src/features/workspaces/WorkspacesPage.tsx
+  - typescript/apps/azents-web/src/features/workspaces/containers/useWorkspaceCreateFormInnerController.tsx
+  - typescript/apps/azents-web/src/features/workspaces/components/WorkspaceCreateForm.tsx
+  - typescript/apps/azents-web/src/features/workspace-join/containers/useWorkspaceJoinViewController.ts
+  - typescript/apps/azents-web/src/features/workspace-join/components/WorkspaceJoinView.tsx
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
   - typescript/apps/azents-web/src/shared/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
+  - typescript/apps/azents-web/src/trpc/api-error.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/workspace-settings/**
@@ -153,7 +161,6 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
-  - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
@@ -162,8 +169,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-26
-spec_version: 98
+last_verified_at: 2026-10-27
+spec_version: 99
 ---
 
 # Workspace & Membership
@@ -1025,8 +1032,8 @@ stateDiagram-v2
 | `join_request_v1_approve_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/approve` | `[unique-membership]` |
 | `join_request_v1_reject_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/reject` | — |
 | `join_request_v1_mute_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/mute` | — |
-| `chat_v1_create_team_agent_session` | POST `/chat/v1/agents/{agent_id}/sessions` | `existing_projects` or `git_worktree` workspace mode |
-| `chat_v1_create_team_agent_session_message` | POST `/chat/v1/agents/{agent_id}/sessions/messages` | `existing_projects` or `git_worktree` workspace mode |
+| `chat_v1_create_team_agent_session` | POST `/chat/v1/agents/{agent_id}/sessions` | `existing_project_paths` and ordered `setup_actions` |
+| `chat_v1_create_team_agent_session_message` | POST `/chat/v1/agents/{agent_id}/sessions/messages` | `existing_project_paths` and ordered `setup_actions` |
 | `chat_v1_list_agent_project_presets` | GET `/chat/v1/agents/{agent_id}/project-presets` | workspace membership |
 | `chat_v1_get_agent_session_project_defaults` | GET `/chat/v1/agents/{agent_id}/session-project-defaults` | workspace membership |
 | `chat_v1_preview_agent_git_refs` | GET `/chat/v1/agents/{agent_id}/git-refs` | Git source Project path and Runtime Runner availability |
@@ -1090,6 +1097,9 @@ stateDiagram-v2
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 99) — Removed an obsolete internal Agent home
+  Projects route and corrected Session creation request fields in the API inventory.
 
 - **2026-10-26 (spec_version=98)** — Shared missing Session-folder setup admission
   between human and External Channel input, including next-message repair and
