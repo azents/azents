@@ -93,6 +93,11 @@ code_paths:
   - python/apps/azents/src/azents/api/public/terminal/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
+  - typescript/apps/azents-web/src/features/workspaces/WorkspacesPage.tsx
+  - typescript/apps/azents-web/src/features/workspaces/containers/useWorkspaceCreateFormInnerController.tsx
+  - typescript/apps/azents-web/src/features/workspaces/components/WorkspaceCreateForm.tsx
+  - typescript/apps/azents-web/src/features/workspace-join/containers/useWorkspaceJoinViewController.ts
+  - typescript/apps/azents-web/src/features/workspace-join/components/WorkspaceJoinView.tsx
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
   - typescript/apps/azents-web/src/shared/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
