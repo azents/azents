@@ -1032,8 +1032,8 @@ stateDiagram-v2
 | `join_request_v1_approve_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/approve` | `[unique-membership]` |
 | `join_request_v1_reject_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/reject` | — |
 | `join_request_v1_mute_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/mute` | — |
-| `chat_v1_create_team_agent_session` | POST `/chat/v1/agents/{agent_id}/sessions` | `existing_projects` or `git_worktree` workspace mode |
-| `chat_v1_create_team_agent_session_message` | POST `/chat/v1/agents/{agent_id}/sessions/messages` | `existing_projects` or `git_worktree` workspace mode |
+| `chat_v1_create_team_agent_session` | POST `/chat/v1/agents/{agent_id}/sessions` | `existing_project_paths` and ordered `setup_actions` |
+| `chat_v1_create_team_agent_session_message` | POST `/chat/v1/agents/{agent_id}/sessions/messages` | `existing_project_paths` and ordered `setup_actions` |
 | `chat_v1_list_agent_project_presets` | GET `/chat/v1/agents/{agent_id}/project-presets` | workspace membership |
 | `chat_v1_get_agent_session_project_defaults` | GET `/chat/v1/agents/{agent_id}/session-project-defaults` | workspace membership |
 | `chat_v1_preview_agent_git_refs` | GET `/chat/v1/agents/{agent_id}/git-refs` | Git source Project path and Runtime Runner availability |
@@ -1099,7 +1099,7 @@ stateDiagram-v2
 ## Changelog
 
 - **2026-10-27** (spec_version 99) — Removed an obsolete internal Agent home
-  Projects route from the API inventory.
+  Projects route and corrected Session creation request fields in the API inventory.
 
 - **2026-10-26 (spec_version=98)** — Shared missing Session-folder setup admission
   between human and External Channel input, including next-message repair and
