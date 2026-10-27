@@ -19,6 +19,7 @@ from azents_runtime_control.runtime_stream_session import (
     RunnerSessionOffer,
 )
 
+from azents_runtime_runner.main import StructuredLogFormatter
 from azents_runtime_runner.stream_session import (
     RunnerStreamSessionManager,
     RunnerWebLoopbackPool,
@@ -118,13 +119,19 @@ async def test_detached_receiver_reports_stream_failure(
     await observed.wait()
     assert manager.client is None
     assert manager.offer is None
-    assert any(
-        record.message == "Runtime Web Runner session receiver failed"
-        and record.error_type == "ConnectionError"
-        and record.exc_info is None
+    record = next(
+        record
         for record in caplog.records
+        if record.message == "Runtime Web Runner session receiver failed"
     )
+    assert record.error_type == "ConnectionError"
+    assert any(frame["function"] == "stream" for frame in record.error_frames)
+    assert record.exc_info is not None
     assert "synthetic disconnect" not in caplog.text
+    rendered = StructuredLogFormatter().format(record)
+    assert "synthetic disconnect" not in rendered
+    assert '"error_frames"' in rendered
+    assert "runner_web_session_receiver_failed" in rendered
     await manager.close()
 
 

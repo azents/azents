@@ -34,6 +34,11 @@ from wsproto.events import (
 from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
+from azents_runtime_runner.diagnostics import (
+    RunnerDiagnosticReason,
+    runner_exception_diagnostic,
+)
+
 _LOGGER = logging.getLogger(__name__)
 _WEBSOCKET_HANDSHAKE_HEADERS = frozenset(
     {
@@ -535,9 +540,13 @@ def _observe_detached_receiver(task: asyncio.Task[None]) -> None:
         return
     error = task.exception()
     if error is not None:
+        diagnostic = runner_exception_diagnostic(
+            error, RunnerDiagnosticReason.WEB_SESSION_RECEIVER_FAILED
+        )
         _LOGGER.error(
             "Runtime Web Runner session receiver failed",
-            extra={"error_type": type(error).__name__},
+            exc_info=diagnostic.exc_info,
+            extra=diagnostic.log_fields(),
         )
 
 
