@@ -855,11 +855,15 @@ class ExternalChannelActionService:
         intent = target.decode_intent()
         reply = None
         if target.operation is ExternalChannelDeliveryOperation.REPLY:
-            reply = _decode_discord_reply(payload)
+            reply = _decode_discord_reply(target)
             if reply is None:
                 return _discord_invalid_payload()
         configuration = target.provider_configuration
-        destination = _decode_discord_destination(target)
+        destination = (
+            reply.destination
+            if reply is not None
+            else _decode_discord_destination(target)
+        )
         if destination is None or configuration is None:
             return _discord_invalid_payload()
         guild_id = destination.guild_id
@@ -1092,7 +1096,11 @@ class ExternalChannelActionService:
                 ):
                     return _discord_invalid_payload()
                 components = (
-                    reply.components
+                    (
+                        [row.to_wire() for row in reply.components]
+                        if reply.components is not None
+                        else None
+                    )
                     if reply is not None
                     else _discord_components(payload.get("components"))
                 )
@@ -1103,7 +1111,11 @@ class ExternalChannelActionService:
                 ):
                     return _discord_invalid_payload()
                 embeds = (
-                    reply.embeds
+                    (
+                        [embed.to_wire() for embed in reply.embeds]
+                        if reply.embeds is not None
+                        else None
+                    )
                     if reply is not None
                     else _discord_embeds(payload.get("embeds"))
                 )
@@ -2158,29 +2170,201 @@ def _decode_discord_destination(target: ProviderTarget) -> _DiscordDestination |
 
 
 @dataclass(frozen=True)
+class _DiscordReplyButton:
+    """Validated button retaining its exact provider-wire numeric values."""
+
+    button_type: int | float
+    style: int
+    label: str
+    destination_key: str
+    destination: str
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the validated button to the Discord SDK shape."""
+        return {
+            "type": self.button_type,
+            "style": self.style,
+            "label": self.label,
+            self.destination_key: self.destination,
+        }
+
+
+@dataclass(frozen=True)
+class _DiscordReplyRow:
+    """One validated row of Discord buttons."""
+
+    row_type: int | float
+    buttons: tuple[_DiscordReplyButton, ...]
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the validated row at the provider boundary."""
+        return {
+            "type": self.row_type,
+            "components": [button.to_wire() for button in self.buttons],
+        }
+
+
+def _decode_discord_reply_rows(value: object) -> tuple[_DiscordReplyRow, ...] | None:
+    """Validate and type the supported reply component subset."""
+    rows = _discord_components(value)
+    if rows is None:
+        return None
+    result: list[_DiscordReplyRow] = []
+    for row in rows:
+        row_type = row["type"]
+        buttons = row["components"]
+        if not isinstance(row_type, int | float) or not isinstance(buttons, list):
+            return None
+        typed_buttons: list[_DiscordReplyButton] = []
+        for button in buttons:
+            if not is_external_channel_projection(button):
+                return None
+            button_type = button.get("type")
+            style = button.get("style")
+            label = button.get("label")
+            key = "url" if style == 5 else "custom_id"
+            destination = button.get(key)
+            if (
+                not isinstance(button_type, int | float)
+                or not isinstance(style, int)
+                or not isinstance(label, str)
+                or not isinstance(destination, str)
+            ):
+                return None
+            typed_buttons.append(
+                _DiscordReplyButton(button_type, style, label, key, destination)
+            )
+        result.append(_DiscordReplyRow(row_type, tuple(typed_buttons)))
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class _DiscordReplyEmbedField:
+    """Validated embed field preserving whether inline was present."""
+
+    name: str
+    value: str
+    inline: bool | None
+    inline_present: bool
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the field without collapsing omitted and null values."""
+        result: dict[str, object] = {"name": self.name, "value": self.value}
+        if self.inline_present:
+            result["inline"] = self.inline
+        return result
+
+
+@dataclass(frozen=True)
+class _DiscordReplyEmbed:
+    """Validated embed and optional-key presence for lossless SDK lowering."""
+
+    color: int
+    title: str | None
+    description: str | None
+    fields: tuple[_DiscordReplyEmbedField, ...] | None
+    present: frozenset[str]
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the embed preserving explicit nulls."""
+        result: dict[str, object] = {"color": self.color}
+        if "title" in self.present:
+            result["title"] = self.title
+        if "description" in self.present:
+            result["description"] = self.description
+        if "fields" in self.present:
+            result["fields"] = (
+                None
+                if self.fields is None
+                else [field.to_wire() for field in self.fields]
+            )
+        return result
+
+
+def _decode_discord_reply_embeds(
+    value: object,
+) -> tuple[_DiscordReplyEmbed, ...] | None:
+    """Validate and type embeds while retaining their original wire shape."""
+    embeds = _discord_embeds(value)
+    if embeds is None:
+        return None
+    result: list[_DiscordReplyEmbed] = []
+    for embed in embeds:
+        color, title, description = (
+            embed.get("color"),
+            embed.get("title"),
+            embed.get("description"),
+        )
+        raw_fields = embed.get("fields")
+        if (
+            not isinstance(color, int)
+            or title is not None
+            and not isinstance(title, str)
+            or description is not None
+            and not isinstance(description, str)
+            or raw_fields is not None
+            and not isinstance(raw_fields, list)
+        ):
+            return None
+        fields: list[_DiscordReplyEmbedField] = []
+        for field in raw_fields or []:
+            if not is_external_channel_projection(field):
+                return None
+            name, field_value, inline = (
+                field.get("name"),
+                field.get("value"),
+                field.get("inline"),
+            )
+            if (
+                not isinstance(name, str)
+                or not isinstance(field_value, str)
+                or inline is not None
+                and not isinstance(inline, bool)
+            ):
+                return None
+            fields.append(
+                _DiscordReplyEmbedField(name, field_value, inline, "inline" in field)
+            )
+        result.append(
+            _DiscordReplyEmbed(
+                color,
+                title,
+                description,
+                None if raw_fields is None else tuple(fields),
+                frozenset(embed),
+            )
+        )
+    return tuple(result)
+
+
+@dataclass(frozen=True)
 class _DiscordReplyPayload:
     """Validated fields consumed by a Discord reply operation."""
 
+    destination: _DiscordDestination
     text: str
     forward_to_parent: bool
     parent_channel_id: str | None
     files: tuple[ExternalChannelOutboundFileManifest, ...]
-    components: list[dict[str, object]] | None
-    embeds: list[dict[str, object]] | None
+    components: tuple[_DiscordReplyRow, ...] | None
+    embeds: tuple[_DiscordReplyEmbed, ...] | None
 
 
-def _decode_discord_reply(payload: dict[str, object]) -> _DiscordReplyPayload | None:
-    """Validate reply fields before any provider mutation."""
+def _decode_discord_reply(target: ProviderTarget) -> _DiscordReplyPayload | None:
+    """Validate reply destination and content before any provider mutation."""
+    payload = target.request_payload
+    destination = _decode_discord_destination(target)
     text = payload.get("text")
     forward = payload.get("forward_to_parent", False)
     parent = payload.get("parent_channel_id")
     raw_components = payload.get("components")
     raw_embeds = payload.get("embeds")
     files = _outbound_files(payload.get("files"))
-    components = _discord_components(raw_components)
-    embeds = _discord_embeds(raw_embeds)
+    components = _decode_discord_reply_rows(raw_components)
+    embeds = _decode_discord_reply_embeds(raw_embeds)
     if (
-        not isinstance(text, str)
+        destination is None
+        or not isinstance(text, str)
         or not isinstance(forward, bool)
         or forward
         and (not isinstance(parent, str) or not parent.isdigit())
@@ -2194,6 +2378,7 @@ def _decode_discord_reply(payload: dict[str, object]) -> _DiscordReplyPayload | 
     ):
         return None
     return _DiscordReplyPayload(
+        destination=destination,
         text=text,
         forward_to_parent=forward,
         parent_channel_id=parent if isinstance(parent, str) else None,

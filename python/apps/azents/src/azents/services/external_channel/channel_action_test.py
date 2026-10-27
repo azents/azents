@@ -72,6 +72,7 @@ from azents.repos.session_execution import (
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     _decode_discord_destination,
+    _decode_discord_reply,
     _provider_mutation_outcome,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
@@ -274,6 +275,72 @@ def test_discord_destination_rejects_configuration_mismatch() -> None:
         ),
     )
     assert _decode_discord_destination(target) is None
+
+
+@pytest.mark.parametrize(
+    "embed",
+    [
+        {"title": "title", "color": 123},
+        {"title": "title", "description": None, "fields": None, "color": 123},
+        {
+            "description": "body",
+            "color": 123,
+            "fields": [
+                {"name": "one", "value": "1"},
+                {"name": "two", "value": "2", "inline": None},
+                {"name": "three", "value": "3", "inline": False},
+            ],
+        },
+    ],
+)
+def test_discord_reply_embed_preserves_wire_values(embed: dict[str, object]) -> None:
+    """Do not collapse absent or explicitly null nested provider fields."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload["embeds"] = [embed]
+    reply = _decode_discord_reply(target)
+    assert reply is not None
+    assert reply.embeds is not None
+    assert [item.to_wire() for item in reply.embeds] == [embed]
+
+
+@pytest.mark.parametrize(("row_type", "button_type"), [(1, 2), (1.0, 2.0)])
+def test_discord_reply_components_preserve_wire_values(
+    row_type: int | float, button_type: int | float
+) -> None:
+    """Lower supported link and custom-id buttons without changing wire values."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    rows = [
+        {
+            "type": row_type,
+            "components": [
+                {
+                    "type": button_type,
+                    "style": 5,
+                    "label": "Link",
+                    "url": "https://a.test",
+                },
+                {
+                    "type": button_type,
+                    "style": 1,
+                    "label": "Act",
+                    "custom_id": "action",
+                },
+            ],
+        }
+    ]
+    target.request_payload["components"] = rows
+    reply = _decode_discord_reply(target)
+    assert reply is not None
+    assert reply.components is not None
+    assert [row.to_wire() for row in reply.components] == rows
+    assert type(reply.components[0].row_type) is type(row_type)
+    assert type(reply.components[0].buttons[0].button_type) is type(button_type)
 
 
 def _effect(
