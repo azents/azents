@@ -42,6 +42,9 @@ code_paths:
   - python/apps/azents/src/azents/resources/vfs/global/skills/browser/SKILL.md
   - python/apps/azents/src/azents/resources/vfs/global/skills/browser/scripts/encrypt.py
   - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/confidential-input.md
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/open-and-observe.md
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/actions-and-help.md
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/captures-and-files.md
   - python/apps/azents/src/azents/engine/tools/runtime_io.py
   - python/apps/azents/src/azents/runtime/control_protocol/runner_operations.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/runner_server.py
