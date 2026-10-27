@@ -1,8 +1,11 @@
 """Provider identity OAuth adapter contract tests."""
 
 import traceback
+from unittest.mock import patch
 
+import httpx2
 import pytest
+from authlib.integrations.httpx_client import AsyncOAuth2Client
 from slack_sdk.errors import SlackClientError
 
 import azents.core.external_account_oauth as oauth
@@ -137,49 +140,185 @@ async def test_slack_adapter_decodes_sdk_response_data(
 
 
 @pytest.mark.asyncio
-async def test_discord_adapter_uses_client_token_for_user_info(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_discord_adapter_uses_client_token_for_user_info() -> None:
     """Discord adapter uses Authlib's authenticated client request surface."""
+    requests: list[httpx2.Request] = []
 
-    class FakeResponse:
-        status_code = 200
+    def provider(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        if request.url.path == "/api/oauth2/token":
+            return httpx2.Response(
+                200, json={"access_token": "token", "token_type": "Bearer"}
+            )
+        assert str(request.url) == oauth.DISCORD_IDENTITY_USERINFO_URL
+        assert request.headers["authorization"] == "Bearer token"
+        return httpx2.Response(
+            200, json={"id": "123456789", "global_name": "Example User"}
+        )
 
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> object:
-            return {"id": "123456789", "global_name": "Example User"}
-
-    class FakeDiscordClient:
-        def __init__(self, **_: object) -> None:
-            self.user_info_called = False
-
-        async def __aenter__(self) -> "FakeDiscordClient":
-            return self
-
-        async def __aexit__(self, *_: object) -> None:
-            return None
-
-        async def fetch_token(self, *args: object, **kwargs: object) -> dict[str, str]:
-            return {"access_token": "token"}
-
-        async def get(self, url: str) -> FakeResponse:
-            assert url == oauth.DISCORD_IDENTITY_USERINFO_URL
-            self.user_info_called = True
-            return FakeResponse()
-
-    monkeypatch.setattr(oauth, "AsyncOAuth2Client", FakeDiscordClient)
-    identity = await DiscordIdentityOAuthAdapter().exchange_identity(
+    client = AsyncOAuth2Client(
         client_id="client",
         client_secret="secret",
-        code="code",
-        redirect_uri="https://azents.example/callback",
-        code_verifier="verifier",
+        scope="identify",
+        token_endpoint_auth_method="client_secret_post",
+        transport=httpx2.MockTransport(provider),
     )
-
+    with patch.object(oauth, "AsyncOAuth2Client", return_value=client):
+        identity = await DiscordIdentityOAuthAdapter().exchange_identity(
+            client_id="client",
+            client_secret="secret",
+            code="code",
+            redirect_uri="https://azents.example/callback",
+            code_verifier="verifier",
+        )
+    assert len(requests) == 2
+    assert client.is_closed
     assert identity.provider is ExternalChannelProvider.DISCORD
     assert identity.provider_user_id == "123456789"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["token", "userinfo"])
+@pytest.mark.parametrize("status", [400, 429, 503])
+async def test_discord_real_sdk_http_errors_are_sanitized(
+    stage: str,
+    status: int,
+) -> None:
+    """Native SDK HTTP failures retain the safe provider-rejection boundary."""
+    requests: list[httpx2.Request] = []
+
+    def provider(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        if stage == "token" or request.url.path == "/api/users/@me":
+            return httpx2.Response(status, text="provider-body-secret")
+        return httpx2.Response(
+            200, json={"access_token": "token", "token_type": "Bearer"}
+        )
+
+    client = AsyncOAuth2Client(
+        client_id="client",
+        client_secret="secret",
+        scope="identify",
+        token_endpoint_auth_method="client_secret_post",
+        transport=httpx2.MockTransport(provider),
+    )
+    with patch.object(oauth, "AsyncOAuth2Client", return_value=client):
+        with pytest.raises(
+            ExternalAccountOAuthProviderError,
+            match="discord_identity_exchange_failed",
+        ) as caught:
+            await DiscordIdentityOAuthAdapter().exchange_identity(
+                client_id="client",
+                client_secret="secret",
+                code="code",
+                redirect_uri="https://azents.example/callback",
+                code_verifier="verifier",
+            )
+    assert len(requests) == (1 if stage == "token" else 2)
+    assert client.is_closed
+    assert "provider-body-secret" not in "".join(
+        traceback.format_exception(caught.value)
+    )
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [b"not-json", b"[]", b"null", b'"provider-body-secret"'],
+)
+async def test_discord_real_sdk_malformed_token_payload_is_sanitized(
+    body: bytes,
+) -> None:
+    """Successful HTTP responses still require an object-shaped token payload."""
+    client = AsyncOAuth2Client(
+        client_id="client",
+        client_secret="secret",
+        scope="identify",
+        token_endpoint_auth_method="client_secret_post",
+        transport=httpx2.MockTransport(
+            lambda request: httpx2.Response(200, content=body)
+        ),
+    )
+    with patch.object(oauth, "AsyncOAuth2Client", return_value=client):
+        with pytest.raises(
+            ExternalAccountOAuthProviderError,
+            match="discord_token_response_invalid",
+        ) as caught:
+            await DiscordIdentityOAuthAdapter().exchange_identity(
+                client_id="client",
+                client_secret="secret",
+                code="code",
+                redirect_uri="https://azents.example/callback",
+                code_verifier="verifier",
+            )
+    assert client.is_closed
+    assert "provider-body-secret" not in "".join(
+        traceback.format_exception(caught.value)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({}, "discord_token_missing"),
+        ({"error": "invalid_grant"}, "discord_identity_exchange_failed"),
+    ],
+)
+async def test_discord_real_sdk_invalid_token_objects(
+    payload: dict[str, str],
+    error: str,
+) -> None:
+    """Object-shaped responses still require an accepted access token."""
+    client = AsyncOAuth2Client(
+        client_id="client",
+        client_secret="secret",
+        token_endpoint_auth_method="client_secret_post",
+        transport=httpx2.MockTransport(
+            lambda request: httpx2.Response(200, json=payload)
+        ),
+    )
+    with patch.object(oauth, "AsyncOAuth2Client", return_value=client):
+        with pytest.raises(ExternalAccountOAuthProviderError, match=error):
+            await DiscordIdentityOAuthAdapter().exchange_identity(
+                client_id="client",
+                client_secret="secret",
+                code="code",
+                redirect_uri="https://azents.example/callback",
+                code_verifier="verifier",
+            )
+    assert client.is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("unexpected defect"), TypeError("invalid collaborator")]
+)
+async def test_discord_sdk_programming_errors_remain_observable(
+    failure: Exception,
+) -> None:
+    """Expected provider decoding does not swallow arbitrary SDK defects."""
+
+    def provider(request: httpx2.Request) -> httpx2.Response:
+        raise failure
+
+    client = AsyncOAuth2Client(
+        client_id="client",
+        transport=httpx2.MockTransport(provider),
+    )
+    with patch.object(oauth, "AsyncOAuth2Client", return_value=client):
+        with pytest.raises(type(failure)) as caught:
+            await DiscordIdentityOAuthAdapter().exchange_identity(
+                client_id="client",
+                client_secret="secret",
+                code="code",
+                redirect_uri="https://azents.example/callback",
+                code_verifier="verifier",
+            )
+    assert caught.value is failure
+    assert client.is_closed
 
 
 @pytest.mark.asyncio

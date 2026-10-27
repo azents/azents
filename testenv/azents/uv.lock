@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 
 [options]
@@ -348,15 +348,15 @@ wheels = [
 
 [[package]]
 name = "authlib"
-version = "1.8.0"
+version = "1.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "joserfc" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f1/51/bc1729d3cfdc214b4935f4e886e4dd443c3065fd8e1e66423fe84b490f81/authlib-1.8.0.tar.gz", hash = "sha256:f3ecd5f1da737262fb53bf1a4d95c4ea1ad9dd509316587a255c99ab1838a4f0", size = 177759, upload-time = "2026-08-30T12:12:34.833Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/dc/087c08741a98d234c9b98beef8a28d3c309f814d14b6156422c5815bf6d6/authlib-1.9.1.tar.gz", hash = "sha256:5c7d9848f47cac340f060f76ae0bc09b59f5c8e89cc1bb032d4370a0c55b5974", size = 182700, upload-time = "2026-10-14T14:17:52.307Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/c6/6f124bcfbbfb20fba22c939b4e43a06dccfc0e1ca20e5634ca573cb1e271/authlib-1.8.0-py2.py3-none-any.whl", hash = "sha256:88aebbd9af6757e14e912d5dc007ae1dc1f3e27e3b2152ce7c552ee2c3b3c121", size = 260804, upload-time = "2026-08-30T12:12:33.162Z" },
+    { url = "https://files.pythonhosted.org/packages/39/44/a46089266de32a0d809023b6bf31b80a1f26a46954446a7ce695a565cbea/authlib-1.9.1-py2.py3-none-any.whl", hash = "sha256:8b9be8b1e5174dcbf5520e984f1a22dc2edae5b6e40a61d4cedbf86b97e9e69b", size = 266042, upload-time = "2026-10-14T14:17:50.695Z" },
 ]
 
 [[package]]
@@ -480,12 +480,12 @@ requires-dist = [
     { name = "alembic", specifier = "==1.19.2" },
     { name = "alembic-postgresql-enum", specifier = "==1.10.0" },
     { name = "anthropic", specifier = "==1.12.1" },
-    { name = "authlib", specifier = "==1.8.0" },
+    { name = "authlib", specifier = "==1.9.1" },
     { name = "az-common", editable = "../../python/libs/az-common" },
     { name = "azents-runtime-control", editable = "../../python/libs/azents-runtime-control" },
     { name = "bcrypt", specifier = "==5.0.0" },
     { name = "boto3", specifier = "==1.40.61" },
-    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.114" },
+    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.115" },
     { name = "croniter", specifier = "==6.2.4" },
     { name = "cryptography", specifier = "==50.0.2" },
     { name = "defusedxml", specifier = "==0.7.1" },
@@ -733,15 +733,15 @@ wheels = [
 
 [[package]]
 name = "boto3-stubs"
-version = "1.43.114"
+version = "1.43.115"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/20/ee/764acba614a8c3f65204ec9d167b432c9c68f7586748204a3cec3489f485/boto3_stubs-1.43.114.tar.gz", hash = "sha256:98729a4aa168a23e27cb68490979987cf7e4872df48c7480fd4399679c9dcbf8", size = 105897, upload-time = "2026-10-14T19:39:49.123Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/54/4cf798003d461d1422e3655a954d55ffc6cda22476adf40671b2fb3c935b/boto3_stubs-1.43.115.tar.gz", hash = "sha256:7712bbf021c391f8c8d4c7209ddc1f018b4a362a35732058392971a7e903af87", size = 105913, upload-time = "2026-10-19T20:43:55.104Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/f3/025209380f68920c223f104dc0d5792bd3cda35c64b2eeebf44cc00dfd1e/boto3_stubs-1.43.114-py3-none-any.whl", hash = "sha256:2a9effc8ea19b5edf95b83e01c033e12c92c293c3a193268eeb7830cc4c10ddb", size = 72202, upload-time = "2026-10-14T19:39:44.781Z" },
+    { url = "https://files.pythonhosted.org/packages/25/53/e39068349bfeca0f1fc79484d239002bdfec5c067d26e19e7c9a7929c3cb/boto3_stubs-1.43.115-py3-none-any.whl", hash = "sha256:be8366d223e06d42dbfca61b7b75e30cc9effb6461389e28a7005397737fd0eb", size = 72202, upload-time = "2026-10-19T20:43:50.314Z" },
 ]
 
 [package.optional-dependencies]
