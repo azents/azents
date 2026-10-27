@@ -26,7 +26,11 @@ code_paths:
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/toolkit_errors.py
   - python/apps/azents/src/azents/core/toolkit_ownership.py
+  - python/apps/azents/src/azents/core/toolkit_identifiers.py
+  - python/apps/azents/src/azents/core/personal_toolkit.py
   - python/apps/azents/src/azents/core/personal_toolkit_runtime.py
+  - python/apps/azents/src/azents/repos/toolkit_namespace.py
+  - python/apps/azents/src/azents/repos/toolkit_namespace_data.py
   - python/apps/azents/src/azents/engine/tooling/personal_admission.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
@@ -67,6 +71,13 @@ code_paths:
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/cda14157c46c_allow_duplicate_toolkit_slugs.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/716e7468e1f5_add_user_toolkit_ownership_and_access_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/004bda2b6938_extend_provider_setup_targets_to_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/e89fba791b40_add_unpublished_github_user_creation_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/8c432dfdd6c6_add_toolkit_github_user_oauth_lifecycle.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/af654664e6b6_add_toolkit_namespace_reservations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/a0dac2fe3ca2_reconcile_toolkit_namespace_reservations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/7b6d0eb501fb_remove_obsolete_toolkit_visibility_.py
   - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_web/**
@@ -140,7 +151,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-27
-spec_version: 155
+spec_version: 156
 ---
 
 # Toolkit
@@ -1128,6 +1139,9 @@ MCP-backed toolkits must keep `list_tools` discovery off the normal run preparat
 - Background refresh lists tools, sorts them deterministically, builds a complete serializable snapshot, then atomically replaces the stored snapshot.
 - Discovery retries HTTP 429 and MCP `Too many requests` failures up to three times with 1s/2s/4s backoff when no numeric `Retry-After` is provided. Numeric delays up to 60s are honored; invalid or longer delays stop the attempt rather than retrying early. Nested groups are retryable only when every leaf is throttling. This read-only retry boundary does not replay tool execution.
 - Exhausted discovery throttling retains an actionable internal error and a sanitized warning with traceback; unrelated connection failures remain errors and cancellation propagates.
+- Explicit MCP connection tests return a generic failed result for an MCP protocol
+  error or a group containing only MCP protocol errors, without exposing provider
+  details. Mixed protocol and internal failures propagate; cancellation is preserved.
 - Refresh failure keeps the previous successful snapshot unchanged. If there is no previous snapshot, no tools are exposed.
 - Loading, retry, setup, and status pseudo-tools are not model-visible MCP availability controls.
 - MCP loading/error text is not injected into Toolkit prompts.
@@ -1898,6 +1912,9 @@ idle continuation hooks preserve incomplete admitted objectives without
 introducing an independent Routine execution owner.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 156) — Return sanitized MCP connection-test failure
+  results for protocol-only errors while preserving mixed failures and cancellation.
 
 - **2026-10-23** (spec_version 154) — Prioritize exact current-catalog tool names,
   distinguish ambiguous original names and already-direct matches, and replace
