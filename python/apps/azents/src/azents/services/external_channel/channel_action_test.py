@@ -71,6 +71,7 @@ from azents.repos.session_execution import (
 )
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
+    _decode_discord_create,
     _decode_discord_deletion_notice,
     _decode_discord_destination,
     _decode_discord_progress_delete,
@@ -578,6 +579,26 @@ def test_discord_scheduled_notices_decode_complete_fields() -> None:
     assert _decode_discord_deletion_notice(target, files=()) is not None
     target.request_payload["text"] = "unexpected"
     assert _decode_discord_deletion_notice(target, files=()) is None
+
+
+def test_discord_create_decodes_nonreply_fields() -> None:
+    """Nonreply messages preserve wire data and reject forwarding requests."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+    )
+    content = _decode_discord_create(target)
+    assert content is not None
+    assert content.embeds is not None
+    assert [embed.to_wire() for embed in content.embeds] == target.request_payload[
+        "embeds"
+    ]
+    assert not content.forward_to_parent
+    target.request_payload["forward_to_parent"] = True
+    assert _decode_discord_create(target) is None
+    target.request_payload["forward_to_parent"] = False
+    target.request_payload["components"] = ["invalid"]
+    assert _decode_discord_create(target) is None
 
 
 def test_slack_file_reply_ignores_blocks() -> None:

@@ -1041,59 +1041,22 @@ class ExternalChannelActionService:
                         suppress_embeds=False,
                         embeds=[embed.to_wire() for embed in notice.embeds],
                     )
-                text = reply.text if reply is not None else payload.get("text")
-                if not isinstance(text, str):
+                content = reply if reply is not None else _decode_discord_create(target)
+                if content is None:
                     return _discord_invalid_payload()
-                forward_to_parent = (
-                    reply.forward_to_parent
-                    if reply is not None
-                    else payload.get("forward_to_parent", False)
-                )
-                forward_parent_channel_id = (
-                    reply.parent_channel_id
-                    if reply is not None
-                    else payload.get("parent_channel_id")
-                )
-                if (
-                    not isinstance(forward_to_parent, bool)
-                    or forward_to_parent
-                    and (
-                        target.operation is not ExternalChannelDeliveryOperation.REPLY
-                        or not isinstance(forward_parent_channel_id, str)
-                        or not forward_parent_channel_id.isdigit()
-                    )
-                ):
-                    return _discord_invalid_payload()
+                text = content.text
+                forward_to_parent = content.forward_to_parent
+                forward_parent_channel_id = content.parent_channel_id
                 components = (
-                    (
-                        [row.to_wire() for row in reply.components]
-                        if reply.components is not None
-                        else None
-                    )
-                    if reply is not None
-                    else _discord_components(payload.get("components"))
+                    None
+                    if content.components is None
+                    else [row.to_wire() for row in content.components]
                 )
-                if (
-                    reply is None
-                    and payload.get("components") is not None
-                    and components is None
-                ):
-                    return _discord_invalid_payload()
                 embeds = (
-                    (
-                        [embed.to_wire() for embed in reply.embeds]
-                        if reply.embeds is not None
-                        else None
-                    )
-                    if reply is not None
-                    else _discord_embeds(payload.get("embeds"))
+                    None
+                    if content.embeds is None
+                    else [embed.to_wire() for embed in content.embeds]
                 )
-                if (
-                    reply is None
-                    and payload.get("embeds") is not None
-                    and embeds is None
-                ):
-                    return _discord_invalid_payload()
                 if target.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
                     context = _session_navigation_context(
                         target,
@@ -2572,6 +2535,45 @@ def _decode_discord_progress_delete(
         target.request_payload.get("provider_message_key"), guild_id=guild_id
     )
     return None if message_id is None else _DiscordProgressDelete(message_id=message_id)
+
+
+@dataclass(frozen=True)
+class _DiscordCreatePayload:
+    """Validated generic nonreply message fields."""
+
+    text: str
+    forward_to_parent: bool
+    parent_channel_id: str | None
+    components: tuple[_DiscordReplyRow, ...] | None
+    embeds: tuple[_DiscordReplyEmbed, ...] | None
+
+
+def _decode_discord_create(target: ProviderTarget) -> _DiscordCreatePayload | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    forward = payload.get("forward_to_parent", False)
+    parent = payload.get("parent_channel_id")
+    raw_components = payload.get("components")
+    raw_embeds = payload.get("embeds")
+    components = _decode_discord_reply_rows(raw_components)
+    embeds = _decode_discord_reply_embeds(raw_embeds)
+    if (
+        not isinstance(text, str)
+        or not isinstance(forward, bool)
+        or forward
+        or raw_components is not None
+        and components is None
+        or raw_embeds is not None
+        and embeds is None
+    ):
+        return None
+    return _DiscordCreatePayload(
+        text=text,
+        forward_to_parent=forward,
+        parent_channel_id=parent if isinstance(parent, str) else None,
+        components=components,
+        embeds=embeds,
+    )
 
 
 @dataclass(frozen=True)
