@@ -71,9 +71,11 @@ from azents.repos.session_execution import (
 )
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
+    _decode_discord_deletion_notice,
     _decode_discord_destination,
     _decode_discord_progress_delete,
     _decode_discord_progress_update,
+    _decode_discord_registration_notice,
     _decode_discord_reply,
     _decode_discord_setup,
     _decode_slack_approval,
@@ -548,6 +550,34 @@ def test_discord_progress_decodes_complete_operations() -> None:
         is None
     )
     assert _decode_discord_progress_delete(target, guild_id="111") is not None
+
+
+def test_discord_scheduled_notices_decode_complete_fields() -> None:
+    """Registration and deletion retain their different required fields."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    target.request_payload.update(task_id="task-1", delete_locator="")
+    notice = _decode_discord_registration_notice(
+        target, files=(), web_url="https://azents.example"
+    )
+    assert notice is not None
+    assert notice.delete_locator == ""
+    assert [embed.to_wire() for embed in notice.embeds] == target.request_payload[
+        "embeds"
+    ]
+    assert _decode_discord_deletion_notice(target, files=()) is not None
+    target.request_payload["task_id"] = None
+    assert (
+        _decode_discord_registration_notice(
+            target, files=(), web_url="https://azents.example"
+        )
+        is None
+    )
+    assert _decode_discord_deletion_notice(target, files=()) is not None
+    target.request_payload["text"] = "unexpected"
+    assert _decode_discord_deletion_notice(target, files=()) is None
 
 
 def test_slack_file_reply_ignores_blocks() -> None:

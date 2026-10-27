@@ -1005,58 +1005,41 @@ class ExternalChannelActionService:
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and intent.control_kind == "scheduled_task_registration"
                 ):
-                    text = payload.get("text")
-                    embeds = _discord_embeds(payload.get("embeds"))
-                    task_id = payload.get("task_id")
-                    delete_locator = payload.get("delete_locator")
-                    edit_url = (
-                        None
-                        if not isinstance(task_id, str)
-                        else _scheduled_task_edit_url(
-                            target,
-                            web_url=self.config.web_url,
-                            task_id=task_id,
-                        )
+                    notice = _decode_discord_registration_notice(
+                        target, files=files, web_url=self.config.web_url
                     )
-                    if (
-                        files
-                        or text != ""
-                        or embeds is None
-                        or not isinstance(delete_locator, str)
-                        or edit_url is None
-                    ):
+                    if notice is None:
                         return _discord_invalid_payload()
                     return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
-                        content=_discord_agent_content(target, text),
+                        content=_discord_agent_content(target, notice.text),
                         operation_key=operation_key,
                         suppress_notifications=False,
                         suppress_embeds=False,
                         components=render_scheduled_task_discord_controls(
-                            edit_url=edit_url,
-                            delete_locator=delete_locator,
+                            edit_url=notice.edit_url,
+                            delete_locator=notice.delete_locator,
                         ),
-                        embeds=embeds,
+                        embeds=[embed.to_wire() for embed in notice.embeds],
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and intent.control_kind == "scheduled_task_deletion"
                 ):
-                    text = payload.get("text")
-                    embeds = _discord_embeds(payload.get("embeds"))
-                    if files or text != "" or embeds is None:
+                    notice = _decode_discord_deletion_notice(target, files=files)
+                    if notice is None:
                         return _discord_invalid_payload()
                     return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
-                        content=_discord_agent_content(target, text),
+                        content=_discord_agent_content(target, notice.text),
                         operation_key=operation_key,
                         suppress_notifications=False,
                         suppress_embeds=False,
-                        embeds=embeds,
+                        embeds=[embed.to_wire() for embed in notice.embeds],
                     )
                 text = reply.text if reply is not None else payload.get("text")
                 if not isinstance(text, str):
@@ -2489,6 +2472,58 @@ def _decode_discord_reply_embeds(
             )
         )
     return tuple(result)
+
+
+@dataclass(frozen=True)
+class _DiscordDeletionNotice:
+    """Validated scheduled-task deletion notice."""
+
+    text: str
+    embeds: tuple[_DiscordReplyEmbed, ...]
+
+
+@dataclass(frozen=True)
+class _DiscordRegistrationNotice:
+    """Validated scheduled-task registration notice and controls."""
+
+    text: str
+    embeds: tuple[_DiscordReplyEmbed, ...]
+    edit_url: str
+    delete_locator: str
+
+
+def _decode_discord_deletion_notice(
+    target: ProviderTarget, *, files: tuple[ExternalChannelOutboundFileManifest, ...]
+) -> _DiscordDeletionNotice | None:
+    text = target.request_payload.get("text")
+    embeds = _decode_discord_reply_embeds(target.request_payload.get("embeds"))
+    if files or text != "" or embeds is None:
+        return None
+    return _DiscordDeletionNotice(text=text, embeds=embeds)
+
+
+def _decode_discord_registration_notice(
+    target: ProviderTarget,
+    *,
+    files: tuple[ExternalChannelOutboundFileManifest, ...],
+    web_url: str | None,
+) -> _DiscordRegistrationNotice | None:
+    notice = _decode_discord_deletion_notice(target, files=files)
+    task_id = target.request_payload.get("task_id")
+    locator = target.request_payload.get("delete_locator")
+    edit_url = (
+        _scheduled_task_edit_url(target, web_url=web_url, task_id=task_id)
+        if isinstance(task_id, str)
+        else None
+    )
+    if notice is None or not isinstance(locator, str) or edit_url is None:
+        return None
+    return _DiscordRegistrationNotice(
+        text=notice.text,
+        embeds=notice.embeds,
+        edit_url=edit_url,
+        delete_locator=locator,
+    )
 
 
 @dataclass(frozen=True)
