@@ -33,6 +33,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/e4cd231524e4_add_setup_claim_preparation_ownership.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/43a0fbdc96fe_retire_external_channel_inbound_file_.py
   - python/apps/azents/src/azents/core/external_account_link.py
   - python/apps/azents/src/azents/core/external_account_oauth.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
