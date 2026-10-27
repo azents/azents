@@ -140,7 +140,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-27
-spec_version: 155
+spec_version: 156
 ---
 
 # Toolkit
@@ -1124,6 +1124,9 @@ MCP-backed toolkits must keep `list_tools` discovery off the normal run preparat
 - Background refresh lists tools, sorts them deterministically, builds a complete serializable snapshot, then atomically replaces the stored snapshot.
 - Discovery retries HTTP 429 and MCP `Too many requests` failures up to three times with 1s/2s/4s backoff when no numeric `Retry-After` is provided. Numeric delays up to 60s are honored; invalid or longer delays stop the attempt rather than retrying early. Nested groups are retryable only when every leaf is throttling. This read-only retry boundary does not replay tool execution.
 - Exhausted discovery throttling retains an actionable internal error and a sanitized warning with traceback; unrelated connection failures remain errors and cancellation propagates.
+- Explicit MCP connection tests return a generic failed result for an MCP protocol
+  error or a group containing only MCP protocol errors, without exposing provider
+  details. Mixed protocol and internal failures propagate; cancellation is preserved.
 - Refresh failure keeps the previous successful snapshot unchanged. If there is no previous snapshot, no tools are exposed.
 - Loading, retry, setup, and status pseudo-tools are not model-visible MCP availability controls.
 - MCP loading/error text is not injected into Toolkit prompts.
@@ -1894,6 +1897,9 @@ idle continuation hooks preserve incomplete admitted objectives without
 introducing an independent Routine execution owner.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 156) — Return sanitized MCP connection-test failure
+  results for protocol-only errors while preserving mixed failures and cancellation.
 
 - **2026-10-23** (spec_version 154) — Prioritize exact current-catalog tool names,
   distinguish ambiguous original names and already-direct matches, and replace

@@ -311,7 +311,7 @@ async def test_mcp_transport(
 ) -> TestConnectionResult:
     """Connect to MCP server and call list_tools.
 
-    Convert network errors to failure result and re-raise other errors.
+    Convert network and MCP protocol errors to failure results; re-raise others.
 
     :param server_url: MCP server URL
     :param headers: Authentication headers
@@ -327,7 +327,18 @@ async def test_mcp_transport(
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        message = extract_network_error(exc)
+        if isinstance(exc, MCPError):
+            message = "MCP connection test failed."
+        elif isinstance(exc, ExceptionGroup):
+            protocol_errors, other_errors = exc.split(MCPError)
+            if protocol_errors is not None:
+                if other_errors is not None:
+                    raise
+                message = "MCP connection test failed."
+            else:
+                message = extract_network_error(exc)
+        else:
+            message = extract_network_error(exc)
         if message is not None:
             return TestConnectionResult(
                 success=False,
