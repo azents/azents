@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import re
 import subprocess
 import sys
@@ -587,43 +586,46 @@ def changed_range_plan(
     }
 
 
-def changed_paths_since(
-    repo_root: Path,
-    base_commit: str,
-    head_commit: str,
+def changed_paths_in_day(
+    repo_root: Path, head_commit: str, generated_at: str
 ) -> ChangedPaths:
-    """Return current and deleted paths changed between two commits."""
-    run_git(repo_root, "cat-file", "-e", f"{base_commit}^{{commit}}")
-    current_output = run_git(
+    """Collect paths touched by commits in the 24 hours ending at planning time."""
+    try:
+        end = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AuditStateError("Invalid plan time") from exc
+    if end.tzinfo is None:
+        raise AuditStateError("Plan time must include timezone")
+    start = end - timedelta(hours=24)
+    commits = run_git(
         repo_root,
-        "diff",
-        "--no-renames",
-        "--name-only",
-        "-z",
-        "--diff-filter=ACM",
-        f"{base_commit}..{head_commit}",
-    )
-    deleted_output = run_git(
-        repo_root,
-        "diff",
-        "--no-renames",
-        "--name-only",
-        "-z",
-        "--diff-filter=D",
-        f"{base_commit}..{head_commit}",
-    )
-    current_files = set(tracked_files(repo_root))
+        "log",
+        "--since-as-filter=" + start.isoformat(),
+        "--until=" + end.isoformat(),
+        "--format=%H",
+        head_commit,
+    ).splitlines()
+    touched: set[str] = set()
+    for commit in commits:
+        output = run_git(
+            repo_root,
+            "diff-tree",
+            "--root",
+            "--first-parent",
+            "-m",
+            "-r",
+            "--no-commit-id",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            commit,
+        )
+        touched.update(path for path in output.split("\0") if path)
+    touched.discard(str(STATE_PATH_TO_EXCLUDE))
+    current = set(tracked_files(repo_root))
     return ChangedPaths(
-        current=tuple(
-            sorted(
-                path
-                for path in current_output.split("\0")
-                if path
-                and path in current_files
-                and PurePosixPath(path) != STATE_PATH_TO_EXCLUDE
-            )
-        ),
-        deleted=tuple(sorted(path for path in deleted_output.split("\0") if path)),
+        current=tuple(sorted(touched & current)),
+        deleted=tuple(sorted(touched - current)),
     )
 
 
@@ -648,15 +650,10 @@ def specs_for_path(path: str, specs: tuple[LivingSpec, ...]) -> list[str]:
 
 
 def changed_work_plans(
-    repo_root: Path,
     scope: AuditScope,
-    base_commit: str | None,
-    head_commit: str,
+    changes: ChangedPaths,
 ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]], list[str]]:
     """Return exact changed implementation and Living Spec work."""
-    if base_commit is None:
-        return [], [], [], []
-    changes = changed_paths_since(repo_root, base_commit, head_commit)
     spec_by_path = {spec.path: spec for spec in scope.specs}
     changed_by_range: dict[str, dict[str, list[str]]] = {}
     changed_specs: list[str] = []
@@ -738,21 +735,14 @@ def resolve_rotation_limit(
     range_limit: int | None,
     rotation_days: int | None,
 ) -> tuple[int, int | None]:
-    """Resolve a fixed range limit or target rotation period."""
-    if range_limit is not None and rotation_days is not None:
-        raise AuditStateError(
-            "--range-limit and --rotation-days are mutually exclusive"
-        )
-    if range_limit is not None:
-        if range_limit < 1:
-            raise AuditStateError("--range-limit must be at least 1")
-        return min(range_count, range_limit), None
-    effective_rotation_days = (
-        rotation_days if rotation_days is not None else DEFAULT_ROTATION_DAYS
-    )
-    if effective_rotation_days < 1:
-        raise AuditStateError("--rotation-days must be at least 1")
-    return math.ceil(range_count / effective_rotation_days), effective_rotation_days
+    """Select one existing range without expanding work for a rotation target."""
+    if (
+        isinstance(range_limit, bool)
+        or range_limit not in ((None, 0, 1) if range_count == 0 else (None, 1))
+        or rotation_days is not None
+    ):
+        raise AuditStateError("Incremental audits select exactly one range")
+    return min(1, range_count), None
 
 
 def rotation_range_plans(
@@ -802,6 +792,20 @@ def validated_plan_range_limit(plan: Mapping[str, Any], range_count: int) -> int
     return range_limit
 
 
+def relevant_missing_paths(
+    scope: AuditScope, plan: Mapping[str, Any]
+) -> list[dict[str, str]]:
+    """Limit structural findings to the selected range and daily changes."""
+    specs = set(plan["changed_specs"])
+    for item in (
+        *plan["rotation_ranges"],
+        *plan["changed_checks"],
+        *plan["deleted_checks"],
+    ):
+        specs.update(item["specs"])
+    return [item for item in scope.missing_code_paths if item["spec"] in specs]
+
+
 def build_plan(
     repo_root: Path,
     state_path: Path,
@@ -849,28 +853,25 @@ def build_plan(
         )
         return seal_plan(plan)
 
-    resolved_limit, effective_rotation_days = resolve_rotation_limit(
+    resolved_limit, _ = resolve_rotation_limit(
         len(scope.ranges),
         range_limit=range_limit,
         rotation_days=rotation_days,
     )
-    base_commit = reconciled["change_checkpoint"].get("checked_through_commit")
     changed_checks, changed_specs, deleted_checks, deleted_specs = changed_work_plans(
-        repo_root,
         scope,
-        base_commit,
-        head_commit,
+        changed_paths_in_day(repo_root, head_commit, plan["generated_at"]),
     )
     plan.update(
         {
-            "bootstrap": base_commit is None,
+            "bootstrap": False,
             "changed_checks": changed_checks,
             "changed_specs": changed_specs,
             "deleted_checks": deleted_checks,
             "deleted_specs": deleted_specs,
             "full_ranges": [],
             "range_limit": resolved_limit,
-            "rotation_days": effective_rotation_days,
+            "rotation_days": None,
             "rotation_ranges": rotation_range_plans(
                 reconciled,
                 scope.ranges,
@@ -878,6 +879,7 @@ def build_plan(
             ),
         }
     )
+    plan["missing_code_paths"] = relevant_missing_paths(scope, plan)
     return seal_plan(plan)
 
 
@@ -895,7 +897,12 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
     state = load_state(state_path)
     scope = discover_audit_scope(repo_root)
     reconciled = reconcile_state(state, scope.ranges)
-    if plan.get("missing_code_paths") != list(scope.missing_code_paths):
+    expected_missing = (
+        relevant_missing_paths(scope, plan)
+        if plan["mode"] == "incremental"
+        else list(scope.missing_code_paths)
+    )
+    if plan.get("missing_code_paths") != expected_missing:
         raise AuditStateError("Living Spec code_paths changed after planning")
 
     mode = plan.get("mode")
@@ -918,20 +925,12 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
             )
         ranges_to_complete = expected_ranges
     elif mode == "incremental":
-        base_commit = reconciled["change_checkpoint"].get("checked_through_commit")
-        if plan.get("change_checkpoint_before") != base_commit:
-            raise AuditStateError(
-                "Incremental change checkpoint changed after planning"
-            )
         expected_work = changed_work_plans(
-            repo_root,
             scope,
-            base_commit,
-            plan["head_commit"],
+            changed_paths_in_day(repo_root, plan["head_commit"], plan["generated_at"]),
         )
-        expected_bootstrap = base_commit is None
         if (
-            plan.get("bootstrap") is not expected_bootstrap
+            plan.get("bootstrap") is not False
             or plan.get("changed_checks") != expected_work[0]
             or plan.get("changed_specs") != expected_work[1]
             or plan.get("deleted_checks") != expected_work[2]
@@ -942,6 +941,11 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
                 "Incremental audit plan does not exactly cover changed work"
             )
         range_limit = validated_plan_range_limit(plan, len(scope.ranges))
+        if (
+            range_limit != min(1, len(scope.ranges))
+            or plan.get("rotation_days") is not None
+        ):
+            raise AuditStateError("Incremental audits select exactly one range")
         expected_ranges = rotation_range_plans(
             reconciled,
             scope.ranges,
@@ -958,19 +962,15 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
     completed_at = utc_now()
     head_commit = plan["head_commit"]
     for planned_range in ranges_to_complete:
-        reconciled["ranges"][planned_range["name"]] = {
+        state["ranges"][planned_range["name"]] = {
             "checked_at": completed_at,
             "checked_scope_revision": planned_range["scope_revision"],
             "checked_through_commit": head_commit,
         }
-    reconciled["change_checkpoint"] = {
-        "checked_at": completed_at,
-        "checked_through_commit": head_commit,
-    }
-    write_json_atomic(state_path, reconciled)
+    write_json_atomic(state_path, state)
     emit_json(
         {
-            "change_checkpoint": head_commit,
+            "change_checkpoint": state["change_checkpoint"]["checked_through_commit"],
             "completed_at": completed_at,
             "mode": mode,
             "ranges_completed": len(ranges_to_complete),
@@ -1029,8 +1029,9 @@ def status_summary(
         "missing_code_paths": len(scope.missing_code_paths),
         "never_checked_ranges": never_checked,
         "overdue_ranges": overdue,
-        "rotation_range_limit": math.ceil(len(scope.ranges) / rotation_days),
-        "rotation_target_days": rotation_days,
+        "rotation_range_limit": 1,
+        "daily_rotation_days": len(scope.ranges),
+        "overdue_threshold_days": rotation_days,
         "stale_ranges": stale,
     }
 

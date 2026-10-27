@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -205,17 +207,19 @@ def test_discover_scope_rotates_only_declared_files_and_reports_missing_paths(
     )
 
 
-def test_resolve_rotation_limit_targets_fourteen_days() -> None:
+def test_resolve_rotation_limit_selects_one_range() -> None:
     assert audit_state.resolve_rotation_limit(
         246,
         range_limit=None,
         rotation_days=None,
-    ) == (18, 14)
-    assert audit_state.resolve_rotation_limit(
-        10,
-        range_limit=20,
-        rotation_days=None,
-    ) == (10, None)
+    ) == (1, None)
+    for limit, days in ((20, None), (None, 14), (True, None)):
+        with pytest.raises(audit_state.AuditStateError, match="exactly one range"):
+            audit_state.resolve_rotation_limit(
+                10,
+                range_limit=limit,
+                rotation_days=days,
+            )
 
 
 def test_rotation_priority_is_never_checked_scope_changed_then_oldest() -> None:
@@ -257,6 +261,11 @@ def test_incremental_plan_bootstraps_with_rotation(
         audit_state, "discover_audit_scope", lambda _root: _scope(ranges)
     )
     monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+    monkeypatch.setattr(
+        audit_state,
+        "changed_paths_in_day",
+        lambda *_args: audit_state.ChangedPaths(current=(), deleted=()),
+    )
 
     plan = audit_state.build_plan(
         tmp_path,
@@ -266,11 +275,11 @@ def test_incremental_plan_bootstraps_with_rotation(
         rotation_days=None,
     )
 
-    assert plan["bootstrap"] is True
+    assert plan["bootstrap"] is False
     assert plan["changed_checks"] == []
-    assert plan["range_limit"] == 2
-    assert plan["rotation_days"] == 14
-    assert len(plan["rotation_ranges"]) == 2
+    assert plan["range_limit"] == 1
+    assert plan["rotation_days"] is None
+    assert len(plan["rotation_ranges"]) == 1
     assert plan["plan_sha256"] == audit_state.plan_sha256(plan)
 
 
@@ -285,21 +294,13 @@ def test_changed_work_includes_unmapped_and_deleted_paths(
         "range-unmapped": _range(file_path=unmapped, specs=()),
     }
     scope = _scope(ranges)
-    monkeypatch.setattr(
-        audit_state,
-        "changed_paths_since",
-        lambda _root, _base, _head: audit_state.ChangedPaths(
-            current=(mapped, unmapped, "docs/azents/spec/domain/example.md"),
-            deleted=("python/apps/example/src/deleted.py",),
-        ),
-    )
-
     changed_checks, changed_specs, deleted_checks, deleted_specs = (
         audit_state.changed_work_plans(
-            tmp_path,
             scope,
-            "base",
-            "head",
+            audit_state.ChangedPaths(
+                current=(mapped, unmapped, "docs/azents/spec/domain/example.md"),
+                deleted=("python/apps/example/src/deleted.py",),
+            ),
         )
     )
 
@@ -330,6 +331,11 @@ def test_complete_rejects_modified_plan_payload(
         audit_state, "discover_audit_scope", lambda _root: _scope(ranges)
     )
     monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+    monkeypatch.setattr(
+        audit_state,
+        "changed_paths_in_day",
+        lambda *_args: audit_state.ChangedPaths(current=(), deleted=()),
+    )
 
     plan = audit_state.build_plan(
         tmp_path,
@@ -365,15 +371,20 @@ def test_complete_rejects_rehashed_partial_rotation_plan(
         lambda _root: _scope(ranges),
     )
     monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+    monkeypatch.setattr(
+        audit_state,
+        "changed_paths_in_day",
+        lambda *_args: audit_state.ChangedPaths(current=(), deleted=()),
+    )
 
     plan = audit_state.build_plan(
         tmp_path,
         state_path,
         mode="incremental",
         range_limit=None,
-        rotation_days=1,
+        rotation_days=None,
     )
-    plan["rotation_ranges"] = plan["rotation_ranges"][:1]
+    plan["rotation_ranges"] = []
     plan["plan_sha256"] = audit_state.plan_sha256(plan)
     plan_path.write_text(json.dumps(plan))
 
@@ -382,6 +393,169 @@ def test_complete_rejects_rehashed_partial_rotation_plan(
         match="does not exactly match rotation ranges",
     ):
         audit_state.complete_plan(tmp_path, state_path, plan_path)
+
+
+def test_recent_commits_collect_only_daily_paths_and_deleted_files(
+    tmp_path: Path,
+) -> None:
+    def git(*args: str, date: str | None = None) -> str:
+        env = os.environ.copy()
+        if date:
+            env.update(GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
+        return subprocess.run(
+            ["git", *args],
+            cwd=tmp_path,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    (tmp_path / "old").write_text("old")
+    (tmp_path / "deleted").write_text("old")
+    git("add", ".")
+    git("commit", "-m", "old", date="2026-10-25T00:00:00Z")
+    (tmp_path / "new").write_text("new")
+    (tmp_path / "deleted").unlink()
+    git("add", "-A")
+    git("commit", "-m", "recent", date="2026-10-27T00:00:00Z")
+    (tmp_path / "future").write_text("future")
+    git("add", ".")
+    git("commit", "-m", "after window", date="2026-10-27T02:00:00Z")
+    head = git("rev-parse", "HEAD")
+    changes = audit_state.changed_paths_in_day(tmp_path, head, "2026-10-27T01:00:00Z")
+    assert changes.current == ("new",)
+    assert changes.deleted == ("deleted",)
+
+
+def test_recent_merge_includes_old_branch_changes(tmp_path: Path) -> None:
+    def git(*args: str, date: str) -> str:
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_DATE": date,
+            "GIT_COMMITTER_DATE": date,
+        }
+        return subprocess.run(
+            ["git", *args],
+            cwd=tmp_path,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    old = "2026-10-20T00:00:00Z"
+    git("init", "-b", "main", date=old)
+    git("config", "user.name", "Test", date=old)
+    git("config", "user.email", "test@example.com", date=old)
+    git("commit", "--allow-empty", "-m", "base", date=old)
+    git("checkout", "-b", "feature", date=old)
+    (tmp_path / "feature").write_text("feature")
+    git("add", ".", date=old)
+    git("commit", "-m", "old branch work", date=old)
+    git("checkout", "main", date=old)
+    git("merge", "--no-ff", "feature", "-m", "merge", date="2026-10-27T00:00:00Z")
+    head = git("rev-parse", "HEAD", date=old)
+    assert audit_state.changed_paths_in_day(
+        tmp_path,
+        head,
+        "2026-10-27T01:00:00Z",
+    ).current == ("feature",)
+
+
+def test_missing_paths_are_scoped_to_selected_and_recent_specs() -> None:
+    scope = audit_state.AuditScope(
+        ranges={},
+        missing_code_paths=(
+            {"pattern": "a", "spec": "selected"},
+            {"pattern": "b", "spec": "changed"},
+            {"pattern": "c", "spec": "unrelated"},
+        ),
+        specs=(),
+    )
+    plan = {
+        "rotation_ranges": [{"specs": ["selected"]}],
+        "changed_specs": ["changed"],
+        "changed_checks": [],
+        "deleted_checks": [],
+    }
+    assert audit_state.relevant_missing_paths(scope, plan) == list(
+        scope.missing_code_paths[:2]
+    )
+
+
+def test_completion_changes_only_selected_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ranges = {
+        "a": _range(file_path="python/apps/example/src/a.py"),
+        "b": _range(file_path="python/apps/example/src/b.py"),
+    }
+    state = audit_state.empty_state()
+    state["change_checkpoint"] = {
+        "checked_at": "2026-09-01T00:00:00Z",
+        "checked_through_commit": "old",
+    }
+    state["ranges"]["b"] = {
+        "checked_at": "2026-09-01T00:00:00Z",
+        "checked_through_commit": "old",
+        "checked_scope_revision": "current",
+    }
+    state["ranges"]["legacy"] = dict(state["ranges"]["b"])
+    state_path, plan_path = tmp_path / "state.json", tmp_path / "plan.json"
+    state_path.write_text(json.dumps(state))
+    monkeypatch.setattr(audit_state, "ensure_tracked_tree_clean", lambda _root: None)
+    monkeypatch.setattr(
+        audit_state, "discover_audit_scope", lambda _root: _scope(ranges)
+    )
+    monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+    monkeypatch.setattr(
+        audit_state,
+        "changed_paths_in_day",
+        lambda *_args: audit_state.ChangedPaths(current=(), deleted=()),
+    )
+    plan = audit_state.build_plan(
+        tmp_path, state_path, mode="incremental", range_limit=None, rotation_days=None
+    )
+    plan_path.write_text(json.dumps(plan))
+    audit_state.complete_plan(tmp_path, state_path, plan_path)
+    result = json.loads(state_path.read_text())
+    assert result["change_checkpoint"] == state["change_checkpoint"]
+    assert result["ranges"]["b"] == state["ranges"]["b"]
+    assert result["ranges"]["legacy"] == state["ranges"]["legacy"]
+    assert result["ranges"]["a"]["checked_through_commit"] == "head"
+
+
+def test_empty_scope_plan_can_complete_without_marking_ranges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path, plan_path = tmp_path / "state.json", tmp_path / "plan.json"
+    state = audit_state.empty_state()
+    state_path.write_text(json.dumps(state))
+    monkeypatch.setattr(audit_state, "ensure_tracked_tree_clean", lambda _root: None)
+    monkeypatch.setattr(audit_state, "discover_audit_scope", lambda _root: _scope({}))
+    monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+    monkeypatch.setattr(
+        audit_state,
+        "changed_paths_in_day",
+        lambda *_args: audit_state.ChangedPaths(current=(), deleted=()),
+    )
+    plan = audit_state.build_plan(
+        tmp_path,
+        state_path,
+        mode="incremental",
+        range_limit=None,
+        rotation_days=None,
+    )
+    assert plan["rotation_ranges"] == []
+    assert plan["range_limit"] == 0
+    plan_path.write_text(json.dumps(plan))
+    audit_state.complete_plan(tmp_path, state_path, plan_path)
+    assert json.loads(state_path.read_text()) == state
 
 
 def test_status_reports_rotation_health() -> None:
@@ -414,4 +588,6 @@ def test_status_reports_rotation_health() -> None:
     assert summary["never_checked_ranges"] == 1
     assert summary["stale_ranges"] == 1
     assert summary["overdue_ranges"] == 2
-    assert summary["rotation_target_days"] == 14
+    assert summary["overdue_threshold_days"] == 14
+    assert summary["rotation_range_limit"] == 1
+    assert summary["daily_rotation_days"] == 3
