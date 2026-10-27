@@ -52,6 +52,7 @@ code_paths:
   - python/apps/azents/src/azents/core/runtime_browser_source_credential.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/browser_source_server.py
   - python/apps/azents/src/azents/services/runtime_browser/authority.py
+  - python/apps/azents/src/azents/services/runtime_browser/data.py
   - python/apps/azents/src/azents/services/runtime_browser/service.py
   - python/apps/azents/src/azents/services/runtime_browser/socket.py
   - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py

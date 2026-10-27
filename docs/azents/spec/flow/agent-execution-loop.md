@@ -57,6 +57,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/run/contracts.py
+  - python/apps/azents/src/azents/engine/run/task_supervision.py
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/engine/run/model_transport.py
