@@ -34,7 +34,15 @@ async def cancel_owned_discovery(task: asyncio.Task[None] | None) -> None:
     if task is None or task.done():
         return
     task.cancel()
-    (result,) = await asyncio.gather(task, return_exceptions=True)
+    try:
+        (result,) = await asyncio.gather(task, return_exceptions=True)
+    except asyncio.CancelledError as cancellation:
+        # gather waits for the child but prioritizes cancellation over its error.
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                raise error from cancellation
+        raise
     if isinstance(result, BaseException) and not isinstance(
         result, asyncio.CancelledError
     ):

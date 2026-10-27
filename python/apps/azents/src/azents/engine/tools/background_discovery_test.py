@@ -50,12 +50,15 @@ def _snapshot_storage(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("kind", ["aws", "gcp"])
+@pytest.mark.parametrize("cleanup_failure", [False, True])
 async def test_exit_propagates_caller_cancellation_and_closes(
     kind: Literal["aws", "gcp"],
+    cleanup_failure: bool,
 ) -> None:
     toolkit = _aws_toolkit() if kind == "aws" else _gcp_toolkit()
     started = asyncio.Event()
     cleaning = asyncio.Event()
+    failure = ValueError("discovery cleanup failed")
 
     async def discovery() -> None:
         started.set()
@@ -63,7 +66,12 @@ async def test_exit_propagates_caller_cancellation_and_closes(
             await asyncio.Event().wait()
         finally:
             cleaning.set()
-            await asyncio.Event().wait()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as cancellation:
+                if cleanup_failure:
+                    raise failure from cancellation
+                raise
 
     toolkit._bg_task = asyncio.create_task(discovery())
     await started.wait()
@@ -71,8 +79,14 @@ async def test_exit_propagates_caller_cancellation_and_closes(
         exit_task = asyncio.create_task(toolkit.__aexit__())
         await cleaning.wait()
         exit_task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await exit_task
+        if cleanup_failure:
+            with pytest.raises(ValueError) as caught:
+                await exit_task
+            assert caught.value is failure
+            assert isinstance(failure.__context__, asyncio.CancelledError)
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await exit_task
         close.assert_awaited_once()
 
 
