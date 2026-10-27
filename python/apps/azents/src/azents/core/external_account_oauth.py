@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
+import httpx2
 from aiohttp import ClientError
 from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
@@ -245,6 +246,9 @@ class DiscordIdentityOAuthAdapter:
                 client_secret=client_secret,
                 scope="identify",
             ) as client:
+                client.register_compliance_hook(
+                    "access_token_response", _validate_discord_token_response
+                )
                 token = await client.fetch_token(
                     self._endpoints.token_url,
                     code=code,
@@ -262,10 +266,30 @@ class DiscordIdentityOAuthAdapter:
             raise
         except asyncio.CancelledError:
             raise
-        except OAuthError, OAuth2Error, httpx.HTTPError, json.JSONDecodeError:
+        except (
+            OAuthError,
+            OAuth2Error,
+            httpx.HTTPError,
+            httpx2.HTTPError,
+            json.JSONDecodeError,
+        ):
             raise ExternalAccountOAuthProviderError(
                 "discord_identity_exchange_failed"
             ) from None
+
+
+def _validate_discord_token_response(response: httpx2.Response) -> httpx2.Response:
+    """Reject malformed provider payloads before SDK token normalization."""
+    response.raise_for_status()
+    try:
+        payload: object = response.json()
+    except ValueError:
+        raise ExternalAccountOAuthProviderError(
+            "discord_token_response_invalid"
+        ) from None
+    if _object_payload(payload) is None:
+        raise ExternalAccountOAuthProviderError("discord_token_response_invalid")
+    return response
 
 
 def external_account_oauth_endpoints(
