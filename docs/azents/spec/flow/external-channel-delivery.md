@@ -64,8 +64,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-20
-spec_version: 70
+last_verified_at: 2026-10-27
+spec_version: 71
 ---
 
 # External Channel Delivery and Channel Work
@@ -361,7 +361,9 @@ without the explicit Channel action.
 
 Discord splits oversized replies into stable ordered message parts. Each part is
 bounded to the provider message limit, preserves balanced fenced Markdown where
-possible, and is one ordered process-local effect. A Channel Work snapshot
+possible, and is one ordered process-local effect. Reply content, forwarding
+options, file manifests, components, embeds, and their supported combinations are
+validated before a Discord delivery thread is provisioned. A Channel Work snapshot
 instead becomes one retained compact Embed Tracker. The Embed title contains the
 bounded work title, and its description contains completion/failure counts plus every
 ordered task's status marker and bounded title. Remaining description space is
@@ -734,6 +736,7 @@ required; the Routine cannot choose a new destination or complete ordinary Work.
 
 ## Changelog
 
+- **2026-10-27** (spec_version 71) — Validate Discord reply content before thread provisioning.
 - 2026-10-19: Document current-Primary, one-attempt Routine notification without
   Channel Work terminalization, fallback or uncertain replay.
 

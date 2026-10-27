@@ -71,7 +71,25 @@ from azents.repos.session_execution import (
 )
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
+    _decode_discord_create,
+    _decode_discord_deletion_notice,
+    _decode_discord_destination,
+    _decode_discord_progress_delete,
+    _decode_discord_progress_update,
+    _decode_discord_registration_notice,
+    _decode_discord_reply,
+    _decode_discord_setup,
+    _decode_slack_approval,
+    _decode_slack_control_notice,
+    _decode_slack_destination,
+    _decode_slack_progress,
+    _decode_slack_progress_delete,
+    _decode_slack_progress_update,
+    _decode_slack_recorded_agent_name,
+    _decode_slack_reply,
+    _decode_slack_selector,
     _provider_mutation_outcome,
+    _slack_control_tenant_matches,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
 from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
@@ -201,6 +219,415 @@ def _target(
         agent_avatar=None,
         request_payload=request_payload,
     )
+
+
+@pytest.mark.parametrize(
+    ("scope", "thread", "valid", "thread_scope"),
+    [
+        ("parent_channel", None, True, False),
+        ("parent_channel", "123", False, False),
+        ("thread", "123", True, True),
+        ("thread", None, False, False),
+        (None, "123", True, False),
+        ("other", "", True, False),
+        ([], "123", True, False),
+    ],
+)
+def test_slack_destination_scope(
+    scope: object, thread: object, valid: bool, thread_scope: bool
+) -> None:
+    """Preserve Slack target acceptance and explicit broadcast scope."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update({"conversation_scope": scope, "thread_ts": thread})
+    destination = _decode_slack_destination(target)
+    assert (destination is not None) is valid
+    if destination is not None:
+        assert destination.thread_scope is thread_scope
+        assert destination.thread_ts == thread
+
+
+@pytest.mark.parametrize(
+    ("scope", "parent", "root", "valid"),
+    [
+        (None, None, None, True),
+        ("thread", None, None, True),
+        ("parent_channel", None, None, True),
+        ("thread", "222", "333", True),
+        (None, "222", "333", True),
+        ("parent_channel", "222", "333", False),
+        ("thread", None, "333", False),
+        ("thread", "222", None, False),
+        ("thread", "222", "444", False),
+        ("other", None, None, False),
+        ([], None, None, False),
+    ],
+)
+def test_discord_destination_scope_validation(
+    scope: object, parent: object, root: object, valid: bool
+) -> None:
+    """Decode explicit scope and thread identity before provider effects."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": scope,
+            "thread_parent_channel_id": parent,
+            "thread_root_message_id": root,
+        }
+    )
+    destination = _decode_discord_destination(target)
+    assert (destination is not None) is valid
+    if destination is not None:
+        assert destination.guild_id == "111"
+        assert destination.channel_id == "333"
+        assert destination.thread_parent_channel_id == parent
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("guild_id", "invalid"), ("guild_id", "222"), ("channel_id", "invalid")],
+)
+def test_discord_destination_rejects_invalid_provider_identity(
+    field: str, value: str
+) -> None:
+    """Reject malformed identifiers and a guild outside the authorized target."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload[field] = value
+    assert _decode_discord_destination(target) is None
+
+
+def test_discord_destination_rejects_configuration_mismatch() -> None:
+    """A matching tenant cannot override the configured Guild authority."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target = replace(
+        target,
+        provider_configuration=DiscordConnectionConfiguration(
+            target_guild_id="222",
+            suppress_url_previews=True,
+            thread_auto_archive_duration_minutes=1440,
+        ),
+    )
+    assert _decode_discord_destination(target) is None
+
+
+@pytest.mark.parametrize(
+    "embed",
+    [
+        {"title": "title", "color": 123},
+        {"title": "title", "description": None, "fields": None, "color": 123},
+        {
+            "description": "body",
+            "color": 123,
+            "fields": [
+                {"name": "one", "value": "1"},
+                {"name": "two", "value": "2", "inline": None},
+                {"name": "three", "value": "3", "inline": False},
+            ],
+        },
+    ],
+)
+def test_discord_reply_embed_preserves_wire_values(embed: dict[str, object]) -> None:
+    """Do not collapse absent or explicitly null nested provider fields."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload["embeds"] = [embed]
+    reply = _decode_discord_reply(target)
+    assert reply is not None
+    assert reply.embeds is not None
+    assert [item.to_wire() for item in reply.embeds] == [embed]
+
+
+@pytest.mark.parametrize(("row_type", "button_type"), [(1, 2), (1.0, 2.0)])
+def test_discord_reply_components_preserve_wire_values(
+    row_type: int | float, button_type: int | float
+) -> None:
+    """Lower supported link and custom-id buttons without changing wire values."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    rows = [
+        {
+            "type": row_type,
+            "components": [
+                {
+                    "type": button_type,
+                    "style": 5,
+                    "label": "Link",
+                    "url": "https://a.test",
+                },
+                {
+                    "type": button_type,
+                    "style": 1,
+                    "label": "Act",
+                    "custom_id": "action",
+                },
+            ],
+        }
+    ]
+    target.request_payload["components"] = rows
+    reply = _decode_discord_reply(target)
+    assert reply is not None
+    assert reply.components is not None
+    assert [row.to_wire() for row in reply.components] == rows
+    assert type(reply.components[0].row_type) is type(row_type)
+    assert type(reply.components[0].buttons[0].button_type) is type(button_type)
+
+
+@pytest.mark.parametrize(
+    ("text", "broadcast", "blocks", "valid"),
+    [
+        ("hello", False, None, True),
+        ("hello", False, [{"type": "section", "text": {"text": "hi"}}], True),
+        ("hello", None, None, False),
+        (None, False, None, False),
+        ("hello", True, None, False),
+        ("hello", False, ["invalid"], False),
+    ],
+)
+def test_slack_reply_decodes_consumed_fields(
+    text: object, broadcast: object, blocks: object, valid: bool
+) -> None:
+    """Validate reply fields without changing opaque provider block contents."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {"text": text, "reply_broadcast": broadcast, "blocks": blocks}
+    )
+    destination = _decode_slack_destination(target)
+    assert destination is not None
+    reply = _decode_slack_reply(target, destination)
+    assert (reply is not None) is valid
+    if reply is not None and blocks is not None:
+        assert reply.blocks is not None
+        assert list(reply.blocks) == blocks
+
+
+@pytest.mark.parametrize(
+    ("text", "blocks", "valid"),
+    [
+        ("working", [{"type": "section", "extra": {"value": None}}], True),
+        (None, [], False),
+        ("working", None, False),
+        ("working", [1], False),
+    ],
+)
+def test_slack_progress_decodes_content(
+    text: object, blocks: object, valid: bool
+) -> None:
+    """Progress fields are validated without interpreting provider blocks."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    )
+    target.request_payload.update({"text": text, "blocks": blocks})
+    progress = _decode_slack_progress(target, web_url="https://azents.example")
+    assert (progress is not None) is valid
+    if progress is not None:
+        assert list(progress.blocks) == blocks
+        assert progress.context.session_url == _SESSION_URL
+    update = _decode_slack_progress_update(target, web_url="https://azents.example")
+    assert (update is not None) is valid
+    if update is not None:
+        assert update.message_ts == "123.456"
+    deletion = _decode_slack_progress_delete(target)
+    assert deletion is not None
+    assert deletion.message_ts == "123.456"
+    target.request_payload["provider_message_key"] = None
+    assert (
+        _decode_slack_progress_update(target, web_url="https://azents.example") is None
+    )
+    assert _decode_slack_progress_delete(target) is None
+
+
+def test_slack_control_decoders_preserve_input_contracts() -> None:
+    """Control variants validate only their consumed fields."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    assert _slack_control_tenant_matches(target, "T1")
+    target.request_payload["tenant_id"] = "other"
+    assert not _slack_control_tenant_matches(target, "T1")
+    target.request_payload["tenant_id"] = None
+    assert _slack_control_tenant_matches(target, "T1")
+    notice = _decode_slack_control_notice(target)
+    assert notice is not None
+    assert list(notice.blocks) == target.request_payload["blocks"]
+    target.request_payload["blocks"] = [1]
+    assert _decode_slack_control_notice(target) is None
+    target.request_payload["selector_interaction_id"] = "selector"
+    assert _decode_slack_selector(target) == "selector"
+    target.request_payload["selector_interaction_id"] = ""
+    assert _decode_slack_selector(target) is None
+    target.request_payload["recorded_agent_name"] = ""
+    assert _decode_slack_recorded_agent_name(target) == ""
+    target.request_payload["recorded_agent_name"] = 1
+    assert _decode_slack_recorded_agent_name(target) is None
+    target.request_payload.update(
+        approval_url="https://example.test/approval",
+        participant_provider_user_id="U1",
+        participant_label="Member",
+    )
+    approval = _decode_slack_approval(target)
+    assert approval is not None
+    assert approval.url == "https://example.test/approval"
+    assert approval.participant_provider_user_id == "U1"
+    assert approval.participant_label == "Member"
+    target.request_payload["participant_label"] = ""
+    assert _decode_slack_approval(target) is None
+
+
+@pytest.mark.parametrize(
+    ("generation", "revision", "valid"),
+    [(1, 2, True), (True, 2, False), (0, 2, False), (1, False, False), (1, 0, False)],
+)
+def test_discord_setup_decodes_claim(
+    generation: object, revision: object, valid: bool
+) -> None:
+    """Reject booleans and nonpositive claim epochs without coercion."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    target.request_payload.update(
+        setup_claim_id="claim", claim_generation=generation, source_revision=revision
+    )
+    setup = _decode_discord_setup(target, files=())
+    assert (setup is not None) is valid
+    if setup is not None:
+        assert setup.claim_id == "claim"
+        assert setup.agent_name == "Research Agent"
+        assert setup.claim_generation == generation
+        assert setup.source_revision == revision
+
+
+def test_discord_progress_decodes_complete_operations() -> None:
+    """Validate update content and both operations' message identity."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    )
+    update = _decode_discord_progress_update(
+        target, guild_id="111", web_url="https://azents.example"
+    )
+    assert update is not None
+    assert update.message_id == "555"
+    assert [embed.to_wire() for embed in update.embeds] == target.request_payload[
+        "embeds"
+    ]
+    deletion = _decode_discord_progress_delete(target, guild_id="111")
+    assert deletion is not None
+    assert deletion.message_id == "555"
+    target.request_payload["provider_message_key"] = "discord:222:555"
+    assert (
+        _decode_discord_progress_update(
+            target, guild_id="111", web_url="https://azents.example"
+        )
+        is None
+    )
+    assert _decode_discord_progress_delete(target, guild_id="111") is None
+    target.request_payload["provider_message_key"] = "discord:111:555"
+    target.request_payload["embeds"] = None
+    assert (
+        _decode_discord_progress_update(
+            target, guild_id="111", web_url="https://azents.example"
+        )
+        is None
+    )
+    assert _decode_discord_progress_delete(target, guild_id="111") is not None
+
+
+def test_discord_scheduled_notices_decode_complete_fields() -> None:
+    """Registration and deletion retain their different required fields."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    target.request_payload.update(task_id="task-1", delete_locator="")
+    notice = _decode_discord_registration_notice(
+        target, files=(), web_url="https://azents.example"
+    )
+    assert notice is not None
+    assert notice.delete_locator == ""
+    assert [embed.to_wire() for embed in notice.embeds] == target.request_payload[
+        "embeds"
+    ]
+    assert _decode_discord_deletion_notice(target, files=()) is not None
+    target.request_payload["task_id"] = None
+    assert (
+        _decode_discord_registration_notice(
+            target, files=(), web_url="https://azents.example"
+        )
+        is None
+    )
+    assert _decode_discord_deletion_notice(target, files=()) is not None
+    target.request_payload["text"] = "unexpected"
+    assert _decode_discord_deletion_notice(target, files=()) is None
+
+
+def test_discord_create_decodes_nonreply_fields() -> None:
+    """Nonreply messages preserve wire data and reject forwarding requests."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+    )
+    content = _decode_discord_create(target)
+    assert content is not None
+    assert content.embeds is not None
+    assert [embed.to_wire() for embed in content.embeds] == target.request_payload[
+        "embeds"
+    ]
+    assert not content.forward_to_parent
+    target.request_payload["forward_to_parent"] = True
+    assert _decode_discord_create(target) is None
+    target.request_payload["forward_to_parent"] = False
+    target.request_payload["components"] = ["invalid"]
+    assert _decode_discord_create(target) is None
+
+
+def test_slack_file_reply_ignores_blocks() -> None:
+    """File delivery retains its existing behavior of not consuming blocks."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "text": "hello",
+            "blocks": ["invalid"],
+            "files": [
+                {
+                    "source": "exchange",
+                    "path": "exchange://file-1",
+                    "filename": "report.txt",
+                    "media_type": "text/plain",
+                    "expected_size": 12,
+                }
+            ],
+        }
+    )
+    destination = _decode_slack_destination(target)
+    assert destination is not None
+    reply = _decode_slack_reply(target, destination)
+    assert reply is not None
+    assert len(reply.files) == 1
+    assert reply.blocks is None
 
 
 def _effect(
@@ -1682,6 +2109,62 @@ async def test_discord_parent_file_delivery_does_not_open_sdk_session() -> None:
     assert result.status == "delivered"
     assert require_instance(service.discord_client, _OpenableDiscordClient).opens == 0
     create_file_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("text", None),
+        ("forward_to_parent", None),
+        ("components", [{"type": 99}]),
+        ("embeds", [{"unexpected": "value"}]),
+        (
+            "files",
+            [
+                {
+                    "source": "exchange",
+                    "path": "exchange://file-1",
+                    "filename": "report.txt",
+                    "media_type": "text/plain",
+                    "expected_size": 12,
+                }
+            ],
+        ),
+    ],
+)
+async def test_invalid_discord_reply_never_provisions_thread(
+    field: str, value: object
+) -> None:
+    """Reject malformed reply fields before any Discord thread mutation."""
+    ensure_thread = AsyncMock()
+    service = _service(
+        discord_client=_DiscordClientDelegate(ensure_thread=ensure_thread)
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": "thread",
+            "thread_parent_channel_id": "222",
+            "thread_root_message_id": "333",
+            field: value,
+        }
+    )
+    result = await ExternalChannelActionService._deliver_discord(
+        service,
+        replace(target, resource_id=None),
+        operation_key=ProviderOperationKey.from_seed("invalid-discord-thread"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+    assert result.status == "failed"
+    ensure_thread.assert_not_awaited()
+    assert require_instance(service.discord_client, _OpenableDiscordClient).opens == 0
 
 
 @pytest.mark.asyncio

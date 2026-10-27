@@ -127,7 +127,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-10-27
-spec_version: 89
+spec_version: 90
 ---
 
 # External Channel
@@ -456,7 +456,9 @@ provider effects and durable-ingestion orchestration run after completion.
   A parent-channel Resource posts directly to the Slack or Discord parent channel. A
   Discord thread Resource provisions or reuses one delivery thread, persists that
   target, and sends approval controls, Session navigation, replies, files, progress,
-  and cleanup to that thread. A delivered final answer permits active-progress
+  and cleanup to that thread. Discord reply text, forwarding options, file manifests,
+  components, embeds, and their supported combinations are validated before thread
+  provisioning; invalid reply payloads cannot create a thread. A delivered final answer permits active-progress
   deletion, and separate work cycles never share provider identities.
 - A newly created External Channel root Session uses only the exact eligible human
   mailbox event whose `prompt_role` is `invocation` for the existing two-phase automatic title
@@ -736,6 +738,9 @@ fallback, uncertain replay or a second copy. Routine completion does not finish
 ordinary External Channel Work or add a destination selector.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 90) — Validate Discord reply content and supported
+  file combinations before provisioning a delivery thread.
 
 - **2026-10-27** (spec_version 89) — Corrected the Slack management handoff
   route's interaction identifier parameter.

@@ -853,39 +853,29 @@ class ExternalChannelActionService:
         """Deliver one Discord text, multipart file, or control mutation."""
         payload = target.request_payload
         intent = target.decode_intent()
-        guild_id = payload.get("guild_id")
-        channel_id = payload.get("channel_id")
+        reply = None
+        if target.operation is ExternalChannelDeliveryOperation.REPLY:
+            reply = _decode_discord_reply(target)
+            if reply is None:
+                return _discord_invalid_payload()
         configuration = target.provider_configuration
-        if (
-            not isinstance(guild_id, str)
-            or not guild_id.isdigit()
-            or target.provider_tenant_id != guild_id
-            or configuration is None
-            or configuration.target_guild_id != guild_id
-            or not isinstance(channel_id, str)
-            or not channel_id.isdigit()
-        ):
+        destination = (
+            reply.destination
+            if reply is not None
+            else _decode_discord_destination(target)
+        )
+        if destination is None or configuration is None:
             return _discord_invalid_payload()
-        files = _outbound_files(payload.get("files"))
+        guild_id = destination.guild_id
+        channel_id = destination.channel_id
+        files = (
+            reply.files if reply is not None else _outbound_files(payload.get("files"))
+        )
         if files is None:
             return _discord_invalid_payload()
         delivery_channel_id = channel_id
-        conversation_scope = payload.get("conversation_scope")
-        parent_channel_id = payload.get("thread_parent_channel_id")
-        root_message_id = payload.get("thread_root_message_id")
-        if conversation_scope == "parent_channel":
-            if parent_channel_id is not None or root_message_id is not None:
-                return _discord_invalid_payload()
-        elif conversation_scope in {None, "thread"} and (
-            parent_channel_id is not None or root_message_id is not None
-        ):
-            if (
-                not isinstance(parent_channel_id, str)
-                or not parent_channel_id.isdigit()
-                or not isinstance(root_message_id, str)
-                or root_message_id != channel_id
-            ):
-                return _discord_invalid_payload()
+        thread_parent = destination.thread_parent_channel_id
+        if thread_parent is not None:
             if not workflow_session_open:
                 try:
                     async with discord_client.open(
@@ -911,8 +901,8 @@ class ExternalChannelActionService:
             thread = await discord_client.ensure_thread(
                 bot_token=bot_token,
                 guild_id=guild_id,
-                parent_channel_id=parent_channel_id,
-                root_message_id=root_message_id,
+                parent_channel_id=thread_parent,
+                root_message_id=channel_id,
                 name=target.agent_name,
                 auto_archive_duration=(
                     configuration.thread_auto_archive_duration_minutes
@@ -931,8 +921,6 @@ class ExternalChannelActionService:
                     initial_thread_title=thread.created_thread_name,
                     authority=authority,
                 )
-        elif conversation_scope not in {None, "thread"}:
-            return _discord_invalid_payload()
         match target.operation:
             case (
                 ExternalChannelDeliveryOperation.REPLY
@@ -980,40 +968,26 @@ class ExternalChannelActionService:
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and intent.control_kind == "setup_required"
                 ):
-                    setup_claim_id = payload.get("setup_claim_id")
-                    claim_generation = payload.get("claim_generation")
-                    source_revision = payload.get("source_revision")
-                    if (
-                        files
-                        or not isinstance(target.agent_name, str)
-                        or not target.agent_name
-                        or not isinstance(setup_claim_id, str)
-                        or not setup_claim_id
-                        or not isinstance(claim_generation, int)
-                        or isinstance(claim_generation, bool)
-                        or claim_generation <= 0
-                        or not isinstance(source_revision, int)
-                        or isinstance(source_revision, bool)
-                        or source_revision <= 0
-                    ):
+                    setup = _decode_discord_setup(target, files=files)
+                    if setup is None:
                         return _discord_invalid_payload()
                     control = render_discord_setup_required(
-                        agent_name=target.agent_name,
+                        agent_name=setup.agent_name,
                         channel_custom_id=build_discord_settings_custom_id(
                             secret=self.config.auth.jwt.secret_key,
                             action="setup_channel",
-                            origin_interaction_id=setup_claim_id,
-                            setup_claim_id=setup_claim_id,
-                            claim_generation=claim_generation,
-                            source_revision=source_revision,
+                            origin_interaction_id=setup.claim_id,
+                            setup_claim_id=setup.claim_id,
+                            claim_generation=setup.claim_generation,
+                            source_revision=setup.source_revision,
                         ),
                         threads_custom_id=build_discord_settings_custom_id(
                             secret=self.config.auth.jwt.secret_key,
                             action="setup_threads",
-                            origin_interaction_id=setup_claim_id,
-                            setup_claim_id=setup_claim_id,
-                            claim_generation=claim_generation,
-                            source_revision=source_revision,
+                            origin_interaction_id=setup.claim_id,
+                            setup_claim_id=setup.claim_id,
+                            claim_generation=setup.claim_generation,
+                            source_revision=setup.source_revision,
                         ),
                     )
                     return await discord_client.create_message(
@@ -1031,80 +1005,58 @@ class ExternalChannelActionService:
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and intent.control_kind == "scheduled_task_registration"
                 ):
-                    text = payload.get("text")
-                    embeds = _discord_embeds(payload.get("embeds"))
-                    task_id = payload.get("task_id")
-                    delete_locator = payload.get("delete_locator")
-                    edit_url = (
-                        None
-                        if not isinstance(task_id, str)
-                        else _scheduled_task_edit_url(
-                            target,
-                            web_url=self.config.web_url,
-                            task_id=task_id,
-                        )
+                    notice = _decode_discord_registration_notice(
+                        target, files=files, web_url=self.config.web_url
                     )
-                    if (
-                        files
-                        or text != ""
-                        or embeds is None
-                        or not isinstance(delete_locator, str)
-                        or edit_url is None
-                    ):
+                    if notice is None:
                         return _discord_invalid_payload()
                     return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
-                        content=_discord_agent_content(target, text),
+                        content=_discord_agent_content(target, notice.text),
                         operation_key=operation_key,
                         suppress_notifications=False,
                         suppress_embeds=False,
                         components=render_scheduled_task_discord_controls(
-                            edit_url=edit_url,
-                            delete_locator=delete_locator,
+                            edit_url=notice.edit_url,
+                            delete_locator=notice.delete_locator,
                         ),
-                        embeds=embeds,
+                        embeds=[embed.to_wire() for embed in notice.embeds],
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and intent.control_kind == "scheduled_task_deletion"
                 ):
-                    text = payload.get("text")
-                    embeds = _discord_embeds(payload.get("embeds"))
-                    if files or text != "" or embeds is None:
+                    notice = _decode_discord_deletion_notice(target, files=files)
+                    if notice is None:
                         return _discord_invalid_payload()
                     return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
-                        content=_discord_agent_content(target, text),
+                        content=_discord_agent_content(target, notice.text),
                         operation_key=operation_key,
                         suppress_notifications=False,
                         suppress_embeds=False,
-                        embeds=embeds,
+                        embeds=[embed.to_wire() for embed in notice.embeds],
                     )
-                text = payload.get("text")
-                if not isinstance(text, str):
+                content = reply if reply is not None else _decode_discord_create(target)
+                if content is None:
                     return _discord_invalid_payload()
-                forward_to_parent = payload.get("forward_to_parent", False)
-                forward_parent_channel_id = payload.get("parent_channel_id")
-                if (
-                    not isinstance(forward_to_parent, bool)
-                    or forward_to_parent
-                    and (
-                        target.operation is not ExternalChannelDeliveryOperation.REPLY
-                        or not isinstance(forward_parent_channel_id, str)
-                        or not forward_parent_channel_id.isdigit()
-                    )
-                ):
-                    return _discord_invalid_payload()
-                components = _discord_components(payload.get("components"))
-                if payload.get("components") is not None and components is None:
-                    return _discord_invalid_payload()
-                embeds = _discord_embeds(payload.get("embeds"))
-                if payload.get("embeds") is not None and embeds is None:
-                    return _discord_invalid_payload()
+                text = content.text
+                forward_to_parent = content.forward_to_parent
+                forward_parent_channel_id = content.parent_channel_id
+                components = (
+                    None
+                    if content.components is None
+                    else [row.to_wire() for row in content.components]
+                )
+                embeds = (
+                    None
+                    if content.embeds is None
+                    else [embed.to_wire() for embed in content.embeds]
+                )
                 if target.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
                     context = _session_navigation_context(
                         target,
@@ -1227,41 +1179,29 @@ class ExternalChannelActionService:
                     ),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
-                text = payload.get("text")
-                embeds = _discord_embeds(payload.get("embeds"))
-                context = _session_navigation_context(
-                    target,
-                    web_url=self.config.web_url,
+                update = _decode_discord_progress_update(
+                    target, guild_id=guild_id, web_url=self.config.web_url
                 )
-                message_id = _discord_provider_message_id(
-                    payload.get("provider_message_key"),
-                    guild_id=guild_id,
-                )
-                host_kind = intent.tracker_host_kind
-                if (
-                    not isinstance(text, str)
-                    or embeds is None
-                    or context is None
-                    or message_id is None
-                ):
+                if update is None:
                     return _discord_invalid_payload()
                 components = _discord_tracker_components(
                     target,
                     intent=intent,
-                    session_url=context.session_url,
+                    session_url=update.context.session_url,
                     secret=self.config.auth.jwt.secret_key,
                 )
                 if components is None:
                     return _discord_invalid_payload()
+                embeds = [embed.to_wire() for embed in update.embeds]
                 return await discord_client.update_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
-                    message_id=message_id,
+                    message_id=update.message_id,
                     content=(
                         None
-                        if host_kind == "reply"
-                        else _discord_agent_content(target, text)
+                        if intent.tracker_host_kind == "reply"
+                        else _discord_agent_content(target, update.text)
                     ),
                     suppress_embeds=(
                         configuration.suppress_url_previews and not embeds
@@ -1270,18 +1210,15 @@ class ExternalChannelActionService:
                     embeds=embeds,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-                message_id = _discord_provider_message_id(
-                    payload.get("provider_message_key"),
-                    guild_id=guild_id,
-                )
-                if message_id is None:
+                deletion = _decode_discord_progress_delete(target, guild_id=guild_id)
+                if deletion is None:
                     return _discord_invalid_payload()
                 if intent.tracker_host_kind == "reply":
                     return await discord_client.update_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
-                        message_id=message_id,
+                        message_id=deletion.message_id,
                         content=None,
                         suppress_embeds=configuration.suppress_url_previews,
                         components=[],
@@ -1291,7 +1228,7 @@ class ExternalChannelActionService:
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
-                    message_id=message_id,
+                    message_id=deletion.message_id,
                 )
             case _ as unreachable:
                 assert_never(unreachable)
@@ -1325,52 +1262,36 @@ class ExternalChannelActionService:
         provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> SlackControlMessageResult:
-        payload = target.request_payload
         intent = target.decode_intent()
         presentation = resolve_slack_agent_presentation(
             target,
             avatar_cdn_base_url=self.config.avatar_cdn_base_url,
         )
-        tenant_id = target.provider_tenant_id
-        channel_id = payload.get("channel_id")
-        thread_ts = payload.get("thread_ts")
-        conversation_scope = payload.get("conversation_scope")
-        if (
-            not isinstance(tenant_id, str)
-            or not tenant_id
-            or not isinstance(channel_id, str)
-            or (conversation_scope == "parent_channel" and thread_ts is not None)
-            or (
-                conversation_scope != "parent_channel"
-                and not isinstance(thread_ts, str)
-            )
-        ):
+        destination = _decode_slack_destination(target)
+        if destination is None:
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
                 error_kind="provider_target_invalid",
                 error_summary="Slack delivery target is incomplete.",
             )
+        tenant_id = destination.tenant_id
+        channel_id = destination.channel_id
+        thread_ts = destination.thread_ts
         match target.operation:
             case ExternalChannelDeliveryOperation.REPLY:
-                text = payload.get("text")
-                reply_broadcast = payload.get("reply_broadcast", False)
-                if not isinstance(text, str) or not isinstance(reply_broadcast, bool):
+                reply = _decode_slack_reply(target, destination)
+                if reply is None:
                     return _invalid_payload()
-                if reply_broadcast and conversation_scope != "thread":
-                    return _invalid_payload()
-                files = _outbound_files(payload.get("files"))
-                if files is None:
-                    return _invalid_payload()
-                if files:
+                if reply.files:
                     del file_storage
                     return await self._deliver_slack_files(
                         bot_token=bot_token,
                         tenant_id=tenant_id,
                         channel_id=channel_id,
                         thread_ts=thread_ts,
-                        markdown_text=prepend_agent_markdown(presentation, text),
-                        files=files,
+                        markdown_text=prepend_agent_markdown(presentation, reply.text),
+                        files=reply.files,
                         operation_key=operation_key,
                         agent_id=agent_id,
                         session_id=session_id,
@@ -1378,38 +1299,31 @@ class ExternalChannelActionService:
                         provider_delivery_service=provider_delivery_service,
                         resolve_runtime_target=resolve_runtime_target,
                     )
-                navigation_blocks = _blocks(payload.get("blocks"))
-                if payload.get("blocks") is not None and navigation_blocks is None:
-                    return _invalid_payload()
                 return await self.slack_client.post_message(
                     blocks=(
                         None
-                        if navigation_blocks is None
-                        else prepend_agent_blocks(presentation, navigation_blocks)
+                        if reply.blocks is None
+                        else prepend_agent_blocks(presentation, list(reply.blocks))
                     ),
                     bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    markdown_text=prepend_agent_markdown(presentation, text),
+                    markdown_text=prepend_agent_markdown(presentation, reply.text),
                     icon_url=(None if presentation is None else presentation.icon_url),
-                    reply_broadcast=reply_broadcast,
+                    reply_broadcast=reply.broadcast,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_CREATE:
-                text = payload.get("text")
-                blocks = _blocks(payload.get("blocks"))
-                context = _session_navigation_context(
-                    target,
-                    web_url=self.config.web_url,
-                )
-                if not isinstance(text, str) or blocks is None or context is None:
+                progress = _decode_slack_progress(target, web_url=self.config.web_url)
+                if progress is None:
                     return _invalid_payload()
+                blocks = list(progress.blocks)
                 blocks.append(
                     _slack_progress_actions(
                         intent=intent,
                         target=target,
                         channel_id=channel_id,
-                        session_url=context.session_url,
+                        session_url=progress.context.session_url,
                         jwt_secret=self.config.auth.jwt.secret_key,
                     )
                 )
@@ -1418,31 +1332,24 @@ class ExternalChannelActionService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    text=prepend_agent_fallback(presentation, text),
+                    text=prepend_agent_fallback(presentation, progress.text),
                     blocks=prepend_agent_blocks(presentation, blocks),
                     icon_url=(None if presentation is None else presentation.icon_url),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
-                text = payload.get("text")
-                blocks = _blocks(payload.get("blocks"))
-                context = _session_navigation_context(
-                    target,
-                    web_url=self.config.web_url,
+                update = _decode_slack_progress_update(
+                    target, web_url=self.config.web_url
                 )
-                message_ts = _provider_message_ts(payload.get("provider_message_key"))
-                if (
-                    not isinstance(text, str)
-                    or blocks is None
-                    or context is None
-                    or message_ts is None
-                ):
+                if update is None:
                     return _invalid_payload()
+                progress = update.content
+                blocks = list(progress.blocks)
                 blocks.append(
                     _slack_progress_actions(
                         intent=intent,
                         target=target,
                         channel_id=channel_id,
-                        session_url=context.session_url,
+                        session_url=progress.context.session_url,
                         jwt_secret=self.config.auth.jwt.secret_key,
                     )
                 )
@@ -1450,19 +1357,19 @@ class ExternalChannelActionService:
                     bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
-                    message_ts=message_ts,
-                    text=prepend_agent_fallback(presentation, text),
+                    message_ts=update.message_ts,
+                    text=prepend_agent_fallback(presentation, progress.text),
                     blocks=prepend_agent_blocks(presentation, blocks),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-                message_ts = _provider_message_ts(payload.get("provider_message_key"))
-                if message_ts is None:
+                deletion = _decode_slack_progress_delete(target)
+                if deletion is None:
                     return _invalid_payload()
                 return await self.slack_client.delete_message(
                     bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
-                    message_ts=message_ts,
+                    message_ts=deletion.message_ts,
                 )
             case ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
                 return await self._deliver_slack_control(
@@ -1487,35 +1394,29 @@ class ExternalChannelActionService:
         presentation: SlackAgentPresentation | None,
     ) -> SlackControlMessageResult:
         """Deliver one validated selector, notice, or approval control."""
-        payload = target.request_payload
         intent = target.decode_intent()
-        payload_tenant_id = payload.get("tenant_id")
-        if payload_tenant_id is not None and payload_tenant_id != tenant_id:
+        if not _slack_control_tenant_matches(target, tenant_id):
             return _invalid_payload()
         control_kind = intent.control_kind
         if control_kind in {
             "scheduled_task_registration",
             "scheduled_task_deletion",
         }:
-            text = payload.get("text")
-            blocks = _blocks(payload.get("blocks"))
-            if not isinstance(text, str) or blocks is None:
+            notice = _decode_slack_control_notice(target)
+            if notice is None:
                 return _invalid_payload()
             return await self.slack_client.post_blocks(
                 bot_token=bot_token,
                 tenant_id=tenant_id,
                 channel_id=channel_id,
                 thread_ts=thread_ts,
-                text=prepend_agent_fallback(presentation, text),
-                blocks=prepend_agent_blocks(presentation, blocks),
+                text=prepend_agent_fallback(presentation, notice.text),
+                blocks=prepend_agent_blocks(presentation, list(notice.blocks)),
                 icon_url=(None if presentation is None else presentation.icon_url),
             )
         if control_kind == "agent_selector":
-            selector_interaction_id = payload.get("selector_interaction_id")
-            if (
-                not isinstance(selector_interaction_id, str)
-                or not selector_interaction_id
-            ):
+            selector_interaction_id = _decode_slack_selector(target)
+            if selector_interaction_id is None:
                 return _invalid_payload()
             selector = _render_agent_selector_control(selector_interaction_id)
             return await self.slack_client.post_blocks(
@@ -1588,9 +1489,7 @@ class ExternalChannelActionService:
             )
         if control_kind == "shortcut_already_bound":
             recorded_presentation = resolve_slack_agent_name_presentation(
-                payload.get("recorded_agent_name")
-                if isinstance(payload.get("recorded_agent_name"), str)
-                else None
+                _decode_slack_recorded_agent_name(target)
             )
             bound_presentation = presentation or recorded_presentation
             if bound_presentation is None:
@@ -1616,27 +1515,17 @@ class ExternalChannelActionService:
                 ),
                 icon_url=bound_presentation.icon_url,
             )
-        approval_url = payload.get("approval_url")
-        participant_provider_user_id = payload.get("participant_provider_user_id")
-        participant_label = payload.get("participant_label")
-        if (
-            not isinstance(approval_url, str)
-            or not approval_url
-            or not isinstance(participant_provider_user_id, str)
-            or not participant_provider_user_id
-            or not isinstance(participant_label, str)
-            or not participant_label
-            or thread_ts is None
-        ):
+        approval = _decode_slack_approval(target)
+        if approval is None or thread_ts is None:
             return _invalid_payload()
         return await self.slack_client.post_approval_control_message(
             bot_token=bot_token,
             tenant_id=tenant_id,
             channel_id=channel_id,
             thread_ts=thread_ts,
-            approval_url=approval_url,
-            participant_label=participant_label,
-            participant_provider_user_id=participant_provider_user_id,
+            approval_url=approval.url,
+            participant_label=approval.participant_label,
+            participant_provider_user_id=approval.participant_provider_user_id,
             agent_name=(
                 None
                 if presentation is None or not presentation.show_name
@@ -2097,6 +1986,644 @@ def _discord_invalid_payload() -> DiscordDeliveryResult:
         provider_message_key=None,
         error_kind="provider_payload_invalid",
         error_summary="The committed Discord provider request is incomplete.",
+    )
+
+
+@dataclass(frozen=True)
+class _SlackDestination:
+    """Validated Slack target and explicit thread-scope predicate."""
+
+    tenant_id: str
+    channel_id: str
+    thread_ts: str | None
+    thread_scope: bool
+
+
+def _decode_slack_destination(target: ProviderTarget) -> _SlackDestination | None:
+    """Preserve the provider target's historical scope and null semantics."""
+    payload = target.request_payload
+    tenant = target.provider_tenant_id
+    channel = payload.get("channel_id")
+    thread = payload.get("thread_ts")
+    scope = payload.get("conversation_scope")
+    if (
+        not isinstance(tenant, str)
+        or not tenant
+        or not isinstance(channel, str)
+        or scope == "parent_channel"
+        and thread is not None
+        or scope != "parent_channel"
+        and not isinstance(thread, str)
+    ):
+        return None
+    return _SlackDestination(
+        tenant_id=tenant,
+        channel_id=channel,
+        thread_ts=thread if isinstance(thread, str) else None,
+        thread_scope=scope == "thread",
+    )
+
+
+@dataclass(frozen=True)
+class _SlackReply:
+    """Validated reply fields; provider blocks remain opaque egress data."""
+
+    destination: _SlackDestination
+    text: str
+    broadcast: bool
+    files: tuple[ExternalChannelOutboundFileManifest, ...]
+    blocks: tuple[dict[str, object], ...] | None
+
+
+@dataclass(frozen=True)
+class _SlackProgress:
+    """Validated progress content with opaque provider blocks."""
+
+    text: str
+    blocks: tuple[dict[str, object], ...]
+    context: _SessionNavigationContext
+
+
+@dataclass(frozen=True)
+class _SlackControlNotice:
+    """Validated notice text and opaque provider blocks."""
+
+    text: str
+    blocks: tuple[dict[str, object], ...]
+
+
+@dataclass(frozen=True)
+class _SlackApproval:
+    """Validated approval control fields."""
+
+    url: str
+    participant_provider_user_id: str
+    participant_label: str
+
+
+def _slack_control_tenant_matches(target: ProviderTarget, tenant_id: str) -> bool:
+    value = target.request_payload.get("tenant_id")
+    return value is None or value == tenant_id
+
+
+def _decode_slack_control_notice(target: ProviderTarget) -> _SlackControlNotice | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    blocks = _blocks(payload.get("blocks"))
+    if not isinstance(text, str) or blocks is None:
+        return None
+    return _SlackControlNotice(text=text, blocks=tuple(blocks))
+
+
+def _decode_slack_selector(target: ProviderTarget) -> str | None:
+    value = target.request_payload.get("selector_interaction_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _decode_slack_recorded_agent_name(target: ProviderTarget) -> str | None:
+    value = target.request_payload.get("recorded_agent_name")
+    return value if isinstance(value, str) else None
+
+
+def _decode_slack_approval(target: ProviderTarget) -> _SlackApproval | None:
+    payload = target.request_payload
+    url = payload.get("approval_url")
+    user = payload.get("participant_provider_user_id")
+    label = payload.get("participant_label")
+    if not isinstance(url, str) or not url:
+        return None
+    if not isinstance(user, str) or not user:
+        return None
+    if not isinstance(label, str) or not label:
+        return None
+    return _SlackApproval(
+        url=url, participant_provider_user_id=user, participant_label=label
+    )
+
+
+def _decode_slack_progress(
+    target: ProviderTarget, *, web_url: str | None
+) -> _SlackProgress | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    blocks = _blocks(payload.get("blocks"))
+    context = _session_navigation_context(target, web_url=web_url)
+    if not isinstance(text, str) or blocks is None or context is None:
+        return None
+    return _SlackProgress(text=text, blocks=tuple(blocks), context=context)
+
+
+@dataclass(frozen=True)
+class _SlackProgressUpdate:
+    """Complete validated update payload."""
+
+    content: _SlackProgress
+    message_ts: str
+
+
+@dataclass(frozen=True)
+class _SlackProgressDelete:
+    """Complete validated deletion payload."""
+
+    message_ts: str
+
+
+def _decode_slack_progress_update(
+    target: ProviderTarget, *, web_url: str | None
+) -> _SlackProgressUpdate | None:
+    content = _decode_slack_progress(target, web_url=web_url)
+    message_ts = _provider_message_ts(
+        target.request_payload.get("provider_message_key")
+    )
+    if content is None or message_ts is None:
+        return None
+    return _SlackProgressUpdate(content=content, message_ts=message_ts)
+
+
+def _decode_slack_progress_delete(
+    target: ProviderTarget,
+) -> _SlackProgressDelete | None:
+    message_ts = _provider_message_ts(
+        target.request_payload.get("provider_message_key")
+    )
+    if message_ts is None:
+        return None
+    return _SlackProgressDelete(message_ts=message_ts)
+
+
+def _decode_slack_reply(
+    target: ProviderTarget, destination: _SlackDestination
+) -> _SlackReply | None:
+    """Validate consumed reply fields, retaining file-reply block behavior."""
+    payload = target.request_payload
+    text = payload.get("text")
+    broadcast = payload.get("reply_broadcast", False)
+    files = _outbound_files(payload.get("files"))
+    if (
+        not isinstance(text, str)
+        or not isinstance(broadcast, bool)
+        or broadcast
+        and not destination.thread_scope
+        or files is None
+    ):
+        return None
+    raw_blocks = payload.get("blocks")
+    blocks = None if files else _blocks(raw_blocks)
+    if not files and raw_blocks is not None and blocks is None:
+        return None
+    return _SlackReply(
+        destination=destination,
+        text=text,
+        broadcast=broadcast,
+        files=files,
+        blocks=None if blocks is None else tuple(blocks),
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordSetup:
+    """Validated setup claim and display identity."""
+
+    agent_name: str
+    claim_id: str
+    claim_generation: int
+    source_revision: int
+
+
+def _decode_discord_setup(
+    target: ProviderTarget, *, files: tuple[ExternalChannelOutboundFileManifest, ...]
+) -> _DiscordSetup | None:
+    payload = target.request_payload
+    name = target.agent_name
+    claim = payload.get("setup_claim_id")
+    generation = payload.get("claim_generation")
+    revision = payload.get("source_revision")
+    if (
+        files
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(claim, str)
+        or not claim
+        or not isinstance(generation, int)
+        or isinstance(generation, bool)
+        or generation <= 0
+        or not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision <= 0
+    ):
+        return None
+    return _DiscordSetup(
+        agent_name=name,
+        claim_id=claim,
+        claim_generation=generation,
+        source_revision=revision,
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordDestination:
+    """Validated provider identity and optional root-message thread target."""
+
+    guild_id: str
+    channel_id: str
+    thread_parent_channel_id: str | None
+
+
+def _decode_discord_destination(target: ProviderTarget) -> _DiscordDestination | None:
+    """Validate the current target without interpreting provider extensions."""
+    payload = target.request_payload
+    guild_id = payload.get("guild_id")
+    channel_id = payload.get("channel_id")
+    scope = payload.get("conversation_scope")
+    parent = payload.get("thread_parent_channel_id")
+    root = payload.get("thread_root_message_id")
+    configuration = target.provider_configuration
+    if (
+        not isinstance(guild_id, str)
+        or not guild_id.isdigit()
+        or target.provider_tenant_id != guild_id
+        or configuration is None
+        or configuration.target_guild_id != guild_id
+        or not isinstance(channel_id, str)
+        or not channel_id.isdigit()
+    ):
+        return None
+    if scope == "parent_channel":
+        if parent is not None or root is not None:
+            return None
+    elif scope is None or scope == "thread":
+        if parent is not None or root is not None:
+            if (
+                not isinstance(parent, str)
+                or not parent.isdigit()
+                or not isinstance(root, str)
+                or root != channel_id
+            ):
+                return None
+    else:
+        return None
+    return _DiscordDestination(
+        guild_id=guild_id,
+        channel_id=channel_id,
+        thread_parent_channel_id=parent if isinstance(parent, str) else None,
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordReplyButton:
+    """Validated button retaining its exact provider-wire numeric values."""
+
+    button_type: int | float
+    style: int
+    label: str
+    destination_key: str
+    destination: str
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the validated button to the Discord SDK shape."""
+        return {
+            "type": self.button_type,
+            "style": self.style,
+            "label": self.label,
+            self.destination_key: self.destination,
+        }
+
+
+@dataclass(frozen=True)
+class _DiscordReplyRow:
+    """One validated row of Discord buttons."""
+
+    row_type: int | float
+    buttons: tuple[_DiscordReplyButton, ...]
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the validated row at the provider boundary."""
+        return {
+            "type": self.row_type,
+            "components": [button.to_wire() for button in self.buttons],
+        }
+
+
+def _decode_discord_reply_rows(value: object) -> tuple[_DiscordReplyRow, ...] | None:
+    """Validate and type the supported reply component subset."""
+    rows = _discord_components(value)
+    if rows is None:
+        return None
+    result: list[_DiscordReplyRow] = []
+    for row in rows:
+        row_type = row["type"]
+        buttons = row["components"]
+        if not isinstance(row_type, int | float) or not isinstance(buttons, list):
+            return None
+        typed_buttons: list[_DiscordReplyButton] = []
+        for button in buttons:
+            if not is_external_channel_projection(button):
+                return None
+            button_type = button.get("type")
+            style = button.get("style")
+            label = button.get("label")
+            key = "url" if style == 5 else "custom_id"
+            destination = button.get(key)
+            if (
+                not isinstance(button_type, int | float)
+                or not isinstance(style, int)
+                or not isinstance(label, str)
+                or not isinstance(destination, str)
+            ):
+                return None
+            typed_buttons.append(
+                _DiscordReplyButton(button_type, style, label, key, destination)
+            )
+        result.append(_DiscordReplyRow(row_type, tuple(typed_buttons)))
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class _DiscordReplyEmbedField:
+    """Validated embed field preserving whether inline was present."""
+
+    name: str
+    value: str
+    inline: bool | None
+    inline_present: bool
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the field without collapsing omitted and null values."""
+        result: dict[str, object] = {"name": self.name, "value": self.value}
+        if self.inline_present:
+            result["inline"] = self.inline
+        return result
+
+
+@dataclass(frozen=True)
+class _DiscordReplyEmbed:
+    """Validated embed and optional-key presence for lossless SDK lowering."""
+
+    color: int
+    title: str | None
+    description: str | None
+    fields: tuple[_DiscordReplyEmbedField, ...] | None
+    present: frozenset[str]
+
+    def to_wire(self) -> dict[str, object]:
+        """Lower the embed preserving explicit nulls."""
+        result: dict[str, object] = {"color": self.color}
+        if "title" in self.present:
+            result["title"] = self.title
+        if "description" in self.present:
+            result["description"] = self.description
+        if "fields" in self.present:
+            result["fields"] = (
+                None
+                if self.fields is None
+                else [field.to_wire() for field in self.fields]
+            )
+        return result
+
+
+def _decode_discord_reply_embeds(
+    value: object,
+) -> tuple[_DiscordReplyEmbed, ...] | None:
+    """Validate and type embeds while retaining their original wire shape."""
+    embeds = _discord_embeds(value)
+    if embeds is None:
+        return None
+    result: list[_DiscordReplyEmbed] = []
+    for embed in embeds:
+        color, title, description = (
+            embed.get("color"),
+            embed.get("title"),
+            embed.get("description"),
+        )
+        raw_fields = embed.get("fields")
+        if (
+            not isinstance(color, int)
+            or title is not None
+            and not isinstance(title, str)
+            or description is not None
+            and not isinstance(description, str)
+            or raw_fields is not None
+            and not isinstance(raw_fields, list)
+        ):
+            return None
+        fields: list[_DiscordReplyEmbedField] = []
+        for field in raw_fields or []:
+            if not is_external_channel_projection(field):
+                return None
+            name, field_value, inline = (
+                field.get("name"),
+                field.get("value"),
+                field.get("inline"),
+            )
+            if (
+                not isinstance(name, str)
+                or not isinstance(field_value, str)
+                or inline is not None
+                and not isinstance(inline, bool)
+            ):
+                return None
+            fields.append(
+                _DiscordReplyEmbedField(name, field_value, inline, "inline" in field)
+            )
+        result.append(
+            _DiscordReplyEmbed(
+                color,
+                title,
+                description,
+                None if raw_fields is None else tuple(fields),
+                frozenset(embed),
+            )
+        )
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class _DiscordDeletionNotice:
+    """Validated scheduled-task deletion notice."""
+
+    text: str
+    embeds: tuple[_DiscordReplyEmbed, ...]
+
+
+@dataclass(frozen=True)
+class _DiscordRegistrationNotice:
+    """Validated scheduled-task registration notice and controls."""
+
+    text: str
+    embeds: tuple[_DiscordReplyEmbed, ...]
+    edit_url: str
+    delete_locator: str
+
+
+def _decode_discord_deletion_notice(
+    target: ProviderTarget, *, files: tuple[ExternalChannelOutboundFileManifest, ...]
+) -> _DiscordDeletionNotice | None:
+    text = target.request_payload.get("text")
+    embeds = _decode_discord_reply_embeds(target.request_payload.get("embeds"))
+    if files or text != "" or embeds is None:
+        return None
+    return _DiscordDeletionNotice(text=text, embeds=embeds)
+
+
+def _decode_discord_registration_notice(
+    target: ProviderTarget,
+    *,
+    files: tuple[ExternalChannelOutboundFileManifest, ...],
+    web_url: str | None,
+) -> _DiscordRegistrationNotice | None:
+    notice = _decode_discord_deletion_notice(target, files=files)
+    task_id = target.request_payload.get("task_id")
+    locator = target.request_payload.get("delete_locator")
+    edit_url = (
+        _scheduled_task_edit_url(target, web_url=web_url, task_id=task_id)
+        if isinstance(task_id, str)
+        else None
+    )
+    if notice is None or not isinstance(locator, str) or edit_url is None:
+        return None
+    return _DiscordRegistrationNotice(
+        text=notice.text,
+        embeds=notice.embeds,
+        edit_url=edit_url,
+        delete_locator=locator,
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordProgressUpdate:
+    """Validated progress update content and message identity."""
+
+    text: str
+    embeds: tuple[_DiscordReplyEmbed, ...]
+    context: _SessionNavigationContext
+    message_id: str
+
+
+@dataclass(frozen=True)
+class _DiscordProgressDelete:
+    """Validated progress deletion message identity."""
+
+    message_id: str
+
+
+def _decode_discord_progress_update(
+    target: ProviderTarget, *, guild_id: str, web_url: str | None
+) -> _DiscordProgressUpdate | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    embeds = _decode_discord_reply_embeds(payload.get("embeds"))
+    context = _session_navigation_context(target, web_url=web_url)
+    message_id = _discord_provider_message_id(
+        payload.get("provider_message_key"), guild_id=guild_id
+    )
+    if (
+        not isinstance(text, str)
+        or embeds is None
+        or context is None
+        or message_id is None
+    ):
+        return None
+    return _DiscordProgressUpdate(
+        text=text, embeds=embeds, context=context, message_id=message_id
+    )
+
+
+def _decode_discord_progress_delete(
+    target: ProviderTarget, *, guild_id: str
+) -> _DiscordProgressDelete | None:
+    message_id = _discord_provider_message_id(
+        target.request_payload.get("provider_message_key"), guild_id=guild_id
+    )
+    return None if message_id is None else _DiscordProgressDelete(message_id=message_id)
+
+
+@dataclass(frozen=True)
+class _DiscordCreatePayload:
+    """Validated generic nonreply message fields."""
+
+    text: str
+    forward_to_parent: bool
+    parent_channel_id: str | None
+    components: tuple[_DiscordReplyRow, ...] | None
+    embeds: tuple[_DiscordReplyEmbed, ...] | None
+
+
+def _decode_discord_create(target: ProviderTarget) -> _DiscordCreatePayload | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    forward = payload.get("forward_to_parent", False)
+    parent = payload.get("parent_channel_id")
+    raw_components = payload.get("components")
+    raw_embeds = payload.get("embeds")
+    components = _decode_discord_reply_rows(raw_components)
+    embeds = _decode_discord_reply_embeds(raw_embeds)
+    if (
+        not isinstance(text, str)
+        or not isinstance(forward, bool)
+        or forward
+        or raw_components is not None
+        and components is None
+        or raw_embeds is not None
+        and embeds is None
+    ):
+        return None
+    return _DiscordCreatePayload(
+        text=text,
+        forward_to_parent=forward,
+        parent_channel_id=parent if isinstance(parent, str) else None,
+        components=components,
+        embeds=embeds,
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordReplyPayload:
+    """Validated fields consumed by a Discord reply operation."""
+
+    destination: _DiscordDestination
+    text: str
+    forward_to_parent: bool
+    parent_channel_id: str | None
+    files: tuple[ExternalChannelOutboundFileManifest, ...]
+    components: tuple[_DiscordReplyRow, ...] | None
+    embeds: tuple[_DiscordReplyEmbed, ...] | None
+
+
+def _decode_discord_reply(target: ProviderTarget) -> _DiscordReplyPayload | None:
+    """Validate reply destination and content before any provider mutation."""
+    payload = target.request_payload
+    destination = _decode_discord_destination(target)
+    text = payload.get("text")
+    forward = payload.get("forward_to_parent", False)
+    parent = payload.get("parent_channel_id")
+    raw_components = payload.get("components")
+    raw_embeds = payload.get("embeds")
+    files = _outbound_files(payload.get("files"))
+    components = _decode_discord_reply_rows(raw_components)
+    embeds = _decode_discord_reply_embeds(raw_embeds)
+    if (
+        destination is None
+        or not isinstance(text, str)
+        or not isinstance(forward, bool)
+        or forward
+        and (not isinstance(parent, str) or not parent.isdigit())
+        or raw_components is not None
+        and components is None
+        or raw_embeds is not None
+        and embeds is None
+        or files is None
+        or files
+        and (components is not None or embeds is not None)
+    ):
+        return None
+    return _DiscordReplyPayload(
+        destination=destination,
+        text=text,
+        forward_to_parent=forward,
+        parent_channel_id=parent if isinstance(parent, str) else None,
+        files=files,
+        components=components,
+        embeds=embeds,
     )
 
 
