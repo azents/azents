@@ -657,6 +657,8 @@ def _wrap_gcp_snapshot_tool(
                 auth_identity=None,
                 before_send=before_send,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             if _is_http_401(exc):
                 if effect_admission is not None:
@@ -882,6 +884,8 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         try:
             provider = GcpAccessTokenProvider(key, sorted(all_scopes))
             token = await provider.get_token()
+        except asyncio.CancelledError:
+            raise
         except GoogleAuthError as exc:
             return TestConnectionResult(
                 success=False,
@@ -916,6 +920,8 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
                     meta.endpoint, headers, 10.0, proxy_url=proxy_url
                 )
                 results.append(f"{svc.value}: {len(discovery.tools)} tools")
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 net_msg = extract_network_error(exc)
                 if net_msg is None:

@@ -36,6 +36,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/readable_storage.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
+  - python/apps/azents/src/azents/repos/model_file_pin.py
+  - python/apps/azents/src/azents/rdb/models/model_file_pin.py
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/file_metadata_authority.py
   - python/apps/azents/src/azents/repos/provider_output_operation.py
@@ -56,8 +58,16 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/core/file_transfer.py
   - python/apps/azents/src/azents/core/exchange_upload.py
+  - typescript/apps/azents-web/src/shared/file-upload/fileHash.ts
+  - typescript/apps/azents-web/src/shared/file-upload/fileHash.worker.ts
+  - typescript/apps/azents-web/src/shared/file-upload/incrementalSha256.ts
+  - typescript/apps/azents-web/src/shared/file-upload/browserFileUpload.ts
+  - typescript/apps/azents-web/src/shared/file-upload/fileUploadCancellation.ts
+  - typescript/apps/azents-web/src/app/(app)/api/chat/upload/[uploadId]/finalize/**
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/rdb/models/exchange_upload_operation.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/9462aab292cc_add_exchange_browser_upload_operations.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/0c18705eb6cb_retain_completed_exchange_upload_.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
