@@ -23,6 +23,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/runtime_web.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/a32efa82fd63_replace_runtime_web_service_authority.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/409e9e3cb85a_migrate_envvar_toolkits_to_runtime_.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/core/runtime_environment.py
   - python/apps/azents/src/azents/repos/agent_runtime_environment.py
