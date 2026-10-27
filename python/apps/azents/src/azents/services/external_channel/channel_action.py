@@ -1420,10 +1420,12 @@ class ExternalChannelActionService:
                     icon_url=(None if presentation is None else presentation.icon_url),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
-                progress = _decode_slack_progress(target, web_url=self.config.web_url)
-                message_ts = _decode_slack_progress_message_ts(target)
-                if progress is None or message_ts is None:
+                update = _decode_slack_progress_update(
+                    target, web_url=self.config.web_url
+                )
+                if update is None:
                     return _invalid_payload()
+                progress = update.content
                 blocks = list(progress.blocks)
                 blocks.append(
                     _slack_progress_actions(
@@ -1438,19 +1440,19 @@ class ExternalChannelActionService:
                     bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
-                    message_ts=message_ts,
+                    message_ts=update.message_ts,
                     text=prepend_agent_fallback(presentation, progress.text),
                     blocks=prepend_agent_blocks(presentation, blocks),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-                message_ts = _decode_slack_progress_message_ts(target)
-                if message_ts is None:
+                deletion = _decode_slack_progress_delete(target)
+                if deletion is None:
                     return _invalid_payload()
                 return await self.slack_client.delete_message(
                     bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
-                    message_ts=message_ts,
+                    message_ts=deletion.message_ts,
                 )
             case ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
                 return await self._deliver_slack_control(
@@ -2194,8 +2196,42 @@ def _decode_slack_progress(
     return _SlackProgress(text=text, blocks=tuple(blocks), context=context)
 
 
-def _decode_slack_progress_message_ts(target: ProviderTarget) -> str | None:
-    return _provider_message_ts(target.request_payload.get("provider_message_key"))
+@dataclass(frozen=True)
+class _SlackProgressUpdate:
+    """Complete validated update payload."""
+
+    content: _SlackProgress
+    message_ts: str
+
+
+@dataclass(frozen=True)
+class _SlackProgressDelete:
+    """Complete validated deletion payload."""
+
+    message_ts: str
+
+
+def _decode_slack_progress_update(
+    target: ProviderTarget, *, web_url: str | None
+) -> _SlackProgressUpdate | None:
+    content = _decode_slack_progress(target, web_url=web_url)
+    message_ts = _provider_message_ts(
+        target.request_payload.get("provider_message_key")
+    )
+    if content is None or message_ts is None:
+        return None
+    return _SlackProgressUpdate(content=content, message_ts=message_ts)
+
+
+def _decode_slack_progress_delete(
+    target: ProviderTarget,
+) -> _SlackProgressDelete | None:
+    message_ts = _provider_message_ts(
+        target.request_payload.get("provider_message_key")
+    )
+    if message_ts is None:
+        return None
+    return _SlackProgressDelete(message_ts=message_ts)
 
 
 def _decode_slack_reply(
