@@ -161,7 +161,6 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
-  - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
@@ -170,8 +169,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-26
-spec_version: 98
+last_verified_at: 2026-10-27
+spec_version: 99
 ---
 
 # Workspace & Membership
@@ -1098,6 +1097,9 @@ stateDiagram-v2
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
+
+- **2026-10-27** (spec_version 99) — Removed an obsolete internal Agent home
+  Projects route from the API inventory.
 
 - **2026-10-26 (spec_version=98)** — Shared missing Session-folder setup admission
   between human and External Channel input, including next-message repair and
