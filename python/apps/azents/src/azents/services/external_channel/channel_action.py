@@ -968,40 +968,26 @@ class ExternalChannelActionService:
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and intent.control_kind == "setup_required"
                 ):
-                    setup_claim_id = payload.get("setup_claim_id")
-                    claim_generation = payload.get("claim_generation")
-                    source_revision = payload.get("source_revision")
-                    if (
-                        files
-                        or not isinstance(target.agent_name, str)
-                        or not target.agent_name
-                        or not isinstance(setup_claim_id, str)
-                        or not setup_claim_id
-                        or not isinstance(claim_generation, int)
-                        or isinstance(claim_generation, bool)
-                        or claim_generation <= 0
-                        or not isinstance(source_revision, int)
-                        or isinstance(source_revision, bool)
-                        or source_revision <= 0
-                    ):
+                    setup = _decode_discord_setup(target, files=files)
+                    if setup is None:
                         return _discord_invalid_payload()
                     control = render_discord_setup_required(
-                        agent_name=target.agent_name,
+                        agent_name=setup.agent_name,
                         channel_custom_id=build_discord_settings_custom_id(
                             secret=self.config.auth.jwt.secret_key,
                             action="setup_channel",
-                            origin_interaction_id=setup_claim_id,
-                            setup_claim_id=setup_claim_id,
-                            claim_generation=claim_generation,
-                            source_revision=source_revision,
+                            origin_interaction_id=setup.claim_id,
+                            setup_claim_id=setup.claim_id,
+                            claim_generation=setup.claim_generation,
+                            source_revision=setup.source_revision,
                         ),
                         threads_custom_id=build_discord_settings_custom_id(
                             secret=self.config.auth.jwt.secret_key,
                             action="setup_threads",
-                            origin_interaction_id=setup_claim_id,
-                            setup_claim_id=setup_claim_id,
-                            claim_generation=claim_generation,
-                            source_revision=source_revision,
+                            origin_interaction_id=setup.claim_id,
+                            setup_claim_id=setup.claim_id,
+                            claim_generation=setup.claim_generation,
+                            source_revision=setup.source_revision,
                         ),
                     )
                     return await discord_client.create_message(
@@ -2260,6 +2246,46 @@ def _decode_slack_reply(
         broadcast=broadcast,
         files=files,
         blocks=None if blocks is None else tuple(blocks),
+    )
+
+
+@dataclass(frozen=True)
+class _DiscordSetup:
+    """Validated setup claim and display identity."""
+
+    agent_name: str
+    claim_id: str
+    claim_generation: int
+    source_revision: int
+
+
+def _decode_discord_setup(
+    target: ProviderTarget, *, files: tuple[ExternalChannelOutboundFileManifest, ...]
+) -> _DiscordSetup | None:
+    payload = target.request_payload
+    name = target.agent_name
+    claim = payload.get("setup_claim_id")
+    generation = payload.get("claim_generation")
+    revision = payload.get("source_revision")
+    if (
+        files
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(claim, str)
+        or not claim
+        or not isinstance(generation, int)
+        or isinstance(generation, bool)
+        or generation <= 0
+        or not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision <= 0
+    ):
+        return None
+    return _DiscordSetup(
+        agent_name=name,
+        claim_id=claim,
+        claim_generation=generation,
+        source_revision=revision,
     )
 
 

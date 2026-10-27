@@ -73,6 +73,7 @@ from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     _decode_discord_destination,
     _decode_discord_reply,
+    _decode_discord_setup,
     _decode_slack_approval,
     _decode_slack_control_notice,
     _decode_slack_destination,
@@ -485,6 +486,30 @@ def test_slack_control_decoders_preserve_input_contracts() -> None:
     assert approval.participant_label == "Member"
     target.request_payload["participant_label"] = ""
     assert _decode_slack_approval(target) is None
+
+
+@pytest.mark.parametrize(
+    ("generation", "revision", "valid"),
+    [(1, 2, True), (True, 2, False), (0, 2, False), (1, False, False), (1, 0, False)],
+)
+def test_discord_setup_decodes_claim(
+    generation: object, revision: object, valid: bool
+) -> None:
+    """Reject booleans and nonpositive claim epochs without coercion."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    target.request_payload.update(
+        setup_claim_id="claim", claim_generation=generation, source_revision=revision
+    )
+    setup = _decode_discord_setup(target, files=())
+    assert (setup is not None) is valid
+    if setup is not None:
+        assert setup.claim_id == "claim"
+        assert setup.agent_name == "Research Agent"
+        assert setup.claim_generation == generation
+        assert setup.source_revision == revision
 
 
 def test_slack_file_reply_ignores_blocks() -> None:
