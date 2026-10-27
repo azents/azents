@@ -36,6 +36,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/readable_storage.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
+  - python/apps/azents/src/azents/repos/model_file_pin.py
+  - python/apps/azents/src/azents/rdb/models/model_file_pin.py
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/file_metadata_authority.py
   - python/apps/azents/src/azents/repos/provider_output_operation.py
