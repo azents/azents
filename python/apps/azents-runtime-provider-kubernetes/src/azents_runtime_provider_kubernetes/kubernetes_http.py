@@ -108,23 +108,40 @@ class KubernetesResourceOperations:
     delete: Callable[..., Awaitable[object]]
 
 
+@dataclasses.dataclass(frozen=True)
+class _WatchStatus:
+    """Validated Status fields consumed by the Pod watch."""
+
+    code: int
+    reason: str | None
+    message: str | None
+
+
+def _decode_watch_status(data: str | bytes) -> _WatchStatus | None:
+    """Decode an error event while leaving other SDK events opaque."""
+    event = _decode_json_object(json.loads(data))
+    if event.get("type") != "ERROR":
+        return None
+    status = _required_object(event.get("object"), "watch Status")
+    code = _required_int(status.get("code"), "watch Status code")
+    if status.get("kind") != "Status" or not 400 <= code <= 599:
+        raise RuntimeError("Kubernetes watch Status is malformed")
+    reason = _optional_string(status.get("reason"), "watch Status reason")
+    message = _optional_string(status.get("message"), "watch Status message")
+    return _WatchStatus(code=code, reason=reason, message=message)
+
+
 class ProviderPodWatch(watch.Watch):
     """Preserve Provider Status validation through the public SDK decoder hook."""
 
     def unmarshal_event(self, data: str | bytes, response_type: str | None) -> object:
         """Validate Status errors while the SDK owns transport and reconnects."""
-        event = _decode_json_object(json.loads(data))
-        if event.get("type") == "ERROR":
-            status = _required_object(event.get("object"), "watch Status")
-            code = _required_int(status.get("code"), "watch Status code")
-            if status.get("kind") != "Status" or not 400 <= code <= 599:
-                raise RuntimeError("Kubernetes watch Status is malformed")
-            reason = _optional_string(status.get("reason"), "watch Status reason")
-            message = _optional_string(status.get("message"), "watch Status message")
-            error = ApiException(status=code, reason=reason)
+        status = _decode_watch_status(data)
+        if status is not None:
+            error = ApiException(status=status.code, reason=status.reason)
             error.body = (
-                message
-                if message is not None
+                status.message
+                if status.message is not None
                 else "Kubernetes Pod watch returned a Status error"
             ).encode()
             raise error

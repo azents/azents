@@ -96,14 +96,18 @@ class BrowserSourceCredentialRequest:
         ):
             raise ValueError("Browser source scope is invalid")
         profile = APPROVED_SESSION_PROFILE
-        fields = {
-            "maximum_data_frame_bytes": profile.data_frame_bytes,
-            "request_stream_window_bytes": profile.request_stream_window_bytes,
-            "response_stream_window_bytes": profile.response_stream_window_bytes,
-            "request_session_window_bytes": profile.request_session_window_bytes,
-            "response_session_window_bytes": profile.response_session_window_bytes,
-        }
-        if any(getattr(hello.hello, name) != value for name, value in fields.items()):
+        source_profile = hello.hello
+        if (
+            source_profile.maximum_data_frame_bytes != profile.data_frame_bytes
+            or source_profile.request_stream_window_bytes
+            != profile.request_stream_window_bytes
+            or source_profile.response_stream_window_bytes
+            != profile.response_stream_window_bytes
+            or source_profile.request_session_window_bytes
+            != profile.request_session_window_bytes
+            or source_profile.response_session_window_bytes
+            != profile.response_session_window_bytes
+        ):
             raise ValueError("Browser source profile is incompatible")
         authority = decode_stream_authority(opened.open.authority)
         if not isinstance(authority, BrowserStreamAuthority):
