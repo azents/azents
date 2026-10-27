@@ -61,6 +61,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/engine/run/model_transport.py
+  - python/apps/azents/src/azents/engine/model_factory_types.py
+  - python/apps/azents/src/azents/engine/model_factories.py
+  - python/apps/azents/src/azents/engine/provider_errors.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/run/client_tool_compatibility.py
   - python/apps/azents/src/azents/engine/run/failure.py
