@@ -54,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/core/runtime_provider_credential.py
   - python/apps/azents/src/azents/core/runtime_runner_credential.py
+  - python/apps/azents/src/azents/core/runtime_transfer_coordinator_credential.py
   - python/apps/azents/src/azents/core/runtime_connection_registration.py
   - python/apps/azents/src/azents/core/runtime_provider_control.py
   - python/apps/azents/src/azents/core/runtime_recreation.py

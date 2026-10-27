@@ -56,6 +56,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/agent_automatic_project_operations.py
   - python/apps/azents/src/azents/repos/project_browser_manifest_read.py
+  - python/apps/azents/src/azents/services/project_browser_manifest.py
   - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_setting.py
