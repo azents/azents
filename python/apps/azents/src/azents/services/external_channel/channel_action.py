@@ -1233,41 +1233,29 @@ class ExternalChannelActionService:
                     ),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
-                text = payload.get("text")
-                embeds = _discord_embeds(payload.get("embeds"))
-                context = _session_navigation_context(
-                    target,
-                    web_url=self.config.web_url,
+                update = _decode_discord_progress_update(
+                    target, guild_id=guild_id, web_url=self.config.web_url
                 )
-                message_id = _discord_provider_message_id(
-                    payload.get("provider_message_key"),
-                    guild_id=guild_id,
-                )
-                host_kind = intent.tracker_host_kind
-                if (
-                    not isinstance(text, str)
-                    or embeds is None
-                    or context is None
-                    or message_id is None
-                ):
+                if update is None:
                     return _discord_invalid_payload()
                 components = _discord_tracker_components(
                     target,
                     intent=intent,
-                    session_url=context.session_url,
+                    session_url=update.context.session_url,
                     secret=self.config.auth.jwt.secret_key,
                 )
                 if components is None:
                     return _discord_invalid_payload()
+                embeds = [embed.to_wire() for embed in update.embeds]
                 return await discord_client.update_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
-                    message_id=message_id,
+                    message_id=update.message_id,
                     content=(
                         None
-                        if host_kind == "reply"
-                        else _discord_agent_content(target, text)
+                        if intent.tracker_host_kind == "reply"
+                        else _discord_agent_content(target, update.text)
                     ),
                     suppress_embeds=(
                         configuration.suppress_url_previews and not embeds
@@ -1276,18 +1264,15 @@ class ExternalChannelActionService:
                     embeds=embeds,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-                message_id = _discord_provider_message_id(
-                    payload.get("provider_message_key"),
-                    guild_id=guild_id,
-                )
-                if message_id is None:
+                deletion = _decode_discord_progress_delete(target, guild_id=guild_id)
+                if deletion is None:
                     return _discord_invalid_payload()
                 if intent.tracker_host_kind == "reply":
                     return await discord_client.update_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
-                        message_id=message_id,
+                        message_id=deletion.message_id,
                         content=None,
                         suppress_embeds=configuration.suppress_url_previews,
                         components=[],
@@ -1297,7 +1282,7 @@ class ExternalChannelActionService:
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
-                    message_id=message_id,
+                    message_id=deletion.message_id,
                 )
             case _ as unreachable:
                 assert_never(unreachable)
@@ -2504,6 +2489,54 @@ def _decode_discord_reply_embeds(
             )
         )
     return tuple(result)
+
+
+@dataclass(frozen=True)
+class _DiscordProgressUpdate:
+    """Validated progress update content and message identity."""
+
+    text: str
+    embeds: tuple[_DiscordReplyEmbed, ...]
+    context: _SessionNavigationContext
+    message_id: str
+
+
+@dataclass(frozen=True)
+class _DiscordProgressDelete:
+    """Validated progress deletion message identity."""
+
+    message_id: str
+
+
+def _decode_discord_progress_update(
+    target: ProviderTarget, *, guild_id: str, web_url: str | None
+) -> _DiscordProgressUpdate | None:
+    payload = target.request_payload
+    text = payload.get("text")
+    embeds = _decode_discord_reply_embeds(payload.get("embeds"))
+    context = _session_navigation_context(target, web_url=web_url)
+    message_id = _discord_provider_message_id(
+        payload.get("provider_message_key"), guild_id=guild_id
+    )
+    if (
+        not isinstance(text, str)
+        or embeds is None
+        or context is None
+        or message_id is None
+    ):
+        return None
+    return _DiscordProgressUpdate(
+        text=text, embeds=embeds, context=context, message_id=message_id
+    )
+
+
+def _decode_discord_progress_delete(
+    target: ProviderTarget, *, guild_id: str
+) -> _DiscordProgressDelete | None:
+    message_id = _discord_provider_message_id(
+        target.request_payload.get("provider_message_key"), guild_id=guild_id
+    )
+    return None if message_id is None else _DiscordProgressDelete(message_id=message_id)
 
 
 @dataclass(frozen=True)

@@ -72,6 +72,8 @@ from azents.repos.session_execution import (
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     _decode_discord_destination,
+    _decode_discord_progress_delete,
+    _decode_discord_progress_update,
     _decode_discord_reply,
     _decode_discord_setup,
     _decode_slack_approval,
@@ -510,6 +512,42 @@ def test_discord_setup_decodes_claim(
         assert setup.agent_name == "Research Agent"
         assert setup.claim_generation == generation
         assert setup.source_revision == revision
+
+
+def test_discord_progress_decodes_complete_operations() -> None:
+    """Validate update content and both operations' message identity."""
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+    )
+    update = _decode_discord_progress_update(
+        target, guild_id="111", web_url="https://azents.example"
+    )
+    assert update is not None
+    assert update.message_id == "555"
+    assert [embed.to_wire() for embed in update.embeds] == target.request_payload[
+        "embeds"
+    ]
+    deletion = _decode_discord_progress_delete(target, guild_id="111")
+    assert deletion is not None
+    assert deletion.message_id == "555"
+    target.request_payload["provider_message_key"] = "discord:222:555"
+    assert (
+        _decode_discord_progress_update(
+            target, guild_id="111", web_url="https://azents.example"
+        )
+        is None
+    )
+    assert _decode_discord_progress_delete(target, guild_id="111") is None
+    target.request_payload["provider_message_key"] = "discord:111:555"
+    target.request_payload["embeds"] = None
+    assert (
+        _decode_discord_progress_update(
+            target, guild_id="111", web_url="https://azents.example"
+        )
+        is None
+    )
+    assert _decode_discord_progress_delete(target, guild_id="111") is not None
 
 
 def test_slack_file_reply_ignores_blocks() -> None:
