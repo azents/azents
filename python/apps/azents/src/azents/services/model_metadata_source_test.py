@@ -325,8 +325,23 @@ async def test_unexpected_catalog_write_failure_rolls_back_source_and_rows(
         assert after_rows == before_rows
 
 
-async def test_sync_rejects_material_provider_reduction(
+@pytest.mark.parametrize(
+    ("previous_count", "next_count", "blocked"),
+    [
+        (100, 50, False),
+        (100, 49, True),
+        (100, 48, True),
+        (2, 1, False),
+        (2, 0, True),
+        (3, 1, False),
+        (3, 0, True),
+    ],
+)
+async def test_sync_guards_only_global_reductions_of_at_least_half(
     rdb_session_manager: SessionManager[WriteSession],
+    previous_count: int,
+    next_count: int,
+    blocked: bool,
 ) -> None:
     adapter = AsyncMock(spec=CatalogSourceAdapter)
     adapter.policy = CatalogCollectionPolicy(
@@ -335,23 +350,85 @@ async def test_sync_rejects_material_provider_reduction(
         timeout_seconds=2,
         allow_testenv_endpoint=False,
     )
-    adapter.fetch.side_effect = [_fetched(_payload(30)), _fetched(_payload(3))]
+    # _payload adds two other providers to each supplied count.
+    fetched = _fetched(_payload(next_count))
+    adapter.fetch.side_effect = [_fetched(_payload(previous_count)), fetched]
     service = _service(rdb_session_manager, adapter)
     original = await service.sync_current_source()
-    with pytest.raises(ModelMetadataSourceSyncError, match="operator review"):
-        await service.sync_current_source()
-    assert await service.get_current_source() == original
+    if blocked:
+        with pytest.raises(ModelMetadataSourceSyncError, match="operator review"):
+            await service.sync_current_source()
+        assert await service.get_current_source() == original
+    else:
+        result = await service.sync_current_source()
+        assert result.models == fetched.models
+        assert await service.get_current_source() == result
     async with rdb_session_manager() as session:
         status = await service.operations.repository.get_sync_status(
             session, source_key=CATALOG_SOURCE_KEY
         )
     assert status is not None and status.finished_at is not None
     assert status.finished_at <= datetime.datetime.now(datetime.UTC)
-    assert status.failure_code == "ModelMetadataSourceModelCountReduction"
-    assert (
-        status.diagnostics is not None
-        and status.diagnostics["reduction_scope"] == "provider:openai"
+    if blocked:
+        assert status.failure_code == "ModelMetadataSourceModelCountReduction"
+        assert status.diagnostics is not None
+        assert status.diagnostics["reduction_scope"] == "global"
+    else:
+        assert status.failure_code is None
+
+
+async def test_provider_removal_does_not_block_unrelated_new_model_evidence(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    retained = {
+        f"gpt-test-{index}": {
+            "litellm_provider": "openai",
+            "mode": "chat",
+        }
+        for index in range(30)
+    }
+    old = make_test_source_payload(
+        {
+            **retained,
+            **{
+                f"openrouter/retired-{index}": {
+                    "litellm_provider": "openrouter",
+                    "mode": "chat",
+                }
+                for index in range(10)
+            },
+        }
     )
+    new = make_test_source_payload(
+        {
+            **retained,
+            "chatgpt/new-account-model": {
+                "litellm_provider": "chatgpt",
+                "mode": "responses",
+                "supports_response_schema": True,
+            },
+        }
+    )
+    adapter = AsyncMock(spec=CatalogSourceAdapter)
+    adapter.fetch.side_effect = [_fetched(old), _fetched(new)]
+    service = _service(rdb_session_manager, adapter)
+    await service.sync_current_source()
+    result = await service.sync_current_source()
+    assert result.payload == new
+    async with rdb_session_manager() as session:
+        status = await service.operations.repository.get_sync_status(
+            session, source_key=CATALOG_SOURCE_KEY
+        )
+    assert status is not None and status.status.value == "succeeded"
+    assert status.diagnostics is not None
+    assert status.diagnostics["previous_supported_provider_counts"] == {
+        "openai": 30,
+        "openrouter": 10,
+    }
+    assert status.diagnostics["supported_provider_counts"] == {
+        "openai": 30,
+        "chatgpt": 1,
+    }
 
 
 @pytest.mark.parametrize(
