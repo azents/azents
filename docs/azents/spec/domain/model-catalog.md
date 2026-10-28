@@ -354,16 +354,8 @@ integration models.
 The six-hour `model_catalog_system_projection` task uses this collector and
 stored source contract. Transport, validation, supersession and material-reduction
 failures record bounded diagnostics and retain last-good source/catalog state.
-The reduction guard rejects a source only when the total model count falls by
-at least 50% from the last accepted source. There is no independent minimum
-removal count or per-provider rejection. Provider counts before and after
-replacement remain diagnostic, so one provider's removal does not prevent
-unrelated additions from being adopted when the global source remains healthy.
-Collection still requires a nonempty, strictly valid JSON source within 12 MiB,
-20,000 model records and a 20-second fetch deadline (at most 5 seconds to
-connect), with HTTP 200 and no redirects. The source/system publication claim
-has a five-minute lease; scheduled refresh runs every six hours and retries
-failures with bounded five-minute to one-hour backoff.
+A reduction of at least 50% in the total source model count rejects replacement;
+per-provider counts are diagnostic only.
 Normal reads, model dispatch and integration enrichment do not fetch remote
 metadata. Preparation normalizes prices and capabilities outside database transactions.
 Source replacement and all affected system catalog entries commit together after
