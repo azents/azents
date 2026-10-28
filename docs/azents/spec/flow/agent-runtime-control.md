@@ -122,8 +122,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-27
-spec_version: 109
+last_verified_at: 2026-10-29
+spec_version: 110
 ---
 
 # Agent Runtime Control
@@ -389,6 +389,11 @@ Disconnected source notification queues do not interrupt Runner/registry/owner
 release. All binding and capacity releases run even if an earlier cleanup fails;
 unexpected errors remain observable. Joined owner state is removed when its
 Runner Web connection ends so same-generation reconnect can acquire a new epoch.
+
+Gateway and Owner-relay source registration remains owned throughout acceptance
+enqueue, reader-task allocation, and response streaming. Cancellation or failure
+at any of those stages unregisters the source and releases its process session
+capacity; cancellation during handshake acceptance cannot leave a registered source.
 
 Logical stream release completes its existing Runner routing, Browser guard and
 broker-capacity cleanup before propagating caller cancellation. Removing the
@@ -1528,6 +1533,9 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-29** (spec_version 110) — Guaranteed registered-source cleanup when
+  Gateway or Owner-relay handshake acceptance is cancelled.
 
 - **2026-10-27** (spec_version 109) — Recorded Pod watch validation and
   error-specific reconnect boundaries.

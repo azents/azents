@@ -2579,38 +2579,35 @@ class RuntimeStreamGatewaySessionGrpcServicer(
             )
             raise AssertionError("unreachable") from None
         try:
-            await source.queue.put(
-                _acceptance(first, self.data_plane.control_boot_id, self.clock)
-            )
-        except _RuntimeStreamControlResourceExhausted:
-            await self.data_plane.unregister_source(source)
-            await context.abort(
-                grpc.StatusCode.RESOURCE_EXHAUSTED,
-                "Runtime Web Control hard queue limit is exhausted",
-            )
-            raise AssertionError("unreachable") from None
-        try:
-            reader = _create_control_task(
-                self.data_plane.resources,
-                lambda: _read_source(self.data_plane, source, request_iterator),
-                name=f"runtime-web-gateway-reader:{source.session_id}",
-            )
-        except _RuntimeStreamControlResourceExhausted:
-            await self.data_plane.unregister_source(source)
-            await context.abort(
-                grpc.StatusCode.RESOURCE_EXHAUSTED,
-                "Runtime Web Control hard task limit is exhausted",
-            )
-            raise AssertionError("unreachable") from None
-        except Exception:
-            await self.data_plane.unregister_source(source)
-            raise
-        try:
-            async for response in source.queue:
-                yield response
+            try:
+                await source.queue.put(
+                    _acceptance(first, self.data_plane.control_boot_id, self.clock)
+                )
+            except _RuntimeStreamControlResourceExhausted:
+                await context.abort(
+                    grpc.StatusCode.RESOURCE_EXHAUSTED,
+                    "Runtime Web Control hard queue limit is exhausted",
+                )
+                raise AssertionError("unreachable") from None
+            try:
+                reader = _create_control_task(
+                    self.data_plane.resources,
+                    lambda: _read_source(self.data_plane, source, request_iterator),
+                    name=f"runtime-web-gateway-reader:{source.session_id}",
+                )
+            except _RuntimeStreamControlResourceExhausted:
+                await context.abort(
+                    grpc.StatusCode.RESOURCE_EXHAUSTED,
+                    "Runtime Web Control hard task limit is exhausted",
+                )
+                raise AssertionError("unreachable") from None
+            try:
+                async for response in source.queue:
+                    yield response
+            finally:
+                reader.cancel()
+                await asyncio.gather(reader, return_exceptions=True)
         finally:
-            reader.cancel()
-            await asyncio.gather(reader, return_exceptions=True)
             await self.data_plane.unregister_source(source)
 
 
@@ -2671,36 +2668,35 @@ class RuntimeStreamControlSessionGrpcServicer(
             )
             raise AssertionError("unreachable") from None
         try:
-            await source.queue.put(_acceptance(first, owner.owner_boot_id, self.clock))
-        except _RuntimeStreamControlResourceExhausted:
-            await self.data_plane.unregister_source(source)
-            await context.abort(
-                grpc.StatusCode.RESOURCE_EXHAUSTED,
-                "Runtime Web Control hard queue limit is exhausted",
-            )
-            raise AssertionError("unreachable") from None
-        try:
-            reader = _create_control_task(
-                self.data_plane.resources,
-                lambda: _read_source(self.data_plane, source, request_iterator),
-                name=f"runtime-web-relay-reader:{source.session_id}",
-            )
-        except _RuntimeStreamControlResourceExhausted:
-            await self.data_plane.unregister_source(source)
-            await context.abort(
-                grpc.StatusCode.RESOURCE_EXHAUSTED,
-                "Runtime Web Control hard task limit is exhausted",
-            )
-            raise AssertionError("unreachable") from None
-        except Exception:
-            await self.data_plane.unregister_source(source)
-            raise
-        try:
-            async for response in source.queue:
-                yield response
+            try:
+                await source.queue.put(
+                    _acceptance(first, owner.owner_boot_id, self.clock)
+                )
+            except _RuntimeStreamControlResourceExhausted:
+                await context.abort(
+                    grpc.StatusCode.RESOURCE_EXHAUSTED,
+                    "Runtime Web Control hard queue limit is exhausted",
+                )
+                raise AssertionError("unreachable") from None
+            try:
+                reader = _create_control_task(
+                    self.data_plane.resources,
+                    lambda: _read_source(self.data_plane, source, request_iterator),
+                    name=f"runtime-web-relay-reader:{source.session_id}",
+                )
+            except _RuntimeStreamControlResourceExhausted:
+                await context.abort(
+                    grpc.StatusCode.RESOURCE_EXHAUSTED,
+                    "Runtime Web Control hard task limit is exhausted",
+                )
+                raise AssertionError("unreachable") from None
+            try:
+                async for response in source.queue:
+                    yield response
+            finally:
+                reader.cancel()
+                await asyncio.gather(reader, return_exceptions=True)
         finally:
-            reader.cancel()
-            await asyncio.gather(reader, return_exceptions=True)
             await self.data_plane.unregister_source(source)
 
 
