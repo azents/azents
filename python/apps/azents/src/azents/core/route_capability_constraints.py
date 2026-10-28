@@ -143,14 +143,6 @@ def resolve_route_capabilities(
         LLMProvider.XAI_OAUTH,
         LLMProvider.KIMI_OAUTH,
     }
-    # Codex's common strict-schema producer grammar plus reviewed 2026-10-04
-    # same-host nonce acceptance establish these exact OAuth model contracts.
-    # This is support potential, not account entitlement or every-schema-subset
-    # acceptance, and does not borrow facts from the public OpenAI hosting route.
-    chatgpt_schemas = provider is LLMProvider.CHATGPT_OAUTH and exact_model in {
-        "gpt-6-astra",
-        "gpt-6.1-sol",
-    }
     function_contract = coding_functions
     if (
         provider is LLMProvider.KIMI_OAUTH
@@ -172,13 +164,15 @@ def resolve_route_capabilities(
     parallel = function and _supported(declared.parallel_function_calling)
     strict = function and _supported(
         declared.strict_function_schema,
-        contract=chatgpt_schemas or provider is LLMProvider.OPENAI,
+        # Native Responses routes encode strict function declarations independently
+        # of model-owned response-output schema support.
+        contract=provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH},
     )
     if parallel:
         features.add(ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS)
     if strict:
         features.add(ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA)
-    if _supported(declared.structured_response, contract=chatgpt_schemas):
+    if _supported(declared.structured_response):
         features.add(ModelCapabilityFeature.STRUCTURED_RESPONSE)
     if protocol == "bedrock" and ModelCapabilityFeature.STRUCTURED_RESPONSE in features:
         features.remove(ModelCapabilityFeature.STRUCTURED_RESPONSE)

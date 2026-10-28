@@ -2,14 +2,18 @@
 
 import dataclasses
 import datetime
+import json
 
 import httpx2
 import pytest
 from openai import AsyncOpenAI
 from pydantic import TypeAdapter
 
-from azents.core.enums import EventKind, LLMProvider
+from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_projection import compile_stored_choice
+from azents.core.model_catalog_source import decode_catalog_source
+from azents.core.model_provider_declarations import decode_stored_provider_evidence
 from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.core.routine_judgment_test import JUDGMENT_TIME, candidate
 from azents.engine.events.openai_responses import (
@@ -127,27 +131,30 @@ def test_openai_endpoint_configuration_is_not_a_structured_request_control(
 
 
 @pytest.mark.parametrize(
-    ("provider", "protocol"),
+    ("provider", "protocol", "model_name"),
     [
-        (LLMProvider.OPENAI, "responses"),
-        (LLMProvider.CHATGPT_OAUTH, "responses"),
-        (LLMProvider.OPENROUTER, "responses"),
-        (LLMProvider.XAI, "responses"),
-        (LLMProvider.XAI_OAUTH, "responses"),
-        (LLMProvider.ANTHROPIC, "anthropic"),
-        (LLMProvider.GOOGLE_GEMINI, "google"),
-        (LLMProvider.KIMI_OAUTH, "chat_completions"),
+        (LLMProvider.OPENAI, "responses", "fixture"),
+        (LLMProvider.CHATGPT_OAUTH, "responses", "gpt-6.1-terra"),
+        (LLMProvider.CHATGPT_OAUTH, "responses", "new-account-model"),
+        (LLMProvider.OPENROUTER, "responses", "fixture"),
+        (LLMProvider.XAI, "responses", "fixture"),
+        (LLMProvider.XAI_OAUTH, "responses", "fixture"),
+        (LLMProvider.ANTHROPIC, "anthropic", "fixture"),
+        (LLMProvider.GOOGLE_GEMINI, "google", "fixture"),
+        (LLMProvider.KIMI_OAUTH, "chat_completions", "fixture"),
     ],
 )
 async def test_actual_sdk_wire_preserves_history_schema_usage_and_owned_cleanup(
-    provider: LLMProvider, protocol: NativeFixtureProtocol
+    provider: LLMProvider, protocol: NativeFixtureProtocol, model_name: str
 ) -> None:
     captured: list[dict[str, object]] = []
     clients: list[httpx2.AsyncClient] = []
 
     def respond(request: httpx2.Request) -> httpx2.Response:
         captured.append(_BODY.validate_json(request.content))
-        response = core_native_response(protocol=protocol, model="fixture", text=_VALID)
+        response = core_native_response(
+            protocol=protocol, model=model_name, text=_VALID
+        )
         return httpx2.Response(
             200, headers={"content-type": response.content_type}, content=response.body
         )
@@ -176,7 +183,41 @@ async def test_actual_sdk_wire_preserves_history_schema_usage_and_owned_cleanup(
         factory.transports = ProviderTransports(httpx2=transport)
         return factory
 
-    model = selection(provider)
+    model = dataclasses.replace(selection(provider), model=model_name)
+    if provider is LLMProvider.CHATGPT_OAUTH:
+        evidence = decode_stored_provider_evidence(
+            provider=provider,
+            provider_metadata={
+                "input_modalities": ["text", "image"],
+                "tool_mode": "code_mode_only",
+            },
+            capability_evidence=None,
+        )
+        compiled = compile_stored_choice(
+            provider=provider,
+            exact_model=model_name,
+            source_model=decode_catalog_source(
+                json.dumps(
+                    {
+                        f"chatgpt/{model_name}": {
+                            "litellm_provider": "chatgpt",
+                            "mode": "responses",
+                            "supports_response_schema": True,
+                        }
+                    }
+                ).encode()
+            ).models[0],
+            evidence=evidence,
+            model_developer=LLMModelDeveloper.OPENAI,
+        )
+        model = dataclasses.replace(
+            model,
+            assembly=ModelAssemblyMetadata(
+                model_developer=LLMModelDeveloper.OPENAI,
+                model_family=None,
+                capabilities=compiled.capabilities,
+            ),
+        )
     watchdog = make_test_model_stream_watchdog()
     request = prepare_routine_judgment_request(
         selection=model,
@@ -203,7 +244,7 @@ async def test_actual_sdk_wire_preserves_history_schema_usage_and_owned_cleanup(
         pricing=None,
         watchdog=watchdog,
         timeout_policy=watchdog.resolve_policy(
-            provider=provider.value, model="fixture", inference_profile=None
+            provider=provider.value, model=model_name, inference_profile=None
         ),
         call_context=context(model),
     )
@@ -211,6 +252,8 @@ async def test_actual_sdk_wire_preserves_history_schema_usage_and_owned_cleanup(
     assert result.decision is not None and result.decision.decisions[0].act
     assert result.usage is not None and result.usage.total_tokens > 0
     assert len(captured) == 1
+    if protocol == "responses":
+        assert captured[0]["model"] == model_name
     wire = str(captured[0])
     assert "Watch official launch announcements." in wire
     assert "Only notify about confirmed news." in wire

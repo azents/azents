@@ -1,5 +1,7 @@
 """Own-provider declarations retain presence without network or legacy flags."""
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,7 +13,7 @@ from azents.core.model_capability_projection import (
     compile_model_capabilities,
     compile_stored_choice,
 )
-from azents.core.model_catalog_source import CatalogFact
+from azents.core.model_catalog_source import CatalogFact, decode_catalog_source
 from azents.core.model_provider_declarations import (
     MalformedProviderDeclarations,
     decode_stored_provider_evidence,
@@ -295,11 +297,16 @@ def test_vertex_physical_resource_owns_protocol_not_developer_metadata(
     assert compiled.capabilities.parameters.top_k is supports_top_k
 
 
-@pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-6.1-sol"])
-def test_sparse_stored_chatgpt_declarations_recover_verified_exact_schema_support(
+@pytest.mark.parametrize(
+    "model",
+    ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "new-account-model"],
+)
+@pytest.mark.parametrize("source_support", [None, False, True])
+def test_chatgpt_structured_output_uses_exact_source_evidence(
     model: str,
+    source_support: bool | None,
 ) -> None:
-    """Root's scoped strict-function and strict-output probes returned schema nonces."""
+    """Account visibility and function schemas do not imply structured output."""
     evidence = _decode(
         LLMProvider.CHATGPT_OAUTH,
         {
@@ -314,18 +321,60 @@ def test_sparse_stored_chatgpt_declarations_recover_verified_exact_schema_suppor
     replayed = ProviderCapabilityEvidence.model_validate_json(
         evidence.model_dump_json()
     )
+    source = (
+        decode_catalog_source(
+            json.dumps(
+                {
+                    f"chatgpt/{model}": {
+                        "litellm_provider": "chatgpt",
+                        "mode": "responses",
+                        "supports_response_schema": source_support,
+                    }
+                }
+            ).encode()
+        ).models[0]
+        if source_support is not None
+        else None
+    )
     compiled = compile_stored_choice(
         provider=LLMProvider.CHATGPT_OAUTH,
         exact_model=model,
-        source_model=None,
+        source_model=source,
         evidence=replayed,
         model_developer=LLMModelDeveloper.OPENAI,
     )
     assert compiled.capabilities.supports(ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA)
-    assert compiled.capabilities.supports(ModelCapabilityFeature.STRUCTURED_RESPONSE)
+    assert compiled.capabilities.structured_response is (source_support is True)
     assert compiled.facts.provider_declarations == evidence
     assert compiled.facts.declarations.strict_function_schema.state == "absent"
-    assert compiled.facts.declarations.structured_response.state == "absent"
+    assert compiled.facts.declarations.structured_response.value is source_support
+
+
+@pytest.mark.parametrize("structured", [None, False, True])
+@pytest.mark.parametrize("strict", [None, False, True])
+def test_chatgpt_schema_support_preserves_independent_explicit_declarations(
+    structured: bool | None, strict: bool | None
+) -> None:
+    evidence = ProviderCapabilityEvidence(
+        structured_response=CatalogFact(
+            state="null" if structured is None else "value", value=structured
+        ),
+        strict_function_schema=CatalogFact(
+            state="null" if strict is None else "value", value=strict
+        ),
+    )
+    compiled = compile_stored_choice(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        exact_model="new-account-model",
+        source_model=None,
+        evidence=evidence,
+        model_developer=LLMModelDeveloper.OPENAI,
+    )
+    assert compiled.capabilities.structured_response is (structured is True)
+    assert compiled.capabilities.tool_calling.strict_json_schema is (
+        strict is not False
+    )
+    assert compiled.facts.provider_declarations == evidence
 
 
 @pytest.mark.parametrize(
