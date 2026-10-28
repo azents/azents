@@ -1439,43 +1439,47 @@ async def runtime_control_server_lifespan(
         transfer_repair_task.cancel()
         workspace_upload_repair_task.cancel()
         terminal_repair_task.cancel()
-        try:
-            await reconciler_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await transfer_repair_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await workspace_upload_repair_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await terminal_repair_task
-        except asyncio.CancelledError:
-            pass
-        if web_data_plane is not None:
-            await web_data_plane.begin_drain()
-        if web_process_sampler_task is not None:
-            web_process_sampler_task.cancel()
+
+        async def join_owned(task: asyncio.Task[None]) -> None:
             try:
-                await web_process_sampler_task
-            except asyncio.CancelledError:
-                pass
-        if trusted_server is not None:
-            await trusted_server.stop(grace=0)
-        await server.stop(grace=0)
-        if web_operations_runner is not None:
-            await web_operations_runner.cleanup()
-        if web_data_plane is not None:
-            await web_data_plane.close()
-        if kubernetes_api_client is not None:
-            await kubernetes_api_client.close()
-        await resources.aclose()
-        if redis is not None:
-            await redis.aclose()
-        await engine.dispose()
+                (result,) = await asyncio.gather(task, return_exceptions=True)
+            except asyncio.CancelledError as cancellation:
+                if not task.cancelled():
+                    error = task.exception()
+                    if error is not None:
+                        raise error from cancellation
+                raise
+            if isinstance(result, BaseException) and not isinstance(
+                result, asyncio.CancelledError
+            ):
+                raise result
+
+        async def stop_web_sampler() -> None:
+            if web_process_sampler_task is not None:
+                web_process_sampler_task.cancel()
+                await join_owned(web_process_sampler_task)
+
+        async with AsyncExitStack() as cleanup:
+            cleanup.push_async_callback(engine.dispose)
+            if redis is not None:
+                cleanup.push_async_callback(redis.aclose)
+            cleanup.push_async_callback(resources.aclose)
+            if kubernetes_api_client is not None:
+                cleanup.push_async_callback(kubernetes_api_client.close)
+            if web_data_plane is not None:
+                cleanup.push_async_callback(web_data_plane.close)
+            if web_operations_runner is not None:
+                cleanup.push_async_callback(web_operations_runner.cleanup)
+            cleanup.push_async_callback(server.stop, grace=0)
+            if trusted_server is not None:
+                cleanup.push_async_callback(trusted_server.stop, grace=0)
+            cleanup.push_async_callback(stop_web_sampler)
+            if web_data_plane is not None:
+                cleanup.push_async_callback(web_data_plane.begin_drain)
+            cleanup.push_async_callback(join_owned, terminal_repair_task)
+            cleanup.push_async_callback(join_owned, workspace_upload_repair_task)
+            cleanup.push_async_callback(join_owned, transfer_repair_task)
+            cleanup.push_async_callback(join_owned, reconciler_task)
 
 
 async def _run_reconciler(

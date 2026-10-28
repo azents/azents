@@ -5,6 +5,7 @@ import inspect
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from unittest.mock import create_autospec
 
 import pytest
@@ -260,9 +261,11 @@ async def test_runtime_s3_clients_use_checksum_capable_sigv4_presigning(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("memory_mode", [False, True])
+@pytest.mark.parametrize("shutdown", ["normal", "cancel", "error", "cancel-error"])
 async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch: pytest.MonkeyPatch,
     memory_mode: bool,
+    shutdown: Literal["normal", "cancel", "error", "cancel-error"],
 ) -> None:
     """One process owns state, S3, repair, and all Runtime Control services."""
     redis = _Redis()
@@ -324,6 +327,26 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         del args, kwargs
         await stop.wait()
 
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+    failure = ValueError("reconciler cleanup failed")
+
+    async def blocked(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            if shutdown == "error":
+                raise failure
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as cancellation:
+                if shutdown == "cancel-error":
+                    raise failure from cancellation
+                raise
+
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[object]:
         yield object()
@@ -358,7 +381,9 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         _GenerationRepository,
     )
     monkeypatch.setattr(control_server, "_runtime_transfer_s3_service", s3_service)
-    monkeypatch.setattr(control_server, "_run_reconciler", idle)
+    monkeypatch.setattr(
+        control_server, "_run_reconciler", idle if shutdown == "normal" else blocked
+    )
     monkeypatch.setattr(control_server, "_run_transfer_repair", idle)
     monkeypatch.setattr(control_server, "_run_workspace_upload_repair", idle)
     monkeypatch.setattr(control_server, "_run_terminal_repair", idle)
@@ -378,7 +403,34 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
             coordination=InMemoryRuntimeCoordinationStore(),
             terminal=InMemoryRuntimeTerminalCoordinationStore(),
         )
-    async with runtime_control_server_lifespan(settings, local_stores=local_stores):
+
+    @asynccontextmanager
+    async def checked_lifespan() -> AsyncIterator[None]:
+        context = runtime_control_server_lifespan(settings, local_stores=local_stores)
+        await context.__aenter__()
+        try:
+            if shutdown != "normal":
+                await asyncio.wait_for(started.wait(), timeout=1)
+            yield
+        finally:
+            if shutdown == "normal":
+                await context.__aexit__(None, None, None)
+            else:
+                exit_task = asyncio.create_task(context.__aexit__(None, None, None))
+                await asyncio.wait_for(cleaning.wait(), timeout=1)
+                if shutdown in {"cancel", "cancel-error"}:
+                    exit_task.cancel()
+                if shutdown == "cancel":
+                    with pytest.raises(asyncio.CancelledError):
+                        await exit_task
+                else:
+                    with pytest.raises(ValueError) as caught:
+                        await exit_task
+                    assert caught.value is failure
+                    if shutdown == "cancel-error":
+                        assert isinstance(failure.__cause__, asyncio.CancelledError)
+
+    async with checked_lifespan():
         names = [name for name, _kwargs in registrations]
         assert names == [
             "runtime-web-sessions",

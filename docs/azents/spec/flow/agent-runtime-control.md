@@ -395,6 +395,12 @@ enqueue, reader-task allocation, and response streaming. Cancellation or failure
 at any of those stages unregisters the source and releases its process session
 capacity; cancellation during handshake acceptance cannot leave a registered source.
 
+Control process shutdown distinguishes cancellation of owned repair tasks from
+cancellation of the lifespan caller. Every owned shutdown step is attempted in its
+existing order even when an earlier join or cleanup fails. Caller cancellation
+propagates after successful cleanup; an ordinary cleanup failure remains observable
+and may supersede cancellation under normal Python exception semantics.
+
 Logical stream release completes its existing Runner routing, Browser guard and
 broker-capacity cleanup before propagating caller cancellation. Removing the
 public binding or decrementing the process stream gauge is not cleanup completion.
@@ -1535,7 +1541,8 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 ## Changelog
 
 - **2026-10-29** (spec_version 110) — Guaranteed registered-source cleanup when
-  Gateway or Owner-relay handshake acceptance is cancelled.
+  Gateway or Owner-relay handshake acceptance is cancelled, and preserved Control
+  shutdown ownership cleanup and caller cancellation.
 
 - **2026-10-27** (spec_version 109) — Recorded Pod watch validation and
   error-specific reconnect boundaries.
