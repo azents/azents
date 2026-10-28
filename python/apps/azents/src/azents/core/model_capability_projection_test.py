@@ -102,7 +102,9 @@ def test_known_coding_function_contract_is_stored_as_support(
     assert compiled.capabilities.supports(ModelCapabilityFeature.FUNCTION_CALLING)
     assert compiled.facts.declarations.function_calling.state == presence
     assert compiled.capabilities.tool_calling.parallel_tool_calls is False
-    assert compiled.capabilities.tool_calling.strict_json_schema is False
+    assert compiled.capabilities.tool_calling.strict_json_schema is (
+        provider is LLMProvider.CHATGPT_OAUTH
+    )
     assert compiled.capabilities.structured_response is False
 
 
@@ -463,64 +465,20 @@ def test_final_projector_wrapper_retains_existing_publication_interface() -> Non
     assert projected == compiled.capabilities
 
 
-@pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-6.1-sol"])
-@pytest.mark.parametrize(
-    ("declaration", "expected"),
-    [
-        (CatalogFact[bool](state="absent", value=None), True),
-        (CatalogFact[bool](state="null", value=None), True),
-        (CatalogFact[bool](state="value", value=True), True),
-        (CatalogFact[bool](state="value", value=False), False),
-    ],
-)
-def test_reviewed_exact_oauth_schema_contract_preserves_declaration_denials(
-    model: str, declaration: CatalogFact[bool], expected: bool
-) -> None:
-    compiled = _compile(
-        LLMProvider.CHATGPT_OAUTH,
-        model=model,
-        evidence=ProviderCapabilityEvidence(
-            strict_function_schema=declaration,
-            structured_response=declaration,
-        ),
-    )
-    assert compiled.capabilities.tool_calling.strict_json_schema is expected
-    assert compiled.capabilities.structured_response is expected
-    assert compiled.facts.declarations.strict_function_schema == declaration
-    assert compiled.facts.declarations.structured_response == declaration
-
-
-@pytest.mark.parametrize(
-    "model",
-    ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra-other", "gpt-6.1-sol-other"],
-)
-def test_reviewed_oauth_schema_contract_does_not_predict_other_model_support(
-    model: str,
-) -> None:
-    caps = _compile(LLMProvider.CHATGPT_OAUTH, model=model).capabilities
-    assert caps.tool_calling.supported is True
+def test_public_api_requires_own_function_and_structured_evidence() -> None:
+    caps = _compile(LLMProvider.OPENAI).capabilities
     assert caps.tool_calling.strict_json_schema is False
     assert caps.structured_response is False
 
 
-@pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-6.1-sol"])
-def test_reviewed_oauth_schema_contract_does_not_borrow_into_public_api(
-    model: str,
-) -> None:
-    caps = _compile(LLMProvider.OPENAI, model=model).capabilities
-    assert caps.tool_calling.strict_json_schema is False
-    assert caps.structured_response is False
-
-
-@pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-6.1-sol"])
-def test_explicit_function_denial_does_not_deny_independent_structured_response(
-    model: str,
-) -> None:
+def test_explicit_function_denial_does_not_deny_independent_structured_response() -> (
+    None
+):
     caps = _compile(
         LLMProvider.CHATGPT_OAUTH,
-        model=model,
         evidence=ProviderCapabilityEvidence(
             function_calling=CatalogFact(state="value", value=False),
+            structured_response=CatalogFact(state="value", value=True),
         ),
     ).capabilities
     assert caps.tool_calling.supported is False
@@ -528,14 +486,10 @@ def test_explicit_function_denial_does_not_deny_independent_structured_response(
     assert caps.structured_response is True
 
 
-@pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-6.1-sol"])
-def test_reviewed_oauth_contract_preserves_exact_source_structured_response_denial(
-    model: str,
-) -> None:
+def test_oauth_function_contract_preserves_source_structured_denial() -> None:
     compiled = _compile(
         LLMProvider.CHATGPT_OAUTH,
-        model=model,
-        source=_source("chatgpt", model, {"supports_response_schema": False}),
+        source=_source("chatgpt", "literal-model", {"supports_response_schema": False}),
     )
     assert compiled.capabilities.tool_calling.strict_json_schema is True
     assert compiled.capabilities.structured_response is False

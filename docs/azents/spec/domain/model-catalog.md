@@ -97,8 +97,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-10-21
-spec_version: 48
+last_verified_at: 2026-10-28
+spec_version: 49
 ---
 
 # Model Catalog Domain Spec
@@ -239,6 +239,16 @@ separate final fields. A conditional supported feature remains configurable;
 actual request admission evaluates its captured effort/function conditions.
 Configuration and profile controls read complete final lists without inventing
 request dimensions or maintaining a second descriptor authority.
+
+ChatGPT OAuth structured response support requires its own provider declaration
+or the exact `chatgpt/<model-id>` source row's `supports_response_schema` (or
+`supports_native_structured_output`) declaration. Missing or negative evidence
+does not grant support, regardless of model name, family, account visibility, or
+successful ordinary conversation. New source rows can establish support without
+an application code change. Strict function-schema encoding is a separate native
+Responses route contract for OpenAI and ChatGPT OAuth; explicit function/schema
+denials remain authoritative and strict function support does not imply
+structured response support.
 
 Eligible authenticated Kimi OAuth managed coding inventory establishes
 function-calling potential; it does not establish parallel calls, strict schemas,
@@ -708,6 +718,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-28 | 49 | Removed model-name structured-output allowances; ChatGPT OAuth response schemas use exact declarations independently of the native strict function-schema route contract. |
 | 2026-10-21 | 48 | Mapped xAI OAuth enrichment and active source capture to exact xAI source records while retaining account declarations and visibility. |
 | 2026-10-05 | 48 | Moved integration CRUD and atomic account-catalog materialization into completed repository operations; kept provider validation in services. |
 | 2026-10-05 | 48 | Reconciled code-path discovery with current defining modules; system behavior is unchanged. |
