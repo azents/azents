@@ -33,6 +33,7 @@ from azents.core.credentials import (
 )
 from azents.core.enums import LLMProvider
 from azents.core.llm_access import token_digest
+from azents.core.route_capability_constraints import projection_protocol
 from azents.repos.llm_authority import LLMAuthorityRepository, PreparedLLMAuthority
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
@@ -50,6 +51,9 @@ def project_configuration(prepared: PreparedLLMAuthority) -> ModelConfiguration:
     parameters = prepared.agent.model_parameters
     return ModelConfiguration.model_validate(
         {
+            "protocol": projection_protocol(
+                prepared.integration.provider, selection.model_identifier
+            ),
             "parameters": parameters.model_dump(mode="json")
             if parameters is not None
             else None,

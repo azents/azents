@@ -1,0 +1,17 @@
+# This is the regular LiteLLM Proxy configuration, without a Router or model list.
+general_settings:
+  custom_auth: azents_llm_proxy.bootstrap.authenticate
+  infer_model_from_keys: false
+  disable_spend_logs: true
+  disable_error_logs: true
+  disable_budget_reservation: true
+  disable_reset_budget: true
+litellm_settings:
+  callbacks:
+    - azents_llm_proxy.bootstrap.boundary
+  num_retries: 0
+  drop_params: false
+  set_verbose: false
+  turn_off_message_logging: true
+  disable_aiohttp_transport: true
+  cache: false

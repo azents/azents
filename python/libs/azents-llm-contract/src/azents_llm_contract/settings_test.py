@@ -8,6 +8,7 @@ from azents_llm_contract.settings import ModelConfiguration
 
 def configuration() -> ModelConfiguration:
     return ModelConfiguration(
+        protocol="native_responses",
         parameters=None,
         context_window_tokens=None,
         max_output_tokens=3000,

@@ -66,6 +66,9 @@ class ModelConfiguration(SettingsPayload):
     transport projection. Tool configurations remain tool-local typed inputs.
     """
 
+    protocol: Literal[
+        "native_responses", "responses", "chat", "anthropic", "google", "bedrock"
+    ]
     parameters: GenerationSettings | None
     context_window_tokens: PositiveTokens | None
     max_output_tokens: PositiveTokens | None

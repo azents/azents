@@ -172,6 +172,7 @@ def test_mismatched_secret_does_not_become_a_different_route(
 def test_configuration_uses_existing_snapshot_without_new_defaults() -> None:
     value = prepared()
     projected = project_configuration(value)
+    assert projected.protocol == "native_responses"
     assert projected.context_window_tokens == 5000
     assert projected.max_output_tokens == 1000
     assert projected.parameters is not None and projected.parameters.temperature == 0.2

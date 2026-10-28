@@ -40,7 +40,10 @@ Agent must be enabled and lifecycle-active. The integration must exist in the
 same Workspace, be enabled, and match the saved provider identity. Model parameters,
 candidate caps, supported features/conditions, tools and execution options are
 projected into a closed request-local configuration contract without inventing
-new defaults. Tool-local JSON configuration is not a bag of transport/SDK overrides.
+new defaults. The existing route projection also supplies the selected protocol
+(`native_responses`, `responses`, `chat`, `anthropic`, `google` or `bedrock`), so
+provider-specific normalization does not infer model facts from names in the Proxy.
+Tool-local JSON configuration is not a bag of transport/SDK overrides.
 
 ## Token State and Ownership
 

@@ -223,7 +223,9 @@ def expected_test_artifacts(run: Run) -> set[str]:
     projects = {
         "python/libs/az-common": "python-az-common",
         "python/libs/azents-runtime-control": "python-runtime-control",
+        "python/libs/azents-llm-contract": "python-llm-contract",
         "python/apps/azents": "python-azents",
+        "python/apps/azents-llm-proxy": "python-llm-proxy",
         "python/apps/azents-runtime-runner": "python-runtime-runner",
         "python/apps/azents-runtime-proxy": "python-runtime-proxy",
         "python/apps/azents-runtime-provider-kubernetes": "python-provider-kubernetes",
