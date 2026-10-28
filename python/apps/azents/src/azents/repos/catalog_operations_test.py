@@ -522,19 +522,24 @@ async def test_only_expired_system_lease_is_reclaimed_by_combined_work() -> None
 
 
 @pytest.mark.parametrize(
-    ("provider", "removed_count", "expected"),
+    ("provider", "original_count", "removed_count", "expected"),
     [
-        ("openai", 50, "global"),
-        ("anthropic", 5, "provider:anthropic"),
-        ("anthropic", 4, None),
+        ("openai", 250, 50, None),
+        ("openai", 250, 124, None),
+        ("openai", 250, 125, "global"),
+        ("openai", 250, 126, "global"),
+        ("anthropic", 25, 5, None),
+        ("anthropic", 25, 12, None),
+        ("anthropic", 25, 13, "global"),
+        ("chatgpt", 2, 1, "global"),
     ],
 )
-def test_existing_source_shrink_thresholds(
-    provider: str, removed_count: int, expected: str | None
+def test_source_shrink_uses_global_half_boundary(
+    provider: str, original_count: int, removed_count: int, expected: str | None
 ) -> None:
     original: dict[str, object] = {
         f"model-{index}": {"litellm_provider": provider}
-        for index in range(250 if provider == "openai" else 25)
+        for index in range(original_count)
     }
     before = make_test_source(make_test_source_payload(original))
     retained = dict(list(original.items())[removed_count:])
