@@ -354,6 +354,8 @@ integration models.
 The six-hour `model_catalog_system_projection` task uses this collector and
 stored source contract. Transport, validation, supersession and material-reduction
 failures record bounded diagnostics and retain last-good source/catalog state.
+A reduction of at least 50% in the total source model count rejects replacement;
+per-provider counts are diagnostic only.
 Normal reads, model dispatch and integration enrichment do not fetch remote
 metadata. Preparation normalizes prices and capabilities outside database transactions.
 Source replacement and all affected system catalog entries commit together after

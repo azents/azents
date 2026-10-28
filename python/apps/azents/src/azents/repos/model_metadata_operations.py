@@ -31,10 +31,7 @@ from azents.repos.model_catalog_sync_state import fail_sync, start_sync, succeed
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import ModelMetadataSource
 
-_SOURCE_MIN_REMOVAL_COUNT = 50
-_SOURCE_MIN_REMOVAL_RATIO = 0.02
-_PROVIDER_MIN_REMOVAL_COUNT = 5
-_PROVIDER_MIN_REMOVAL_RATIO = 0.20
+_SOURCE_MIN_REMOVAL_RATIO = 0.50
 _SYSTEM_PROVIDERS = (
     LLMProvider.OPENAI,
     LLMProvider.ANTHROPIC,
@@ -358,16 +355,8 @@ def _material_reduction(
         return None
     removed = previous.model_count - fetched.model_count
     if (
-        removed >= _SOURCE_MIN_REMOVAL_COUNT
+        previous.model_count > 0
         and removed / previous.model_count >= _SOURCE_MIN_REMOVAL_RATIO
     ):
         return "global"
-    current_counts = _provider_counts(fetched.payload)
-    for provider, count in _provider_counts(previous.payload).items():
-        removed = count - current_counts.get(provider, 0)
-        if (
-            removed >= _PROVIDER_MIN_REMOVAL_COUNT
-            and removed / count >= _PROVIDER_MIN_REMOVAL_RATIO
-        ):
-            return f"provider:{provider}"
     return None
