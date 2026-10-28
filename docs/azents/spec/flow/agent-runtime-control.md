@@ -400,6 +400,9 @@ cancellation of the lifespan caller. Every owned shutdown step is attempted in i
 existing order even when an earlier join or cleanup fails. Caller cancellation
 propagates after successful cleanup; an ordinary cleanup failure remains observable
 and may supersede cancellation under normal Python exception semantics.
+Runner shutdown applies the same distinction to its process-pressure sampler and
+attempts Browser-controller and execution-backend cleanup in that order even when
+the sampler join fails or is cancelled by the shutdown caller.
 
 Logical stream release completes its existing Runner routing, Browser guard and
 broker-capacity cleanup before propagating caller cancellation. Removing the
@@ -1542,7 +1545,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 - **2026-10-29** (spec_version 110) — Guaranteed registered-source cleanup when
   Gateway or Owner-relay handshake acceptance is cancelled, and preserved Control
-  shutdown ownership cleanup and caller cancellation.
+  and Runner shutdown ownership cleanup and caller cancellation.
 
 - **2026-10-27** (spec_version 109) — Recorded Pod watch validation and
   error-specific reconnect boundaries.

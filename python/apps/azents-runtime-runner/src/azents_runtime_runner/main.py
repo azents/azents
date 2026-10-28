@@ -10,6 +10,7 @@ import platform
 import sys
 import time
 import uuid
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -613,15 +614,37 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                     )
             await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
     finally:
-        web_process_sampler_task.cancel()
+        await _close_runner_resources(
+            web_process_sampler_task, browser_manager, execution_backend
+        )
+
+
+async def _close_runner_resources(
+    sampler: asyncio.Task[None],
+    browser: RunnerBrowserController,
+    execution: DirectExecutionBackend,
+) -> None:
+    """Close process-owned resources in their required shutdown order."""
+    sampler.cancel()
+
+    async def join_sampler() -> None:
         try:
-            await web_process_sampler_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await browser_manager.close()
-        finally:
-            await execution_backend.close()
+            (result,) = await asyncio.gather(sampler, return_exceptions=True)
+        except asyncio.CancelledError as cancellation:
+            if not sampler.cancelled():
+                error = sampler.exception()
+                if error is not None:
+                    raise error from cancellation
+            raise
+        if isinstance(result, BaseException) and not isinstance(
+            result, asyncio.CancelledError
+        ):
+            raise result
+
+    async with AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(execution.close)
+        cleanup.push_async_callback(browser.close)
+        cleanup.push_async_callback(join_sampler)
 
 
 def _log_control_stream_closed(
