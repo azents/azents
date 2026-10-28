@@ -16,7 +16,7 @@ from azents_llm_contract.authority import (
 )
 from azents_llm_contract.settings import ModelConfiguration
 from fastapi import Depends
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -134,12 +134,17 @@ def project_credential(
                 )
         case LLMProvider.GOOGLE_VERTEX_AI:
             if isinstance(secret, GcpSecrets) and isinstance(config, GcpConfig):
-                return VertexCredential(
-                    kind="google_vertex_ai",
-                    service_account_json=SecretStr(secret.service_account_json),
-                    project_id=config.project_id,
-                    location=config.region,
-                )
+                try:
+                    return VertexCredential(
+                        kind="google_vertex_ai",
+                        service_account_json=SecretStr(secret.service_account_json),
+                        project_id=config.project_id,
+                        location=config.region,
+                    )
+                except ValidationError:
+                    raise LLMCredentialUnavailable(
+                        "Provider credential configuration is unavailable."
+                    ) from None
         case _ as unknown:
             assert_never(unknown)
     raise LLMCredentialUnavailable("Provider credential configuration is unavailable.")

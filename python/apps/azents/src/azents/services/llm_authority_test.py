@@ -1,6 +1,7 @@
 """Typed credential projection and completed-operation orchestration."""
 
 import datetime
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -97,7 +98,16 @@ def integration(provider: LLMProvider) -> LLMProviderIntegrationWithSecrets:
                 role_arn="arn:aws:iam::123456789012:role/fixture",
             )
         case LLMProvider.GOOGLE_VERTEX_AI:
-            value.secrets = GcpSecrets(service_account_json=SENTINEL)
+            value.secrets = GcpSecrets(
+                service_account_json=json.dumps(
+                    {
+                        "type": "service_account",
+                        "private_key": SENTINEL,
+                        "client_email": "fixture@example.iam.gserviceaccount.com",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                    }
+                )
+            )
             value.config = GcpConfig(project_id="project", region="region")
     return value
 
@@ -226,3 +236,29 @@ async def test_listing_never_refreshes_or_prepares_secrets() -> None:
     repository.list_models.assert_awaited_once()
     repository.prepare.assert_not_called()
     tokens.ensure.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"type": "authorized_user", "refresh_token": REFRESH},
+        {
+            "type": "external_account",
+            "credential_source": {"executable": {"command": REFRESH}},
+        },
+        {
+            "type": "service_account",
+            "private_key": SENTINEL,
+            "client_email": "fixture@example.iam.gserviceaccount.com",
+            "token_uri": "http://control.internal/token",
+        },
+    ],
+)
+def test_vertex_preparation_rejects_management_and_redirect_credentials(
+    document: dict[str, object],
+) -> None:
+    value = integration(LLMProvider.GOOGLE_VERTEX_AI)
+    value.secrets = GcpSecrets(service_account_json=json.dumps(document))
+    with pytest.raises(LLMCredentialUnavailable) as caught:
+        project_credential(value)
+    assert SENTINEL not in str(caught.value) and REFRESH not in str(caught.value)

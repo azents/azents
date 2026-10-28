@@ -54,7 +54,16 @@ def credential_cases() -> list[ProviderCredential]:
         ),
         VertexCredential(
             kind="google_vertex_ai",
-            service_account_json=secret,
+            service_account_json=SecretStr(
+                json.dumps(
+                    {
+                        "type": "service_account",
+                        "private_key": SENTINEL,
+                        "client_email": "fixture@example.iam.gserviceaccount.com",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                    }
+                )
+            ),
             project_id="project",
             location="us-central1",
         ),

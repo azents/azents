@@ -134,6 +134,15 @@ AWS/GCP call credential fields cross the resolver channel. Refresh tokens, ID
 management tokens and diagnostics stay private. Existing OAuth persistence fences
 are reused; they do not guarantee only one upstream refresh request.
 
+The Vertex JSON field is decoded as a closed Google service-account key, rather
+than relaying arbitrary Google credential configurations. User refresh-token and
+external/executable-account configurations, unknown fields, nonstandard token
+endpoints and non-Google universes fail preparation. The call uses Google's HTTPS
+OAuth token endpoint. Unused auth/certificate display URLs and client metadata are
+removed before protected serialization. Ordinary key/DTO dumps redact the private
+key; only explicit protected egress contains it. This does not change integration
+storage or the existing Worker's credential handling.
+
 ## Errors and Secret Handling
 
 Expected invalid bearer, unauthorized target, and lifecycle conflict responses use
