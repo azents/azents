@@ -1398,7 +1398,8 @@ class RuntimeStreamControlDataPlane:
                 for key, binding in self.bindings.items()
                 if binding.source is source
             )
-        for key in keys:
+
+        async def release_binding(key: BrokerStreamKey) -> None:
             async with self.lock:
                 current = self.bindings.get(key)
             if current is not None and current.browser_authority is not None:
@@ -1414,12 +1415,17 @@ class RuntimeStreamControlDataPlane:
                         )
             else:
                 await self._release(key)
-        if source.owner is None:
-            await self.relay_pool.release_source(
-                source_session_id=source.session_id,
-                source_peer_boot_id=source.peer_boot_id,
-            )
-        await source.queue.close()
+
+        async with contextlib.AsyncExitStack() as cleanup:
+            cleanup.push_async_callback(source.queue.close)
+            if source.owner is None:
+                cleanup.push_async_callback(
+                    self.relay_pool.release_source,
+                    source_session_id=source.session_id,
+                    source_peer_boot_id=source.peer_boot_id,
+                )
+            for key in reversed(keys):
+                cleanup.push_async_callback(release_binding, key)
 
     async def relay_disconnected(
         self,

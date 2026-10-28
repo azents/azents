@@ -2082,6 +2082,59 @@ async def test_relay_runner_round_trip_restores_source_stream_and_epoch() -> Non
 
 
 @pytest.mark.asyncio
+async def test_source_unregister_finishes_remaining_cleanup_after_binding_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_plane, _lifecycle = _local_data_plane()
+    owner = _owner()
+    await data_plane.register_runner(
+        RuntimeStreamAcceptedRunnerSession(
+            owner=owner,
+            runner_boot_id="runner-boot",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        )
+    )
+    source = await data_plane.register_source(
+        session_id="gateway-session", peer_boot_id="gateway-boot", owner=None
+    )
+    for stream_id in (1, 3):
+        await data_plane.handle(
+            source,
+            _open_envelope(
+                session_id="gateway-session",
+                peer_boot_id="gateway-boot",
+                stream_id=stream_id,
+            ),
+        )
+    assert len(data_plane.bindings) == 2
+    original_release = data_plane._release
+    failure = ValueError("first binding cleanup failed")
+    released: list[BrokerStreamKey] = []
+
+    async def release(key: BrokerStreamKey) -> None:
+        await original_release(key)
+        released.append(key)
+        if key.stream_id == 1:
+            raise failure
+
+    monkeypatch.setattr(data_plane, "_release", release)
+    sessions_before = data_plane.resources.snapshot().active_sessions
+    try:
+        with pytest.raises(ValueError) as caught:
+            await data_plane.unregister_source(source)
+        assert caught.value is failure
+        assert [key.stream_id for key in released] == [1, 3]
+        assert data_plane.bindings == {}
+        assert source.queue.closed
+        # Only the source is retired here; the Runner session remains registered.
+        assert data_plane.resources.snapshot().active_sessions == sessions_before - 1
+        assert data_plane.resources.snapshot().active_streams == 0
+    finally:
+        await data_plane.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("caller_is_guard", [False, True])
 @pytest.mark.parametrize("blocked_cleanup", ["runner", "broker"])
 @pytest.mark.parametrize("cancel_count", [1, 3])
