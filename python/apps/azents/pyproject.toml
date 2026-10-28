@@ -80,6 +80,7 @@ dependencies = [
     "markdown-it-py==4.2.0",
     "defusedxml==0.7.1",
     "pypdf==6.21.2",
+    "azents-llm-contract",
 ]
 
 [project.scripts]
@@ -115,6 +116,7 @@ build-backend = "uv_build"
 [tool.uv.sources]
 az-common = { path = "../../libs/az-common", editable = true }
 azents-runtime-control = { path = "../../libs/azents-runtime-control", editable = true }
+azents-llm-contract = { path = "../../libs/azents-llm-contract", editable = true }
 
 [tool.ruff]
 target-version = "py314"

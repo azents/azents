@@ -13,6 +13,8 @@ from pydantic import (
     SerializationInfo,
 )
 
+from azents_llm_contract.settings import ModelConfiguration
+
 
 def _serialize_secret(value: SecretStr, info: SerializationInfo) -> str:
     if info.context == {"protected_transport": True}:
@@ -126,6 +128,7 @@ class TargetBinding(AuthorityPayload):
     target_id: TargetId
     public_model: ModelName
     model_identifier: ModelName
+    configuration: ModelConfiguration
     credential: ProviderCredential = Field(repr=False)
 
 

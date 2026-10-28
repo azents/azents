@@ -3,6 +3,7 @@ azentsadminclient/api/__init__.py
 azentsadminclient/api/auth_v1_api.py
 azentsadminclient/api/debug_v1_api.py
 azentsadminclient/api/health_v1_api.py
+azentsadminclient/api/inference_access_v1_api.py
 azentsadminclient/api/invitation_v1_api.py
 azentsadminclient/api/model_catalog_v1_api.py
 azentsadminclient/api/runtime_provider_v1_api.py
@@ -61,10 +62,12 @@ azentsadminclient/docs/HealthStatus.md
 azentsadminclient/docs/HealthV1Api.md
 azentsadminclient/docs/HistoricalMemoryExecutionDetailResponse.md
 azentsadminclient/docs/HistoricalMemoryExecutionPatchRequest.md
+azentsadminclient/docs/InferenceAccessV1Api.md
 azentsadminclient/docs/InvitationListResponse.md
 azentsadminclient/docs/InvitationResponse.md
 azentsadminclient/docs/InvitationStatus.md
 azentsadminclient/docs/InvitationV1Api.md
+azentsadminclient/docs/IssuedToken.md
 azentsadminclient/docs/KubernetesContainerResources.md
 azentsadminclient/docs/KubernetesDinDModule.md
 azentsadminclient/docs/KubernetesPodProfileSpecV1.md
@@ -142,6 +145,7 @@ azentsadminclient/docs/SessionDiagnosticMetadata.md
 azentsadminclient/docs/SignupTokenDeliveryMethod.md
 azentsadminclient/docs/SignupTokenListResponse.md
 azentsadminclient/docs/SignupTokenResponse.md
+azentsadminclient/docs/SupplyState.md
 azentsadminclient/docs/SystemAdminMeResponse.md
 azentsadminclient/docs/SystemBootstrapFirstAdminRequest.md
 azentsadminclient/docs/SystemBootstrapFirstAdminResponse.md
@@ -171,6 +175,9 @@ azentsadminclient/docs/SystemUserRole.md
 azentsadminclient/docs/SystemUserRoleAssignmentListResponse.md
 azentsadminclient/docs/SystemUserRoleAssignmentResponse.md
 azentsadminclient/docs/SystemV1Api.md
+azentsadminclient/docs/TokenIssueRequest.md
+azentsadminclient/docs/TokenRotateRequest.md
+azentsadminclient/docs/TokenState.md
 azentsadminclient/docs/TransferOwnershipRequest.md
 azentsadminclient/docs/UserEmailCreateRequest.md
 azentsadminclient/docs/UserEmailListResponse.md
@@ -248,6 +255,7 @@ azentsadminclient/models/http_validation_error.py
 azentsadminclient/models/invitation_list_response.py
 azentsadminclient/models/invitation_response.py
 azentsadminclient/models/invitation_status.py
+azentsadminclient/models/issued_token.py
 azentsadminclient/models/kubernetes_container_resources.py
 azentsadminclient/models/kubernetes_din_d_module.py
 azentsadminclient/models/kubernetes_pod_profile_spec_v1.py
@@ -323,6 +331,7 @@ azentsadminclient/models/session_diagnostic_metadata.py
 azentsadminclient/models/signup_token_delivery_method.py
 azentsadminclient/models/signup_token_list_response.py
 azentsadminclient/models/signup_token_response.py
+azentsadminclient/models/supply_state.py
 azentsadminclient/models/system_admin_me_response.py
 azentsadminclient/models/system_bootstrap_first_admin_request.py
 azentsadminclient/models/system_bootstrap_first_admin_response.py
@@ -349,6 +358,9 @@ azentsadminclient/models/system_setting_version_conflict_response.py
 azentsadminclient/models/system_user_role.py
 azentsadminclient/models/system_user_role_assignment_list_response.py
 azentsadminclient/models/system_user_role_assignment_response.py
+azentsadminclient/models/token_issue_request.py
+azentsadminclient/models/token_rotate_request.py
+azentsadminclient/models/token_state.py
 azentsadminclient/models/transfer_ownership_request.py
 azentsadminclient/models/user_email_create_request.py
 azentsadminclient/models/user_email_list_response.py
@@ -422,10 +434,12 @@ azentsadminclient/test/test_health_v1_api.py
 azentsadminclient/test/test_historical_memory_execution_detail_response.py
 azentsadminclient/test/test_historical_memory_execution_patch_request.py
 azentsadminclient/test/test_http_validation_error.py
+azentsadminclient/test/test_inference_access_v1_api.py
 azentsadminclient/test/test_invitation_list_response.py
 azentsadminclient/test/test_invitation_response.py
 azentsadminclient/test/test_invitation_status.py
 azentsadminclient/test/test_invitation_v1_api.py
+azentsadminclient/test/test_issued_token.py
 azentsadminclient/test/test_kubernetes_container_resources.py
 azentsadminclient/test/test_kubernetes_din_d_module.py
 azentsadminclient/test/test_kubernetes_pod_profile_spec_v1.py
@@ -503,6 +517,7 @@ azentsadminclient/test/test_session_diagnostic_metadata.py
 azentsadminclient/test/test_signup_token_delivery_method.py
 azentsadminclient/test/test_signup_token_list_response.py
 azentsadminclient/test/test_signup_token_response.py
+azentsadminclient/test/test_supply_state.py
 azentsadminclient/test/test_system_admin_me_response.py
 azentsadminclient/test/test_system_bootstrap_first_admin_request.py
 azentsadminclient/test/test_system_bootstrap_first_admin_response.py
@@ -532,6 +547,9 @@ azentsadminclient/test/test_system_user_role.py
 azentsadminclient/test/test_system_user_role_assignment_list_response.py
 azentsadminclient/test/test_system_user_role_assignment_response.py
 azentsadminclient/test/test_system_v1_api.py
+azentsadminclient/test/test_token_issue_request.py
+azentsadminclient/test/test_token_rotate_request.py
+azentsadminclient/test/test_token_state.py
 azentsadminclient/test/test_transfer_ownership_request.py
 azentsadminclient/test/test_user_email_create_request.py
 azentsadminclient/test/test_user_email_list_response.py

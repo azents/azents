@@ -20,6 +20,7 @@ from azents_llm_contract.authority import (
     VertexCredential,
     XaiCredential,
 )
+from azents_llm_contract.settings_test import configuration
 
 SENTINEL = "secret-sentinel-not-for-logs"
 IDENTITY = AuthenticatedIdentity(
@@ -71,6 +72,7 @@ def test_secrets_redacted_normally_and_explicit_wire_roundtrip(
         public_model="model",
         model_identifier="provider/model",
         credential=credential,
+        configuration=configuration(),
     )
     for output in (
         str(binding),
@@ -122,6 +124,7 @@ def test_unknown_credentials_and_refresh_token_are_rejected() -> None:
         "target_id": "a" * 64,
         "public_model": "model",
         "model_identifier": "model",
+        "configuration": configuration().model_dump(),
     }
     for credential in [
         {"kind": "arbitrary_sdk_kwargs", "api_key": SENTINEL},

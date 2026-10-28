@@ -90,6 +90,12 @@ Class | Method | HTTP request | Description
 *DebugV1Api* | [**debug_v1_get_session_diagnostics**](azentsadminclient/docs/DebugV1Api.md#debug_v1_get_session_diagnostics) | **GET** /debug/v1/sessions/{session_id} | Get Session Diagnostics
 *HealthV1Api* | [**health_v1_liveness**](azentsadminclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentsadminclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
+*InferenceAccessV1Api* | [**inference_access_v1_inspect_subject**](azentsadminclient/docs/InferenceAccessV1Api.md#inference_access_v1_inspect_subject) | **GET** /llm-access/v1/agents/{agent_id}/supply | Inspect Subject
+*InferenceAccessV1Api* | [**inference_access_v1_inspect_supply**](azentsadminclient/docs/InferenceAccessV1Api.md#inference_access_v1_inspect_supply) | **GET** /llm-access/v1/supplies/{supply_id} | Inspect Supply
+*InferenceAccessV1Api* | [**inference_access_v1_issue**](azentsadminclient/docs/InferenceAccessV1Api.md#inference_access_v1_issue) | **POST** /llm-access/v1/supplies | Issue
+*InferenceAccessV1Api* | [**inference_access_v1_revoke_supply**](azentsadminclient/docs/InferenceAccessV1Api.md#inference_access_v1_revoke_supply) | **DELETE** /llm-access/v1/supplies/{supply_id} | Revoke Supply
+*InferenceAccessV1Api* | [**inference_access_v1_revoke_token**](azentsadminclient/docs/InferenceAccessV1Api.md#inference_access_v1_revoke_token) | **DELETE** /llm-access/v1/supplies/{supply_id}/tokens/{token_id} | Revoke Token
+*InferenceAccessV1Api* | [**inference_access_v1_rotate**](azentsadminclient/docs/InferenceAccessV1Api.md#inference_access_v1_rotate) | **POST** /llm-access/v1/rotate | Rotate
 *InvitationV1Api* | [**invitation_v1_delete_invitation**](azentsadminclient/docs/InvitationV1Api.md#invitation_v1_delete_invitation) | **DELETE** /invitation/v1/invitations/{invitation_id} | Delete Invitation
 *InvitationV1Api* | [**invitation_v1_list_workspace_invitations**](azentsadminclient/docs/InvitationV1Api.md#invitation_v1_list_workspace_invitations) | **GET** /invitation/v1/workspaces/{handle}/invitations | List Workspace Invitations
 *ModelCatalogV1Api* | [**model_catalog_v1_list_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_list_system_model_catalogs) | **GET** /model-catalog/v1/system-catalogs | List System Model Catalogs
@@ -219,6 +225,7 @@ Class | Method | HTTP request | Description
  - [InvitationListResponse](azentsadminclient/docs/InvitationListResponse.md)
  - [InvitationResponse](azentsadminclient/docs/InvitationResponse.md)
  - [InvitationStatus](azentsadminclient/docs/InvitationStatus.md)
+ - [IssuedToken](azentsadminclient/docs/IssuedToken.md)
  - [KubernetesContainerResources](azentsadminclient/docs/KubernetesContainerResources.md)
  - [KubernetesDinDModule](azentsadminclient/docs/KubernetesDinDModule.md)
  - [KubernetesPodProfileSpecV1](azentsadminclient/docs/KubernetesPodProfileSpecV1.md)
@@ -294,6 +301,7 @@ Class | Method | HTTP request | Description
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
  - [SignupTokenResponse](azentsadminclient/docs/SignupTokenResponse.md)
+ - [SupplyState](azentsadminclient/docs/SupplyState.md)
  - [SystemAdminMeResponse](azentsadminclient/docs/SystemAdminMeResponse.md)
  - [SystemBootstrapFirstAdminRequest](azentsadminclient/docs/SystemBootstrapFirstAdminRequest.md)
  - [SystemBootstrapFirstAdminResponse](azentsadminclient/docs/SystemBootstrapFirstAdminResponse.md)
@@ -320,6 +328,9 @@ Class | Method | HTTP request | Description
  - [SystemUserRole](azentsadminclient/docs/SystemUserRole.md)
  - [SystemUserRoleAssignmentListResponse](azentsadminclient/docs/SystemUserRoleAssignmentListResponse.md)
  - [SystemUserRoleAssignmentResponse](azentsadminclient/docs/SystemUserRoleAssignmentResponse.md)
+ - [TokenIssueRequest](azentsadminclient/docs/TokenIssueRequest.md)
+ - [TokenRotateRequest](azentsadminclient/docs/TokenRotateRequest.md)
+ - [TokenState](azentsadminclient/docs/TokenState.md)
  - [TransferOwnershipRequest](azentsadminclient/docs/TransferOwnershipRequest.md)
  - [UserEmailCreateRequest](azentsadminclient/docs/UserEmailCreateRequest.md)
  - [UserEmailListResponse](azentsadminclient/docs/UserEmailListResponse.md)

@@ -21,6 +21,7 @@ __all__ = [
     "AuthV1Api",
     "DebugV1Api",
     "HealthV1Api",
+    "InferenceAccessV1Api",
     "InvitationV1Api",
     "ModelCatalogV1Api",
     "RuntimeProviderV1Api",
@@ -85,6 +86,7 @@ __all__ = [
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
+    "IssuedToken",
     "KubernetesContainerResources",
     "KubernetesDinDModule",
     "KubernetesPodProfileSpecV1",
@@ -160,6 +162,7 @@ __all__ = [
     "SignupTokenDeliveryMethod",
     "SignupTokenListResponse",
     "SignupTokenResponse",
+    "SupplyState",
     "SystemAdminMeResponse",
     "SystemBootstrapFirstAdminRequest",
     "SystemBootstrapFirstAdminResponse",
@@ -186,6 +189,9 @@ __all__ = [
     "SystemUserRole",
     "SystemUserRoleAssignmentListResponse",
     "SystemUserRoleAssignmentResponse",
+    "TokenIssueRequest",
+    "TokenRotateRequest",
+    "TokenState",
     "TransferOwnershipRequest",
     "UserEmailCreateRequest",
     "UserEmailListResponse",
@@ -218,6 +224,7 @@ __all__ = [
 from azentsadminclient.api.auth_v1_api import AuthV1Api as AuthV1Api
 from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
+from azentsadminclient.api.inference_access_v1_api import InferenceAccessV1Api as InferenceAccessV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
 from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
@@ -286,6 +293,7 @@ from azentsadminclient.models.historical_memory_execution_patch_request import H
 from azentsadminclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentsadminclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus
+from azentsadminclient.models.issued_token import IssuedToken as IssuedToken
 from azentsadminclient.models.kubernetes_container_resources import KubernetesContainerResources as KubernetesContainerResources
 from azentsadminclient.models.kubernetes_din_d_module import KubernetesDinDModule as KubernetesDinDModule
 from azentsadminclient.models.kubernetes_pod_profile_spec_v1 import KubernetesPodProfileSpecV1 as KubernetesPodProfileSpecV1
@@ -361,6 +369,7 @@ from azentsadminclient.models.session_diagnostic_metadata import SessionDiagnost
 from azentsadminclient.models.signup_token_delivery_method import SignupTokenDeliveryMethod as SignupTokenDeliveryMethod
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse
 from azentsadminclient.models.signup_token_response import SignupTokenResponse as SignupTokenResponse
+from azentsadminclient.models.supply_state import SupplyState as SupplyState
 from azentsadminclient.models.system_admin_me_response import SystemAdminMeResponse as SystemAdminMeResponse
 from azentsadminclient.models.system_bootstrap_first_admin_request import SystemBootstrapFirstAdminRequest as SystemBootstrapFirstAdminRequest
 from azentsadminclient.models.system_bootstrap_first_admin_response import SystemBootstrapFirstAdminResponse as SystemBootstrapFirstAdminResponse
@@ -387,6 +396,9 @@ from azentsadminclient.models.system_setting_version_conflict_response import Sy
 from azentsadminclient.models.system_user_role import SystemUserRole as SystemUserRole
 from azentsadminclient.models.system_user_role_assignment_list_response import SystemUserRoleAssignmentListResponse as SystemUserRoleAssignmentListResponse
 from azentsadminclient.models.system_user_role_assignment_response import SystemUserRoleAssignmentResponse as SystemUserRoleAssignmentResponse
+from azentsadminclient.models.token_issue_request import TokenIssueRequest as TokenIssueRequest
+from azentsadminclient.models.token_rotate_request import TokenRotateRequest as TokenRotateRequest
+from azentsadminclient.models.token_state import TokenState as TokenState
 from azentsadminclient.models.transfer_ownership_request import TransferOwnershipRequest as TransferOwnershipRequest
 from azentsadminclient.models.user_email_create_request import UserEmailCreateRequest as UserEmailCreateRequest
 from azentsadminclient.models.user_email_list_response import UserEmailListResponse as UserEmailListResponse
