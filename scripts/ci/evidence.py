@@ -117,6 +117,14 @@ def artifacts_for_run(raw: object, run: Run) -> tuple[Artifact, ...]:
     ]
     if not ends or not starts:
         raise ValueError("Missing attempt execution boundaries")
+    verdict_uploaded = any(
+        job.name == "ci-e2e-aggregate"
+        and any(
+            step.name == "Upload E2E duration verdict" and step.conclusion == "success"
+            for step in job.steps
+        )
+        for job in run.jobs
+    )
     selected = []
     for page in sequence(raw):
         for value in sequence(object_value(page)["artifacts"]):
@@ -128,11 +136,20 @@ def artifacts_for_run(raw: object, run: Run) -> tuple[Artifact, ...]:
                 and name.endswith(f"-{run.attempt}")
                 or name == f"ci-workflow-{run.attempt}"
                 or name == f"ios-diagnostics-{run.head_sha}"
+                or name == "e2e-duration-gate"
             ):
                 continue
             if re.fullmatch("[a-z0-9][a-z0-9-]*", name) is None:
                 raise ValueError("Unsafe artifact name")
             created = timestamp(item["created_at"])
+            if (
+                name == "e2e-duration-gate"
+                and not verdict_uploaded
+                and created is not None
+                and created < min(starts)
+            ):
+                # An unsuccessful rerun can leave the earlier stable-name verdict.
+                continue
             if (
                 item["expired"] is not False
                 or created is None
@@ -159,6 +176,10 @@ def artifacts_for_run(raw: object, run: Run) -> tuple[Artifact, ...]:
             selected.append(artifact)
     if len({a.name for a in selected}) != len(selected):
         raise ValueError("Ambiguous duplicate artifact name")
+    if verdict_uploaded and not any(
+        artifact.name == "e2e-duration-gate" for artifact in selected
+    ):
+        raise ValueError("Uploaded E2E duration verdict artifact is missing")
     return tuple(selected)
 
 
