@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 import httpx2 as httpx
 from anyio import BrokenResourceError, ClosedResourceError, EndOfStream
+from azcommon.logging import bind_extra
 from azcommon.result import Success
 from mcp import MCPError
 from mcp.types import (
@@ -893,19 +894,20 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 and _authorization_is_401(authorization, exc)
             ):
                 await authorization.on_authentication_failure()
+            L = bind_extra(
+                logger, {"server_url": redact_sensitive_text(config.server_url)}
+            )
             if discovery_rate_limit_delay(exc) is not None:
-                logger.warning(
+                L.warning(
                     "MCP discovery remains rate limited",
-                    extra={"server_url": redact_sensitive_text(config.server_url)},
                     exc_info=sanitized_exception_info(
                         exc, message="MCP server rate limited discovery."
                     ),
                 )
                 self._bg_error = "MCP server rate limited discovery. Retry later."
             elif _is_http_auth_error(exc) or _authorization_is_401(authorization, exc):
-                logger.warning(
+                L.warning(
                     "MCP server auth failed",
-                    extra={"server_url": config.server_url},
                     exc_info=(
                         sanitized_exception_info(
                             exc, message="MCP server authentication failed."
@@ -916,9 +918,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 )
                 self._bg_error = f"MCP server auth failed: {config.server_url}"
             else:
-                logger.error(
+                L.error(
                     "Failed to connect to MCP server",
-                    extra={"server_url": config.server_url},
                     exc_info=(
                         sanitized_exception_info(
                             exc, message="MCP server connection failed."
