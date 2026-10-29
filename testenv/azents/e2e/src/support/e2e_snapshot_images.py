@@ -111,6 +111,7 @@ _CORE_IMAGES = (
             "azents.Dockerfile",
             "python/apps/azents",
             "python/libs/az-common",
+            "python/libs/azents-llm-contract",
             "python/libs/azents-runtime-control",
         ),
         source_overlay_pathspecs=(
@@ -119,6 +120,7 @@ _CORE_IMAGES = (
             "python/apps/azents/pyproject.toml",
             "python/apps/azents/uv.lock",
             "python/libs/az-common",
+            "python/libs/azents-llm-contract",
             "python/libs/azents-runtime-control",
         ),
     ),
@@ -181,8 +183,21 @@ _WEB_IMAGES = (
         source_overlay_pathspecs=None,
     ),
 )
+_LLM_PROXY_IMAGE = SnapshotImage(
+    image="azents-llm-proxy",
+    package="azents-llm-proxy-snapshot",
+    local_tag="azents-llm-proxy:e2e-base-snapshot",
+    environment_variable="AZENTS_E2E_LLM_PROXY_IMAGE",
+    changed_environment_variable="AZENTS_E2E_LLM_PROXY_IMAGE_CHANGED",
+    pathspecs=(
+        ".dockerignore",
+        "python/apps/azents-llm-proxy",
+        "python/libs/azents-llm-contract",
+    ),
+    source_overlay_pathspecs=None,
+)
 _IMAGE_BUILD_PROFILES = {
-    "required": _CORE_IMAGES,
+    "required": (*_CORE_IMAGES, _LLM_PROXY_IMAGE),
     "web": (*_CORE_IMAGES, *_WEB_IMAGES),
 }
 

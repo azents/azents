@@ -63,7 +63,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-28
+last_verified_at: 2026-10-29
 spec_version: 87
 ---
 
@@ -460,8 +460,9 @@ Always-on required CI does not depend on external credentials.
   Docker build matrix in the same workflow attempt. The Docker matrix is enabled
   whenever either E2E suite is enabled, including test-only changes. Consumers wait
   for its success; no extra job, matrix entry, registry publication, snapshot wait,
-  or fallback rebuild is introduced. Required lanes consume Server, Runtime Runner,
-  and Docker Runtime Provider; Web additionally consumes Main Web and Admin Web.
+  or fallback rebuild is introduced. Both profiles consume Server, Runtime Runner
+  and Docker Runtime Provider. Required additionally consumes the independent
+  Agent inference Proxy; Web instead adds Main Web and Admin Web.
   Both producer and consumer check out the tested head SHA rather than the synthetic
   pull-request merge commit.
   The Runtime Runner producer imports content-addressed BuildKit layers from the
@@ -488,7 +489,7 @@ Always-on required CI does not depend on external credentials.
   existing public prerequisite images. Both tasks, every download and every
   prerequisite pull are joined before the owner returns.
   Missing downloads or failed pulls fail preparation without retry or fallback.
-  No Selenium or additional image is added to this portfolio; ordinary fixture
+  No Selenium or additional public prerequisite image is added; ordinary fixture
   health/readiness and lifecycle behavior remain authoritative.
   Workflow step evidence separately measures export, upload, preparation, load and
   archive cleanup,

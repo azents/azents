@@ -193,7 +193,23 @@ def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -
     producer = workflow.split("  ci_docker_build_run:\n", 1)[1].split(
         "\n  ci-docker-build:\n", 1
     )[0]
-    assert producer.count("          - name: azents-") == 8
+    matrix = producer.split("    steps:\n", 1)[0]
+    images = [
+        line.removeprefix("          - name: ")
+        for line in matrix.splitlines()
+        if line.startswith("          - name: ")
+    ]
+    assert images == [
+        "azents-server",
+        "azents-llm-proxy",
+        "azents-web",
+        "azents-admin-web",
+        "azents-runtime-runner",
+        "azents-runtime-proxy",
+        "azents-runtime-engine",
+        "azents-runtime-provider-kubernetes",
+        "azents-runtime-provider-docker",
+    ]
     assert "runs-on: ubuntu-latest" in producer
     assert "needs.changes.outputs.python_e2e == 'true'" in producer
     assert "needs.changes.outputs.web_e2e == 'true'" in producer
@@ -207,6 +223,8 @@ def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -
     export = _step_block(producer, "Export exact E2E image")
     publish = _step_block(producer, "Publish exact E2E image")
     assert "scripts.ci.e2e_images export" in export
+    assert "azents-llm-proxy" in export
+    assert "azents-llm-proxy" in publish
     assert "continue-on-error:" not in export
     assert "${{ github.run_id }}-${{ github.run_attempt }}" in publish
     assert "compression-level: 0" in publish

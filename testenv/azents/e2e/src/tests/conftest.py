@@ -66,6 +66,7 @@ from support.google_provider_fixture import (
     configure_trust,
     write_material,
 )
+from support.llm_proxy_fixture import RESOLVER_KEY as LLM_PROXY_RESOLVER_KEY
 from support.model_stream_fixture_policy import ordinary_model_stream_environment
 from support.observations import (
     DockerNetworkObservation,
@@ -251,13 +252,20 @@ _ADMIN_WEB_IMAGE_BUILD = _E2EImageBuild(
     cache_repository="azents-admin-web",
     web=True,
 )
+_LLM_PROXY_IMAGE_BUILD = _E2EImageBuild(
+    environment_variable="AZENTS_E2E_LLM_PROXY_IMAGE",
+    tag_prefix="azents-llm-proxy-e2e",
+    dockerfile=REPOSITORY_ROOT / "python/apps/azents-llm-proxy/Dockerfile",
+    cache_repository="azents-llm-proxy",
+    web=False,
+)
 _CORE_E2E_IMAGE_BUILDS = (
     _SERVER_IMAGE_BUILD,
     _RUNTIME_RUNNER_IMAGE_BUILD,
     _RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD,
 )
 _E2E_IMAGE_BUILD_PROFILES = {
-    "required": _CORE_E2E_IMAGE_BUILDS,
+    "required": (*_CORE_E2E_IMAGE_BUILDS, _LLM_PROXY_IMAGE_BUILD),
     "web": (*_CORE_E2E_IMAGE_BUILDS, _WEB_IMAGE_BUILD, _ADMIN_WEB_IMAGE_BUILD),
 }
 
@@ -1126,6 +1134,12 @@ def azents_runtime_runner_image(core_prerequisites: _CorePrerequisites) -> str:
 
 
 @pytest.fixture(scope="session")
+def azents_llm_proxy_image(core_prerequisites: _CorePrerequisites) -> str:
+    """Original Proxy artifact for its one representative required journey."""
+    return _join_e2e_image(_LLM_PROXY_IMAGE_BUILD, core_prerequisites)
+
+
+@pytest.fixture(scope="session")
 def azents_runtime_provider_docker_image(core_prerequisites: _CorePrerequisites) -> str:
     return _join_e2e_image(_RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD, core_prerequisites)
 
@@ -1351,6 +1365,10 @@ def _configure_azents_server_container(
             str(E2E_GENERAL_FILE_MAXIMUM_BYTES),
         )
         .with_env("AZ_CREDENTIAL_ENCRYPTION_KEY", credential_encryption_key)
+        .with_env(
+            "AZ_LLM_RESOLVER_SERVICE_KEY",
+            LLM_PROXY_RESOLVER_KEY,
+        )
         .with_env("AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN", system_bootstrap_setup_token)
         .with_env("AZ_REDIS_URL", "redis://valkey:6379")
         .with_env("AZ_WEB_URL", _MAIN_WEB_BROWSER_URL)

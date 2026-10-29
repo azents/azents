@@ -1,0 +1,67 @@
+[project]
+name = "azents-llm-proxy"
+version = "0.1.0"
+description = "Agent-scoped authority extension for the independent LiteLLM Proxy"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "apscheduler==3.11.3",
+    "azents-llm-contract",
+    "azure-identity==1.27.0",
+    "azure-storage-blob==12.31.0",
+    "backoff==2.2.1",
+    "expression==5.7.0",
+    "fastapi==0.141.1",
+    "fastapi-sso==0.23.0",
+    "google-auth==2.57.1",
+    "httpx==0.28.1",
+    "httpx2==2.12.0",
+    "jsonschema==4.26.0",
+    # One-time requester-approved exception (2026-10-29): official dev wheel
+    # contains ChatGPT per-request credential forwarding (upstream PR #41522).
+    # Replace with the first stable release containing that fix after the same
+    # auth/account-isolation/stream tests pass; do not retain a Git source pin.
+    "litellm==1.109.0.dev1",
+    "litellm-proxy-extras==0.4.111",
+    "mcp==2.2.0",
+    "openai==3.26.0",
+    "orjson==3.13.0",
+    "pydantic==2.13.5",
+    "pydantic-ai-slim==2.59.0",
+    "pydantic-settings==2.15.0",
+    "pyjwt==2.15.1",
+    "pynacl==1.6.2",
+    "python-multipart==0.0.32",
+    "redis==8.1.0",
+    "rich==15.0.0",
+    "soundfile==0.14.0",
+    "uvicorn==0.52.4",
+    "websockets==15.0.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["ruff>=0.16.4", "ty>=0.0.74", "pytest>=9.1.1", "pytest-asyncio>=1.4.0", "respx>=0.22.0"]
+
+[tool.uv]
+package = true
+resolution = "lowest-direct"
+
+[tool.uv.sources]
+azents-llm-contract = { path = "../../libs/azents-llm-contract", editable = true }
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

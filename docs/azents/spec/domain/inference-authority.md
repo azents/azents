@@ -11,12 +11,13 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_authority.py
   - python/apps/azents/src/azents/services/llm_access.py
   - python/apps/azents/src/azents/services/llm_authority.py
+  - python/apps/azents/src/azents/services/llm_bedrock_sessions.py
   - python/apps/azents/src/azents/api/llm_authority_route.py
   - python/apps/azents/src/azents/api/admin/llm_access.py
   - python/apps/azents/src/azents/api/internal/llm.py
   - python/libs/azents-llm-contract/src/azents_llm_contract/**
   - python/apps/azents/db-schemas/rdb/migrations/versions/3ac042ea72bd_add_agent_inference_access_supplies_and_.py
-last_verified_at: 2026-10-28
+last_verified_at: 2026-10-29
 spec_version: 1
 ---
 
@@ -24,8 +25,9 @@ spec_version: 1
 
 This additive server authority does not reroute Worker inference. It authenticates
 system-issued Agent bearers and resolves current Agent-owned candidates over a
-separate private service channel. The Proxy application, packaging, provider-wire
-mapping and assembled end-to-end verification are separate delivery work.
+separate private service channel. The independent original Proxy application,
+provider-wire boundary and deployment are described in
+[Agent Inference Proxy](inference-proxy.md).
 
 ## Current Configuration and Identity
 
@@ -40,7 +42,10 @@ Agent must be enabled and lifecycle-active. The integration must exist in the
 same Workspace, be enabled, and match the saved provider identity. Model parameters,
 candidate caps, supported features/conditions, tools and execution options are
 projected into a closed request-local configuration contract without inventing
-new defaults. Tool-local JSON configuration is not a bag of transport/SDK overrides.
+new defaults. The existing route projection also supplies the selected protocol
+(`native_responses`, `responses`, `chat`, `anthropic`, `google` or `bedrock`), so
+provider-specific normalization does not infer model facts from names in the Proxy.
+Tool-local JSON configuration is not a bag of transport/SDK overrides.
 
 ## Token State and Ownership
 
@@ -115,7 +120,7 @@ shared typed DTOs own their wire contract. Admin OpenAPI/clients are generated.
 ```mermaid
 flowchart LR
     A[Resolver service authentication] --> B[DB-only token and target prepare]
-    B --> C[Existing OAuth resolver outside DB transaction]
+    B --> C[OAuth and AWS role preparation outside DB transaction]
     C --> D[DB-only final authority revalidation]
     D --> E[Request-local typed binding]
 ```
@@ -133,6 +138,23 @@ Only API keys, access tokens plus required account/device data, and the selected
 AWS/GCP call credential fields cross the resolver channel. Refresh tokens, ID
 management tokens and diagnostics stay private. Existing OAuth persistence fences
 are reused; they do not guarantee only one upstream refresh request.
+
+Bedrock role configurations use the official asynchronous STS SDK with the stored
+explicit source key/secret, selected region, no configured endpoint/proxy override
+and one total attempt. `AssumeRole` requests a 900-second session outside DB
+transactions; preparation completes before final authority revalidation.
+The returned closed call tuple contains temporary access key, secret, session token,
+region and aware expiry, not role selection or original source keys. Session token
+and expiry are an atomic nullable pair. Expired sessions fail before returning an
+admission, and Proxy checks expiry again before physical dispatch. STS denial,
+transport failure and cancellation do not produce a binding or inference dispatch;
+owned SDK clients close and private provider errors are not exposed.
+
+No role session is persisted or automatically refreshed in Proxy, and no new
+credential table or background session-refresh service is introduced. Existing
+direct static-key configurations retain explicit-key tuples with no session/expiry.
+Final checks still reject revocation, disable, settings or credential changes
+while STS was preparing. These rules do not alter Worker AWS handling.
 
 The Vertex JSON field is decoded as a closed Google service-account key, rather
 than relaying arbitrary Google credential configurations. User refresh-token and
@@ -155,9 +177,9 @@ handled validation/domain errors use `Cache-Control: no-store`.
 Shared DTO ordinary serialization/repr redacts credential material. Only explicit
 protected-channel serialization emits secrets. Pydantic raw `errors()`/`json()`
 can retain invalid input: callers must not log those objects. Route validation is
-sanitized before the HTTP boundary. Comprehensive Proxy logging/tracing privacy
-and provider fidelity remain separate verification obligations, not implied by
-these DTO and server tests.
+sanitized before the HTTP boundary. Proxy logging/tracing privacy and provider
+fidelity have their own boundary and focused verification; neither is implied
+merely by these DTO and server tests.
 
 The shared runtime logging integration disables Sentry request-body and
 exception-frame-local collection and recursively scrubs resolver/Agent/provider

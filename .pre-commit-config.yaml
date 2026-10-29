@@ -47,6 +47,20 @@ repos:
         args: [--fix]
       - id: ruff-format
         types_or: [python, pyi, jupyter]
+  # Independent LiteLLM Proxy
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.12.22
+    hooks:
+      - id: uv-lock
+        files: ^python/apps/azents-llm-proxy/pyproject\.toml$
+        args: [--project, python/apps/azents-llm-proxy]
+  - repo: local
+    hooks:
+      - id: ty-azents-llm-proxy
+        name: Run ty in azents-llm-proxy
+        language: unsupported
+        entry: bash -c 'cd python/apps/azents-llm-proxy && uv run ty check --error-on-warning'
+        files: ^python/(apps/azents-llm-proxy|libs/azents-llm-contract)/
   # az-common
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.12.22

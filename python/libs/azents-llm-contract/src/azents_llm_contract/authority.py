@@ -1,6 +1,6 @@
 """Closed payloads for the private authority channel, never inference bodies."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -13,6 +13,7 @@ from pydantic import (
     SerializationInfo,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from azents_llm_contract.gcp import service_account_call_json
@@ -101,8 +102,14 @@ class BedrockCredential(AuthorityPayload):
     access_key_id: ProtectedSecret = Field(repr=False)
     secret_access_key: ProtectedSecret = Field(repr=False)
     region: Identifier
-    role_arn: str | None
-    role_session_name: str | None
+    session_token: ProtectedSecret | None = Field(repr=False)
+    expires_at: AwareDatetime | None
+
+    @model_validator(mode="after")
+    def session_expiry_pair(self) -> Self:
+        if (self.session_token is None) != (self.expires_at is None):
+            raise ValueError("Session credentials require an expiry.")
+        return self
 
 
 class VertexCredential(AuthorityPayload):

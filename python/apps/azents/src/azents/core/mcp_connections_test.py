@@ -420,7 +420,12 @@ async def test_readiness_and_cleanup_are_bounded(server: _Server) -> None:
     connections = McpConnections()
     server.listing_release = asyncio.Event()
     try:
-        with pytest.raises(TimeoutError):
+        # The owner's readiness deadline can reach the borrower through the
+        # SDK task groups before the borrower's own deadline fires. Both paths
+        # must contain only TimeoutError, with no dispatched call.
+        with pytest.RaisesGroup(
+            TimeoutError, allow_unwrapped=True, flatten_subgroups=True
+        ):
             await connections.call_tool(
                 "https://fixture.test/mcp",
                 {},

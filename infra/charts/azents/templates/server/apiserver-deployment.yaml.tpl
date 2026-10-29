@@ -46,6 +46,13 @@ spec:
           env:
             - name: AZ_PORT
               value: "8010"
+            {{- with .Values.server.llmAuthority.resolver.existingSecret }}
+            - name: AZ_LLM_RESOLVER_SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: {{ $.Values.server.llmAuthority.resolver.key | quote }}
+            {{- end }}
             - name: AZ_RUNTIME_WEB_GATEWAY_ENABLED
               value: {{ .Values.server.runtimeWebGateway.enabled | quote }}
             - name: AZ_RUNTIME_WEB_GATEWAY_AUTH_MODE

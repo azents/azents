@@ -118,6 +118,10 @@ jobs:
             package: azents-runtime-proxy
             dockerfile: python/apps/azents-runtime-proxy/Dockerfile
             extra_context: ""
+          - component: llm-proxy
+            package: azents-llm-proxy
+            dockerfile: python/apps/azents-llm-proxy/Dockerfile
+            extra_context: ""
           - component: runtime-engine
             package: azents-runtime-engine
             dockerfile: images/azents-runtime-engine/Dockerfile

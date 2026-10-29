@@ -498,7 +498,7 @@ async def test_provider_io_runs_after_prepare_transaction_is_closed(
         return Success(integration)
 
     tokens.ensure.side_effect = refresh
-    result = await LLMAuthorityService(subject.authority, tokens).resolve(
+    result = await LLMAuthorityService(subject.authority, tokens, AsyncMock()).resolve(
         agent_token="token", model="test-model", target_id=subject.target_id
     )
     assert result.identity.agent_id == subject.agent_id

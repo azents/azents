@@ -467,7 +467,7 @@ dependencies = [
     { name = "slack-sdk" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "typer" },
-    { name = "types-aioboto3", extra = ["aioboto3", "s3", "ses"] },
+    { name = "types-aioboto3", extra = ["aioboto3", "s3", "ses", "sts"] },
     { name = "types-pytz" },
     { name = "tzdata" },
     { name = "uvicorn" },
@@ -545,7 +545,7 @@ requires-dist = [
     { name = "slack-sdk", specifier = "==3.44.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.0.52" },
     { name = "typer", specifier = "==0.27.3" },
-    { name = "types-aioboto3", extras = ["aioboto3", "s3", "ses"], specifier = "==15.5.0" },
+    { name = "types-aioboto3", extras = ["aioboto3", "s3", "ses", "sts"], specifier = "==15.5.0" },
     { name = "types-pytz", specifier = "==2026.3.1.20260727" },
     { name = "tzdata", specifier = "==2026.3" },
     { name = "uvicorn", specifier = "==0.52.4" },
@@ -3634,6 +3634,9 @@ s3 = [
 ses = [
     { name = "types-aiobotocore-ses" },
 ]
+sts = [
+    { name = "types-aiobotocore-sts" },
+]
 
 [[package]]
 name = "types-aiobotocore"
@@ -3663,6 +3666,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/68/5b/a233614f0cb94d4afdde9559efc336c81e39853b8f4f96710e1bdf2df8e9/types_aiobotocore_ses-2.25.2.tar.gz", hash = "sha256:7c7bf5037d7f5b58b2c5f94b36074954848be1f5cebbde30f839e45a61161db9", size = 31341, upload-time = "2025-11-12T01:52:43.459Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/91/12c2ff7405fdc3112c0b24ebf2e009eea9a0a39e0889f030959b86ce60ac/types_aiobotocore_ses-2.25.2-py3-none-any.whl", hash = "sha256:715b238b1af4ea58e511e2101f5c8f2073e43b32af90d732c0678efaa411942e", size = 39848, upload-time = "2025-11-12T01:52:41.278Z" },
+]
+
+[[package]]
+name = "types-aiobotocore-sts"
+version = "2.25.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/74/fba6a4a67f8b27a092dd19e8dbcc9328a06be39fdadeb8f9e3caf28ce4d9/types_aiobotocore_sts-2.25.2.tar.gz", hash = "sha256:1342271243d03fd8d4a1eab566d9137f70ec723bb6ad613669c74152ac3a0427", size = 16537, upload-time = "2025-11-12T01:53:12.056Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/4e/e2d85d9b7ed7b12da8b451df42cfc2f0cf6b0e1b94c9bb788d063a8a921d/types_aiobotocore_sts-2.25.2-py3-none-any.whl", hash = "sha256:487da184371dc9761fd3ed663d519f4a19f690d7dcc1fe8f551b6dd805f08549", size = 20739, upload-time = "2025-11-12T01:53:09.81Z" },
 ]
 
 [[package]]

@@ -59,6 +59,11 @@ jobs:
             dockerfile: python/apps/azents-runtime-proxy/Dockerfile
             extra_context: ""
             e2e_cache_repository: ""
+          - component: llm-proxy
+            package: azents-llm-proxy-snapshot
+            dockerfile: python/apps/azents-llm-proxy/Dockerfile
+            extra_context: ""
+            e2e_cache_repository: azents-llm-proxy
           - component: runtime-engine
             package: azents-runtime-engine-snapshot
             dockerfile: images/azents-runtime-engine/Dockerfile

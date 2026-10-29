@@ -441,6 +441,100 @@
     }
   ],
   "properties": {
+    "llmProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "resources": {
+          "type": "object"
+        },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^$|^https://[^/@?#]+/internal/llm/?$"
+            },
+            "timeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "resolver": {
+              "$ref": "#/definitions/llmProxySecret"
+            },
+            "ca": {
+              "$ref": "#/definitions/llmProxySecret"
+            }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "className": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "hosts": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "tls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "hosts",
+                  "secretName"
+                ],
+                "properties": {
+                  "hosts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "secretName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "secrets": {
       "type": "object",
       "properties": {
@@ -535,6 +629,19 @@
     }
   },
   "definitions": {
+    "llmProxySecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "enabledOnly": {
       "type": "object",
       "properties": {
@@ -1039,6 +1146,15 @@
         },
         "systemBootstrap": {
           "$ref": "#/definitions/systemBootstrap"
+        },
+        "llmAuthority": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resolver": {
+              "$ref": "#/definitions/llmProxySecret"
+            }
+          }
         },
         "platformGitHubApp": {
           "$ref": "#/definitions/platformGitHubApp"

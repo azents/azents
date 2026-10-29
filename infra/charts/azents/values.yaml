@@ -42,6 +42,10 @@ server:
   systemBootstrap:
     existingSecret: ""
     tokenKey: setup-token
+  llmAuthority:
+    resolver:
+      existingSecret: ""
+      key: resolver-key
   platformGitHubApp:
     existingSecret: ""
     appIdKey: github-platform-app-id
@@ -247,6 +251,40 @@ web:
     enabled: false
     className: ""
     annotations: {}
+    hosts: []
+    tls: []
+
+llmProxy:
+  enabled: false
+  replicas: 1
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  port: 4000
+  authority:
+    url: ""
+    timeoutSeconds: 15
+    resolver:
+      existingSecret: ""
+      key: resolver-key
+    ca:
+      existingSecret: ""
+      key: ca.crt
+  resources: {}
+  terminationGracePeriodSeconds: 150
+  ingress:
+    enabled: false
+    className: ""
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-buffering: "off"
+      nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+      nginx.ingress.kubernetes.io/proxy-next-upstream: "off"
+      nginx.ingress.kubernetes.io/proxy-body-size: "32m"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
     hosts: []
     tls: []
 

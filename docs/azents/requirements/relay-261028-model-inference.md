@@ -1,7 +1,8 @@
 ---
 title: "Agent-Scoped Model Inference Backend Requirements"
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-29
+implemented: 2026-10-29
 tags: [engine, inference, security, backend]
 document_role: primary
 document_type: requirements
@@ -239,6 +240,14 @@ separated authorized live-provider evidence.
 - Start in a separate Pod; final placement during harness relocation remains deferred.
 - Use the MIT-covered LiteLLM feature surface and independently authored Azents
   integration code; do not bypass Enterprise license checks.
+- Use officially published dependency releases. Unreleased development commits
+  must not be selected as runtime dependencies; prefer the published distribution
+  wheel rather than building an unreleased upstream checkout. The requester
+  approved one exception on 2026-10-29: use the officially published LiteLLM
+  development release carrying request-local ChatGPT credential forwarding,
+  then replace it with a stable release containing that fix. Record the reason
+  and stable-transition condition beside the dependency pin. This does not
+  authorize arbitrary prereleases, a source build or a maintained vendor patch.
 - Protect Proxy-to-Azents calls with dedicated service authentication, TLS, and
   private network access. Issuer privileges remain separate from resolver privileges.
 - This snapshot is design work; implementation, deployment, and live account use
@@ -259,3 +268,12 @@ The requester confirmed this complete consolidated snapshot on 2026-10-28
 before formal ADR and Design creation. The preceding discussion supplied the
 individual scope and technical choices. This confirmation authorizes design work,
 not implementation, deployment, or final Design approval.
+
+On 2026-10-29, the requester explicitly required officially released packages
+after the implementation had selected an unreleased LiteLLM commit. This fixes
+the dependency-delivery constraint; it does not approve a vendor patch, reduced
+provider scope, merge, deployment or live-account use.
+
+Later on 2026-10-29, the requester approved the single published-development-release
+exception above and directed completion of all remaining approved implementation
+and specification work. Merge, deployment and live-account use remain separate.

@@ -2,6 +2,7 @@
 title: "Agent-Scoped Model Inference Backend Design"
 created: 2026-10-28
 updated: 2026-10-28
+implemented: 2026-10-29
 tags: [engine, inference, security, backend, infra]
 document_role: primary
 document_type: design

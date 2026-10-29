@@ -1,6 +1,7 @@
 """Resolve current Agent authority without holding DB transactions across OAuth."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated, assert_never
 
 from azents_llm_contract.authority import (
@@ -33,9 +34,11 @@ from azents.core.credentials import (
 )
 from azents.core.enums import LLMProvider
 from azents.core.llm_access import token_digest
+from azents.core.route_capability_constraints import projection_protocol
 from azents.repos.llm_authority import LLMAuthorityRepository, PreparedLLMAuthority
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
+from azents.services.llm_bedrock_sessions import BedrockSessionPreparer
 
 
 class LLMCredentialUnavailable(Exception):
@@ -50,6 +53,9 @@ def project_configuration(prepared: PreparedLLMAuthority) -> ModelConfiguration:
     parameters = prepared.agent.model_parameters
     return ModelConfiguration.model_validate(
         {
+            "protocol": projection_protocol(
+                prepared.integration.provider, selection.model_identifier
+            ),
             "parameters": parameters.model_dump(mode="json")
             if parameters is not None
             else None,
@@ -122,15 +128,17 @@ def project_credential(
                 )
         case LLMProvider.AWS_BEDROCK:
             if isinstance(secret, AwsSecrets) and isinstance(config, AwsConfig):
+                if config.role_arn is not None:
+                    raise LLMCredentialUnavailable(
+                        "Provider role session was not prepared."
+                    )
                 return BedrockCredential(
                     kind="aws_bedrock",
                     access_key_id=SecretStr(config.access_key_id),
                     secret_access_key=SecretStr(secret.secret_access_key),
                     region=config.region,
-                    role_arn=config.role_arn,
-                    role_session_name=f"azents-{integration.workspace_id[:8]}"
-                    if config.role_arn is not None
-                    else None,
+                    session_token=None,
+                    expires_at=None,
                 )
         case LLMProvider.GOOGLE_VERTEX_AI:
             if isinstance(secret, GcpSecrets) and isinstance(config, GcpConfig):
@@ -154,6 +162,7 @@ def project_credential(
 class LLMAuthorityService:
     repository: Annotated[LLMAuthorityRepository, Depends(LLMAuthorityRepository)]
     tokens: Annotated[EngineRuntimeTokenResolver, Depends(EngineRuntimeTokenResolver)]
+    bedrock: Annotated[BedrockSessionPreparer, Depends(BedrockSessionPreparer)]
 
     async def list_models(self, *, agent_token: str) -> ModelListResponse:
         # No integration secret reads and no refresh on listing.
@@ -170,6 +179,20 @@ class LLMAuthorityService:
         if refreshed.failure:
             # Do not expose OAuth errors/raw bodies through logs or HTTP errors.
             raise LLMCredentialUnavailable("Provider credential preparation failed.")
+        integration = refreshed.value
+        if (
+            integration.provider == LLMProvider.AWS_BEDROCK
+            and isinstance(integration.config, AwsConfig)
+            and integration.config.role_arn is not None
+            and isinstance(integration.secrets, AwsSecrets)
+        ):
+            credential = await self.bedrock.prepare(
+                config=integration.config,
+                secret=integration.secrets,
+                session_name=f"azents-{integration.workspace_id[:8]}",
+            )
+        else:
+            credential = project_credential(integration)
         latest = await self.repository.finalize(
             digest=digest,
             model=model,
@@ -177,6 +200,14 @@ class LLMAuthorityService:
             prepared=prepared,
             refreshed=refreshed.value,
         )
+        if (
+            isinstance(credential, BedrockCredential)
+            and credential.expires_at is not None
+            and credential.expires_at <= datetime.now(UTC)
+        ):
+            raise LLMCredentialUnavailable(
+                "Provider role session expired before admission."
+            )
         return TargetBinding(
             identity=latest.identity,
             integration_id=latest.integration.id,
@@ -184,5 +215,5 @@ class LLMAuthorityService:
             public_model=model,
             model_identifier=latest.candidate.model_selection.model_identifier,
             configuration=project_configuration(latest),
-            credential=project_credential(latest.integration),
+            credential=credential,
         )

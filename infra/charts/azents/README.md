@@ -27,6 +27,65 @@ Default-off optional components:
 - `server.mcpEgressProxy`
 - `server.runtimeControl`
 - `runtimeProviderKubernetes`
+- `llmProxy`
+
+## Independent Agent Inference Proxy
+
+`llmProxy` is a separate Deployment, image and Service, independent of
+`server.enabled`. It defaults off with one replica. Multiple replicas have no
+shared account, model registry, credential database or local conversation state.
+The existing Worker continues to use its current inference adapters.
+
+Example nonsecret consumer values:
+
+```yaml
+llmProxy:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ghcr.io/azents/azents-llm-proxy
+    tag: <published-version>
+    digest: sha256:<verified-image-digest>
+  authority:
+    url: https://private-authority.example/internal/llm
+    resolver:
+      existingSecret: inference-resolver
+      key: resolver-key
+    ca:
+      existingSecret: authority-ca
+      key: ca.crt
+```
+
+Only the resolver credential is injected; no `envFrom`, server credential bundle,
+issuer/Admin token, cloud account environment, or Kubernetes ServiceAccount token
+is supplied. The optional CA Secret is mounted read-only and used only to verify
+the authority HTTPS channel. An absent CA uses the image's standard trust roots;
+TLS verification cannot be disabled. Consumers must protect the private authority
+route with their network/ingress policy as well as its dedicated authentication.
+
+For an authority server in the same chart, configure
+`server.llmAuthority.resolver.existingSecret` and its `key` to the corresponding
+resolver credential. That reference is injected into `apiserver` only, not the
+Worker, scheduler, Admin server or Runtime. It grants list/resolve access, never
+token issuance. The Proxy and authority may also be separate chart releases.
+Do not expose `/internal/llm` on an unrestricted public ingress: its verified
+private HTTPS endpoint and network restriction remain operator prerequisites.
+
+Optional `llmProxy.ingress` requires explicit `hosts` (strings) and `tls` entries.
+It exposes only exact `/v1/responses` and `/v1/models` paths, never management or
+health routes. Default NGINX annotations disable buffering and uncertain upstream
+retry. Other controllers need equivalent streaming/no-replay configuration.
+Pod-local probes use the original Proxy's `/health/liveliness`; this is process
+health, not proof of authority availability or provider entitlement.
+
+Do not enable this profile until the selected image's provider-fidelity and
+credential-lifecycle acceptance is complete. The current relay implementation
+still has unresolved Vertex credential-cache/refresh and Bedrock role/ambient
+credential feasibility work; representative API-key/Kimi wire tests do not clear
+those cloud paths. Chart rendering is not deployment approval.
+
+ArgoCD `valuesObject` overlays replace the entire object. Preserve all consumer
+values when opting in rather than applying a partial replacement.
 
 ## Secret Policy
 
