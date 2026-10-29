@@ -53,8 +53,8 @@ def bedrock(region: str) -> BedrockCredential:
         access_key_id=SECRET,
         secret_access_key=SECRET,
         region=region,
-        role_arn=None,
-        role_session_name=None,
+        session_token=None,
+        expires_at=None,
     )
 
 

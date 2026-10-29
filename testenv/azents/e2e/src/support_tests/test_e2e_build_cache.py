@@ -115,7 +115,8 @@ def test_snapshot_workflow_owns_every_e2e_gha_cache_scope() -> None:
     )
     configured_repositories = {
         image_build.cache_repository
-        for image_build in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["web"]
+        for profile in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES.values()
+        for image_build in profile
     }
     remote_reader_repositories = configured_repositories - {"azents-server"}
 
@@ -218,9 +219,9 @@ def test_required_profile_builds_independent_images_concurrently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The required CI profile overlaps all independent product image builds."""
-    barrier = threading.Barrier(3, timeout=5)
+    barrier = threading.Barrier(4, timeout=5)
     calls: list[tuple[str, int]] = []
-    for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+    for image_build in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["required"]:
         monkeypatch.delenv(image_build.environment_variable, raising=False)
 
     def fake_build(
@@ -256,9 +257,10 @@ def test_required_profile_builds_independent_images_concurrently(
         "azents-server",
         "azents-runtime-runner",
         "azents-runtime-provider-docker",
+        "azents-llm-proxy",
     }
     assert {repository for repository, _ in calls} == set(images)
-    assert len({thread_id for _, thread_id in calls}) == 3
+    assert len({thread_id for _, thread_id in calls}) == 4
 
 
 def test_required_upload_gateway_does_not_require_web_images() -> None:
@@ -285,7 +287,7 @@ def test_parallel_profile_reuses_preconfigured_images(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A configured immutable image is excluded from the concurrent build batch."""
-    for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+    for image_build in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["required"]:
         monkeypatch.delenv(image_build.environment_variable, raising=False)
     monkeypatch.setenv("AZENTS_E2E_SERVER_IMAGE", "registry/azents-server:test")
     calls: list[str] = []
@@ -322,6 +324,7 @@ def test_parallel_profile_reuses_preconfigured_images(
     assert set(calls) == {
         "azents-runtime-runner",
         "azents-runtime-provider-docker",
+        "azents-llm-proxy",
     }
 
 
@@ -329,7 +332,7 @@ def test_parallel_profile_accepts_fully_preconfigured_images(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A fully prebuilt CI lane does not create an empty executor."""
-    for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+    for image_build in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["required"]:
         monkeypatch.setenv(
             image_build.environment_variable,
             f"registry/{image_build.cache_repository}:test",
@@ -340,7 +343,7 @@ def test_parallel_profile_accepts_fully_preconfigured_images(
 
     assert images == {
         image_build.cache_repository: (f"registry/{image_build.cache_repository}:test")
-        for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS
+        for image_build in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["required"]
     }
 
 
@@ -433,7 +436,7 @@ def test_preparation_captures_environment_before_build_submission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prepared image references do not drift if the environment changes later."""
-    for image in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+    for image in _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["required"]:
         monkeypatch.setenv(
             image.environment_variable, f"verified-{image.cache_repository}"
         )

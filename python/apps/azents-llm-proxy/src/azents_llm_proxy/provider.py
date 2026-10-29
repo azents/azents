@@ -3,6 +3,7 @@
 import platform
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Required, TypedDict, assert_never
 
 import jwt
@@ -52,6 +53,7 @@ class ProviderArguments(TypedDict, total=False):
     extra_headers: dict[str, str]
     aws_access_key_id: str
     aws_secret_access_key: str
+    aws_session_token: str
     aws_region_name: str
     aws_bedrock_runtime_endpoint: str
     aws_role_name: str
@@ -150,6 +152,11 @@ def provider_invocation(binding: TargetBinding) -> ProviderInvocation:
                 },
             }
         case BedrockCredential():
+            if (
+                credential.expires_at is not None
+                and credential.expires_at <= datetime.now(UTC)
+            ):
+                raise ProviderConfigurationError("Provider role session has expired.")
             if re.fullmatch(r"[a-z0-9-]+", credential.region) is None:
                 raise ProviderConfigurationError(
                     "Provider region configuration is invalid."
@@ -165,10 +172,10 @@ def provider_invocation(binding: TargetBinding) -> ProviderInvocation:
                 "api_base": base,
                 "aws_bedrock_runtime_endpoint": base,
             }
-            if credential.role_arn is not None:
-                arguments["aws_role_name"] = credential.role_arn
-            if credential.role_session_name is not None:
-                arguments["aws_session_name"] = credential.role_session_name
+            if credential.session_token is not None:
+                arguments["aws_session_token"] = (
+                    credential.session_token.get_secret_value()
+                )
         case VertexCredential():
             if re.fullmatch(r"[a-z0-9-]+", credential.location) is None:
                 raise ProviderConfigurationError(

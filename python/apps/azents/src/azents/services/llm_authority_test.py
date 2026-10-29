@@ -95,7 +95,7 @@ def integration(provider: LLMProvider) -> LLMProviderIntegrationWithSecrets:
             value.config = AwsConfig(
                 access_key_id="key-id-sentinel",
                 region="us-east-1",
-                role_arn="arn:aws:iam::123456789012:role/fixture",
+                role_arn=None,
             )
         case LLMProvider.GOOGLE_VERTEX_AI:
             value.secrets = GcpSecrets(
@@ -206,7 +206,7 @@ async def test_refresh_then_final_revalidation_order() -> None:
     repository.prepare.side_effect = prepare
     tokens.ensure.side_effect = refresh
     repository.finalize.side_effect = finalize
-    result = await LLMAuthorityService(repository, tokens).resolve(
+    result = await LLMAuthorityService(repository, tokens, AsyncMock()).resolve(
         agent_token="agent-secret", model="model", target_id="a" * 64
     )
     assert result.identity.agent_id == "agent"
@@ -221,7 +221,7 @@ async def test_refresh_failure_is_not_agent_auth_failure_or_secret_diagnostic() 
     tokens = AsyncMock(spec=EngineRuntimeTokenResolver)
     tokens.ensure.return_value = Failure(ProviderUnavailable(reason=REFRESH))
     with pytest.raises(LLMCredentialUnavailable) as caught:
-        await LLMAuthorityService(repository, tokens).resolve(
+        await LLMAuthorityService(repository, tokens, AsyncMock()).resolve(
             agent_token="agent-secret", model="model", target_id="a" * 64
         )
     assert REFRESH not in str(caught.value)
@@ -231,7 +231,7 @@ async def test_refresh_failure_is_not_agent_auth_failure_or_secret_diagnostic() 
 async def test_listing_never_refreshes_or_prepares_secrets() -> None:
     repository = AsyncMock(spec=LLMAuthorityRepository)
     tokens = AsyncMock(spec=EngineRuntimeTokenResolver)
-    await LLMAuthorityService(repository, tokens).list_models(
+    await LLMAuthorityService(repository, tokens, AsyncMock()).list_models(
         agent_token=SecretStr("agent-secret").get_secret_value()
     )
     repository.list_models.assert_awaited_once()

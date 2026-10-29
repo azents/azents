@@ -1,20 +1,24 @@
 # Third-party composition
 
 The Azents extension is MIT-licensed. Its inference server is the original
-LiteLLM Proxy from Berri AI, pinned to
-`c7c895db456eda349a7be9661b4b21f578f9b589` (distribution version `1.109.0`).
-LiteLLM's root notice identifies its non-Enterprise sources as MIT-licensed.
-The wheel's original license and dependency notices remain installed in their
-distribution metadata. This project does not change license checks or enable
-premium functionality.
+LiteLLM Proxy from Berri AI, installed from the published PyPI wheel
+`litellm==1.109.0.dev1`. The exact registry artifact hashes are in `uv.lock`.
+This development release is a requester-approved one-time exception for ChatGPT
+request-credential forwarding (upstream PR #41522). Replace it with a stable
+release containing that fix after equivalent regression checks.
 
-The final runtime image includes the installed core wheel, the Azents extension,
-the shared contract, and their locked dependencies. The source checkout and build
-toolchain are confined to build stages. Neither the `enterprise` source tree nor
-`litellm-enterprise` distribution belongs in the final image. The composition
-audit checks the installed inventory and original MIT notice and emits the
-installed dependency inventory during the image build.
+LiteLLM's original notice identifies its non-Enterprise sources as MIT-licensed.
+The wheel's license and dependency notices remain installed in distribution
+metadata. This project does not change license checks or enable premium features.
 
-Dependencies retain their respective licenses; this notice does not relicense
+The runtime image contains the installed core wheel, independently authored Azents
+extension, shared contract and locked dependencies. It does not build LiteLLM from
+an upstream checkout or include a Rust build toolchain. Neither the `enterprise`
+source tree nor `litellm-enterprise` distribution belongs in the runtime image.
+The composition audit checks installed inventory, exact release identity, absent
+Enterprise/premium configuration and the original MIT notice; image build emits
+the installed dependency inventory.
+
+Dependencies retain their respective licenses. This notice does not relicense
 them or certify legal suitability. The MIT assertion concerns the selected
-LiteLLM core/extension, not every component of the operating-system image.
+LiteLLM core/extension, not every operating-system or third-party component.

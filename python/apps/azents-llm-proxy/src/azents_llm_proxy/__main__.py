@@ -14,14 +14,21 @@ def main() -> None:
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
     # Import only after disabling third-party dotenv discovery.
     from azents_llm_proxy.application import create_application  # noqa: PLC0415
+    from azents_llm_proxy.egress import ProviderClients  # noqa: PLC0415
 
     try:
         settings = Settings()
-        app = create_application(settings)
+        app = create_application(settings, provider_clients=ProviderClients)
     except ValidationError, RuntimeError:
         sys.stderr.write("Inference Proxy configuration is invalid.\n")
         raise SystemExit(1) from None
-    uvicorn.run(app, host="0.0.0.0", port=settings.port, access_log=False)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=settings.port,
+        access_log=False,
+        timeout_graceful_shutdown=120,
+    )
 
 
 if __name__ == "__main__":

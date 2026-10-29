@@ -197,13 +197,6 @@ jobs:
       - name: Install dependencies
         run: |
           cd "${{ matrix.project }}"
-          if [ "${{ matrix.project }}" = 'python/apps/azents-llm-proxy' ]; then
-            rustup toolchain install 1.98.0 --profile minimal
-            rustup default 1.98.0
-            export CARGO_BUILD_JOBS=2
-            export CARGO_PROFILE_RELEASE_LTO=false
-            export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-          fi
           uv sync
       - name: Select Ubuntu archive for Runner browser dependencies
         if: matrix.project == 'python/apps/azents-runtime-runner'
@@ -1130,7 +1123,7 @@ jobs:
       - name: Export exact E2E image
         if: >-
           (needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true')
-          && contains(fromJSON('["azents-server","azents-runtime-runner","azents-runtime-provider-docker","azents-web","azents-admin-web"]'), matrix.name)
+          && contains(fromJSON('["azents-server","azents-runtime-runner","azents-runtime-provider-docker","azents-web","azents-admin-web","azents-llm-proxy"]'), matrix.name)
         run: |
           python -m scripts.ci.e2e_images export \
             --image "${{ matrix.name }}" \
@@ -1138,7 +1131,7 @@ jobs:
       - name: Publish exact E2E image
         if: >-
           (needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true')
-          && contains(fromJSON('["azents-server","azents-runtime-runner","azents-runtime-provider-docker","azents-web","azents-admin-web"]'), matrix.name)
+          && contains(fromJSON('["azents-server","azents-runtime-runner","azents-runtime-provider-docker","azents-web","azents-admin-web","azents-llm-proxy"]'), matrix.name)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-e2e-image-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}

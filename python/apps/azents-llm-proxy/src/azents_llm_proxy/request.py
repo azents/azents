@@ -4,6 +4,7 @@ import base64
 import binascii
 import copy
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
 
@@ -169,12 +170,31 @@ def _sdk_image_defaults(value: object) -> object:
     return normalized
 
 
+def _materialize_protocol_iterators(value: object) -> None:
+    """Eagerly finish SDK Iterable validation inside the bounded JSON ingress.
+
+    Nested reasoning summaries, assistant annotations and multimodal tool results
+    are lazy too, not only top-level tools/include. Their resulting lists retain
+    the SDK's declared Iterable contract and can be cloned/replayed repeatedly.
+    Caller-owned JSON schemas contain no iterators and keep their original data.
+    """
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(item, Iterator):
+                value[key] = list(item)
+            _materialize_protocol_iterators(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            _materialize_protocol_iterators(item)
+
+
 def decode_request(value: object) -> InferenceRequest:
     """Validate once; unknown SDK/routing extensions never enter business logic."""
     normalized = _sdk_image_defaults(value)
     try:
         _VALIDATOR.validate(normalized)
         payload = _ADAPTER.validate_python(normalized, strict=True)
+        _materialize_protocol_iterators(payload)
     except ValidationError, SchemaValidationError:
         raise RequestRejected("Invalid Responses request.") from None
     model = payload.get("model")
@@ -192,14 +212,6 @@ def decode_request(value: object) -> InferenceRequest:
         or payload.get("prompt") is not None
     ):
         raise RequestRejected("Stored and background operations are not supported.")
-    tools = payload.get("tools")
-    if tools is not None:
-        # SDK Iterable fields otherwise validate lazily and can be exhausted by
-        # an authority check before the actual provider serialization.
-        payload["tools"] = list(tools)
-    include = payload.get("include")
-    if include is not None:
-        payload["include"] = list(include)
     for tool in payload.get("tools") or ():
         if tool["type"] not in {
             "function",

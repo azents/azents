@@ -49,8 +49,16 @@ def credential_cases() -> list[ProviderCredential]:
             access_key_id=secret,
             secret_access_key=secret,
             region="us-east-1",
-            role_arn=None,
-            role_session_name=None,
+            session_token=None,
+            expires_at=None,
+        ),
+        BedrockCredential(
+            kind="aws_bedrock",
+            access_key_id=secret,
+            secret_access_key=secret,
+            region="us-east-1",
+            session_token=secret,
+            expires_at=datetime.datetime(2026, 10, 29, tzinfo=datetime.UTC),
         ),
         VertexCredential(
             kind="google_vertex_ai",
@@ -104,6 +112,25 @@ def test_agent_token_redaction_and_explicit_transport() -> None:
     assert SENTINEL not in str(request)
     assert SENTINEL not in request.model_dump_json()
     assert json.loads(request.protected_json())["agent_token"] == SENTINEL
+
+
+@pytest.mark.parametrize("token", [None, SecretStr(SENTINEL)])
+def test_bedrock_session_token_and_expiry_are_an_atomic_pair(
+    token: SecretStr | None,
+) -> None:
+    with pytest.raises(ValidationError):
+        BedrockCredential(
+            kind="aws_bedrock",
+            access_key_id=SecretStr(SENTINEL),
+            secret_access_key=SecretStr(SENTINEL),
+            region="us-east-1",
+            session_token=token,
+            expires_at=(
+                datetime.datetime(2026, 10, 29, tzinfo=datetime.UTC)
+                if token is None
+                else None
+            ),
+        )
 
 
 @pytest.mark.parametrize(

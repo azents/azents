@@ -14,6 +14,7 @@ from azents_llm_proxy.authority import AuthorityClient, create_http_client
 from azents_llm_proxy.config import Settings
 from azents_llm_proxy.egress import ProviderClients
 from azents_llm_proxy.ingress import AgentIngress
+from azents_llm_proxy.observability import configure_operations_logging
 from azents_llm_proxy.privacy import install_vendor_diagnostics
 
 _AMBIENT_PREFIXES = (
@@ -63,10 +64,13 @@ def select_direct_dispatch() -> None:
     proxy.llm_model_list = []
 
 
-def create_application(settings: Settings) -> AgentIngress:
+def create_application(
+    settings: Settings, *, provider_clients: type[ProviderClients]
+) -> AgentIngress:
     """One application per process; use the original Proxy startup/shutdown."""
     validate_environment(os.environ)
     install_vendor_diagnostics()
+    configure_operations_logging()
     verify_core_composition()
     os.environ["CONFIG_FILE_PATH"] = str(bootstrap.CONFIG)
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -81,7 +85,7 @@ def create_application(settings: Settings) -> AgentIngress:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with (
             create_http_client(settings) as client,
-            ProviderClients.open(bootstrap.context) as clients,
+            provider_clients.open(bootstrap.context) as clients,
         ):
             bootstrap.context.clients = clients
             bootstrap.configure(AuthorityClient(client, settings.resolver_key))

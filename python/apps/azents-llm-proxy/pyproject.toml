@@ -18,7 +18,11 @@ dependencies = [
     "httpx==0.28.1",
     "httpx2==2.12.0",
     "jsonschema==4.26.0",
-    "litellm==1.109.0",
+    # One-time requester-approved exception (2026-10-29): official dev wheel
+    # contains ChatGPT per-request credential forwarding (upstream PR #41522).
+    # Replace with the first stable release containing that fix after the same
+    # auth/account-isolation/stream tests pass; do not retain a Git source pin.
+    "litellm==1.109.0.dev1",
     "litellm-proxy-extras==0.4.111",
     "mcp==2.2.0",
     "openai==3.26.0",
@@ -49,7 +53,6 @@ resolution = "lowest-direct"
 
 [tool.uv.sources]
 azents-llm-contract = { path = "../../libs/azents-llm-contract", editable = true }
-litellm = { git = "https://github.com/BerriAI/litellm", rev = "c7c895db456eda349a7be9661b4b21f578f9b589" }
 
 [tool.ruff]
 target-version = "py314"

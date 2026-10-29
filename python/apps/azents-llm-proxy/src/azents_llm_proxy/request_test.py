@@ -1,6 +1,8 @@
 """Closed protocol fields, explicit history and remote-resource rejection."""
 
 import base64
+import copy
+import json
 
 import pytest
 
@@ -33,6 +35,46 @@ def test_normal_request_preserves_controls_and_selectors() -> None:
     assert decoded.payload["temperature"] == 0.2
     assert decoded.payload["prompt_cache_key"] == "caller-cache"
     assert "private-prompt" not in repr(decoded)
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        [
+            {
+                "type": "reasoning",
+                "id": "rs_fixture",
+                "summary": [{"type": "summary_text", "text": "summary"}],
+                "encrypted_content": "opaque-native-continuation",
+            }
+        ],
+        [
+            {
+                "type": "function_call_output",
+                "call_id": "call_fixture",
+                "output": [{"type": "input_text", "text": "tool result"}],
+            }
+        ],
+        [
+            {
+                "type": "message",
+                "id": "msg_fixture",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {"type": "output_text", "text": "reply", "annotations": []}
+                ],
+            }
+        ],
+    ],
+)
+def test_nested_sdk_iterables_are_validated_once_and_replayable(
+    history: list[dict[str, object]],
+) -> None:
+    decoded = decode_request({**request(), "input": history})
+    for _ in range(2):
+        cloned = copy.deepcopy(decoded.payload)
+        assert json.loads(json.dumps(cloned))["input"] == history
 
 
 @pytest.mark.parametrize(

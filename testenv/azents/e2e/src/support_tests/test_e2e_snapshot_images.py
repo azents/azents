@@ -50,6 +50,7 @@ def _unchanged_environment() -> dict[str, str]:
     return {
         "AZENTS_E2E_IMAGE_BUILD_PROFILE": "required",
         "AZENTS_E2E_SERVER_IMAGE_CHANGED": "false",
+        "AZENTS_E2E_LLM_PROXY_IMAGE_CHANGED": "false",
         "AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED": "false",
         "AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED": "false",
         "AZENTS_E2E_WEB_IMAGE_CHANGED": "false",
@@ -97,11 +98,12 @@ def test_prepares_all_unchanged_images() -> None:
         ),
         "AZENTS_E2E_RUNTIME_RUNNER_IMAGE": ("azents-runtime-runner:e2e-base-snapshot"),
         "AZENTS_E2E_SERVER_IMAGE": "azents-server:e2e-base-snapshot",
+        "AZENTS_E2E_LLM_PROXY_IMAGE": "azents-llm-proxy:e2e-base-snapshot",
     }
-    assert len(result.pulls) == 3
+    assert len(result.pulls) == 4
     assert all(pull.completed for pull in result.pulls)
-    assert sum(command[0][1] == "pull" for command in runner.commands) == 3
-    assert sum(command[0][1] == "tag" for command in runner.commands) == 3
+    assert sum(command[0][1] == "pull" for command in runner.commands) == 4
+    assert sum(command[0][1] == "tag" for command in runner.commands) == 4
 
 
 def test_unchanged_images_prefer_compatible_current_snapshot() -> None:
@@ -136,6 +138,7 @@ def test_unchanged_images_prefer_compatible_current_snapshot() -> None:
             "azents.Dockerfile",
             "python/apps/azents",
             "python/libs/az-common",
+            "python/libs/azents-llm-contract",
             "python/libs/azents-runtime-control",
         ),
         None,
@@ -149,6 +152,7 @@ def test_missing_unchanged_current_snapshot_uses_base_snapshot() -> None:
                 f"azents-server-snapshot:sha-{_ANCESTOR_SHA}",
                 f"azents-runtime-runner-snapshot:sha-{_ANCESTOR_SHA}",
                 f"azents-runtime-provider-docker-snapshot:sha-{_ANCESTOR_SHA}",
+                f"azents-llm-proxy-snapshot:sha-{_ANCESTOR_SHA}",
             }
         )
     )
@@ -250,7 +254,7 @@ def test_builds_changed_image_and_prepares_unchanged_images() -> None:
     assert result.login_completed
     assert not result.all_images_prepared
     assert "AZENTS_E2E_SERVER_IMAGE" not in result.environment
-    assert len(result.environment) == 2
+    assert len(result.environment) == 3
     assert all(
         pull.source is None or "azents-server-snapshot" not in pull.source
         for pull in result.pulls
@@ -287,6 +291,7 @@ def test_prepares_changed_server_as_source_overlay_base() -> None:
         ),
         "AZENTS_E2E_RUNTIME_RUNNER_IMAGE": ("azents-runtime-runner:e2e-base-snapshot"),
         "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE": ("azents-server:e2e-base-snapshot"),
+        "AZENTS_E2E_LLM_PROXY_IMAGE": "azents-llm-proxy:e2e-base-snapshot",
     }
     overlay_pull = next(
         pull for pull in result.pulls if pull.purpose == "source_overlay_base"
@@ -365,6 +370,7 @@ def test_source_overlay_uses_dependency_compatible_ancestor() -> None:
             "python/apps/azents/pyproject.toml",
             "python/apps/azents/uv.lock",
             "python/libs/az-common",
+            "python/libs/azents-llm-contract",
             "python/libs/azents-runtime-control",
         ),
         None,
@@ -459,6 +465,7 @@ def test_fallback_preserves_directly_prepared_images() -> None:
     environment.update(
         {
             "AZENTS_E2E_SERVER_IMAGE": "azents-server:e2e-base-snapshot",
+            "AZENTS_E2E_LLM_PROXY_IMAGE": "azents-llm-proxy:e2e-base-snapshot",
             "AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE": (
                 "azents-runtime-provider-docker:e2e-base-snapshot"
             ),
@@ -483,6 +490,7 @@ def test_fallback_preserves_directly_prepared_images() -> None:
         ),
         "AZENTS_E2E_RUNTIME_RUNNER_IMAGE": "azents-runtime-runner:e2e-base-snapshot",
         "AZENTS_E2E_SERVER_IMAGE": "azents-server:e2e-base-snapshot",
+        "AZENTS_E2E_LLM_PROXY_IMAGE": "azents-llm-proxy:e2e-base-snapshot",
     }
     assert [pull.image for pull in result.pulls] == ["azents-runtime-runner"]
 

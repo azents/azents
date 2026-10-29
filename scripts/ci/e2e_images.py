@@ -25,8 +25,11 @@ IMAGES = {
     "azents-runtime-provider-docker": "AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE",
     "azents-web": "AZENTS_E2E_WEB_IMAGE",
     "azents-admin-web": "AZENTS_E2E_ADMIN_WEB_IMAGE",
+    "azents-llm-proxy": "AZENTS_E2E_LLM_PROXY_IMAGE",
 }
 CORE = tuple(IMAGES)[:3]
+REQUIRED = (*CORE, "azents-llm-proxy")
+WEB = (*CORE, "azents-web", "azents-admin-web")
 ARCHIVE_NAME = "image.tar.zst"
 
 
@@ -124,7 +127,7 @@ def prepare(root: Path, suite: str, evidence: Path) -> None:
     """Own and join exact downloads and existing prerequisite pulls in one step."""
     owner = identity()
     verify_checkout(owner)
-    selected = CORE if suite == "required" else tuple(IMAGES)
+    selected = REQUIRED if suite == "required" else WEB
     root.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -303,7 +306,7 @@ def load(root: Path, suite: str, environment: Path, evidence: Path) -> None:
     """Validate the entire exact portfolio before admitting any image to Docker."""
     owner = identity()
     verify_checkout(owner)
-    selected = CORE if suite == "required" else tuple(IMAGES)
+    selected = REQUIRED if suite == "required" else WEB
     verification_started = time.monotonic()
     if root.is_symlink() or not root.is_dir():
         raise ValueError("CI image artifact root must be a directory")

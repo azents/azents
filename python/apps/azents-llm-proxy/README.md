@@ -7,12 +7,13 @@ a second canonical provider backend. Its approved authority is
 
 ## Current acceptance boundary
 
-This implementation is not ready for all-provider enablement. The pinned SDK's
-Vertex authentication retains service-account material in a shared cache and can
-refresh it in a background task. Bedrock role resolution can probe/use an ambient
-account even when explicit keys were supplied. Neither is controlled by the
-injected inference HTTP client. These are unresolved cloud-auth feasibility
-items, not cleared by DTO tests or representative inference-wire mocks.
+The server performs online admission for each call. Vertex's credential-keyed
+SDK token cache does not grant Agent authority. Bedrock role configurations use
+server-prepared STS sessions rather than Proxy-side ambient role resolution;
+direct static-key configurations use their explicit keys. Request-private
+extension bindings are released at cleanup; SDK cache memory is not claimed to
+be securely erased. Deterministic integration and packaging acceptance is tracked
+separately from live-provider entitlement.
 
 No real provider account, subscription entitlement or billable inference is
 verified here. The existing Worker remains unchanged. Do not deploy this service
@@ -21,15 +22,18 @@ are complete.
 
 ## Composition and startup
 
-- LiteLLM source revision: `c7c895db456eda349a7be9661b4b21f578f9b589`.
-- Locked source wheel metadata: `1.109.0`; original Proxy application/config loader
-  and lifespan, no model deployment registry, no Router dispatch or credential DB.
+- Published LiteLLM wheel: `1.109.0.dev1`, with registry artifacts hashed in `uv.lock`.
+  The requester approved this one-time dev-release exception on 2026-10-29 for
+  ChatGPT request-credential forwarding (upstream PR #41522). Replace it with the
+  first stable containing that fix after equivalent auth/isolation/stream checks.
+- Original Proxy application/config loader and lifespan, no model deployment
+  registry, no Router dispatch or credential DB.
 - The `proxy` extra is deliberately not installed: its Enterprise dependency is
   outside this artifact. `audit.py` checks installed files, premium configuration,
-  original MIT notice and exact source provenance. It never changes license gates.
-- The image build compiles the pinned source with Rust 1.98.0 and `uv.lock`, then
-  copies only the installed environment into a nonroot final stage. Build tools,
-  source checkout and Enterprise tree are not copied into that stage.
+  original MIT notice and exact published-release identity. It never changes license gates.
+- The image installs the published wheel with `uv.lock` and explicitly disables
+  LiteLLM source builds. Only the installed environment enters the nonroot final
+  stage; no upstream checkout, Rust toolchain or Enterprise tree is included.
 - `NOTICE.md`, original distribution notices and the generated installed inventory
   are retained. Dependencies keep their own licenses.
 
@@ -104,8 +108,11 @@ traceback values do not become client or vendor-log output. Public errors retain
 safe status/type and authority-versus-provider parameter classification when the
 standard error envelope has that field. Native Responses stream failures retain
 the attempted response/model identity and safe error code in their normal schema.
-Diagnostic events retain origin/severity/exception class, not arbitrary vendor
-payloads. No separate external exporter is installed.
+Vendor diagnostics retain origin/severity/exception class, not arbitrary payloads.
+The original Proxy's success/failure callbacks also project an allowlisted JSON
+operation event with a fresh correlation ID, verified Agent/Workspace/integration,
+model, outcome, latency and available token counts. Missing usage remains null;
+token counts are not a subscription invoice. No ledger or external exporter is installed.
 
 ## Local validation
 
@@ -123,7 +130,8 @@ uv build --wheel
 
 The test plugin forbids unmocked sockets, Requests and HTTPX2 fallbacks. Real Proxy
 config/ASGI and provider serializers run against controlled transports; tests do
-not authorize real accounts. Source builds require the pinned Rust toolchain.
+not authorize real accounts. Runtime LiteLLM is installed from a published wheel;
+no upstream source compiler or Git checkout is required.
 From the repository root, build with:
 
 ```console

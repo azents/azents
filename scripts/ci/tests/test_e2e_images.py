@@ -14,6 +14,8 @@ from unittest.mock import patch
 from scripts.ci.e2e_images import (
     CORE,
     IMAGES,
+    REQUIRED,
+    WEB,
     Identity,
     ImageLoad,
     ImageReceipt,
@@ -108,7 +110,7 @@ class ImageHandoffTest(unittest.TestCase):
                 self.assertIn("--github-env", result.stdout)
 
     def test_required_and_web_admit_the_whole_exact_portfolio(self):
-        for suite, selected in (("required", CORE), ("web", tuple(IMAGES))):
+        for suite, selected in (("required", REQUIRED), ("web", WEB)):
             with self.subTest(suite=suite), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp) / "artifacts"
                 portfolio(root, selected)
@@ -149,7 +151,7 @@ class ImageHandoffTest(unittest.TestCase):
         ):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp) / "artifacts"
-                portfolio(root, tuple(IMAGES))
+                portfolio(root, WEB)
                 last = root / "ci-e2e-image-azents-admin-web-100-2"
                 path = last / "receipt.json"
                 receipt = json.loads(path.read_text())
@@ -199,7 +201,7 @@ class ImageHandoffTest(unittest.TestCase):
     def test_wrong_loaded_image_cannot_publish_environment_or_success_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "artifacts"
-            portfolio(root, CORE)
+            portfolio(root, REQUIRED)
             env = Path(tmp) / "github-env"
             evidence = Path(tmp) / "evidence"
             with (
@@ -220,7 +222,7 @@ class ImageHandoffTest(unittest.TestCase):
                 root = Path(tmp) / "artifacts"
                 portfolio(
                     root,
-                    CORE if scenario != "extra_web_for_required" else tuple(IMAGES),
+                    REQUIRED if scenario != "extra_web_for_required" else tuple(IMAGES),
                 )
                 if scenario == "missing":
                     last = root / "ci-e2e-image-azents-runtime-runner-100-2"
@@ -247,7 +249,7 @@ class ImageHandoffTest(unittest.TestCase):
 
     def test_preparation_overlaps_download_and_pulls_but_joins_every_outcome(self):
         for scenario in ("passed", "download_failure", "pull_failure"):
-            for suite, selected in (("required", CORE), ("web", tuple(IMAGES))):
+            for suite, selected in (("required", REQUIRED), ("web", WEB)):
                 with self.subTest(scenario=scenario, suite=suite):
                     self._check_preparation(scenario, suite, selected)
 
@@ -368,7 +370,7 @@ class ImageHandoffTest(unittest.TestCase):
     ):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "images"
-            portfolio(root, tuple(IMAGES))
+            portfolio(root, WEB)
             env = Path(tmp) / "env"
             evidence = Path(tmp) / "evidence"
             lock = threading.Lock()
@@ -393,7 +395,7 @@ class ImageHandoffTest(unittest.TestCase):
                 patch("scripts.ci.e2e_images._load_image", side_effect=import_image),
             ):
                 load(root, "web", env, evidence)
-            self.assertEqual(finished, set(IMAGES))
-            self.assertEqual(len(env.read_text().splitlines()), len(IMAGES))
+            self.assertEqual(finished, set(WEB))
+            self.assertEqual(len(env.read_text().splitlines()), len(WEB))
             receipt = json.loads((evidence / "ci-image-handoff.json").read_text())
-            self.assertEqual({x["image"] for x in receipt["image_loads"]}, set(IMAGES))
+            self.assertEqual({x["image"] for x in receipt["image_loads"]}, set(WEB))

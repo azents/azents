@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from azents_llm_contract.authority import TargetBinding
 from litellm.proxy._types import ProxyException
 
+from azents_llm_proxy.observability import Operation
 from azents_llm_proxy.provider import ProviderInvocation, provider_invocation
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ class RequestScope:
     auth: BoundAuth | None
     resources: AsyncExitStack | None
     provider_client: ProviderClient | None
+    operation: Operation | None
 
 
 class RequestContext:
@@ -41,7 +43,9 @@ class RequestContext:
 
     @contextmanager
     def scope(self) -> Iterator[RequestScope]:
-        state = RequestScope(auth=None, resources=None, provider_client=None)
+        state = RequestScope(
+            auth=None, resources=None, provider_client=None, operation=None
+        )
         token = self.current.set(state)
         try:
             yield state
@@ -131,3 +135,9 @@ class RequestContext:
                 code=403,
             )
         return state.auth
+
+    def observe(self, binding: TargetBinding) -> None:
+        state = self.current.get()
+        if state is None:
+            raise RuntimeError("Inference observation requires a request scope.")
+        state.operation = Operation.from_binding(binding)

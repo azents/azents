@@ -1,6 +1,7 @@
 """Official Proxy/deployment hooks tied to the outer ASGI request scope."""
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import HTTPException
 from litellm.caching.caching import DualCache
@@ -37,6 +38,45 @@ class InvocationBoundary(CustomLogger):
     def __init__(self, context: RequestContext) -> None:
         super().__init__()
         self.context = context
+
+    async def async_log_success_event(
+        self,
+        kwargs: dict,
+        response_obj: object,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> None:
+        self.observe(kwargs, response_obj, start_time, end_time, success=True)
+
+    async def async_log_failure_event(
+        self,
+        kwargs: dict,
+        response_obj: object,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> None:
+        self.observe(kwargs, response_obj, start_time, end_time, success=False)
+
+    def observe(
+        self,
+        kwargs: dict,
+        response: object,
+        start: datetime,
+        end: datetime,
+        *,
+        success: bool,
+    ) -> None:
+        # Nested Responses-to-Chat calls do not create duplicate operations.
+        if kwargs.get("call_type") not in {"aresponses", "responses"}:
+            return
+        state = self.context.current.get()
+        if state is not None and state.operation is not None:
+            state.operation.emit(
+                outcome="success" if success else "failure",
+                response=response,
+                start=start,
+                end=end,
+            )
 
     def prepare(self) -> ApprovedInvocation:
         auth = self.context.require_auth()

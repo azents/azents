@@ -149,6 +149,7 @@ class AgentAuthentication:
             auth._binding = binding
             auth._request = selected
             self.context.bind(auth)
+            self.context.observe(binding)
             return auth
         except RequestRejected:
             raise ProxyException(
