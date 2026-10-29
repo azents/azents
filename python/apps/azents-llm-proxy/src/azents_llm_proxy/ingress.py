@@ -1,5 +1,7 @@
 """Outer request scope and operation closure around the genuine Proxy ASGI app."""
 
+import asyncio
+
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -64,13 +66,49 @@ class AgentIngress:
         }
         body.clear()
 
+        disconnected = False
+        cancelled = False
+        status: int | None = None
+        delivered = False
+
         async def bounded_receive() -> Message:
-            nonlocal buffered
+            nonlocal buffered, disconnected
             if buffered is not None:
                 request = buffered
                 buffered = None
                 return request
-            return await receive()
+            message = await receive()
+            if message["type"] == "http.disconnect" and not delivered:
+                disconnected = True
+            return message
 
-        async with self.context.request_scope():
-            await self.app(scope, bounded_receive, send)
+        async def observed_send(message: Message) -> None:
+            nonlocal status, delivered, disconnected
+            try:
+                await send(message)
+            except asyncio.CancelledError:
+                raise
+            except OSError:
+                disconnected = True
+                raise
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            elif message["type"] == "http.response.body" and not message.get(
+                "more_body", False
+            ):
+                delivered = True
+
+        async with self.context.request_scope() as state:
+            try:
+                await self.app(scope, bounded_receive, observed_send)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+            finally:
+                if state.operation is not None:
+                    state.operation.finish(
+                        disconnected=disconnected,
+                        cancelled=cancelled,
+                        status=status,
+                        delivered=delivered,
+                    )

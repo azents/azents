@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Literal
 
@@ -16,6 +17,7 @@ from azents_llm_proxy import bootstrap
 from azents_llm_proxy.authority import AuthorityClient
 from azents_llm_proxy.authority_test import AGENT, SERVICE, binding
 from azents_llm_proxy.egress import NoReplayTransport, NoReplayTransportError
+from azents_llm_proxy.observability import LOGGER
 from azents_llm_proxy.proxy_test import MODEL, RESULT, payload, setup_proxy
 
 ENDPOINT = "https://provider.invalid/v1/responses"
@@ -245,7 +247,10 @@ async def test_real_proxy_midstream_failure_is_private_and_not_false_completion(
 
 
 @pytest.mark.usefixtures("protected_provider_clients")
-async def test_real_proxy_disconnect_closes_provider_stream_without_replay() -> None:
+async def test_real_proxy_disconnect_closes_provider_stream_without_replay(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER.name)
     selected = binding().model_copy(
         update={"public_model": MODEL, "model_identifier": MODEL}
     )
@@ -318,3 +323,6 @@ async def test_real_proxy_disconnect_closes_provider_stream_without_replay() -> 
             assert upstream.call_count == 1
     assert emitted.is_set() and stream.closed
     assert bootstrap.context.current.get() is None
+    events = [r.__dict__ for r in caplog.records if r.name == LOGGER.name]
+    assert len(events) == 1
+    assert events[0]["outcome"] == "disconnected"

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 
 import httpx
@@ -14,6 +15,7 @@ from starlette.types import Message, Scope
 from azents_llm_proxy import bootstrap
 from azents_llm_proxy.authority import AuthorityClient
 from azents_llm_proxy.authority_test import AGENT, SERVICE, binding
+from azents_llm_proxy.observability import LOGGER
 from azents_llm_proxy.proxy_test import setup_proxy
 
 pytestmark = pytest.mark.usefixtures("protected_provider_clients")
@@ -131,7 +133,9 @@ async def test_kimi_transport_failure_never_replays_or_leaks(
 
 async def test_kimi_downstream_disconnect_closes_provider_without_replay(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER.name)
     delivered = asyncio.Event()
     never = asyncio.Event()
     calls = 0
@@ -207,3 +211,7 @@ async def test_kimi_downstream_disconnect_closes_provider_without_replay(
             await app(scope, receive, send)
     assert delivered.is_set() and closed and calls == 1
     assert bootstrap.context.current.get() is None
+    events = [r.__dict__ for r in caplog.records if r.name == LOGGER.name]
+    assert len(events) == 1
+    assert events[0]["outcome"] == "disconnected"
+    assert events[0]["failure_classification"] == "disconnected"

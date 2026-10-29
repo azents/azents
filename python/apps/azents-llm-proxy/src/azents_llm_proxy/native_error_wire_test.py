@@ -1,6 +1,7 @@
 """Native provider error events keep standard failure schema without raw errors."""
 
 import json
+import logging
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ from pydantic import SecretStr
 from azents_llm_proxy import bootstrap
 from azents_llm_proxy.authority import AuthorityClient
 from azents_llm_proxy.authority_test import AGENT, SERVICE, binding
+from azents_llm_proxy.observability import LOGGER
 from azents_llm_proxy.proxy_test import MODEL, RESULT, payload, setup_proxy
 
 pytestmark = pytest.mark.usefixtures("protected_provider_clients")
@@ -21,6 +23,7 @@ async def test_native_error_event_privacy_and_no_false_completion(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER.name)
     selected = binding().model_copy(
         update={"public_model": MODEL, "model_identifier": MODEL}
     )
@@ -73,3 +76,7 @@ async def test_native_error_event_privacy_and_no_false_completion(
         "private-native-error-sentinel"
         not in response.text + caplog.text + captured.out + captured.err
     )
+    events = [r.__dict__ for r in caplog.records if r.name == LOGGER.name]
+    assert len(events) == 1
+    assert events[0]["outcome"] == "failure"
+    assert events[0]["failure_classification"] == "upstream_provider"

@@ -2,22 +2,33 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from time import monotonic
 from typing import Literal
 from uuid import uuid4
 
 from azents_llm_contract.authority import TargetBinding
 from litellm._logging import JsonFormatter
-from litellm.types.llms.openai import ResponsesAPIResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from litellm.types.llms.openai import (
+    ErrorEvent,
+    ResponseCompletedEvent,
+    ResponseFailedEvent,
+    ResponseIncompleteEvent,
+    ResponsesAPIResponse,
+)
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 LOGGER = logging.getLogger("azents_llm_proxy.operations")
 
 
 class UsageCounts(BaseModel):
     model_config = ConfigDict(extra="ignore", from_attributes=True)
-    input_tokens: int | None = None
-    output_tokens: int | None = None
+    input_tokens: int | None = Field(
+        default=None, validation_alias=AliasChoices("input_tokens", "prompt_tokens")
+    )
+    output_tokens: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("output_tokens", "completion_tokens"),
+    )
     total_tokens: int | None = None
 
 
@@ -29,6 +40,10 @@ class Operation:
     integration_id: str
     model: str
     emitted: bool
+    started: float
+    dispatched: bool
+    terminal: Literal["success", "failure", "incomplete"] | None
+    usage: UsageCounts
 
     @classmethod
     def from_binding(cls, binding: TargetBinding) -> "Operation":
@@ -39,29 +54,82 @@ class Operation:
             integration_id=binding.integration_id,
             model=binding.public_model,
             emitted=False,
+            started=monotonic(),
+            dispatched=False,
+            terminal=None,
+            usage=UsageCounts(),
         )
 
-    def emit(
+    def observe(self, response: object) -> None:
+        """Read typed SDK results, never parse or retain provider wire content."""
+        if self.emitted:
+            return
+        if isinstance(response, ErrorEvent):
+            self.terminal = "failure"
+            return
+        if isinstance(
+            response,
+            ResponseCompletedEvent | ResponseFailedEvent | ResponseIncompleteEvent,
+        ):
+            self.observe(response.response)
+            if isinstance(response, ResponseFailedEvent):
+                self.terminal = "failure"
+            elif isinstance(response, ResponseIncompleteEvent):
+                self.terminal = "incomplete"
+            return
+        if isinstance(response, ResponsesAPIResponse):
+            if response.status == "completed":
+                self.terminal = "success"
+            elif response.status == "failed":
+                self.terminal = "failure"
+            elif response.status in {"incomplete", "cancelled"}:
+                self.terminal = "incomplete"
+            self.observe_usage(response)
+
+    def observe_usage(self, response: object) -> None:
+        """SDK accounting callbacks contribute counts, never completion."""
+        if self.emitted:
+            return
+        if isinstance(
+            response,
+            ResponseCompletedEvent | ResponseFailedEvent | ResponseIncompleteEvent,
+        ):
+            response = response.response
+        if isinstance(response, ResponsesAPIResponse) and response.usage is not None:
+            try:
+                self.usage = UsageCounts.model_validate(response.usage)
+            except ValidationError:
+                # Unknown SDK usage stays unknown; no raw provider values.
+                self.usage = UsageCounts()
+
+    def finish(
         self,
         *,
-        outcome: Literal["success", "failure"],
-        response: object,
-        start: datetime,
-        end: datetime,
+        disconnected: bool,
+        cancelled: bool,
+        status: int | None,
+        delivered: bool,
     ) -> None:
         if self.emitted:
             return
         self.emitted = True
-        usage = UsageCounts()
-        if isinstance(response, ResponsesAPIResponse) and response.usage is not None:
-            try:
-                usage = UsageCounts.model_validate(response.usage)
-            except ValidationError:
-                # A missing/unknown usage shape is explicitly unknown, never a
-                # guessed bill, and raw validation/provider values are not logged.
-                usage = UsageCounts()
+        if disconnected:
+            outcome = "disconnected"
+        elif cancelled:
+            outcome = "cancelled"
+        elif status is None or status >= 400:
+            outcome = "failure"
+        elif self.terminal == "success":
+            outcome = "success" if delivered else "incomplete"
+        else:
+            outcome = self.terminal or "incomplete"
+        classification = None
+        if outcome == "failure":
+            classification = "upstream_provider" if self.dispatched else "preparation"
+        elif outcome != "success":
+            classification = outcome
         LOGGER.info(
-            "Inference request completed.",
+            "Inference request ended.",
             extra={
                 "request_id": self.request_id,
                 "agent_id": self.agent_id,
@@ -69,11 +137,9 @@ class Operation:
                 "integration_id": self.integration_id,
                 "model": self.model,
                 "outcome": outcome,
-                "latency_ms": max(0.0, (end - start).total_seconds() * 1000),
-                "failure_classification": "upstream_provider"
-                if outcome == "failure"
-                else None,
-                **usage.model_dump(),
+                "latency_ms": max(0.0, (monotonic() - self.started) * 1000),
+                "failure_classification": classification,
+                **self.usage.model_dump(),
             },
         )
 

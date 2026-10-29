@@ -46,37 +46,36 @@ class InvocationBoundary(CustomLogger):
         start_time: datetime,
         end_time: datetime,
     ) -> None:
-        self.observe(kwargs, response_obj, start_time, end_time, success=True)
-
-    async def async_log_failure_event(
-        self,
-        kwargs: dict,
-        response_obj: object,
-        start_time: datetime,
-        end_time: datetime,
-    ) -> None:
-        self.observe(kwargs, response_obj, start_time, end_time, success=False)
-
-    def observe(
-        self,
-        kwargs: dict,
-        response: object,
-        start: datetime,
-        end: datetime,
-        *,
-        success: bool,
-    ) -> None:
-        # Nested Responses-to-Chat calls do not create duplicate operations.
         if kwargs.get("call_type") not in {"aresponses", "responses"}:
             return
         state = self.context.current.get()
         if state is not None and state.operation is not None:
-            state.operation.emit(
-                outcome="success" if success else "failure",
-                response=response,
-                start=start,
-                end=end,
-            )
+            state.operation.observe_usage(response_obj)
+
+    async def async_post_call_success_hook(
+        self,
+        data: dict,
+        user_api_key_dict: UserAPIKeyAuth,
+        response: object,
+    ) -> object:
+        self.observe(response)
+        return response
+
+    async def async_post_call_streaming_deployment_hook(
+        self,
+        request_data: dict,
+        response_chunk: object,
+        call_type: CallTypes | None,
+    ) -> object:
+        self.observe(response_chunk)
+        return response_chunk
+
+    def observe(self, response: object) -> None:
+        # Only typed Responses results/events carry a logical terminal outcome;
+        # nested Chat chunks and vendor partial-spend success are not completion.
+        state = self.context.current.get()
+        if state is not None and state.operation is not None:
+            state.operation.observe(response)
 
     def prepare(self) -> ApprovedInvocation:
         auth = self.context.require_auth()
@@ -286,6 +285,8 @@ class InvocationBoundary(CustomLogger):
         traceback_str: str | None = None,
     ) -> HTTPException:
         scope = self.context.current.get()
+        if scope is not None and scope.operation is not None:
+            scope.operation.terminal = "failure"
         return safe_failure(
             original_exception,
             authority_pending=scope is None or scope.auth is None,

@@ -136,11 +136,16 @@ or substitution. Caller/provider raw errors, exception values, bodies and header
 are not operational diagnostics.
 
 Vendor diagnostics retain only origin, severity and exception class. The original
-Proxy's success/failure callbacks project an allowlisted JSON operation event with
+Proxy's typed response/deployment callbacks and outer ASGI lifetime project one
+allowlisted JSON operation event with
 fresh request correlation, server-verified Agent/Workspace/integration/model,
 outcome, latency, failure classification and available input/output/total counts.
-Nested provider-bridge calls do not emit duplicate logical operations. Missing usage
-stays unknown; callback cleanup retains no credential/body projection.
+Nested provider-bridge calls do not emit duplicate logical operations. Actual
+terminal status and downstream delivery distinguish success, failure, incomplete,
+disconnected and cancelled calls; SDK partial-spend success is not stream completion.
+Failures before physical dispatch are preparation failures, not upstream failures.
+Responses and Chat usage field names map to the same input/output/total projection;
+missing usage stays unknown. Callback cleanup retains no credential/body projection.
 
 Responses preserve available SDK usage subsets (cache, reasoning, modality and tier)
 without counting subset tokens twice. SDK-calculated `cost`, when present, is an

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 
 import httpx
@@ -15,6 +16,7 @@ from starlette.types import Message, Scope
 from azents_llm_proxy import bootstrap
 from azents_llm_proxy.authority import AuthorityClient
 from azents_llm_proxy.authority_test import AGENT, SERVICE, binding
+from azents_llm_proxy.observability import LOGGER
 from azents_llm_proxy.proxy_test import RESULT, payload, setup_proxy
 
 pytestmark = pytest.mark.usefixtures("protected_provider_clients")
@@ -23,8 +25,9 @@ pytestmark = pytest.mark.usefixtures("protected_provider_clients")
 @pytest.mark.parametrize("model", ["grok-4.5", "grok-4.6", "grok-4.7"])
 @pytest.mark.parametrize("stream", [False, True])
 async def test_current_grok_explicit_subscription_and_native_progress(
-    model: str, stream: bool
+    model: str, stream: bool, caplog: pytest.LogCaptureFixture
 ) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER.name)
     assert litellm.utils.supports_native_streaming(
         model=model, custom_llm_provider="xai"
     )
@@ -180,3 +183,9 @@ async def test_current_grok_explicit_subscription_and_native_progress(
             assert route.call_count == 1
     assert b"current-grok-token" not in body
     assert bootstrap.context.current.get() is None
+    events = [r.__dict__ for r in caplog.records if r.name == LOGGER.name]
+    assert len(events) == 1
+    assert events[0]["outcome"] == "success"
+    assert events[0]["input_tokens"] == 2
+    assert events[0]["output_tokens"] == 1
+    assert events[0]["total_tokens"] == 3

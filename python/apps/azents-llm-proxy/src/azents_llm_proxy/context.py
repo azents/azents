@@ -106,6 +106,9 @@ class RequestContext:
                 param="azents_authority",
                 code=403,
             )
+        state = self.current.get()
+        if state is not None and state.operation is not None:
+            state.operation.dispatched = True
 
     def bind(self, auth: BoundAuth) -> None:
         state = self.current.get()
