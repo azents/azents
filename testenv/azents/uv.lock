@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 
 [options]
@@ -487,7 +487,7 @@ requires-dist = [
     { name = "azents-runtime-control", editable = "../../python/libs/azents-runtime-control" },
     { name = "bcrypt", specifier = "==5.0.0" },
     { name = "boto3", specifier = "==1.40.61" },
-    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.115" },
+    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.117" },
     { name = "croniter", specifier = "==6.2.4" },
     { name = "cryptography", specifier = "==50.0.2" },
     { name = "defusedxml", specifier = "==0.7.1" },
@@ -753,15 +753,15 @@ wheels = [
 
 [[package]]
 name = "boto3-stubs"
-version = "1.43.115"
+version = "1.43.117"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/54/4cf798003d461d1422e3655a954d55ffc6cda22476adf40671b2fb3c935b/boto3_stubs-1.43.115.tar.gz", hash = "sha256:7712bbf021c391f8c8d4c7209ddc1f018b4a362a35732058392971a7e903af87", size = 105913, upload-time = "2026-10-19T20:43:55.104Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/d8/1ef018f6fdd9a4b9d63fbad241825e211b1d72b405aae89df6c9f6f9a15d/boto3_stubs-1.43.117.tar.gz", hash = "sha256:9aea6f96e33cc5d7e548cf6ad726ff8690dbf9a8d037bb8bd6a52777ce8a6662", size = 105342, upload-time = "2026-10-21T22:28:17.045Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/53/e39068349bfeca0f1fc79484d239002bdfec5c067d26e19e7c9a7929c3cb/boto3_stubs-1.43.115-py3-none-any.whl", hash = "sha256:be8366d223e06d42dbfca61b7b75e30cc9effb6461389e28a7005397737fd0eb", size = 72202, upload-time = "2026-10-19T20:43:50.314Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/2b/24eb940cdad0c492b6dbad303f8628fb973f4fe705f686267b9dfa430bea/boto3_stubs-1.43.117-py3-none-any.whl", hash = "sha256:4cc6d2380c616e1658f85292d8081b118a4da78757ad5432e77370a1ca55181b", size = 71912, upload-time = "2026-10-21T22:28:11.22Z" },
 ]
 
 [package.optional-dependencies]
