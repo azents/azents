@@ -168,7 +168,8 @@ def _batch(
         source_user_id=operation.uploader_user_id,
         retention_root_session_id=None,
         retention_bound_at=None,
-        expires_at=_NOW + datetime.timedelta(days=30),
+        # Publication retention follows the same operation clock as its claim.
+        expires_at=operation.created_at + datetime.timedelta(days=30),
     )
     if not preview:
         return ExchangeFileCreateBatch(source=source, preview=None)
@@ -689,13 +690,15 @@ async def test_release_exact_live_claim_allows_retry_but_fences_old_token(
     assert not await harness.repository.release_agent_upload_claim(
         upload_id=operation.upload_id, claim_id="first"
     )
+    publication = _batch(operation, preview=False)
+    assert publication.source.expires_at == now + datetime.timedelta(days=30)
     finalized = await harness.repository.finalize_agent_upload_operation(
         agent_id=harness.agent_id,
         user_id=harness.user_id,
         upload_id=operation.upload_id,
         claim_id="retry",
         now=now,
-        batch=_batch(operation, preview=False),
+        batch=publication,
     )
     assert isinstance(finalized, Success)
     assert not await harness.repository.release_agent_upload_claim(
