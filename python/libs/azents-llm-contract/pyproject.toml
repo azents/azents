@@ -1,0 +1,26 @@
+[project]
+name = "azents-llm-contract"
+version = "0.1.0"
+description = "Shared Agent-scoped inference authority contracts"
+requires-python = ">=3.14"
+dependencies = ["pydantic>=2.13.5"]
+
+[dependency-groups]
+dev = ["ruff>=0.16.4", "ty>=0.0.74", "pytest>=9.1.1"]
+
+[tool.uv]
+package = true
+resolution = "lowest-direct"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
+
+[tool.ty.environment]
+python-version = "3.14"

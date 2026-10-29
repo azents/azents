@@ -65,6 +65,21 @@ repos:
             python/libs/az-common/.*|
             (?!)
           )$
+  # azents-llm-contract
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.12.22
+    hooks:
+      - id: uv-lock
+        files: ^python/libs/azents-llm-contract/pyproject\.toml$
+        args: [--project, python/libs/azents-llm-contract]
+  - repo: local
+    hooks:
+      - id: ty-azents-llm-contract
+        name: Run ty in azents-llm-contract
+        language: unsupported
+        entry: bash -c 'cd python/libs/azents-llm-contract && uv run ty check --error-on-warning'
+        files: ^python/libs/azents-llm-contract/.*
+        pass_filenames: false
   # azents-runtime-control
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.12.22
