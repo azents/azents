@@ -9,8 +9,8 @@ code_paths:
   - python/apps/azents-llm-proxy/Dockerfile
   - python/apps/azents-llm-proxy/pyproject.toml
   - infra/charts/azents/templates/llm-proxy/**
-last_verified_at: 2026-10-29
-spec_version: 1
+last_verified_at: 2026-10-30
+spec_version: 2
 ---
 
 # Agent Inference Proxy
@@ -180,7 +180,9 @@ deployment obligation, not a fact proved by Helm rendering.
 
 The environment accepts only the dedicated `AZ_LLM_PROXY_*` deployment inputs and
 rejects ambient provider, general Proxy, database and exporter credentials/settings.
-The optional private CA augments trust rather than disabling TLS verification.
+When an authority CA file is configured, the resolver client uses that file as its
+trust bundle. Without one, it loads the system default roots. Certificate and
+hostname verification remain enabled in both cases.
 
 ## Verification boundary
 
@@ -194,3 +196,8 @@ No E2E writes product database state directly.
 Deterministic fixtures, package/image/Helm checks and real-provider entitlement are
 separate evidence. No real account login, paid inference, production deployment,
 Worker/Runtime migration or live hosted-tool entitlement follows from these tests.
+
+## Changelog
+
+- **2026-10-30** (spec_version 2) — Clarified configured authority CA bundle
+  selection and system-default trust behavior.
