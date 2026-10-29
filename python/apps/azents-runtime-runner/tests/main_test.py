@@ -1,23 +1,86 @@
 """Runtime Runner entrypoint configuration tests."""
 
+import asyncio
 import json
 import logging
+from typing import Literal
+from unittest.mock import create_autospec
 
 import grpc
 import pytest
 from azents_runtime_control.runner import RunnerConnectionRejected
 from pytest import MonkeyPatch
 
+from azents_runtime_runner.browser_controller import RunnerBrowserController
+from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.main import (
     _CAPABILITIES,
     RunnerLimitConfig,
     StructuredLogFormatter,
+    _close_runner_resources,
     _runner_reprovisioning_error_code,
     _runtime_configuration_evidence_from_env,
     resolve_workspace_path,
     run_runtime_runner,
     runner_limit_config_from_env,
 )
+
+
+@pytest.mark.parametrize("failure", ["normal", "cancel", "error", "cancel-error"])
+async def test_runner_shutdown_closes_resources_and_preserves_failure(
+    failure: Literal["normal", "cancel", "error", "cancel-error"],
+) -> None:
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+    error = ValueError("sampler cleanup failed")
+    closed: list[str] = []
+
+    async def sample() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            if failure == "error":
+                raise error
+            if failure != "normal":
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError as cancellation:
+                    if failure == "cancel-error":
+                        raise error from cancellation
+                    raise
+
+    async def close_browser() -> None:
+        closed.append("browser")
+
+    async def close_execution() -> None:
+        closed.append("execution")
+
+    browser = create_autospec(RunnerBrowserController, instance=True)
+    execution = create_autospec(DirectExecutionBackend, instance=True)
+    browser.close.side_effect = close_browser
+    execution.close.side_effect = close_execution
+    sampler = asyncio.create_task(sample())
+    await started.wait()
+    closing = asyncio.create_task(_close_runner_resources(sampler, browser, execution))
+    await asyncio.wait_for(cleaning.wait(), timeout=1)
+    if failure in {"cancel", "cancel-error"}:
+        closing.cancel()
+    if failure == "normal":
+        await closing
+    elif failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+    else:
+        with pytest.raises(ValueError) as caught:
+            await closing
+        assert caught.value is error
+        if failure == "cancel-error":
+            assert isinstance(error.__cause__, asyncio.CancelledError)
+    assert closed == ["browser", "execution"]
+    browser.close.assert_awaited_once()
+    execution.close.assert_awaited_once()
 
 
 def test_runner_advertises_streaming_capabilities() -> None:
