@@ -627,6 +627,44 @@ async def test_background_throttling_is_actionable_and_preserves_snapshot(
     assert records[0].exc_info is not None
 
 
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (429, "MCP discovery remains rate limited"),
+        (401, "MCP server auth failed"),
+        (500, "Failed to connect to MCP server"),
+    ],
+)
+async def test_discovery_failure_logs_keep_shared_server_context(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    status: int,
+    message: str,
+) -> None:
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    monkeypatch.setattr(
+        mcp_base_module.McpConnections,
+        "list_tools",
+        AsyncMock(side_effect=_http_error(status)),
+    )
+    await toolkit._connect_and_list_tools()
+    records = [record for record in caplog.records if record.message == message]
+    assert len(records) == 1
+    assert records[0].__dict__["server_url"] == "https://mcp.example.test"
+    assert records[0].exc_info is not None
+    assert toolkit._bg_error is not None
+
+
 async def test_background_cancellation_stays_cancellation(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
