@@ -338,7 +338,7 @@ requires-dist = [
     { name = "requests", specifier = "==2.34.2" },
     { name = "selenium", specifier = "==4.48.0" },
     { name = "testcontainers", extras = ["postgres"], specifier = "==4.15.0" },
-    { name = "types-boto3", extras = ["s3"], specifier = "==1.43.115" },
+    { name = "types-boto3", extras = ["s3"], specifier = "==1.43.118" },
     { name = "types-docker", specifier = "==7.2.0.20261006" },
     { name = "types-requests", specifier = "==2.33.0.20261006" },
     { name = "websockets", specifier = "==16.1.1" },
@@ -2168,15 +2168,15 @@ wheels = [
 
 [[package]]
 name = "types-boto3"
-version = "1.43.115"
+version = "1.43.118"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9d/49/0050624e4285f2de32d1091b81dc6900be3c9295226e2b8ef42580dc106c/types_boto3-1.43.115.tar.gz", hash = "sha256:0787cf5bcd91e8481c8640aefef02d7a43a36255547f568aa6a5ca610a52d72f", size = 106082, upload-time = "2026-10-19T20:43:45.489Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/de/af647cc466efb7f7fdf99a7f85d9e6b11a8d9eec6351603e277364ec6ff8/types_boto3-1.43.118.tar.gz", hash = "sha256:14c6090d3515d9e2e87276a8f21631a1faf31e5389d4dbdc16e574e948ef922c", size = 105849, upload-time = "2026-10-22T19:26:39.864Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/65/a79f624585182bcfac2672611a50bd1f22ba2e0201eaabfd31b06b35e914/types_boto3-1.43.115-py3-none-any.whl", hash = "sha256:f97254fafc0fe66005ba885793c202972e813b3b3090e0ef40aaa5a5c8432fd3", size = 72086, upload-time = "2026-10-19T20:43:40.558Z" },
+    { url = "https://files.pythonhosted.org/packages/56/87/b1f3e6695cf591442714033b32b00924f680281ec0d29e1c485a23cd77ac/types_boto3-1.43.118-py3-none-any.whl", hash = "sha256:7973ec7a8d54c56761958419e70ad82c81c68f78779719ebfcb3b51dd999e307", size = 71911, upload-time = "2026-10-22T19:26:35.261Z" },
 ]
 
 [package.optional-dependencies]
