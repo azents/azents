@@ -1,6 +1,6 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-28T23:01:38Z",
+    "checked_at": "2026-10-29T22:17:01Z",
     "checked_ruleset_revisions": [
       "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
       "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
@@ -10,7 +10,7 @@
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "4b6ae55c9048a3f3f9888a8905635723d6b31189"
+    "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -288,6 +288,46 @@
       "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
       "checked_through_commit": "dc2063e24a00caba1ac670296f13ebb638700559"
     },
+    "python/apps/azents-llm-proxy/**::bucket-1-of-8": {
+      "checked_at": "2026-10-29T22:17:01Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    },
+    "python/apps/azents-llm-proxy/**::bucket-2-of-8": {
+      "checked_at": "2026-10-29T22:17:01Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    },
+    "python/apps/azents-llm-proxy/**::bucket-3-of-8": {
+      "checked_at": "2026-10-29T22:17:01Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    },
+    "python/apps/azents-llm-proxy/**::bucket-4-of-8": {
+      "checked_at": "2026-10-29T22:17:01Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    },
+    "python/apps/azents-llm-proxy/**::bucket-5-of-8": {
+      "checked_at": "2026-10-29T22:17:01Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    },
+    "python/apps/azents-llm-proxy/**::bucket-6-of-8": {
+      "checked_at": "2026-10-29T22:17:01Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    },
+    "python/apps/azents-llm-proxy/**::bucket-7-of-8": {
+      "checked_at": "2026-10-29T22:17:01Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    },
+    "python/apps/azents-llm-proxy/**::bucket-8-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
     "python/apps/azents-runtime-provider-docker/**::bucket-1-of-8": {
       "checked_at": "2026-09-28T22:08:07Z",
       "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
@@ -557,6 +597,36 @@
       "checked_at": "2026-10-07T22:12:42Z",
       "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
       "checked_through_commit": "9ebc05b09f32f94e3acb68b712a127455df2cd49"
+    },
+    "python/libs/azents-llm-contract/**::bucket-1-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "python/libs/azents-llm-contract/**::bucket-3-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "python/libs/azents-llm-contract/**::bucket-4-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "python/libs/azents-llm-contract/**::bucket-5-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "python/libs/azents-llm-contract/**::bucket-7-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "python/libs/azents-llm-contract/**::bucket-8-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
     },
     "python/libs/azents-public-client/**::bucket-1-of-8": {
       "checked_at": "2026-10-07T22:12:42Z",
