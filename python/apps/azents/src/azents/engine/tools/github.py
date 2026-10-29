@@ -11,6 +11,7 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from textwrap import dedent
 from typing import Protocol, assert_never
@@ -56,6 +57,7 @@ from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.background_discovery import (
     DISCOVERY_ERRORS,
+    cancel_owned_discovery,
     observe_discovery_failure,
     require_expected_discovery_failure,
 )
@@ -552,17 +554,19 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
 
     async def __aexit__(self, *exc: object) -> None:
         """Delegate to internal McpToolkit to clean up background connection."""
-        for binding in self._installation_bindings:
-            await self._exit_installation_binding(binding, *exc)
-        if self._lazy_mcp_task is not None and not self._lazy_mcp_task.done():
-            self._lazy_mcp_task.cancel()
-            try:
-                await self._lazy_mcp_task
-            except asyncio.CancelledError:
-                pass
-        self._lazy_mcp_task = None
-        if self._mcp is not None:
-            await self._mcp.__aexit__(*exc)
+
+        async def close_toolkit() -> None:
+            if self._mcp is not None:
+                await self._mcp.__aexit__(*exc)
+
+        async with AsyncExitStack() as stack:
+            stack.push_async_callback(close_toolkit)
+            stack.push_async_callback(cancel_owned_discovery, self._lazy_mcp_task)
+            self._lazy_mcp_task = None
+            for binding in reversed(self._installation_bindings):
+                stack.push_async_callback(
+                    self._exit_installation_binding, binding, *exc
+                )
 
     async def _enter_installation_binding(
         self, binding: GitHubInstallationBinding
@@ -589,16 +593,16 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         *exc: object,
     ) -> None:
         """Clean up MCP connection for an installation binding."""
-        if binding.lazy_mcp_task is not None and not binding.lazy_mcp_task.done():
-            binding.lazy_mcp_task.cancel()
-            try:
-                await binding.lazy_mcp_task
-            except asyncio.CancelledError:
-                pass
-        binding.lazy_mcp_task = None
-        if binding.mcp_toolkit is not None:
-            await binding.mcp_toolkit.__aexit__(*exc)
-        await binding.connections.close()
+
+        async def close_toolkit() -> None:
+            if binding.mcp_toolkit is not None:
+                await binding.mcp_toolkit.__aexit__(*exc)
+
+        async with AsyncExitStack() as stack:
+            stack.push_async_callback(binding.connections.close)
+            stack.push_async_callback(close_toolkit)
+            stack.push_async_callback(cancel_owned_discovery, binding.lazy_mcp_task)
+            binding.lazy_mcp_task = None
 
     async def _admitted_token(
         self,

@@ -654,3 +654,105 @@ async def test_background_cancellation_stays_cancellation(
             await task
     assert toolkit._bg_error is None
     assert "Unexpected MCP discovery failure" not in caplog.text
+
+
+async def test_exit_propagates_caller_cancellation_and_closes_connections() -> None:
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+
+    async def discovery() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await asyncio.Event().wait()
+
+    toolkit._bg_task = asyncio.create_task(discovery())
+    await started.wait()
+    with patch.object(toolkit.connections, "close", new_callable=AsyncMock) as close:
+        exit_task = asyncio.create_task(toolkit.__aexit__())
+        await cleaning.wait()
+        exit_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await exit_task
+        close.assert_awaited_once()
+
+
+async def test_exit_propagates_discovery_cleanup_error_and_closes_connections() -> None:
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    started = asyncio.Event()
+    failure = ValueError("discovery cleanup failed")
+
+    async def discovery() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            raise failure
+
+    toolkit._bg_task = asyncio.create_task(discovery())
+    await started.wait()
+    with patch.object(toolkit.connections, "close", new_callable=AsyncMock) as close:
+        with pytest.raises(ValueError) as raised:
+            await toolkit.__aexit__()
+        assert raised.value is failure
+        close.assert_awaited_once()
+
+
+async def test_exit_preserves_cancellation_already_entering_context_cleanup() -> None:
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    started = asyncio.Event()
+    body_entered = asyncio.Event()
+
+    async def discovery() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    async def use_toolkit() -> None:
+        try:
+            toolkit._bg_task = asyncio.create_task(discovery())
+            await started.wait()
+            body_entered.set()
+            await asyncio.Event().wait()
+        finally:
+            await toolkit.__aexit__()
+
+    with patch.object(toolkit.connections, "close", new_callable=AsyncMock) as close:
+        user_task = asyncio.create_task(use_toolkit())
+        await body_entered.wait()
+        user_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await user_task
+        close.assert_awaited_once()

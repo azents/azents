@@ -29,6 +29,26 @@ DISCOVERY_ERRORS = (
 )
 
 
+async def cancel_owned_discovery(task: asyncio.Task[None] | None) -> None:
+    """Join an owned task without confusing its cancellation with the caller's."""
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        (result,) = await asyncio.gather(task, return_exceptions=True)
+    except asyncio.CancelledError as cancellation:
+        # gather waits for the child but prioritizes cancellation over its error.
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                raise error from cancellation
+        raise
+    if isinstance(result, BaseException) and not isinstance(
+        result, asyncio.CancelledError
+    ):
+        raise result
+
+
 def require_expected_discovery_failure(error: BaseException) -> None:
     """Preserve unrelated siblings of a mixed error group."""
     if isinstance(error, BaseExceptionGroup):
