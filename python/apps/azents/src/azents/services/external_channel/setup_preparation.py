@@ -7,6 +7,7 @@ import logging
 from typing import Annotated
 from uuid import uuid4
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.core.external_channel_conversation_data import (
@@ -103,6 +104,7 @@ class ExternalChannelSetupPreparationService:
         self, claim_id: str, *, deadline: ExternalChannelOperationDeadline
     ) -> None:
         """Prepare one exact source, then fence any external control dispatch."""
+        L = bind_extra(logger, {"external_channel_setup_claim_id": claim_id})
         attempt = await self.operations.claim(
             claim_id=claim_id,
             owner=uuid4().hex,
@@ -110,10 +112,9 @@ class ExternalChannelSetupPreparationService:
             deadline=deadline,
         )
         if attempt.failure_code is not None:
-            logger.warning(
+            L.warning(
                 "Setup preparation terminated",
                 extra={
-                    "external_channel_setup_claim_id": claim_id,
                     "failure_code": attempt.failure_code,
                 },
             )
@@ -126,10 +127,9 @@ class ExternalChannelSetupPreparationService:
         try:
             outcome = await self.ingestion_service.ingest(request)
             if outcome.kind is ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION:
-                logger.warning(
+                L.warning(
                     "Setup preparation rejected permanently",
                     extra={
-                        "external_channel_setup_claim_id": claim_id,
                         "failure_code": outcome.reason.value,
                     },
                 )
@@ -155,9 +155,8 @@ class ExternalChannelSetupPreparationService:
                         plan, preparation_boundary=boundary
                     )
                     if delivered is not None and delivered.status == "unknown":
-                        logger.warning(
+                        L.warning(
                             "Setup control dispatch is uncertain",
-                            extra={"external_channel_setup_claim_id": claim_id},
                         )
                         break
                     if delivered is not None and delivered.status == "failed":
@@ -177,12 +176,11 @@ class ExternalChannelSetupPreparationService:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            logger.error(
+            L.error(
                 "Setup preparation execution failed",
                 exc_info=sanitized_exception_info(
                     error, message="Setup failure details redacted."
                 ),
-                extra={"external_channel_setup_claim_id": claim_id},
             )
             await self.operations.transition(
                 boundary=boundary,

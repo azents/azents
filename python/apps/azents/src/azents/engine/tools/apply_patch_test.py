@@ -157,6 +157,15 @@ async def test_apply_patch_schema_profile_and_success_result(
     assert call["schema_version"] == 1
     assert _PATCH not in caplog.text
     assert "secret replacement text" not in caplog.text
+    completed = next(
+        record
+        for record in caplog.records
+        if record.message == "Runtime apply_patch completed"
+    )
+    assert completed.__dict__["agent_id"] == "agent-1"
+    assert completed.__dict__["session_id"] == "session-1"
+    assert completed.__dict__["patch_bytes"] == len(_PATCH.encode("utf-8"))
+    assert completed.__dict__["change_count"] == 1
 
 
 async def test_plaintext_custom_apply_patch_preserves_v4a_body() -> None:

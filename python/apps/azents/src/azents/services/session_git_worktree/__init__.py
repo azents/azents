@@ -4105,6 +4105,14 @@ class SessionGitWorktreeService:
         force: bool,
     ) -> SessionGitWorktree | None:
         """Run cleanup for one session-owned Git worktree allocation."""
+        L = bind_extra(
+            logger,
+            {
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "worktree_id": allocation.id,
+            },
+        )
         expected_authority = RuntimeOperationAuthority(
             configuration_sequence=runtime.configuration_sequence,
             configuration_digest=runtime.configuration_digest,
@@ -4157,13 +4165,8 @@ class SessionGitWorktreeService:
             worktree_path=allocation.worktree_path,
         )
         if not claimed:
-            logger.info(
+            L.info(
                 "Skipped archived Git worktree cleanup owned by another operation",
-                extra={
-                    "agent_id": agent_id,
-                    "session_id": session_id,
-                    "worktree_id": allocation.id,
-                },
             )
             return None
         try:
@@ -4209,13 +4212,10 @@ class SessionGitWorktreeService:
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
         ) as exc:
-            logger.warning(
+            L.warning(
                 "Git worktree cleanup Runner operation failed",
                 exc_info=True,
                 extra={
-                    "agent_id": agent_id,
-                    "session_id": session_id,
-                    "worktree_id": allocation.id,
                     "runner_error_code": (
                         exc.code
                         if isinstance(exc, RuntimeRunnerOperationFailedError)

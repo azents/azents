@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple, Protocol
 
+from azcommon.logging import bind_extra
 from pydantic import BaseModel, Field
 
 from azents.core.runtime_admission import RuntimeAdmissionAuthority
@@ -89,6 +90,10 @@ def make_edit_tool(
 
     async def handler(input: EditInput) -> str:
         """Replace exact text in one Runtime file transaction."""
+        L = bind_extra(
+            logger,
+            {"agent_id": agent_id, "session_id": owner_session_id, "path": input.path},
+        )
         try:
             target = await resolve_runtime_target()
             result = await runner_operations.edit_file(
@@ -116,23 +121,17 @@ def make_edit_tool(
             ) from None
         except RuntimeRunnerOperationFailedError as exc:
             failure = _operation_failure(exc)
-            logger.info(
+            L.info(
                 "Runtime edit failed",
                 extra={
-                    "agent_id": agent_id,
-                    "session_id": owner_session_id,
-                    "path": input.path,
                     "failure_code": failure.code,
                 },
             )
             raise FunctionToolError(_failure_message(exc, input.path)) from None
 
-        logger.info(
+        L.info(
             "Runtime edit completed",
             extra={
-                "agent_id": agent_id,
-                "session_id": owner_session_id,
-                "path": input.path,
                 "replacement_count": result.replacements,
             },
         )

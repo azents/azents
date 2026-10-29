@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from azcommon.logging import bind_extra
 from azcommon.types import JSONObject
 from azents_runtime_control.apply_patch import (
     MAX_APPLY_PATCH_BASE_PATH_BYTES,
@@ -212,6 +213,14 @@ class _ApplyPatchHandler:
         """Run one already-adapted V4A operation."""
         patch = input.patch.encode("utf-8")
         started_at = datetime.now(UTC)
+        L = bind_extra(
+            logger,
+            {
+                "agent_id": self.agent_id,
+                "session_id": self.owner_session_id,
+                "patch_bytes": len(patch),
+            },
+        )
         try:
             target = await self.resolve_runtime_target()
             result = await self.runner_operations.apply_patch(
@@ -230,12 +239,9 @@ class _ApplyPatchHandler:
                 admission_authority=target.admission_authority,
             )
         except RuntimeFileApplyPatchFailedError as exc:
-            logger.info(
+            L.info(
                 "Runtime apply_patch failed",
                 extra={
-                    "agent_id": self.agent_id,
-                    "session_id": self.owner_session_id,
-                    "patch_bytes": len(patch),
                     "phase": exc.failure.phase,
                     "reason": exc.failure.reason,
                     "applied_count": len(exc.failure.applied),
@@ -259,12 +265,9 @@ class _ApplyPatchHandler:
         except RuntimeRunnerOperationFailedError as exc:
             raise FunctionToolError(f"Patch operation failed: {exc}") from None
 
-        logger.info(
+        L.info(
             "Runtime apply_patch completed",
             extra={
-                "agent_id": self.agent_id,
-                "session_id": self.owner_session_id,
-                "patch_bytes": len(patch),
                 "change_count": len(result.changes),
                 "added_lines": sum(change.added_lines for change in result.changes),
                 "removed_lines": sum(change.removed_lines for change in result.changes),
