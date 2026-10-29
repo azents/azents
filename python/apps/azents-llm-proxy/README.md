@@ -16,9 +16,10 @@ be securely erased. Deterministic integration and packaging acceptance is tracke
 separately from live-provider entitlement.
 
 No real provider account, subscription entitlement or billable inference is
-verified here. The existing Worker remains unchanged. Do not deploy this service
-until the owning implementation plan's acceptance and assembled authority journey
-are complete.
+verified here. The existing Worker remains unchanged. The representative assembled
+journey uses real public/Admin APIs, authority over verified TLS and the built
+Proxy, controlling only final provider networking. Deployment and live-provider
+acceptance require separate operational authorization and eligible accounts.
 
 ## Composition and startup
 
@@ -77,10 +78,10 @@ the Proxy does not infer that fact from model names.
 
 | Control | Normalization boundary | Verification layer |
 | --- | --- | --- |
-| temperature, top-p, top-k, stop | Saved non-null defaults apply on omission; explicit request values remain subject to current support facts | units plus native/Anthropic/Gemini sampling/stop wires; remaining provider field matrix is still acceptance work |
+| temperature, top-p, top-k, stop | Saved non-null defaults apply on omission; explicit request values remain subject to current support facts | units plus native/Anthropic/Gemini sampling/stop wires |
 | output cap | Saved candidate cap is authoritative; smaller caller cap wins; known hard maximum clamps; unknown maximum invents no cap | units and Anthropic wire |
-| reasoning | Saved default only on genuine omission; explicit clear stays clear; effort/summary and conditional tool coexistence checked | omission/clear/conditional units; further cross-provider wire work pending |
-| structured text / strict tools | Exact closed Responses declarations, current feature constraints, LiteLLM owns provider conversion | decoder/settings units and native OpenAI strict/schema wire; remaining cross-provider matrix pending |
+| reasoning | Saved default only on genuine omission; explicit clear stays clear; effort/summary and conditional tool coexistence checked | omission/clear/conditional units; Anthropic adaptive effort and Gemini thinking-level wires; explicit native encrypted continuation/history |
+| structured text / strict tools | Exact closed Responses declarations, current feature constraints, LiteLLM owns provider conversion | decoder/settings units; native OpenAI strict/schema wire; exact Anthropic output format and Gemini JSON schema/MIME wires |
 | function tools | Caller declarations stay client-executed; Proxy never runs them | unit and native/Anthropic/Google wire coexistence |
 | hosted search | Saved selection compiles into provider-native search; restricting settings must survive or fail preparation | native OpenAI/xAI, Anthropic and Gemini controlled wire |
 | hosted images | Google selection compiles modalities and image controls; API-key/OpenAI/subscription image tools remain client-executed | unit ownership matrix and Gemini PNG/usage wire |
@@ -109,10 +110,15 @@ safe status/type and authority-versus-provider parameter classification when the
 standard error envelope has that field. Native Responses stream failures retain
 the attempted response/model identity and safe error code in their normal schema.
 Vendor diagnostics retain origin/severity/exception class, not arbitrary payloads.
-The original Proxy's success/failure callbacks also project an allowlisted JSON
+The original Proxy's typed response/deployment callbacks and outer ASGI lifetime
+project one allowlisted JSON
 operation event with a fresh correlation ID, verified Agent/Workspace/integration,
-model, outcome, latency and available token counts. Missing usage remains null;
-token counts are not a subscription invoice. No ledger or external exporter is installed.
+model, actual terminal/delivery outcome, monotonic latency and available token counts.
+Accounting success contributes usage, not proof of completion. Disconnected,
+cancelled and incomplete calls remain distinct from delivered success; preparation
+rejection remains distinct from physical provider failure. Missing usage remains
+null; token counts are not a subscription invoice. No ledger or external exporter
+is installed.
 
 ## Local validation
 

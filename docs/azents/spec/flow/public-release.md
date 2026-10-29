@@ -9,7 +9,7 @@ code_paths:
   - .github/workflows/release.yaml
   - infra/charts/azents/Chart.yaml
   - testenv/azents/e2e/src/support_tests/test_release_workflow.py
-last_verified_at: 2026-09-18
+last_verified_at: 2026-10-29
 spec_version: 3
 ---
 
@@ -53,6 +53,7 @@ The release matrix builds and pushes these GHCR packages from the selected `main
 commit:
 
 - `azents-server`;
+- `azents-llm-proxy` (independent image; its chart component is disabled by default);
 - `azents-web`;
 - `azents-admin-web`;
 - `azents-runtime-runner`;
