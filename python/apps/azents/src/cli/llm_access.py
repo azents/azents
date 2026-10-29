@@ -35,6 +35,27 @@ def validate_identifiers(*values: str) -> None:
         ) from None
 
 
+def write_credential(descriptor: int, output: Path, result: IssuedToken) -> None:
+    """Publish only to the reserved private file before reporting success."""
+    try:
+        with os.fdopen(os.dup(descriptor), "w", encoding="utf-8") as stream:
+            stream.write(result.protected_json())
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        parent = os.open(output.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+    except OSError:
+        typer.echo(
+            "Credential output failed; inspect supply state before retrying issuance.",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+
+
 def execute(operation: Operation, *, output: Path | None) -> None:
     """Run once; reserve secret output before any authority mutation."""
     descriptor: int | None = None
@@ -57,14 +78,9 @@ def execute(operation: Operation, *, output: Path | None) -> None:
             service = await container.solve(LLMAccessService)
             result = await operation(service)
             if isinstance(result, IssuedToken):
-                if descriptor is None:
+                if descriptor is None or output is None:
                     raise RuntimeError("Credential issuance requires secret output.")
-                # One protected response, never diagnostics or console output.
-                with os.fdopen(os.dup(descriptor), "w", encoding="utf-8") as stream:
-                    stream.write(result.protected_json())
-                    stream.write("\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
+                write_credential(descriptor, output, result)
                 typer.echo(result.model_dump_json(exclude={"agent_token"}))
             elif isinstance(result, SupplyState):
                 typer.echo(TypeAdapter(SupplyState).dump_json(result).decode())
@@ -78,12 +94,6 @@ def execute(operation: Operation, *, output: Path | None) -> None:
         raise typer.Exit(1) from None
     except LLMTokenConflict:
         typer.echo("Supply state changed; inspect before replacing.", err=True)
-        raise typer.Exit(1) from None
-    except OSError:
-        typer.echo(
-            "Operator I/O failed; inspect supply state before retrying issuance.",
-            err=True,
-        )
         raise typer.Exit(1) from None
     finally:
         if descriptor is not None:

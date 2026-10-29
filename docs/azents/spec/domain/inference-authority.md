@@ -138,6 +138,9 @@ IDs/expiry and inspection never returns a raw token or digest. The CLI does not
 auto-retry an uncertain operation, print provider credentials, alter existing
 Agent settings, or create another token source. Console tracebacks disable local
 variable rendering.
+File contents and the parent directory are synchronized before success metadata
+is printed. Credential-output errors receive a fixed uncertain-delivery diagnostic;
+unrelated startup/service/cleanup failures propagate as their original failures.
 
 If output or process completion is uncertain, use `lookup`/`inspect` before any
 explicit replacement/revocation. A failed delivery never extends an old token.

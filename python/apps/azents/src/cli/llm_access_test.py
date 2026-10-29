@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import os
 import stat
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -210,11 +211,16 @@ def test_nonsecret_management_delegates_exactly(
     assert SECRET not in result.output
 
 
+@pytest.mark.parametrize("fail_parent", [False, True])
 def test_output_write_failure_reports_uncertain_state_without_retry(
-    service: Service, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    service: Service,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fail_parent: bool,
 ) -> None:
     def fail_fsync(fd: int) -> None:
-        raise OSError("private-filesystem-error")
+        if not fail_parent or stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("private-filesystem-error")
 
     monkeypatch.setattr(llm_access.os, "fsync", fail_fsync)
     result = CliRunner().invoke(
@@ -235,6 +241,57 @@ def test_output_write_failure_reports_uncertain_state_without_retry(
     assert (
         SECRET not in result.output and "private-filesystem-error" not in result.output
     )
+
+
+def test_syncs_file_then_directory_before_success(
+    service: Service, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sync_kinds: list[bool] = []
+    original = os.fsync
+
+    def observe_fsync(fd: int) -> None:
+        sync_kinds.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+        original(fd)
+
+    monkeypatch.setattr(llm_access.os, "fsync", observe_fsync)
+    result = CliRunner().invoke(
+        llm_access.app,
+        [
+            "issue",
+            "--agent-id",
+            "agent",
+            "--subject",
+            "test",
+            "--output",
+            str(tmp_path / "result"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert sync_kinds == [False, True]
+    assert SECRET not in result.output
+
+
+def test_service_oserror_is_not_misclassified_as_credential_delivery(
+    service: Service, tmp_path: Path
+) -> None:
+    failure = OSError("service-unavailable")
+    service.failure = failure
+    result = CliRunner().invoke(
+        llm_access.app,
+        [
+            "issue",
+            "--agent-id",
+            "agent",
+            "--subject",
+            "test",
+            "--output",
+            str(tmp_path / "result"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert result.exception is failure
+    assert "Credential output failed" not in result.output
+    assert len(service.calls) == 1
 
 
 @pytest.mark.parametrize("subject", ["", "x" * 257])
