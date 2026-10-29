@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 
 [options]
@@ -421,6 +421,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "authlib" },
     { name = "az-common" },
+    { name = "azents-llm-contract" },
     { name = "azents-runtime-control" },
     { name = "bcrypt" },
     { name = "boto3" },
@@ -498,6 +499,7 @@ requires-dist = [
     { name = "anthropic", specifier = "==1.12.1" },
     { name = "authlib", specifier = "==1.9.1" },
     { name = "az-common", editable = "../../libs/az-common" },
+    { name = "azents-llm-contract", editable = "../../libs/azents-llm-contract" },
     { name = "azents-runtime-control", editable = "../../libs/azents-runtime-control" },
     { name = "bcrypt", specifier = "==5.0.0" },
     { name = "boto3", specifier = "==1.40.61" },
@@ -563,6 +565,24 @@ dev = [
     { name = "ty", specifier = ">=0.0.74" },
     { name = "types-croniter", specifier = ">=6.0.0" },
     { name = "types-python-dateutil", specifier = ">=2.9.0.20261021" },
+]
+
+[[package]]
+name = "azents-llm-contract"
+version = "0.1.0"
+source = { editable = "../../libs/azents-llm-contract" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.13.5" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.16.4" },
+    { name = "ty", specifier = ">=0.0.74" },
 ]
 
 [[package]]

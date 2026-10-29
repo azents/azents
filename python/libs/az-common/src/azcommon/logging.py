@@ -9,6 +9,7 @@ import click
 import sentry_sdk
 from pythonjsonlogger.core import RESERVED_ATTRS
 from pythonjsonlogger.json import JsonFormatter
+from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 from typing_extensions import override
 from uvicorn.logging import DefaultFormatter
 
@@ -319,6 +320,25 @@ def configure_logging_for_runtime(
         sentry_sdk.init(
             dsn=sentry_dsn,
             before_send=apply_structured_sentry_fingerprint,
+            # Request bodies and exception-frame reprs can hold transient call
+            # credentials even when ordinary DTO serialization is redacted.
+            max_request_body_size="never",
+            include_local_variables=False,
+            event_scrubber=EventScrubber(
+                denylist=[
+                    *DEFAULT_DENYLIST,
+                    "agent_token",
+                    "x-azents-llm-resolver",
+                    "access_token",
+                    "refresh_token",
+                    "device_id",
+                    "service_account_json",
+                    "secret_access_key",
+                    "aws_access_key_id",
+                    "aws_secret_access_key",
+                ],
+                recursive=True,
+            ),
         )
 
     if runtime_env == RuntimeEnvironment.LOCAL:

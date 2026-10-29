@@ -2,6 +2,7 @@
 
 from typing import Protocol
 
+from azents.api.internal import llm
 from azents.utils.fastapi.route import RouteMounter
 
 
@@ -9,7 +10,7 @@ class _RouteModule(Protocol):
     def mount(self, mounter: RouteMounter) -> None: ...
 
 
-modules: list[_RouteModule] = []
+modules: list[_RouteModule] = [llm]
 
 
 def mount(mounter: RouteMounter) -> None:

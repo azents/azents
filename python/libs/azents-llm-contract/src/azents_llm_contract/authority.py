@@ -11,7 +11,12 @@ from pydantic import (
     PlainSerializer,
     SecretStr,
     SerializationInfo,
+    ValidationError,
+    field_validator,
 )
+
+from azents_llm_contract.gcp import service_account_call_json
+from azents_llm_contract.settings import ModelConfiguration
 
 
 def _serialize_secret(value: SecretStr, info: SerializationInfo) -> str:
@@ -106,6 +111,16 @@ class VertexCredential(AuthorityPayload):
     project_id: Identifier
     location: Identifier
 
+    @field_validator("service_account_json")
+    @classmethod
+    def service_account_only(cls, value: SecretStr) -> SecretStr:
+        try:
+            return SecretStr(service_account_call_json(value.get_secret_value()))
+        except ValidationError:
+            raise ValueError(
+                "A Google service-account call credential is required."
+            ) from None
+
 
 ProviderCredential = Annotated[
     ApiKeyCredential
@@ -126,6 +141,7 @@ class TargetBinding(AuthorityPayload):
     target_id: TargetId
     public_model: ModelName
     model_identifier: ModelName
+    configuration: ModelConfiguration
     credential: ProviderCredential = Field(repr=False)
 
 

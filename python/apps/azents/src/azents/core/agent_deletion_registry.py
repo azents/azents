@@ -159,6 +159,7 @@ def get_agent_deletion_registry() -> AgentDeletionRegistry:
                             ("agent_workspace_environment_selections", "agent_id"),
                             ("github_user_oauth_creations", "agent_id"),
                             ("google_oauth_attempts", "agent_id"),
+                            ("llm_access_supplies", "agent_id"),
                             ("memory_units", "agent_id"),
                             ("runtime_web_quota_scopes", "agent_id"),
                             ("runtime_web_services", "agent_id"),
@@ -177,6 +178,7 @@ def get_agent_deletion_registry() -> AgentDeletionRegistry:
                         _child(table, column, parent, cascade_action, cascade)
                         for table, column, parent in (
                             ("agent_toolkits", "toolkit_id", "toolkit_configs"),
+                            ("llm_access_tokens", "supply_id", "llm_access_supplies"),
                             (
                                 "github_user_oauth_attempts",
                                 "toolkit_id",

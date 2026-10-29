@@ -1090,6 +1090,289 @@
         }
       }
     },
+    "/llm-access/v1/supplies": {
+      "post": {
+        "tags": [
+          "Inference access v1"
+        ],
+        "summary": "Issue",
+        "operationId": "inference_access_v1_issue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenIssueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedToken"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/llm-access/v1/rotate": {
+      "post": {
+        "tags": [
+          "Inference access v1"
+        ],
+        "summary": "Rotate",
+        "operationId": "inference_access_v1_rotate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRotateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedToken"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/llm-access/v1/supplies/{supply_id}": {
+      "get": {
+        "tags": [
+          "Inference access v1"
+        ],
+        "summary": "Inspect Supply",
+        "operationId": "inference_access_v1_inspect_supply",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "supply_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Supply Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplyState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Inference access v1"
+        ],
+        "summary": "Revoke Supply",
+        "operationId": "inference_access_v1_revoke_supply",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "supply_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Supply Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llm-access/v1/agents/{agent_id}/supply": {
+      "get": {
+        "tags": [
+          "Inference access v1"
+        ],
+        "summary": "Inspect Subject",
+        "description": "Inspect an existing supply after an uncertain issuance response.",
+        "operationId": "inference_access_v1_inspect_subject",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subject"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplyState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llm-access/v1/supplies/{supply_id}/tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "Inference access v1"
+        ],
+        "summary": "Revoke Token",
+        "operationId": "inference_access_v1_revoke_token",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "supply_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Supply Id"
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/model-catalog/v1/system-catalogs": {
       "get": {
         "tags": [
@@ -6794,6 +7077,53 @@
         "title": "InvitationStatus",
         "description": "Workspace invitation status."
       },
+      "IssuedToken": {
+        "properties": {
+          "supply_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Supply Id"
+          },
+          "token_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Token Id"
+          },
+          "agent_token": {
+            "type": "string",
+            "title": "Agent Token"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "predecessor_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predecessor Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "supply_id",
+          "token_id",
+          "agent_token",
+          "expires_at",
+          "predecessor_expires_at"
+        ],
+        "title": "IssuedToken"
+      },
       "KubernetesContainerResources": {
         "properties": {
           "cpu_request_millicores": {
@@ -9846,6 +10176,67 @@
         "title": "SignupTokenResponse",
         "description": "Signup token metadata response."
       },
+      "SupplyState": {
+        "properties": {
+          "supply_id": {
+            "type": "string",
+            "title": "Supply Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "current_token_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Token Id"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "tokens": {
+            "items": {
+              "$ref": "#/components/schemas/TokenState"
+            },
+            "type": "array",
+            "title": "Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "supply_id",
+          "agent_id",
+          "subject",
+          "issuer",
+          "current_token_id",
+          "revoked_at",
+          "tokens"
+        ],
+        "title": "SupplyState"
+      },
       "SystemAdminMeResponse": {
         "properties": {
           "user_id": {
@@ -10620,6 +11011,104 @@
         "title": "SystemUserRoleAssignmentResponse",
         "description": "System role assignment response."
       },
+      "TokenIssueRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Agent Id"
+          },
+          "supply_subject": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Supply Subject"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "agent_id",
+          "supply_subject"
+        ],
+        "title": "TokenIssueRequest",
+        "description": "Privileged issuer input, not an Agent-authenticated operation."
+      },
+      "TokenRotateRequest": {
+        "properties": {
+          "supply_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Supply Id"
+          },
+          "expected_token_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Expected Token Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "supply_id",
+          "expected_token_id"
+        ],
+        "title": "TokenRotateRequest"
+      },
+      "TokenState": {
+        "properties": {
+          "token_id": {
+            "type": "string",
+            "title": "Token Id"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Issued At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "handover_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handover Until"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token_id",
+          "issued_at",
+          "expires_at",
+          "handover_until",
+          "revoked_at"
+        ],
+        "title": "TokenState"
+      },
       "TransferOwnershipRequest": {
         "properties": {
           "new_owner_workspace_user_id": {
@@ -11321,6 +11810,9 @@
     {
       "name": "Invitation v1",
       "description": "\nWorkspace Invitation API (Admin)\n\nWorkspace invitation lookup/delete endpoints.\n"
+    },
+    {
+      "name": "Inference access v1"
     },
     {
       "name": "Model Catalog v1",

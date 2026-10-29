@@ -124,6 +124,14 @@ invalidating Agent queries, rather than making the Agent editable on a failed re
 
 ## Root and Non-FK Structures
 
+Inference access uses Agent-owned `llm_access_supplies` (`id`, unique
+`agent_id, subject`) and supply-owned `llm_access_tokens` (`id`, unique verification
+`digest`). Both FKs cascade under `agent.database`. Supply `current_token_id` is a
+nullable logical reference to its atomically issued current token, not a foreign
+key. Agent liveness immediately closes new inference admission during decommission;
+physical root deletion cleans these database-only resources without external I/O.
+See [Inference authority](inference-authority.md) for lifecycle and secret handling.
+
 - `agents`: primary key `id`; Workspace membership and lifecycle status define the root authority.
   The referenced `(id, workspace_id)` key supports same-Workspace composite associations.
 - `agent_runtimes`: primary key `id`; one Runtime per Agent. Desired generation and terminal-delete
@@ -209,6 +217,7 @@ any listed relationship, ownership or delete action update this spec and the reg
 | `agent.database` | `agent_workspace_environment_selections` / `agent_id, variable_id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `github_user_oauth_creations` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `google_oauth_attempts` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
+| `agent.database` | `llm_access_supplies` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `memory_units` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `runtime_web_quota_scopes` / `agent_id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `runtime_web_services` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
@@ -234,8 +243,14 @@ any listed relationship, ownership or delete action update this spec and the reg
 | `agent.database` | `memory_legacy_model_usage` / `legacy_job_id, legacy_dispatch_id` | `legacy_job_id` | `memory_legacy_jobs(legacy_job_id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `memory_work` / `id` | `admitted_session_id` | `memory_executions(session_id)` | `set_null` | `preserve_detached` |
 | `agent.database` | `agent_automatic_project_items` / `id` | `agent_id` | `agent_automatic_project_settings(agent_id)` | `cascade` | `declared_cascade` |
+| `agent.database` | `llm_access_tokens` / `id` | `supply_id` | `llm_access_supplies(id)` | `cascade` | `declared_cascade` |
 
 ## Verification Boundary
+
+Inference authority repository tests exercise migrated PostgreSQL cascade behavior,
+hash-only state, rotation conflict/overlap, independent supplies, liveness and
+expiry after a database lock wait. This scoped addition does not reverify every
+unrelated cleanup participant.
 
 `core/agent_deletion_test.py` checks the migrated graph against the registry, including ordered
 composite columns and an injected unknown restrictive reference. Finalizer/lease tests use real

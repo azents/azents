@@ -11,7 +11,7 @@ from typing import Literal, Self
 
 from azcommon.logging import RuntimeEnvironment
 from mypy_boto3_rds import RDSClient
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from azents.core.enums import (
@@ -70,6 +70,9 @@ class Settings(BaseSettings):
 
     # Initial system administrator bootstrap
     system_bootstrap_setup_token: str | None = None
+
+    # Dedicated resolver identity; grants no system-admin/issuer authority.
+    llm_resolver_service_key: SecretStr | None = Field(default=None, repr=False)
 
     # Trusted Runtime Provider bootstrap source
     runtime_provider_bootstrap_source_key: str | None = None
@@ -553,6 +556,7 @@ class Config(BaseModel):
     """Application settings, immutable and type-safe."""
 
     runtime_env: RuntimeEnvironment
+    llm_resolver_service_key: SecretStr | None = Field(default=None, repr=False)
     job_runtime_backend: JobRuntimeBackend = JobRuntimeBackend.LOCAL
     broadcast_backend: Literal["redis", "memory"] = "redis"
     sentry_dsn: str | None
@@ -617,6 +621,7 @@ class Config(BaseModel):
         """Create Config from Settings."""
         return cls(
             runtime_env=settings.runtime_env,
+            llm_resolver_service_key=settings.llm_resolver_service_key,
             job_runtime_backend=settings.job_runtime_backend,
             broadcast_backend=settings.broadcast_backend,
             session_broker_backend=settings.session_broker_backend,

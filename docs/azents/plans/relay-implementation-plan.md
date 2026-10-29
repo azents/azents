@@ -18,7 +18,7 @@ tags: [engine, inference, security]
 | Phase | PR scope | Dependency | Mechanisms |
 | --- | --- | --- | --- |
 | 1 | Shared target identity and typed authority contracts, approval snapshot and contract CI | None | M2, M3, M6, M7, M9, M16 |
-| 2 | PostgreSQL system-token lifecycle, Admin development and private resolve/list APIs, Agent deletion integration | Phase 1 | M2–M7, M10, M15, M16 |
+| 2 | PostgreSQL system-token lifecycle, Admin development and private resolve/list APIs, Agent deletion integration and authority monitoring privacy | Phase 1 | M2–M7, M10, M12, M15, M16 |
 | 3 | Actual MIT Proxy extension, packaging and chart, no Worker routing changes | Phase 2 | M1, M6–M13, M16 |
 | 4 | Representative real-Proxy verification, security/privacy/provider contract coverage, Spec promotion and plan cleanup | Phase 3 | M14 and integrated M1–M16 |
 
@@ -44,4 +44,4 @@ No production deployment, merge, real login, or billable inference is authorized
 
 ### Current checkpoint
 
-Implementation is starting. Design approval has been recorded; no product code changed yet. Phase 1 owns a standalone shared contract and its CI; server state follows in Phase 2. Reviewer assigned and reading authority documents.
+Phase 1 is committed as `2f49e7823` and open at https://github.com/azents/azents/pull/2523; all 41 checks pass. It provides the standalone shared target and credential contracts. Phase 2 is implemented locally on `feat/relay-authority`; root-owned final checks pass and the same independent reviewer cleared the stable integrated diff with no findings. Commit/PR opening is next. It includes two Agent-owned database tables, atomic supply lifecycle, dedicated resolver/service authentication, current-configuration preparation and post-refresh revalidation, generated Admin operations and owning Specs. Root local PostgreSQL tests and schema upgrade/downgrade/check passed; actual Proxy/provider-wire/chart scope remains Phase 3. No production/live actions were performed.

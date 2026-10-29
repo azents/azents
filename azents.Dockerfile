@@ -25,6 +25,7 @@ ARG DEV=false
 WORKDIR $ROOT_DIR/python/apps/azents
 RUN --mount=type=cache,target=$UV_CACHE_DIR \
     --mount=type=bind,source=python/libs/az-common,target=$ROOT_DIR/python/libs/az-common \
+    --mount=type=bind,source=python/libs/azents-llm-contract,target=$ROOT_DIR/python/libs/azents-llm-contract \
     --mount=type=bind,source=python/libs/azents-runtime-control,target=$ROOT_DIR/python/libs/azents-runtime-control \
     if [ "$DEV" ]; then \
     uv sync --frozen --no-install-project; \
@@ -40,6 +41,7 @@ COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 # Copy source code
 COPY python/apps/azents/ $ROOT_DIR/python/apps/azents/
 COPY python/libs/az-common/ $ROOT_DIR/python/libs/az-common/
+COPY python/libs/azents-llm-contract/ $ROOT_DIR/python/libs/azents-llm-contract/
 COPY python/libs/azents-runtime-control/ $ROOT_DIR/python/libs/azents-runtime-control/
 
 WORKDIR $ROOT_DIR/python/apps/azents
