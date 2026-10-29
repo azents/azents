@@ -15,6 +15,7 @@ code_paths:
   - python/apps/azents/src/azents/api/llm_authority_route.py
   - python/apps/azents/src/azents/api/admin/llm_access.py
   - python/apps/azents/src/azents/api/internal/llm.py
+  - python/apps/azents/src/cli/llm_access.py
   - python/libs/azents-llm-contract/src/azents_llm_contract/**
   - python/apps/azents/db-schemas/rdb/migrations/versions/3ac042ea72bd_add_agent_inference_access_supplies_and_.py
 last_verified_at: 2026-10-29
@@ -114,6 +115,35 @@ names only. It performs no integration-secret reads or OAuth refresh. Resolve
 accepts model and target ID only, never prompt content, account IDs, endpoint URLs
 or caller credentials. These internal routes are excluded from public OpenAPI;
 shared typed DTOs own their wire contract. Admin OpenAPI/clients are generated.
+
+## Operator CLI
+
+`python -m cli.llm_access` runs inside the configured server environment, using
+the same local operator trust boundary as `cli.system_admin`. Possession of server
+configuration/DB execution access is privileged; this is not an Agent-authenticated
+or remote unauthenticated issuer. It resolves `LLMAccessService` through the normal
+non-HTTP process container, preserving supply isolation, one-hour expiry, expected
+current-token rotation, overlap, liveness and revocation rules. Issue attribution is
+fixed to `operator_cli`; no CLI caller can impersonate an Admin user identity.
+
+- `issue --agent-id <id> --subject <subject> --output <new-file>`
+- `rotate --supply-id <id> --expected-token-id <id> --output <new-file>`
+- `inspect --supply-id <id>` and `lookup --agent-id <id> --subject <subject>`
+- `revoke --supply-id <id> [--token-id <id>]`
+
+Issue/rotate require a new output file, exclusively created with mode `0600`
+before lifecycle mutation. Existing files and symlinks are rejected without
+issuing. Protected token JSON goes only to this file; stdout contains nonsecret
+IDs/expiry and inspection never returns a raw token or digest. The CLI does not
+auto-retry an uncertain operation, print provider credentials, alter existing
+Agent settings, or create another token source. Console tracebacks disable local
+variable rendering.
+
+If output or process completion is uncertain, use `lookup`/`inspect` before any
+explicit replacement/revocation. A failed delivery never extends an old token.
+Operators own safe transfer/removal of the output file; the CLI leaves a reserved
+file after failure and never silently overwrites it. Revoking an entire supply
+does not affect other supply subjects.
 
 ## Preparation and Admission
 
