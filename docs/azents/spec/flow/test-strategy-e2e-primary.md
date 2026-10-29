@@ -886,7 +886,12 @@ Always-on required CI does not depend on external credentials.
   Collected artifact ZIPs must match the SHA256 digest returned by the GitHub
   artifact API before extraction. Replay rechecks the saved ZIP digest and exact
   extracted file hashes against the authenticated archive, not only a locally
-  generated manifest. Missing or malformed digests, missing archives, substituted
+  generated manifest. The existing `e2e-duration-gate` verdict ZIP is retained
+  with the same immutable identity, digest and attempt boundaries. A successful
+  verdict upload requires its original artifact on collection and replay.
+  When the current upload did not succeed, only a demonstrably older stable-name
+  verdict is excluded; current verdicts retain every provenance check.
+  Missing or malformed digests, missing archives, substituted
   bytes and unsafe or duplicate ZIP paths fail closed. Historical raw evidence
   remains preserved; incomplete evidence is not upgraded to verified success.
   Explicit JUnit testcase times, pytest phase/fixture numbers, image timing
