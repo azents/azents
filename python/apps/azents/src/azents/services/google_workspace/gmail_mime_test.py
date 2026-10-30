@@ -249,7 +249,9 @@ def test_encoded_original_headers_compare_and_quote_as_unicode(
     envelope = envelope.model_copy(
         update={"payload": envelope.payload.model_copy(update={"headers": headers})}
     )
-    original = decode_message(envelope, character_limit=1000, read_body=_read_body)
+    original = decode_message(
+        envelope, character_limit=1000, body_format="raw_mime", read_body=_read_body
+    )
     prefix = "Re:" if mode == "reply" else "Fwd:"
     message = _change(
         compose,
@@ -299,7 +301,9 @@ def test_encoded_original_headers_compare_and_quote_as_unicode(
 def test_encoded_original_header_controls_and_invalid_bytes_are_rejected(
     compose: GmailCompose, encoded: str
 ) -> None:
-    original = decode_message(_original(), character_limit=1000, read_body=_read_body)
+    original = decode_message(
+        _original(), character_limit=1000, body_format="raw_mime", read_body=_read_body
+    )
     original = dataclasses.replace(
         original,
         value=original.value.model_copy(
@@ -379,7 +383,9 @@ def test_literal_encoded_word_marker_is_preserved_in_reply_and_recipient(
     envelope = envelope.model_copy(
         update={"payload": envelope.payload.model_copy(update={"headers": headers})}
     )
-    original = decode_message(envelope, character_limit=1000, read_body=_read_body)
+    original = decode_message(
+        envelope, character_limit=1000, body_format="raw_mime", read_body=_read_body
+    )
     parsed = _parsed(
         prepare_message(
             dataclasses.replace(
@@ -426,7 +432,9 @@ def test_binary_attachment_is_preserved_without_inline_base64_in_result(
 def test_reply_preserves_thread_references_and_uses_reply_to_without_copying_bcc(
     compose: GmailCompose,
 ) -> None:
-    original = decode_message(_original(), character_limit=1000, read_body=_read_body)
+    original = decode_message(
+        _original(), character_limit=1000, body_format="raw_mime", read_body=_read_body
+    )
     message = _change(compose, to=[], subject=None)
     prepared = prepare_message(
         dataclasses.replace(
@@ -452,7 +460,9 @@ def test_reply_preserves_thread_references_and_uses_reply_to_without_copying_bcc
 
 
 def test_forward_does_not_attach_to_original_thread(compose: GmailCompose) -> None:
-    original = decode_message(_original(), character_limit=1000, read_body=_read_body)
+    original = decode_message(
+        _original(), character_limit=1000, body_format="raw_mime", read_body=_read_body
+    )
     prepared = prepare_message(
         dataclasses.replace(
             _context(_change(compose, subject=None)),
@@ -470,7 +480,9 @@ def test_forward_does_not_attach_to_original_thread(compose: GmailCompose) -> No
 def test_reused_inline_image_retains_content_id_and_related_mime_structure(
     compose: GmailCompose,
 ) -> None:
-    original = decode_message(_original(), character_limit=1000, read_body=_read_body)
+    original = decode_message(
+        _original(), character_limit=1000, body_format="raw_mime", read_body=_read_body
+    )
     original = dataclasses.replace(
         original, html_text='<p>Original</p><img src="cid:image1">'
     )
@@ -503,7 +515,12 @@ def test_body_file_text_is_kept_in_html_alternative_when_quoting(
         compose, text=None, body_file=body_source.model_dump(), body_file_format="plain"
     )
     original = dataclasses.replace(
-        decode_message(_original(), character_limit=1000, read_body=_read_body),
+        decode_message(
+            _original(),
+            character_limit=1000,
+            body_format="raw_mime",
+            read_body=_read_body,
+        ),
         html_text="<p>Original HTML</p>",
     )
     body_file = GooglePreparedFile("body.txt", "text/plain", b"Prepared file body.", ())
@@ -524,7 +541,9 @@ def test_body_file_text_is_kept_in_html_alternative_when_quoting(
 
 def test_truncated_text_is_a_preview_and_keeps_full_original_bytes() -> None:
     original = _original()
-    result = decode_message(original, character_limit=4, read_body=_read_body)
+    result = decode_message(
+        original, character_limit=4, body_format="raw_mime", read_body=_read_body
+    )
     assert result.value.body_parts[0].text == "Orig"
     assert result.value.body_parts[0].status == "truncated"
     assert result.files[0].content == b"Original message body."
@@ -544,10 +563,67 @@ def test_unknown_charset_keeps_original_file_without_claiming_extracted_text() -
             body=GmailBody(data="YWJj", size=3),
         ),
     )
-    result = decode_message(envelope, character_limit=100, read_body=_read_body)
+    result = decode_message(
+        envelope, character_limit=100, body_format="raw_mime", read_body=_read_body
+    )
     assert result.value.body_parts[0].status == "unsupported_charset"
     assert result.value.body_parts[0].text is None
     assert result.files[0].content == b"abc"
+
+
+@pytest.mark.parametrize(
+    "charset", ["ks_c_5601-1987", "iso-8859-1", "unknown-encoding"]
+)
+def test_full_text_uses_utf8_without_guessing_original_charset(charset: str) -> None:
+    text = "한글 café"
+    content = text.encode()
+    envelope = GmailMessageEnvelope(
+        id="message",
+        payload=GmailPart(
+            mimeType="text/plain",
+            headers=(
+                GmailHeader(
+                    name="Content-Type", value=f"text/plain; charset={charset}"
+                ),
+            ),
+            body=GmailBody(
+                data=base64.urlsafe_b64encode(content).decode(), size=len(content)
+            ),
+        ),
+    )
+    result = decode_message(
+        envelope,
+        character_limit=100,
+        body_format="gmail_full",
+        read_body=_read_body,
+    )
+    assert result.value.body_parts[0].text == text
+    assert result.value.body_parts[0].status == "complete"
+
+
+def test_invalid_full_utf8_does_not_fall_back_to_original_charset() -> None:
+    content = b"\xff"
+    envelope = GmailMessageEnvelope(
+        id="message",
+        payload=GmailPart(
+            mimeType="text/plain",
+            headers=(
+                GmailHeader(
+                    name="Content-Type", value="text/plain; charset=iso-8859-1"
+                ),
+            ),
+            body=GmailBody(data=base64.urlsafe_b64encode(content).decode(), size=1),
+        ),
+    )
+    result = decode_message(
+        envelope,
+        character_limit=100,
+        body_format="gmail_full",
+        read_body=_read_body,
+    )
+    assert result.value.body_parts[0].text is None
+    assert result.value.body_parts[0].status == "invalid_encoding"
+    assert result.files[0].content == content
 
 
 def test_opaque_attached_message_is_not_quoted_as_ordinary_body() -> None:
@@ -568,6 +644,7 @@ def test_opaque_attached_message_is_not_quoted_as_ordinary_body() -> None:
     result = decode_message(
         GmailMessageEnvelope(id="message", payload=payload),
         character_limit=100,
+        body_format="raw_mime",
         read_body=_read_body,
     )
     assert not result.value.body_parts
@@ -599,7 +676,12 @@ def test_parse_raw_draft_preserves_exact_rfc822_and_decodes_binary_parts() -> No
     )
     parts = tuple(message_parts(parsed.message.payload))
     assert _read_body(parts[1], 100) == b"\x00\xffbinary"
-    decoded = decode_message(parsed.message, character_limit=1000, read_body=_read_body)
+    decoded = decode_message(
+        parsed.message,
+        character_limit=1000,
+        body_format="raw_mime",
+        read_body=_read_body,
+    )
     assert (
         decoded.plain_text is not None and decoded.plain_text.strip() == "Draft text."
     )
@@ -642,7 +724,9 @@ def test_outbound_size_limits_are_checked_before_dispatch(
 def test_reply_subject_must_preserve_original_thread_subject(
     compose: GmailCompose,
 ) -> None:
-    original = decode_message(_original(), character_limit=1000, read_body=_read_body)
+    original = decode_message(
+        _original(), character_limit=1000, body_format="raw_mime", read_body=_read_body
+    )
     with pytest.raises(GoogleSdkError) as error:
         prepare_message(
             dataclasses.replace(

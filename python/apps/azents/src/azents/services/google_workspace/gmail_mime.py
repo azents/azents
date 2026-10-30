@@ -154,6 +154,7 @@ def decode_message(
     message: GmailMessageEnvelope,
     *,
     character_limit: int,
+    body_format: Literal["gmail_full", "raw_mime"],
     read_body: Callable[[GmailPart, int], bytes],
 ) -> GmailDecodedMessage:
     text_parts: list[GmailTextPart] = []
@@ -190,7 +191,12 @@ def decode_message(
             header["Content-Type"] = (
                 source_header(part, "Content-Type") or part.mime_type
             )
-            charset = header.get_content_charset() or "utf-8"
+            # Parsed FULL text is UTF-8 even when original MIME headers say otherwise.
+            charset = (
+                "utf-8"
+                if body_format == "gmail_full"
+                else header.get_content_charset() or "utf-8"
+            )
             status: Literal[
                 "complete", "truncated", "unsupported_charset", "invalid_encoding"
             ]

@@ -128,6 +128,168 @@ def _message(message_id: str = "original") -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("operation", ["message", "batch", "thread"])
+@pytest.mark.parametrize("separate_body", [False, True])
+@pytest.mark.parametrize("character_limit", [1, 100])
+async def test_full_reads_decode_normalized_utf8_with_original_mime_metadata(
+    operation: str, separate_body: bool, character_limit: int
+) -> None:
+    text = "한글 본문\r\n"
+    original = text.encode("euc-kr")
+    normalized = text.encode("utf-8")
+    payload = {
+        "id": "message",
+        "threadId": "thread",
+        "payload": {
+            "mimeType": "text/html",
+            "headers": [
+                {
+                    "name": "Content-Type",
+                    "value": "text/html; charset=ks_c_5601-1987",
+                },
+            ],
+            "body": {
+                "size": len(original),
+                **(
+                    {"attachmentId": "body"}
+                    if separate_body
+                    else {"data": base64.urlsafe_b64encode(normalized).decode()}
+                ),
+            },
+        },
+    }
+    requests: list[httpx.Request] = []
+
+    def read(session: GoogleSdkSession) -> m.GmailMessageResult:
+        if operation == "message":
+            return gmail.get_message(
+                session,
+                m.GmailMessageGetInput(
+                    message_id="message", body_character_limit=character_limit
+                ),
+            ).value
+        if operation == "batch":
+            return gmail.batch_get_messages(
+                session,
+                m.GmailBatchGetInput(
+                    message_ids=("message",), body_character_limit=character_limit
+                ),
+            ).value.messages[0]
+        return gmail.get_thread(
+            session,
+            m.GmailThreadGetInput(
+                thread_id="thread",
+                body_character_limit=character_limit,
+                maximum_messages=1,
+            ),
+        ).value.messages[0]
+
+    replies = (
+        _Reply(
+            200,
+            {"id": "thread", "messages": [payload]}
+            if operation == "thread"
+            else payload,
+        ),
+    )
+    if separate_body:
+        replies += (
+            _Reply(
+                200,
+                {
+                    "data": base64.urlsafe_b64encode(normalized).decode(),
+                    "size": len(normalized),
+                },
+            ),
+        )
+    result = await _run(read, replies, requests)
+    assert result.body_parts[0].text == text[:character_limit]
+    assert result.body_parts[0].status == (
+        "truncated" if character_limit < len(text) else "complete"
+    )
+    assert result.headers[0].value == "text/html; charset=ks_c_5601-1987"
+    assert len(requests) == 1 + separate_body
+    assert all(request.method == "GET" for request in requests)
+
+
+async def test_full_preview_retains_normalized_utf8_file() -> None:
+    text = "한글 본문"
+    payload = _message("message")
+    payload["payload"] = {
+        "mimeType": "text/plain",
+        "headers": [{"name": "Content-Type", "value": "text/plain; charset=euc-kr"}],
+        "body": {
+            "size": len(text.encode("euc-kr")),
+            "data": base64.urlsafe_b64encode(text.encode()).decode(),
+        },
+    }
+    result = await _run(
+        lambda session: gmail.get_message(
+            session,
+            m.GmailMessageGetInput(message_id="message", body_character_limit=1),
+        ),
+        (_Reply(200, payload),),
+        [],
+    )
+    assert result.value.body_parts[0].text == "한"
+    assert result.files[0].content == text.encode()
+
+
+async def test_full_text_byte_budget_uses_normalized_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "azents.services.google_workspace.gmail_mime.GENERAL_FILE_MAXIMUM_BYTES", 4
+    )
+    payload = _message("message")
+    payload["payload"] = {
+        "mimeType": "text/plain",
+        "body": {
+            "size": 4,
+            "data": base64.urlsafe_b64encode("한글".encode()).decode(),
+        },
+    }
+    with pytest.raises(GoogleSdkError) as error:
+        await _run(
+            lambda session: gmail.get_message(
+                session,
+                m.GmailMessageGetInput(message_id="message", body_character_limit=1),
+            ),
+            (_Reply(200, payload),),
+            [],
+        )
+    assert error.value.code == "invalid_gmail_length"
+
+
+async def test_raw_draft_retains_original_non_utf8_text_and_rfc822() -> None:
+    text = "한글 초안"
+    raw = (
+        b"Content-Type: text/plain; charset=ks_c_5601-1987\r\n"
+        b"Content-Transfer-Encoding: 8bit\r\n\r\n" + text.encode("euc-kr")
+    )
+    result = await _run(
+        lambda session: gmail.get_draft(
+            session, m.GmailDraftGetInput(draft_id="draft", body_character_limit=100)
+        ),
+        (
+            _Reply(
+                200,
+                {
+                    "id": "draft",
+                    "message": {
+                        "id": "message",
+                        "raw": base64.urlsafe_b64encode(raw).decode(),
+                    },
+                },
+            ),
+        ),
+        [],
+    )
+    assert result.value.message.body_parts[0].text == text
+    assert result.value.message.body_parts[0].status == "complete"
+    assert result.files[0].content == raw
+
+
 def _parsed(request: httpx.Request, *, draft: bool) -> EmailMessage:
     payload = json.loads(request.content)
     encoded = payload["message"]["raw"] if draft else payload["raw"]
@@ -207,8 +369,9 @@ async def test_reply_requires_read_before_any_provider_effect(
     assert not requests
 
 
+@pytest.mark.parametrize("normalized_source", [False, True])
 async def test_reply_sends_in_exact_original_thread_after_read(
-    compose: m.GmailCompose,
+    compose: m.GmailCompose, normalized_source: bool
 ) -> None:
     value = m.GmailReplyInput(
         message=_change(compose, to=[], subject=None),
@@ -218,6 +381,17 @@ async def test_reply_sends_in_exact_original_thread_after_read(
         reuse_source_attachments=False,
     )
     requests: list[httpx.Request] = []
+    source = _message()
+    source_text = "한글 원문" if normalized_source else "Original body."
+    if normalized_source:
+        assert isinstance(source["payload"], dict)
+        source["payload"]["headers"].append(
+            {"name": "Content-Type", "value": "text/plain; charset=euc-kr"}
+        )
+        source["payload"]["body"] = {
+            "data": base64.urlsafe_b64encode(source_text.encode()).decode(),
+            "size": len(source_text.encode("euc-kr")),
+        }
     await _run(
         lambda session: gmail.reply_message(
             session,
@@ -226,7 +400,7 @@ async def test_reply_sends_in_exact_original_thread_after_read(
             attachments=(),
             body_file=None,
         ),
-        (_Reply(200, _message()), _Reply(200, {"id": "reply", "threadId": "thread"})),
+        (_Reply(200, source), _Reply(200, {"id": "reply", "threadId": "thread"})),
         requests,
         before_request=_gate(
             Op.GMAIL_REPLY_MESSAGE, (_scope("gmail.send"), _scope("gmail.readonly")), ()
@@ -237,6 +411,7 @@ async def test_reply_sends_in_exact_original_thread_after_read(
     parsed = _parsed(requests[1], draft=False)
     assert str(parsed["To"]) == "sender@example.com"
     assert str(parsed["In-Reply-To"]) == "<original@example.com>"
+    assert source_text in parsed.get_content()
 
 
 async def test_unverified_alias_does_not_send(compose: m.GmailCompose) -> None:
