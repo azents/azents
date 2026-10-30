@@ -2171,19 +2171,74 @@ class RuntimeStreamControlDataPlane:
             )
             return
         head = _request_head(envelope.open.request_head)
-        if source.owner is None:
-            route = await self._resolve_route(
-                runtime_id=authority.runtime_id,
-                desired_generation=authority.desired_generation,
-                runner_generation=authority.runner_generation,
-            )
-            target = None if route is None else _target(route, self.owner_replica_id)
-        else:
-            target = (
-                BrokerTarget(owner=source.owner, local=True, relay_count=0)
-                if await self.resolve_local_owner(source.owner)
-                else None
-            )
+        while True:
+            if isinstance(authority, BrowserStreamAuthority) and source.owner is None:
+                if self.draining or source.source_key in self.draining_sources:
+                    await source.queue.put(
+                        _rejection(
+                            source,
+                            self.control_boot_id,
+                            envelope.stream_id,
+                            CloseReason.SERVICE_DRAIN,
+                        )
+                    )
+                    return
+                remaining = (
+                    min(authority.open_deadline_at, authority.transport_deadline_at)
+                    - self.clock()
+                ).total_seconds()
+                if remaining <= 0:
+                    await source.queue.put(
+                        _rejection(
+                            source,
+                            self.control_boot_id,
+                            envelope.stream_id,
+                            CloseReason.DEADLINE,
+                        )
+                    )
+                    return
+            if source.owner is None:
+                route = await self._resolve_route(
+                    runtime_id=authority.runtime_id,
+                    desired_generation=authority.desired_generation,
+                    runner_generation=authority.runner_generation,
+                )
+                target = (
+                    None if route is None else _target(route, self.owner_replica_id)
+                )
+            else:
+                target = (
+                    BrokerTarget(owner=source.owner, local=True, relay_count=0)
+                    if await self.resolve_local_owner(source.owner)
+                    else None
+                )
+            if (
+                not isinstance(authority, BrowserStreamAuthority)
+                or source.owner is not None
+            ):
+                break
+            async with self.lock:
+                joined = target is not None and (
+                    not target.local or target.owner in self.runners
+                )
+            if joined:
+                break
+            # Registration/configuration can become current before the common
+            # Owner transport joins after Control loss. Wait only before the
+            # first dedicated API dispatch, inside the original OPEN deadline.
+            # Shared relay readers must remain available for CANCEL and GOAWAY.
+            scope = await self._browser_scope_current(authority)
+            if scope is not BrowserScopeState.CURRENT:
+                await source.queue.put(
+                    _rejection(
+                        source,
+                        self.control_boot_id,
+                        envelope.stream_id,
+                        _browser_scope_close_reason(scope),
+                    )
+                )
+                return
+            await asyncio.sleep(min(0.05, remaining))
         if target is None:
             await source.queue.put(
                 _rejection(
