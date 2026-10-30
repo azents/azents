@@ -56,6 +56,8 @@ code_paths:
   - python/apps/azents/src/azents/api/public/browser/v1/websocket.py
   - python/apps/azents/src/azents/core/runtime_browser_source_credential.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/browser_source_server.py
+  - python/apps/azents/src/azents/runtime/control_protocol/grpc/runtime_stream_session_server.py
+  - python/apps/azents/src/azents/runtime/control_protocol/grpc/browser_source_owner_test.py
   - python/apps/azents/src/azents/services/runtime_browser/authority.py
   - python/apps/azents/src/azents/services/runtime_browser/data.py
   - python/apps/azents/src/azents/services/runtime_browser/service.py
@@ -95,7 +97,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-27
+last_verified_at: 2026-10-30
 spec_version: 1
 ---
 
@@ -311,7 +313,15 @@ Input sequences are monotonic and attachment-local. No input payload queue or re
 
 Browser source setup has one total deadline of at most ten seconds, including
 scope validation, source registration and initial OPEN handling; it is separate
-from the attachment lifetime. Owner authority supervision is attachment-local:
+from the attachment lifetime. After Control reconnect, current registration and
+Browser configuration do not alone prove that the common Owner transport has
+joined. Dedicated API-source admission may wait before its first dispatch for
+the exact current-generation route and local Owner join, within that original
+deadline and with current-authority checks. It neither rebinds generations nor
+replays an OPEN or input. Shared inbound relay readers do not perform this wait,
+so subsequent cancellation and drain envelopes remain processable; remote Owner
+unavailability retains its existing failure and fresh-observation behavior.
+Owner authority supervision is attachment-local:
 two-second validation deadlines and two-second recheck intervals fail closed
 within five seconds. The shared Runner response demultiplexer uses bounded
 freshness and never waits for Browser database/status-RPC validation. Requests
