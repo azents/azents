@@ -1,7 +1,7 @@
 ---
 title: "Google Connection"
 created: 2026-10-14
-updated: 2026-10-22
+updated: 2026-10-30
 tags: [google, toolkit, oauth, backend, frontend, engine, security]
 spec_type: domain
 domain: google-connection
@@ -37,7 +37,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
   - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
   - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
-last_verified_at: 2026-10-23
+last_verified_at: 2026-10-30
 spec_version: 3
 ---
 
@@ -193,6 +193,14 @@ identity is checked independently. Reply/forward provenance preserves source/thr
 semantics. Applying an existing filter to historical mail changes labels only;
 future automatic forwarding remains a persistent Gmail rule. Deleting or locally
 disabling a connection does not undo an existing remote filter.
+
+Gmail FULL text bodies use Google's normalized UTF-8 bytes, independently of the
+original MIME charset and `body.size` metadata. Original headers remain unchanged.
+Message, batch, thread and reply/forward source reads enforce actual decoded-byte
+budgets and canonical Base64url encoding without equating normalized text size to
+original MIME size. Truncated previews retain the full normalized text file.
+RAW drafts retain original MIME charset decoding and exact RFC822 bytes.
+Binary attachment reads retain declared-size consistency checks.
 
 Composed MIME uses CRLF and ASCII-compatible RFC 2047 encoded words for
 non-ASCII subjects and address display names, plus RFC 2231 attachment filename

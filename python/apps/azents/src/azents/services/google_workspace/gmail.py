@@ -53,16 +53,23 @@ if TYPE_CHECKING:
 
 
 def _read_part(
-    session: GoogleSdkSession, message_id: str, part: m.GmailPart, maximum_bytes: int
+    session: GoogleSdkSession,
+    message_id: str,
+    part: m.GmailPart,
+    maximum_bytes: int,
+    *,
+    normalized_text: bool,
 ) -> bytes:
     body = part.body
-    if body is None or body.size is not None and body.size > maximum_bytes:
+    # FULL text is UTF-8 normalized by Gmail; size still describes original MIME.
+    expected_size = None if body is None or normalized_text else body.size
+    if body is None or expected_size is not None and expected_size > maximum_bytes:
         raise GoogleSdkError(
             "gmail_file_unavailable_or_oversized", dispatched=True, status=None
         )
     if body.data is not None:
         return decode_gmail_bytes(
-            body.data, maximum_bytes=maximum_bytes, expected_size=body.size
+            body.data, maximum_bytes=maximum_bytes, expected_size=expected_size
         )
     if body.attachment_id is None:
         if body.size in {None, 0}:
@@ -77,7 +84,8 @@ def _read_part(
     )
     if (
         receipt.data is None
-        or body.size is not None
+        or not normalized_text
+        and body.size is not None
         and receipt.size is not None
         and body.size != receipt.size
     ):
@@ -85,7 +93,11 @@ def _read_part(
     return decode_gmail_bytes(
         receipt.data,
         maximum_bytes=maximum_bytes,
-        expected_size=body.size if body.size is not None else receipt.size,
+        expected_size=None
+        if normalized_text
+        else body.size
+        if body.size is not None
+        else receipt.size,
     )
 
 
@@ -105,7 +117,10 @@ def _decoded(
     return decode_message(
         message,
         character_limit=character_limit,
-        read_body=lambda part, maximum: _read_part(session, message.id, part, maximum),
+        body_format="gmail_full",
+        read_body=lambda part, maximum: _read_part(
+            session, message.id, part, maximum, normalized_text=True
+        ),
     )
 
 
@@ -232,7 +247,9 @@ def _part_file(
     return GooglePreparedFile(
         filename=safe_file_name(part.filename, fallback="message-part.bin"),
         media_type=part.mime_type,
-        content=_read_part(session, message_id, part, maximum_bytes),
+        content=_read_part(
+            session, message_id, part, maximum_bytes, normalized_text=False
+        ),
         source_ids=(message_id,),
     )
 
@@ -303,7 +320,14 @@ def get_draft(
     if receipt.id != value.draft_id:
         raise GoogleSdkError("draft_identity_mismatch", dispatched=True, status=None)
     parsed = parse_raw_draft(receipt.message)
-    decoded = _decoded(session, parsed.message, value.body_character_limit)
+    decoded = decode_message(
+        parsed.message,
+        character_limit=value.body_character_limit,
+        body_format="raw_mime",
+        read_body=lambda part, maximum: _read_part(
+            session, parsed.message.id, part, maximum, normalized_text=False
+        ),
+    )
     files = [
         GooglePreparedFile(
             filename=f"draft-{receipt.id}.eml",
