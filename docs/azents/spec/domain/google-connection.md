@@ -37,7 +37,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
   - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
   - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
-last_verified_at: 2026-10-23
+last_verified_at: 2026-10-30
 spec_version: 3
 ---
 
