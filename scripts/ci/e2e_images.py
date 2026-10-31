@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 from collections import deque
@@ -161,10 +162,10 @@ def _download(
                         pass  # The owned child exited between poll and kill.
                 returncode = future.result()
                 # Popen.kill can return without signalling a child that exited
-                # meanwhile. Linux negative wait status proves termination;
-                # preserve natural success/failure instead of inferring it.
+                # meanwhile. Match the signal sent by kill, not an unrelated
+                # natural signal failure such as SIGTERM.
                 results[download.image] = _download_result(
-                    download, returncode, cancelled and returncode < 0
+                    download, returncode, cancelled and returncode == -signal.SIGKILL
                 )
     for image in pending:
         now = time.monotonic()

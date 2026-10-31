@@ -2,6 +2,7 @@
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -518,7 +519,7 @@ class ImageHandoffTest(unittest.TestCase):
         )
 
     def test_natural_exit_during_kill_retains_the_actual_outcome(self):
-        for exit_code in (0, 23):
+        for exit_code in (0, 23, -signal.SIGTERM):
             with self.subTest(exit_code=exit_code):
                 self._check_natural_exit_during_kill(exit_code)
 
