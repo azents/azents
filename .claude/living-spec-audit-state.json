@@ -59,6 +59,11 @@
       "checked_scope_revision": "9b2c1b5b94a18057cf2f55582d9f7090775758265ef6a8bfe6a0baf041cef9ce",
       "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
+    ".claude/**::bucket-25-of-32": {
+      "checked_at": "2026-10-31T22:07:24Z",
+      "checked_scope_revision": "fed4ccf0f2c40f787f5836115a49aa07defda9eb712999979aa5f46449e301e7",
+      "checked_through_commit": "c7e1d6c8644d8ac985821331528300a70a49af83"
+    },
     ".claude/**::bucket-30-of-32": {
       "checked_at": "2026-09-22T22:11:01Z",
       "checked_scope_revision": "fb423f4c9b59cb5f03839f29bf874b758f86d1ec9e7424c03eba79e8e2b22023",
