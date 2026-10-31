@@ -63,7 +63,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-29
+last_verified_at: 2026-11-01
 spec_version: 87
 ---
 
@@ -488,6 +488,12 @@ Always-on required CI does not depend on external credentials.
   through two bounded exact-name GitHub CLI download slots with pulls of the five
   existing public prerequisite images. Both tasks, every download and every
   prerequisite pull are joined before the owner returns.
+  A failed mandatory image download stops slot refill and kills and reaps only
+  that preparation owner's remaining download children. Already-finished results
+  retain their actual outcome; interrupted and never-started downloads remain
+  unsuccessful with explicit `cancelled` and `not_started` receipt outcomes.
+  Download startup exceptions also drain any children already started by that
+  owner. Existing prerequisite pulls are still joined.
   Missing downloads or failed pulls fail preparation without retry or fallback.
   No Selenium or additional public prerequisite image is added; ordinary fixture
   health/readiness and lifecycle behavior remain authoritative.

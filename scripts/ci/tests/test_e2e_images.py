@@ -6,7 +6,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +18,7 @@ from scripts.ci.e2e_images import (
     IMAGES,
     REQUIRED,
     WEB,
+    ActiveImageDownload,
     Identity,
     ImageLoad,
     ImageReceipt,
@@ -37,6 +40,27 @@ ENV = {
 }
 OWNER = Identity("azents/azents", "a" * 40, 100, 2)
 IMAGE_ID = "sha256:" + "b" * 64
+
+
+class DownloadProcess:
+    """A command receipt whose wait operation runs in the owned I/O slot."""
+
+    def __init__(self, command, run):
+        self.command = command
+        self.run = run
+        self.returncode = None
+
+    def wait(self):
+        result = self.run(self.command)
+        if self.returncode is None:
+            self.returncode = result.returncode
+        return self.returncode
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
 
 
 def portfolio(root: Path, selected: tuple[str, ...]) -> None:
@@ -289,6 +313,10 @@ class ImageHandoffTest(unittest.TestCase):
                 patch(
                     "scripts.ci.e2e_images.subprocess.run", side_effect=run
                 ) as docker,
+                patch(
+                    "scripts.ci.e2e_images.subprocess.Popen",
+                    side_effect=lambda command: DownloadProcess(command, run),
+                ),
             ):
                 if scenario == "passed":
                     prepare(root, suite, evidence)
@@ -350,7 +378,10 @@ class ImageHandoffTest(unittest.TestCase):
                     active -= 1
                 return subprocess.CompletedProcess(command, 0)
 
-            with patch("scripts.ci.e2e_images.subprocess.run", side_effect=run):
+            with patch(
+                "scripts.ci.e2e_images.subprocess.Popen",
+                side_effect=lambda command: DownloadProcess(command, run),
+            ):
                 results = _download(Path(tmp), CORE, OWNER)
             self.assertEqual(peak, 2)
             self.assertEqual(
@@ -358,12 +389,186 @@ class ImageHandoffTest(unittest.TestCase):
                 sorted(f"ci-e2e-image-{image}-100-2" for image in CORE),
             )
             self.assertTrue(all(item.completed for item in results))
+            self.assertTrue(all(item.outcome == "passed" for item in results))
             self.assertTrue(
                 all(
                     item.finished_at_monotonic > item.started_at_monotonic
                     for item in results
                 )
             )
+
+    def test_failed_download_reaps_its_real_sibling_and_never_starts_queued_work(self):
+        self._check_real_download_failure(startup_failure=False, later_failure=False)
+
+    def test_later_download_failure_stops_refill_and_reaps_running_sibling(self):
+        self._check_real_download_failure(startup_failure=False, later_failure=True)
+
+    def test_startup_failure_reaps_the_child_already_started(self):
+        self._check_real_download_failure(startup_failure=True, later_failure=False)
+
+    def _check_real_download_failure(self, *, startup_failure, later_failure):
+        children = []
+        started = []
+        real_popen = subprocess.Popen
+
+        def child(exit_code):
+            process = real_popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; print('ready', flush=True); "
+                    f"sys.stdin.read(); sys.exit({exit_code})",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
+            children.append(process)
+            self.assertEqual(process.stdout.readline(), b"ready\n")
+            return process
+
+        # This unrelated child must survive the download owner's failure.
+        unrelated = child(23)
+
+        def start(_root, image, _owner):
+            started.append(image)
+            if startup_failure and len(started) == 2:
+                raise OSError("synthetic gh spawn failure")
+            process = child(0 if later_failure and len(started) == 1 else 23)
+            if len(started) == 2:
+                # Both native processes are running before the first fails.
+                children[1].stdin.close()
+            elif later_failure and len(started) == 3:
+                process.stdin.close()
+            return ActiveImageDownload(image, process, time.monotonic())
+
+        try:
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                patch("scripts.ci.e2e_images._start_download", side_effect=start),
+                ThreadPoolExecutor(max_workers=1) as executor,
+            ):
+                future = executor.submit(_download, Path(tmp), REQUIRED, OWNER)
+                try:
+                    if startup_failure:
+                        with self.assertRaisesRegex(OSError, "synthetic"):
+                            future.result(timeout=5)
+                    else:
+                        results = future.result(timeout=5)
+                        self.assertEqual(
+                            [item.outcome for item in results],
+                            ["passed", "cancelled", "failed", "not_started"]
+                            if later_failure
+                            else ["failed", "cancelled", "not_started", "not_started"],
+                        )
+                        self.assertEqual(
+                            [item.completed for item in results],
+                            [later_failure, False, False, False],
+                        )
+                        if not later_failure:
+                            self.assertEqual(results[2].duration_seconds, 0)
+                        self.assertEqual(results[3].duration_seconds, 0)
+                    self.assertEqual(
+                        started, list(REQUIRED[: 3 if later_failure else 2])
+                    )
+                    self.assertIsNone(unrelated.poll())
+                    self.assertTrue(
+                        all(process.returncode is not None for process in children[1:])
+                    )
+                finally:
+                    # Bound the test even if the owner's drain regresses.
+                    for process in children[1:]:
+                        if process.poll() is None:
+                            process.kill()
+                        process.wait()
+        finally:
+            for process in children:
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+                if not process.stdin.closed:
+                    process.stdin.close()
+                process.stdout.close()
+
+    def test_finished_batch_is_checked_before_any_successful_slot_is_refilled(self):
+        started = []
+
+        def start(_root, image, _owner):
+            started.append(image)
+            code = int(image == REQUIRED[1])
+            process = DownloadProcess(
+                [image], lambda command: subprocess.CompletedProcess(command, code)
+            )
+            return ActiveImageDownload(image, process, time.monotonic())
+
+        def whole_batch(futures, **_kwargs):
+            for future in futures:
+                future.result(timeout=5)
+            return set(futures), set()
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch("scripts.ci.e2e_images._start_download", side_effect=start),
+            patch("scripts.ci.e2e_images.wait", side_effect=whole_batch),
+        ):
+            results = _download(Path(tmp), REQUIRED, OWNER)
+        self.assertEqual(started, list(REQUIRED[:2]))
+        self.assertEqual(
+            [item.outcome for item in results],
+            ["passed", "failed", "not_started", "not_started"],
+        )
+
+    def test_natural_exit_during_kill_retains_the_actual_outcome(self):
+        for exit_code in (0, 23):
+            with self.subTest(exit_code=exit_code):
+                self._check_natural_exit_during_kill(exit_code)
+
+    def _check_natural_exit_during_kill(self, exit_code):
+        both_started = threading.Event()
+        finishing = threading.Event()
+        started = []
+
+        class ExitingProcess:
+            def wait(self):
+                if not finishing.wait(5):
+                    raise AssertionError("owner did not drain sibling")
+                return exit_code
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                # CPython kill may repoll and return after natural exit.
+                finishing.set()
+
+        def fail(command):
+            self.assertTrue(both_started.wait(5))
+            return subprocess.CompletedProcess(command, 1)
+
+        def start(_root, image, _owner):
+            started.append(image)
+            if len(started) == 1:
+                process = DownloadProcess([image], fail)
+            else:
+                process = ExitingProcess()
+                both_started.set()
+            return ActiveImageDownload(image, process, time.monotonic())
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch("scripts.ci.e2e_images._start_download", side_effect=start),
+        ):
+            results = _download(Path(tmp), REQUIRED, OWNER)
+        self.assertEqual(started, list(REQUIRED[:2]))
+        self.assertEqual(
+            [item.outcome for item in results],
+            [
+                "failed",
+                "passed" if exit_code == 0 else "failed",
+                "not_started",
+                "not_started",
+            ],
+        )
+        self.assertEqual(results[1].completed, exit_code == 0)
 
     def test_complete_validation_precedes_two_slot_import_and_environment_publication(
         self,
