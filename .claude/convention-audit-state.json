@@ -1,16 +1,12 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-29T22:17:01Z",
+    "checked_at": "2026-10-30T22:06:06Z",
     "checked_ruleset_revisions": [
-      "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
-      "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
       "4b874a6e567252be79e398faa8343ff926899320b3c3d432f2e1acf8e07b7874",
-      "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
-      "a17cf7d88595dc5ac405abbff7fd713dd139c90ec09c0e87131f53bec14f7f8c",
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
+    "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -324,9 +320,9 @@
       "checked_through_commit": "17bd353ed4f320bdcd4555bb9509030b1a11f2ee"
     },
     "python/apps/azents-llm-proxy/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-30T22:06:06Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-1-of-8": {
       "checked_at": "2026-09-28T22:08:07Z",
@@ -599,34 +595,34 @@
       "checked_through_commit": "9ebc05b09f32f94e3acb68b712a127455df2cd49"
     },
     "python/libs/azents-llm-contract/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-30T22:06:06Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
     "python/libs/azents-llm-contract/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-30T22:06:06Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
     "python/libs/azents-llm-contract/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-30T22:06:06Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
     "python/libs/azents-llm-contract/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-30T22:06:06Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
     "python/libs/azents-llm-contract/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-30T22:06:06Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
     "python/libs/azents-llm-contract/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-30T22:06:06Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "413ee6d7ec829012ea58c401ee3e89253533b57a"
     },
     "python/libs/azents-public-client/**::bucket-1-of-8": {
       "checked_at": "2026-10-07T22:12:42Z",
