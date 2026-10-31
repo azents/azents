@@ -114,7 +114,12 @@ def _pdf(
     budget = _TextBudget(limits.maximum_characters)
     decoded_work = 0
     with apply_configuration(config), io.BytesIO(file.content) as stream:
-        reader = PdfReader(stream, strict=True)
+        try:
+            reader = PdfReader(stream, strict=True)
+        except ValueError:
+            # Invalid encryption parameters may fail in the crypto provider
+            # before the reader exposes its encrypted-document state.
+            raise _MalformedDocument() from None
         if reader.is_encrypted:
             raise _EncryptedDocument()
         if len(reader.pages) > limits.maximum_pages:
