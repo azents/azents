@@ -79,7 +79,7 @@ dependencies = [
     # Bounded document conversion and extraction (no OCR or macro execution)
     "markdown-it-py==4.2.0",
     "defusedxml==0.7.1",
-    "pypdf==6.21.2",
+    "pypdf==6.21.4",
     "azents-llm-contract",
 ]
 
