@@ -204,6 +204,33 @@ def test_pdf_encryption_does_not_claim_text_extraction() -> None:
     assert file.content.startswith(b"%PDF")
 
 
+def test_invalid_pdf_encryption_key_is_classified_as_malformed() -> None:
+    original = _pdf(pages=1, password="fixture")
+    # Keep byte offsets valid while supplying an invalid RC4 key length.
+    content = original.replace(b"/Length 128", b"/Length 000")
+    assert content != original
+    file = GooglePreparedFile("source.pdf", "application/pdf", content, ())
+    result = extract_text(file, _limits(), lambda: None)
+    assert result.status == "malformed" and result.text is None
+    assert file.content == content
+
+
+def test_pdf_authority_value_error_is_not_hidden_as_malformed() -> None:
+    calls = 0
+
+    def require_current() -> None:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise ValueError("Current authority check failed")
+
+    file = GooglePreparedFile(
+        "source.pdf", "application/pdf", _pdf(pages=1, password=None), ()
+    )
+    with pytest.raises(ValueError, match="Current authority check failed"):
+        extract_text(file, _limits(), require_current)
+
+
 def test_pdf_page_limit_and_character_budget_are_explicit() -> None:
     file = GooglePreparedFile(
         "source.pdf", "application/pdf", _pdf(pages=2, password=None), ()
