@@ -41,16 +41,17 @@ def test_start_observes_new_running_generation_before_metrics_with_remaining_bud
         return True
 
     wait.until.side_effect = until
-    clock = Mock(side_effect=[100.0, 107.0])
-    monkeypatch.setattr(web, "_click_button", click)
-    monkeypatch.setattr(web, "_wait", Mock(return_value=wait))
+    clock = Mock(side_effect=[100.0, 101.0, 102.0, 107.0])
+    click_wait = Mock()
+    click_wait.until.return_value = Mock(click=click)
+    monkeypatch.setattr(web, "WebDriverWait", Mock(side_effect=[click_wait, wait]))
     monkeypatch.setattr(web, "_wait_for_runtime_metrics", metrics)
     monkeypatch.setattr(web.time, "monotonic", clock)
     web._start_runtime_and_wait_for_metrics(
         driver, runtime_api=api, token="token", handle="workspace", agent_id="agent"
     )
     assert trace == ["click", "admission", "metrics"]
-    click.assert_called_once_with(driver, "Start")
+    click.assert_called_once_with()
     metrics.assert_called_once_with(
         driver,
         runtime_api=api,
@@ -78,8 +79,9 @@ def test_unadmitted_start_fails_with_bounded_state_without_second_click_or_metri
         raise TimeoutException("bounded admission")
 
     wait.until.side_effect = until
-    monkeypatch.setattr(web, "_click_button", click)
-    monkeypatch.setattr(web, "_wait", Mock(return_value=wait))
+    click_wait = Mock()
+    click_wait.until.return_value = Mock(click=click)
+    monkeypatch.setattr(web, "WebDriverWait", Mock(side_effect=[click_wait, wait]))
     monkeypatch.setattr(web, "_wait_for_runtime_metrics", metrics)
     with pytest.raises(
         AssertionError, match="did not advance authoritative admission"
@@ -131,11 +133,21 @@ def test_second_start_shares_one_budget_with_full_readiness(
     ]
     click, wait = Mock(), Mock()
     wait.until.side_effect = lambda predicate: predicate(driver)
-    monkeypatch.setattr(web, "_click_button", click)
-    monkeypatch.setattr(web, "_wait", Mock(return_value=wait))
-    monkeypatch.setattr(web.time, "monotonic", Mock(side_effect=[100.0, 109.0]))
+    click_wait = Mock()
+    click_wait.until.return_value = Mock(click=click)
+    monkeypatch.setattr(web, "WebDriverWait", Mock(side_effect=[click_wait, wait]))
+    layout = Mock()
+    monkeypatch.setattr(web, "_wait_for_settings_metrics_layout", layout)
+    monkeypatch.setattr(
+        web.time, "monotonic", Mock(side_effect=[100.0, 101.0, 102.0, 109.0])
+    )
     remaining = web._start_runtime(
-        driver, runtime_api=api, token="token", handle="workspace", agent_id="agent"
+        driver,
+        runtime_api=api,
+        token="token",
+        handle="workspace",
+        agent_id="agent",
+        wait_for_existing_metrics=True,
     )
     ready_wait = Mock()
     wait_factory = Mock(return_value=ready_wait)
@@ -151,7 +163,8 @@ def test_second_start_shares_one_budget_with_full_readiness(
     )
     assert remaining == 111.0
     wait_factory.assert_called_once_with(driver, 111.0, poll_frequency=1)
-    click.assert_called_once_with(driver, "Start")
+    click.assert_called_once_with()
+    layout.assert_called_once_with(driver, deadline=220.0)
     ready_wait.until.assert_called_once()
 
 

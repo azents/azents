@@ -63,7 +63,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-11-01
+last_verified_at: 2026-11-02
 spec_version: 87
 ---
 
@@ -121,6 +121,16 @@ Admin System Settings follows the same ownership split: native component/control
 tests cover label presentation and unsaved drafts during query-only section changes.
 The representative authenticated settings/redaction boundary, cross-Web authentication
 and persisted retention-policy updates remain browser E2E responsibilities.
+
+## Runtime Settings Browser Readiness
+
+The Runtime lifecycle browser journey waits for the previously collected metrics
+scope and one-hour trend to become visible after settings navigation before its
+single native stop-to-start activation. Initial startup does not wait for metrics
+that do not yet exist. Layout readiness, click readiness, authoritative
+newer-generation admission and subsequent Runtime readiness share the original
+120-second budget; no click is replayed and lifecycle or sentinel checks are
+unchanged.
 
 ## Login Browser Readiness
 
@@ -708,6 +718,11 @@ Always-on required CI does not depend on external credentials.
   and database, network, service, browser, Runtime, and temporary fixtures. Only one
   full product stack runs at a time on the hosted runner. Lane artifacts retain CPU
   topology, memory and before/after CPU, memory and I/O pressure for comparisons.
+  Each lane also captures filesystem bytes and inode availability for its temporary
+  archive and Docker storage paths immediately before image import, and again in
+  always-run diagnostics. These read-only observations retain a load-time disk
+  failure boundary; missing observations warn without replacing the real load or
+  testcase verdict. No host software, image or storage is deleted by diagnostics.
   Web plan files retain descending existing measured call weights (or declared
   source fallback) with path tie-breaking. The standard file scheduler keeps this
   plan order with `--no-loadscope-reorder` rather than re-sorting by testcase count;

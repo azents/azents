@@ -488,6 +488,14 @@ jobs:
             --evidence "${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
       - name: Verify and load exact CI image portfolio
         run: |
+          report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
+          mkdir -p "$report_dir"
+          if ! {
+            df --block-size=1 "$RUNNER_TEMP" /var/lib/docker
+            df --inodes "$RUNNER_TEMP" /var/lib/docker
+          } > "$report_dir/runner-disk-before-load.txt" 2>&1; then
+            printf '::warning::Pre-load filesystem observation unavailable\n'
+          fi
           python -m scripts.ci.e2e_images load \
             --root "${RUNNER_TEMP}/e2e-images" \
             --suite "${{ matrix.suite }}" \
@@ -561,6 +569,8 @@ jobs:
             printf '::warning::Runner observation unavailable: %s\n' "$*"
           }
           capture_runner_observation "$report_dir/runner-memory-after.txt" free --bytes
+          capture_runner_observation "$report_dir/runner-disk-after.txt" df --block-size=1 "$RUNNER_TEMP" /var/lib/docker
+          capture_runner_observation "$report_dir/runner-inodes-after.txt" df --inodes "$RUNNER_TEMP" /var/lib/docker
           for resource in cpu memory io; do
             capture_runner_observation "$report_dir/runner-pressure-${resource}-after.txt" cat "/proc/pressure/${resource}"
           done
