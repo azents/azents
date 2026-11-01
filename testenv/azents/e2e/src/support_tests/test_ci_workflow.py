@@ -373,7 +373,7 @@ def test_runner_observations_preserve_pytest_failure_and_remaining_diagnostics(
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
     tools = tmp_path / "bin"
     tools.mkdir()
-    for name in ("lscpu", "free", "cat"):
+    for name in ("lscpu", "free", "cat", "df"):
         tool = tools / name
         tool.write_text(
             f"#!/bin/sh\nprintf 'resource observation\\n'\nexit {observation_exit}\n"
@@ -381,7 +381,11 @@ def test_runner_observations_preserve_pytest_failure_and_remaining_diagnostics(
         tool.chmod(0o755)
     for name, body in {
         "docker": "printf 'docker diagnostics retained\\n'",
-        "python": "printf 'summary retained\\n'",
+        "python": (
+            'if [ "$1" = "-m" ]; then\n'
+            "  printf 'image load retained\\n'\nexit 19\nfi\n"
+            "printf 'summary retained\\n'"
+        ),
         "uv": ('printf \'%s\\n\' "$@" > "$RUNNER_TEMP/pytest-args.txt"\nexit 17'),
     }.items():
         tool = tools / name
@@ -404,6 +408,7 @@ def test_runner_observations_preserve_pytest_failure_and_remaining_diagnostics(
         script = textwrap.dedent(step.split("        run: |\n", 1)[1])
         script = (
             script.replace("${{ matrix.lane }}", "web-1")
+            .replace("${{ matrix.suite }}", "web")
             .replace("${{ matrix.plan_file }}", "web.txt")
             .replace("${{ job.status }}", "failure")
         )
@@ -416,6 +421,12 @@ def test_runner_observations_preserve_pytest_failure_and_remaining_diagnostics(
             check=False,
         )
 
+    pre_load = execute("Verify and load exact CI image portfolio")
+    assert pre_load.returncode == 19
+    assert "image load retained" in pre_load.stdout
+    assert ("Pre-load filesystem observation unavailable" in pre_load.stdout) == (
+        observation_exit != 0
+    )
     assert execute("Capture E2E runner capacity").returncode == 0
     assert execute("Run E2E lane").returncode == 17
     diagnostics = execute("Capture E2E diagnostics")
@@ -424,8 +435,15 @@ def test_runner_observations_preserve_pytest_failure_and_remaining_diagnostics(
     args = (tmp_path / "pytest-args.txt").read_text().splitlines()
     assert args[-2:] == ["test_first.py", "test_second.py"]
     root = tmp_path / "e2e-observability/web-1"
-    observations = list(root.glob("runner-*"))
-    assert len(observations) == 9
+    assert (root / "runner-disk-before-load.txt").read_text().count(
+        "resource observation"
+    ) == 2
+    observations = [
+        path
+        for path in root.glob("runner-*")
+        if path.name != "runner-disk-before-load.txt"
+    ]
+    assert len(observations) == 11
     for observation in observations:
         assert ("Observation unavailable" in observation.read_text()) == (
             observation_exit != 0
