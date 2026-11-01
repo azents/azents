@@ -5,12 +5,15 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import time
+from collections import deque
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 from scripts.ci.workflow_report import integer, object_value, text
 from testenv.azents.e2e.src.support.e2e_snapshot_images import (
@@ -58,6 +61,14 @@ class ImageDownload:
     duration_seconds: float
     started_at_monotonic: float
     finished_at_monotonic: float
+    outcome: Literal["passed", "failed", "cancelled", "not_started"]
+
+
+@dataclass(frozen=True)
+class ActiveImageDownload:
+    image: str
+    process: subprocess.Popen[bytes]
+    started_at_monotonic: float
 
 
 @dataclass(frozen=True)
@@ -75,10 +86,10 @@ class PrerequisitePreparation:
     finished_at_monotonic: float
 
 
-def _download_one(root: Path, image: str, owner: Identity) -> ImageDownload:
+def _start_download(root: Path, image: str, owner: Identity) -> ActiveImageDownload:
     name = f"ci-e2e-image-{image}-{owner.run_id}-{owner.attempt}"
     started = time.monotonic()
-    result = subprocess.run(
+    process = subprocess.Popen(
         [
             "gh",
             "run",
@@ -90,25 +101,76 @@ def _download_one(root: Path, image: str, owner: Identity) -> ImageDownload:
             name,
             "--dir",
             str(root / name),
-        ],
-        check=False,
+        ]
     )
+    return ActiveImageDownload(image, process, started)
+
+
+def _download_result(
+    active: ActiveImageDownload, returncode: int, cancelled: bool
+) -> ImageDownload:
     finished = time.monotonic()
     return ImageDownload(
-        image, result.returncode == 0, finished - started, started, finished
+        active.image,
+        returncode == 0 and not cancelled,
+        finished - active.started_at_monotonic,
+        active.started_at_monotonic,
+        finished,
+        "cancelled" if cancelled else "passed" if returncode == 0 else "failed",
     )
 
 
 def _download(
     root: Path, selected: tuple[str, ...], owner: Identity
 ) -> tuple[ImageDownload, ...]:
-    # gh downloads a multi-name request serially. Separate exact-name requests
-    # retain two bounded I/O slots and explicit ownership of every result.
+    """Stop an unusable portfolio and reap only this owner's download children."""
+    pending = deque(selected)
+    active: dict[Future[int], ActiveImageDownload] = {}
+    results: dict[str, ImageDownload] = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [
-            executor.submit(_download_one, root, image, owner) for image in selected
-        ]
-    return tuple(future.result() for future in futures)
+        try:
+            while pending or active:
+                while pending and len(active) < 2:
+                    download = _start_download(root, pending.popleft(), owner)
+                    try:
+                        future = executor.submit(download.process.wait)
+                    except BaseException:
+                        download.process.kill()
+                        download.process.wait()
+                        raise
+                    active[future] = download
+                done, _ = wait(active, return_when=FIRST_COMPLETED)
+                # Inspect the complete finished batch before refilling any slot.
+                for future in done:
+                    download = active.pop(future)
+                    results[download.image] = _download_result(
+                        download, future.result(), False
+                    )
+                if any(not item.completed for item in results.values()):
+                    break
+        finally:
+            # A failed mandatory image makes every other download unusable. Do
+            # not wait minutes for a large sibling, or start queued transfers.
+            # A startup exception also drains children already started here.
+            for future, download in active.items():
+                cancelled = False
+                if download.process.poll() is None:
+                    try:
+                        download.process.kill()
+                        cancelled = True
+                    except ProcessLookupError:
+                        pass  # The owned child exited between poll and kill.
+                returncode = future.result()
+                # Popen.kill can return without signalling a child that exited
+                # meanwhile. Match the signal sent by kill, not an unrelated
+                # natural signal failure such as SIGTERM.
+                results[download.image] = _download_result(
+                    download, returncode, cancelled and returncode == -signal.SIGKILL
+                )
+    for image in pending:
+        now = time.monotonic()
+        results[image] = ImageDownload(image, False, 0.0, now, now, "not_started")
+    return tuple(results[image] for image in selected)
 
 
 def _pull_command(
