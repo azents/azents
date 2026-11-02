@@ -10,6 +10,9 @@ import time
 from pathlib import Path
 
 ANDROID_SDK = Path("/usr/local/lib/android/sdk")
+# Avoid expensive SDK deletion on roomy workers. This is cleanup eligibility,
+# not a failing capacity gate or a guarantee of future workload disk usage.
+RECLAIM_BELOW_BYTES = 32 * 1024**3
 
 
 def _directory_exists(path: Path) -> bool:
@@ -37,6 +40,7 @@ def reclaim(evidence: Path) -> None:
     present = _directory_exists(ANDROID_SDK)
     evidence.mkdir(parents=True, exist_ok=True)
     before = shutil.disk_usage("/")
+    remove = present and before.free < RECLAIM_BELOW_BYTES
     with (evidence / "runner-capacity-before.json").open("x") as output:
         json.dump(
             {
@@ -45,13 +49,14 @@ def reclaim(evidence: Path) -> None:
                 "total_bytes": before.total,
                 "used_bytes": before.used,
                 "available_bytes": before.free,
+                "reclaim_below_bytes": RECLAIM_BELOW_BYTES,
             },
             output,
             indent=2,
         )
         output.write("\n")
     started = time.monotonic()
-    if present:
+    if remove:
         subprocess.run(
             [
                 "sudo",
@@ -71,7 +76,14 @@ def reclaim(evidence: Path) -> None:
         json.dump(
             {
                 "target": str(ANDROID_SDK),
-                "removed": present,
+                "removed": remove,
+                "outcome": (
+                    "removed"
+                    if remove
+                    else "missing"
+                    if not present
+                    else "sufficient_capacity"
+                ),
                 "total_bytes": after.total,
                 "used_bytes": after.used,
                 "available_bytes": after.free,

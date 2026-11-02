@@ -19,6 +19,15 @@ SDK = Path("/usr/local/lib/android/sdk")
 
 
 class RunnerCapacityTest(unittest.TestCase):
+    def setUp(self):
+        usage = type(shutil.disk_usage("/"))
+        capacity = patch(
+            "scripts.ci.runner_capacity.shutil.disk_usage",
+            return_value=usage(100, 90, 10),
+        )
+        capacity.start()
+        self.addCleanup(capacity.stop)
+
     def test_refuses_non_hosted_or_non_linux_execution_before_any_mutation(self):
         for field, value in (
             ("GITHUB_ACTIONS", "false"),
@@ -162,6 +171,42 @@ class RunnerCapacityTest(unittest.TestCase):
                     with self.assertRaises(RuntimeError if directory else ValueError):
                         runner_capacity.reclaim(evidence)
                 self.assertFalse((evidence / "runner-capacity-cleanup.json").exists())
+
+    def test_cleanup_eligibility_skips_roomy_workers_at_exact_boundary(self):
+        usage = type(shutil.disk_usage("/"))
+        threshold = runner_capacity.RECLAIM_BELOW_BYTES
+        for free in (threshold - 1, threshold, threshold + 1):
+            with (
+                self.subTest(free=free),
+                tempfile.TemporaryDirectory() as temporary,
+                patch.dict("os.environ", HOSTED),
+            ):
+                target = Path(temporary) / "sdk"
+                target.mkdir()
+                evidence = Path(temporary) / "evidence"
+                with (
+                    patch("scripts.ci.runner_capacity.ANDROID_SDK", target),
+                    patch(
+                        "scripts.ci.runner_capacity.shutil.disk_usage",
+                        return_value=usage(threshold * 3, threshold * 3 - free, free),
+                    ),
+                    patch(
+                        "scripts.ci.runner_capacity.subprocess.run",
+                        side_effect=lambda *args, target=target, **kwargs: (
+                            shutil.rmtree(target)
+                        ),
+                    ) as command,
+                ):
+                    runner_capacity.reclaim(evidence)
+                after = json.loads(
+                    (evidence / "runner-capacity-cleanup.json").read_text()
+                )
+                self.assertEqual(command.call_count, int(free < threshold))
+                self.assertEqual(after["removed"], free < threshold)
+                self.assertEqual(
+                    after["outcome"],
+                    "removed" if free < threshold else "sufficient_capacity",
+                )
 
     def test_missing_sdk_is_noop_and_errors_are_not_success(self):
         with tempfile.TemporaryDirectory() as temporary:
