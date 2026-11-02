@@ -1,12 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-31T22:10:50Z",
+    "checked_at": "2026-11-01T22:13:51Z",
     "checked_ruleset_revisions": [
+      "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
       "4b874a6e567252be79e398faa8343ff926899320b3c3d432f2e1acf8e07b7874",
+      "a17cf7d88595dc5ac405abbff7fd713dd139c90ec09c0e87131f53bec14f7f8c",
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "c7e1d6c8644d8ac985821331528300a70a49af83"
+    "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -200,39 +202,39 @@
       "checked_through_commit": "c7e1d6c8644d8ac985821331528300a70a49af83"
     },
     "infra/**::bucket-2-of-8": {
-      "checked_at": "2026-09-24T22:12:38Z",
-      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
-      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
+      "checked_at": "2026-11-01T22:13:51Z",
+      "checked_ruleset_revision": "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
+      "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
     },
     "infra/**::bucket-3-of-8": {
-      "checked_at": "2026-09-24T22:12:38Z",
-      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
-      "checked_through_commit": "fa9ea3c759c339f9dda7abb6911c82490cf85000"
+      "checked_at": "2026-11-01T22:13:51Z",
+      "checked_ruleset_revision": "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
+      "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
     },
     "infra/**::bucket-4-of-8": {
-      "checked_at": "2026-09-25T22:14:56Z",
-      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
-      "checked_through_commit": "073b16611891bb605ec5f1428c1657a2bc6591da"
+      "checked_at": "2026-11-01T22:13:51Z",
+      "checked_ruleset_revision": "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
+      "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
     },
     "infra/**::bucket-5-of-8": {
-      "checked_at": "2026-09-25T22:14:56Z",
-      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
-      "checked_through_commit": "073b16611891bb605ec5f1428c1657a2bc6591da"
+      "checked_at": "2026-11-01T22:13:51Z",
+      "checked_ruleset_revision": "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
+      "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
     },
     "infra/**::bucket-6-of-8": {
-      "checked_at": "2026-09-25T22:14:56Z",
-      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
-      "checked_through_commit": "073b16611891bb605ec5f1428c1657a2bc6591da"
+      "checked_at": "2026-11-01T22:13:51Z",
+      "checked_ruleset_revision": "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
+      "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
     },
     "infra/**::bucket-7-of-8": {
-      "checked_at": "2026-09-25T22:14:56Z",
-      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
-      "checked_through_commit": "073b16611891bb605ec5f1428c1657a2bc6591da"
+      "checked_at": "2026-11-01T22:13:51Z",
+      "checked_ruleset_revision": "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
+      "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
     },
     "infra/**::bucket-8-of-8": {
-      "checked_at": "2026-09-25T22:14:56Z",
-      "checked_ruleset_revision": "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff",
-      "checked_through_commit": "073b16611891bb605ec5f1428c1657a2bc6591da"
+      "checked_at": "2026-11-01T22:13:51Z",
+      "checked_ruleset_revision": "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
+      "checked_through_commit": "805d7b3e7b41d3306dc5752fe3c189cd6cfd7bfd"
     },
     "proto/**::bucket-3-of-8": {
       "checked_at": "2026-10-20T22:44:47Z",
@@ -1464,29 +1466,6 @@
       ".claude/conventions/testenv/no-direct-db-write-in-tests.md",
       ".claude/conventions/testenv/qa-report-includes-slack-link.md",
       ".claude/conventions/testenv/slack-password-login-uses-hidden-url.md"
-    ],
-    "dd33ea3996e4ff2f1c4603341225ede42ed3dda8ac3440e62507dec6abd7d8ff": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/load-tests-as-reports.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/infra/argocd-valuesobject-full-replacement.md",
-      ".claude/conventions/infra/fluentbit-explicit-kubernetes-filter.md",
-      ".claude/conventions/infra/iam-role-description-ascii-only.md",
-      ".claude/conventions/infra/kustomize-namespace-must-match.md",
-      ".claude/conventions/infra/module-separation-by-role.md",
-      ".claude/conventions/infra/resource-naming-prefix.md",
-      ".claude/conventions/infra/snake-case-vs-camel-case.md"
     ],
     "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
