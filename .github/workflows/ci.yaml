@@ -478,6 +478,10 @@ jobs:
         with:
           name: e2e-plan
           path: e2e-plan
+      - name: Reclaim unused hosted Android SDK
+        run: |
+          python -m scripts.ci.runner_capacity \
+            --evidence "${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
       - name: Prepare exact images and existing prerequisites
         env:
           GH_TOKEN: ${{ github.token }}
