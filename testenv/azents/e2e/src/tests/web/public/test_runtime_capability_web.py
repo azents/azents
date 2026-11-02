@@ -294,15 +294,29 @@ def _start_runtime(
     token: str,
     handle: str,
     agent_id: str,
+    wait_for_existing_metrics: bool,
 ) -> float:
     """Admit one UI activation and return the remaining 120-second budget."""
+    deadline = time.monotonic() + 120
     before = runtime_api.agent_runtime_v1_get_agent_runtime(
         agent_id=agent_id, handle=handle, _headers=_headers(token)
     )
     assert before.lifecycle is not None
     prior_generation = before.lifecycle.desired_generation
-    deadline = time.monotonic() + 120
-    _click_button(driver, "Start")
+    if wait_for_existing_metrics:
+        # Independently resolving metrics above controls must not move the
+        # single native click after navigation to a previously used Runtime.
+        _wait_for_settings_metrics_layout(driver, deadline=deadline)
+    remaining = deadline - time.monotonic()
+    assert remaining > 0, "Runtime Start exhausted the original readiness budget"
+    WebDriverWait(
+        driver,
+        min(20, remaining),
+        poll_frequency=0.1,
+        ignored_exceptions=(StaleElementReferenceException,),
+    ).until(
+        ec.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Start']"))
+    ).click()
     last_state = "unobserved"
 
     def admitted(current: WebDriver) -> bool:
@@ -330,7 +344,9 @@ def _start_runtime(
         )
 
     try:
-        _wait(driver).until(admitted)
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, "Runtime Start exhausted the original readiness budget"
+        WebDriverWait(driver, min(20, remaining), poll_frequency=0.1).until(admitted)
     except TimeoutException as error:
         raise AssertionError(
             "One Runtime Start click did not advance authoritative admission; "
@@ -339,6 +355,32 @@ def _start_runtime(
     remaining = deadline - time.monotonic()
     assert remaining > 0, "Runtime Start exhausted the original readiness budget"
     return remaining
+
+
+def _wait_for_settings_metrics_layout(driver: WebDriver, *, deadline: float) -> None:
+    """Observe the real upper content before targeting lifecycle controls."""
+    remaining = deadline - time.monotonic()
+    assert remaining > 0, "Runtime Start exhausted the original readiness budget"
+
+    def ready(current: WebDriver) -> bool:
+        return bool(
+            ec.visibility_of_element_located(
+                (By.XPATH, "//*[normalize-space()='Scope: Container']")
+            )(current)
+            and ec.visibility_of_element_located(
+                (
+                    By.CSS_SELECTOR,
+                    "[role='img'][aria-label='Recent one-hour usage trend']",
+                )
+            )(current)
+        )
+
+    WebDriverWait(
+        driver,
+        remaining,
+        poll_frequency=0.1,
+        ignored_exceptions=(StaleElementReferenceException,),
+    ).until(ready)
 
 
 def _start_runtime_and_wait_for_metrics(
@@ -356,6 +398,7 @@ def _start_runtime_and_wait_for_metrics(
         token=token,
         handle=handle,
         agent_id=agent_id,
+        wait_for_existing_metrics=False,
     )
     _wait_for_runtime_metrics(
         driver,
@@ -797,6 +840,7 @@ def test_runtime_free_add_and_remove_progress(
         token=workspace.token,
         handle=workspace.handle,
         agent_id=agent.id,
+        wait_for_existing_metrics=True,
     )
     _wait_for_runtime_ready(
         browser_driver,
