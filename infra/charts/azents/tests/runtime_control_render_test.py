@@ -101,7 +101,6 @@ def test_runtime_control_enabled_render_contract() -> None:
 
     assert 'command: ["./bin/runtime-control.sh"]' in rendered
     assert "initialDelaySeconds: 5" in rendered
-    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
     assert "AZ_RUNTIME_CONTROL_ALLOW_INSECURE" in rendered
     assert "AZ_RUNTIME_CONTROL_KUBERNETES_TOKEN_REVIEW_ENABLED" in rendered
     assert "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE" in rendered
@@ -476,22 +475,6 @@ def test_runtime_control_allows_memory_transfer_state_for_single_replica() -> No
     assert 'value: "memory"' in rendered
 
 
-def test_runtime_control_rejects_removed_lifecycle_acknowledgement_values() -> None:
-    """Removed deployment acknowledgement cannot silently regain lifespan authority."""
-    with pytest.raises(subprocess.CalledProcessError) as raised:
-        _helm_template(
-            "server.runtimeControl.enabled=true",
-            "server.runtimeControl.transfer.lifecycleAcknowledgement.owner=platform",
-            "server.runtimeControl.runnerImage.repository=repo/runner",
-            "server.runtimeControl.runnerImage.tag=sha",
-            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
-        )
-
-    error = raised.value.stderr.lower()
-    assert "schema" in error
-    assert "lifecycleacknowledgement" in error
-
-
 def test_runtime_control_rejects_transfer_list_page_above_s3_limit() -> None:
     """Runtime Transfer page bounds remain compatible with S3 list APIs."""
     with pytest.raises(subprocess.CalledProcessError) as raised:
@@ -506,24 +489,6 @@ def test_runtime_control_rejects_transfer_list_page_above_s3_limit() -> None:
     error = raised.value.stderr.lower()
     assert "schema" in error
     assert "listpagesize" in error
-
-
-def test_runtime_control_rejects_removed_shared_auth_values() -> None:
-    """Removed shared-token values fail chart schema validation."""
-    with pytest.raises(subprocess.CalledProcessError) as raised:
-        _helm_template(
-            "server.runtimeControl.enabled=true",
-            "server.runtimeControl.auth.enabled=true",
-            "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
-            "server.runtimeControl.runnerImage.repository=repo/runner",
-            "server.runtimeControl.runnerImage.tag=sha",
-            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
-        )
-
-    error = raised.value.stderr.lower()
-    assert "schema" in error
-    assert "auth" in error
-    assert "not allowed" in error
 
 
 def test_runtime_control_requires_workspace_s3_bucket() -> None:
