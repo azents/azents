@@ -1,107 +1,21 @@
 ---
-title: "Model Catalog Domain Spec"
+title: "Model catalog"
 created: 2026-06-21
 tags: [backend, frontend, engine]
-spec_type: domain
-domain: model-catalog
-code_paths:
-  - python/apps/azents/src/azents/repos/llm_provider_integration/operations.py
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/core/_legacy_model_capability_contract.py
-  - python/apps/azents/src/azents/core/model_provider_declarations.py
-  - python/apps/azents/src/azents/core/route_capability_constraints.py
-  - python/apps/azents/src/azents/repos/active_model_capabilities.py
-  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
-  - python/apps/azents/src/azents/services/active_model_capabilities.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/repos/llm_catalog/capability_publication_test.py
-  - typescript/apps/azents-web/src/shared/model-options/containers/SelectableModelOptionsEditorContainer.tsx
-  - typescript/apps/azents-web/src/shared/model-options/containers/useSelectableModelOptionsEditor.ts
-  - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
-  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.ts
-  - python/apps/azents/src/azents/core/agent_errors.py
-  - python/apps/azents/src/azents/core/model_metadata_collection_data.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/repos/engine_event_repositories.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/image_generation_catalog_operations.py
-  - python/apps/azents/src/azents/repos/kimi_oauth_runtime.py
-  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
-  - python/apps/azents/src/azents/repos/model_metadata_operations.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/1c42cc5ce89f_align_repository_index_names_and_source_.py
-  - python/apps/azents/src/azents/core/model_execution_options.py
-  - python/apps/azents/src/azents/core/openai_client_config.py
-  - python/apps/azents/src/azents/core/model_catalog_source.py
-  - python/apps/azents/src/azents/core/model_catalog_identity.py
-  - python/apps/azents/src/azents/core/model_capability_contract.py
-  - python/apps/azents/src/azents/core/model_capability_evidence.py
-  - python/apps/azents/src/azents/core/model_capability_projection.py
-  - python/apps/azents/src/azents/core/catalog_price_rules.py
-  - python/apps/azents/src/azents/services/catalog_source_collection.py
-  - python/apps/azents/src/azents/engine/events/model_support_contract.py
-  - python/apps/azents/src/azents/core/model_pricing.py
-  - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
-  - python/apps/azents/src/azents/services/model_metadata.py
-  - python/apps/azents/src/azents/services/model_metadata_source.py
-  - python/apps/azents/src/azents/services/model_metadata_projection.py
-  - python/apps/azents/src/azents/core/agent.py
-  - python/apps/azents/src/azents/core/llm_catalog.py
-  - python/apps/azents/src/azents/core/llm_catalog_sync.py
-  - python/apps/azents/src/azents/core/image_generation_catalog.py
-  - python/apps/azents/src/azents/core/image_generation_config.py
-  - python/apps/azents/src/azents/services/llm_catalog/__init__.py
-  - python/apps/azents/src/azents/services/image_generation_catalog/**
-  - python/apps/azents/src/azents/services/llm_provider_integration/__init__.py
-  - python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py
-  - python/apps/azents/src/azents/services/kimi_oauth/**
-  - python/apps/azents/src/azents/repos/llm_catalog/__init__.py
-  - python/apps/azents/src/azents/repos/llm_catalog/data.py
-  - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
-  - python/apps/azents/src/azents/repos/xai_oauth_runtime/**
-  - python/apps/azents/src/azents/repos/kimi_oauth_runtime*.py
-  - python/apps/azents/src/azents/repos/model_metadata_read.py
-  - python/apps/azents/src/azents/repos/model_metadata_source.py
-  - python/apps/azents/src/azents/repos/model_metadata_source_data.py
-  - python/apps/azents/src/azents/repos/model_catalog_sync_state.py
-  - python/apps/azents/src/azents/rdb/models/llm_catalog.py
-  - python/apps/azents/src/azents/rdb/models/model_metadata_source.py
-  - python/apps/azents/src/azents/engine/providers/model_profiles.py
-  - python/apps/azents/src/azents/scheduler/registry.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/4550a9c9083a_remove_catalog_execution_descriptors.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/91dd4bb71ef6_add_model_metadata_source_shadow_schema.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/d29225579621_remove_legacy_litellm_metadata_authority.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/c8bc0a5dcab0_fence_data_only_catalog_source_writers.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/d9bff320245f_replace_catalog_revisions_with_current_.py
-  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
-  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
-  - python/apps/azents/src/azents/api/admin/model_catalog/v1/__init__.py
-  - python/apps/azents/src/azents/services/agent/__init__.py
-  - python/apps/azents/src/azents/services/workspace_model_settings/__init__.py
-  - python/apps/azents/src/azents/repos/workspace_model_settings/**
-  - python/apps/azents/src/azents/repos/model_candidate_chain_cutover/**
-  - python/apps/azents/src/azents/services/model_listing/providers.py
-  - python/apps/azents/src/azents/services/model_options.py
-  - python/apps/azents/src/azents/core/builtin_tools.py
-  - python/apps/azents/src/azents/engine/run/tool_budget.py
-  - python/apps/azents/src/azents/engine/events/engine_adapter.py
-  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
-  - typescript/apps/azents-web/src/shared/model-options/containers/ModelCatalogPickerContainer.tsx
-  - typescript/apps/azents-web/src/shared/model-options/model-selection.ts
-  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.tsx
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
-  - typescript/apps/azents-web/src/shared/model-options/containers/useImageGenerationCatalogs.ts
-  - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmIntegrationsContainer.ts
-  - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
-  - typescript/apps/azents-web/src/trpc/model-settings-input-schemas.ts
-  - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-  - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
-  - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-10-28
-spec_version: 48
 ---
 
-# Model Catalog Domain Spec
+# Model catalog
+
+Account-scoped model projections, capability declarations, selection snapshots and pricing.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Agent](agent.md)
+- [ChatGPT OAuth](../flow/chatgpt-oauth.md)
+- [OpenRouter API keys](../flow/openrouter-api-key.md)
+- [Inference authority](inference-authority.md)
 
 ## Purpose
 
@@ -706,53 +620,6 @@ blocks submission until it is recovered, and distinguishes loading, initial or
 refresh failure, unusable-after-configuration-change, never-synced, stale, and empty catalog states.
 Only Workspace Owners receive the explicit image sync action.
 
-## Change History
-
-| Date | Version | Change |
-|---|---:|---|
-| 2026-10-21 | 48 | Mapped xAI OAuth enrichment and active source capture to exact xAI source records while retaining account declarations and visibility. |
-| 2026-10-05 | 48 | Moved integration CRUD and atomic account-catalog materialization into completed repository operations; kept provider validation in services. |
-| 2026-10-05 | 48 | Reconciled code-path discovery with current defining modules; system behavior is unchanged. |
-| 2026-10-05 | 47 | Removed redundant source/conversation/image key-enumeration locks while retaining exact publisher claims, credential/work-token guards and final accepted-input exclusion. |
-| 2026-10-03 | 42 | Replaced catalog/source revisions with current exact rows and sync state, embedded normalized saved prices, exact context reads, image usability, and destructive history-free transition. |
-| 2026-10-03 | 41 | Completed existing top-k request transport and sampling codec preservation without changing model support authority. |
-| 2026-10-03 | 40 | Preserved route-bounded image/effort/refinement support, complete Google directed billing and truthful codec dependency provenance through audited correction paths. |
-| 2026-10-03 | 39 | Restored contract-derived ChatGPT web-search support through final v2 catalog entries and saved native requests without generic source or price dependence. |
-| 2026-10-03 | 38 | Replaced active genai authority with inert exact-scoped JSON, self-contained v2 support and typed pricing; preserved historical selections and added SQL writer/pointer fences. |
-| 2026-10-02 | 37 | Moved Workspace model default reads/get-or-create/writes into completed repository operations while preserving detached normalization, current policies and atomic downgrade marking. |
-| 2026-10-02 | 36 | Fenced ChatGPT and xAI refresh success and failure against original generation and credential identity under one row lock. |
-| 2026-10-02 | 35 | Kept ChatGPT and xAI OAuth runtime refresh persistence on the generation-preserving path while retaining user-update and publication fences. |
-| 2026-10-02 | 34 | Restored effective Grok client-image, native-search, and function-tool support despite omitted listing facts or missing tool prices. |
-| 2026-10-01 | 33 | Removed the former metadata source schema, rollback pins, temporary reprojection task, and compatibility code after validating generic provenance on every current conversation catalog. |
-| 2026-10-01 | 32 | Cut over system publication, integration projection, runtime context fallback, and estimated pricing to generic genai-prices authority with rollback pins and bounded network-free integration reprojection. |
-| 2026-10-01 | 31 | Added independent genai-prices source shadow collection, shared runtime profile resolution, generic source persistence, non-current replacement candidates, and inert rollback/projection provenance without changing current catalog authority. |
-| 2026-09-30 | 29 | Removed active execution-library catalog descriptors and documented semantic identity, preserved historical/source links, and exact raw provider IDs. |
-| 2026-09-25 | 26 | Projected OpenAI and ChatGPT image generation as a client-tool capability, including function-capable GPT-6 models without a provider-hosted image tool. |
-| 2026-09-13 | 25 | Normalized every candidate in an ordered label-local chain, made Primary capabilities drive label controls, and removed singular public mutation compatibility. |
-
-| 2026-09-10 | 24 | Hid image-model selection controls for providers that support maintained-default image generation only. |
-| 2026-09-10 | 23 | Added purpose-separated image-generation catalogs, OpenAI registry-and-credential intersection, generation fencing, maintained-default semantics, owner sync, save/runtime authority, and stored-catalog UI behavior. |
-| 2026-08-27 | 21 | Added provider-neutral default and maximum input context capabilities, maximum-only fallback, and split-aware picker and Agent settings presentation |
-| 2026-08-18 | 20 | Replaced xAI system catalogs with credential-specific integration discovery and optional fill-only LiteLLM enrichment |
-| 2026-08-18 | 19 | Made explicitly validated remote LiteLLM DB snapshots authoritative, quarantined fallback/malformed/materially smaller sources, and removed remote source fetching from integration sync |
-| 2026-08-01 | 18 | Split Workspace model selection and LLM integration settings into focused routes and containers while preserving catalog query, sync, and submit authority |
-| 2026-07-21 | 17 | Clarified that provider-request declaration limits apply whenever the Agent has Tool Search enabled, which is the default for newly created Agents |
-| 2026-07-19 | 15 | Added the Agent-opt-in provider-request tool-limit registry as the narrow call-time exception to saved model-selection snapshot semantics |
-| 2026-07-19 | 14 | Added direct account-scoped OpenRouter model projection with unrestricted valid model visibility and conservative capability claims |
-| 2026-07-18 | 13 | Projected effective `image_generation` capability onto selectable function-calling xAI API-key and OAuth chat entries |
-| 2026-07-17 | 12 | Restored trusted `image_generation` capability projection for supported OpenAI-family catalog entries |
-| 2026-07-16 | 11 | Removed the Responses Lite capability and request-dialect metadata from ChatGPT OAuth catalog projections |
-| 2026-07-16 | 10 | Completed create, configuration-update, explicit, and stale-refresh synchronization policy with atomic throttling, backoff, and picker status behavior |
-| 2026-07-16 | 9 | Scoped selectable settings to catalog-resolved options and limited advertised built-in tools to implemented contracts |
-| 2026-07-16 | 8 | Projected `web_search` for every selectable ChatGPT OAuth model under the Codex provider capability policy |
-| 2026-07-14 | 7 | Removed the ChatGPT OAuth system catalog and made integration catalogs authoritative from integration creation |
-| 2026-07-13 | 6 | Documented live system-administrator authorization for Admin model-catalog operations |
-| 2026-07-12 | 5 | Added account-scoped ChatGPT OAuth integration catalogs and backend-authoritative Responses Lite capability projection |
-| 2026-07-10 | 4 | Documented canonical LiteLLM reasoning-effort capability projection and strict empty-list semantics |
-| 2026-07-10 | 3 | Added the separate xAI API-key system catalog projected from the shared LiteLLM xAI family |
-| 2026-07-09 | 2 | Documented selectable model option submit normalization through stored catalog projection |
-| 2026-06-21 | 1 | Initial model catalog domain spec |
-
 ## Integration Management Database Ownership
 
 Integration management services validate workspace ownership and provider-specific
@@ -790,3 +657,25 @@ old read/save/dispatch producers before exposing the new contract and applicatio
 publication guard. This is operational coordination rather than a new runtime
 mode. Existing database integrity and historical operation/provenance are
 preserved; no new database migration is part of this capability correction.
+
+## Subscription integration read boundary
+
+Kimi and xAI OAuth share the following credential-read contract; their device,
+refresh and entitlement protocols remain in their separate provider pages.
+
+The integration and decrypted typed secrets are loaded by one completed native
+PostgreSQL read-only repository operation. Missing integration is classified
+before foreign-Workspace access, preserving the existing error and privacy
+contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
+calls run only after that read closes; existing OAuth persistence operations own
+their separate writes. Usage persistence, financial-field authorization and
+provider/secrets redaction retain their existing contracts.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/llm_catalog`](../../../../python/apps/azents/src/azents/services/llm_catalog)
+- [`python/apps/azents/src/azents/core/model_provider_declarations.py`](../../../../python/apps/azents/src/azents/core/model_provider_declarations.py)
+- [`python/apps/azents/src/azents/services/active_model_capabilities.py`](../../../../python/apps/azents/src/azents/services/active_model_capabilities.py)

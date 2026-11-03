@@ -1,74 +1,22 @@
 ---
-title: "External Channel Delivery and Channel Work"
+title: "External Channel delivery"
 created: 2026-07-22
 tags: [backend, engine, external-channel, slack, discord, delivery]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [external-channel, agent, conversation, toolkit]
-code_paths:
-  - python/apps/azents/src/azents/repos/external_channel/thread_title_read.py
-  - python/apps/azents/src/azents/core/exchange_file_errors.py
-  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
-  - python/apps/azents/src/azents/core/external_channel_ingestion.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
-  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
-  - python/apps/azents/src/azents/repos/scheduled_task_channel_operations.py
-  - python/apps/azents/src/azents/repos/external_channel/action_operations.py
-  - python/apps/azents/src/azents/repos/skill_state_store.py
-  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
-  - python/apps/azents/src/azents/repos/vfs_read_authority.py
-  - python/apps/azents/src/azents/core/external_channel_progress.py
-  - python/apps/azents/src/azents/core/external_channel_file.py
-  - python/apps/azents/src/azents/core/external_channel_provider.py
-  - python/apps/azents/src/azents/core/external_channel_provider_effect.py
-  - python/apps/azents/src/azents/core/external_channel_effect_intent.py
-  - python/apps/azents/src/azents/core/external_channel_navigation.py
-  - python/apps/azents/src/azents/core/external_channel_session_presence.py
-  - python/apps/azents/src/azents/core/external_channel_title.py
-  - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
-  - python/apps/azents/src/azents/core/slack_external_channel_progress.py
-  - python/apps/azents/src/azents/engine/tools/external_channel.py
-  - python/apps/azents/src/azents/engine/tools/deps.py
-  - python/apps/azents/src/azents/engine/tooling/execution_context.py
-  - python/apps/azents/src/azents/engine/run/resolve.py
-  - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
-  - python/apps/azents/src/azents/services/external_channel/channel_action.py
-  - python/apps/azents/src/azents/services/external_channel/discord_http.py
-  - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
-  - python/apps/azents/src/azents/services/external_channel/presentation.py
-  - python/apps/azents/src/azents/services/external_channel/provider_control.py
-  - python/apps/azents/src/azents/services/external_channel/slack_events.py
-  - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
-  - python/apps/azents/src/azents/services/external_channel/discord_sdk.py
-  - python/apps/azents/src/azents/services/external_channel/model_settings.py
-  - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
-  - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
-  - python/apps/azents/src/azents/services/external_channel/slack_presence.py
-  - python/apps/azents/src/azents/services/external_channel/slack_presence_manager.py
-  - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
-  - python/apps/azents/src/azents/services/external_channel/thread_title.py
-  - python/apps/azents/src/azents/services/session_title.py
-  - python/apps/azents/src/azents/services/scheduled_task/channel.py
-  - python/apps/azents/src/azents/services/scheduled_task/control.py
-  - python/apps/azents/src/azents/services/exchange_file/**
-  - python/apps/azents/src/azents/repos/session_resource_authority.py
-  - python/apps/azents/src/azents/repos/external_channel/management.py
-  - python/apps/azents/src/azents/core/external_channel_management.py
-  - python/apps/azents/src/azents/repos/external_channel/work.py
-  - python/apps/azents/src/azents/repos/external_channel/work_data.py
-  - python/apps/azents/src/azents/repos/external_channel/work_state.py
-  - python/apps/azents/src/azents/repos/external_channel/file_access.py
-  - python/apps/azents/src/azents/worker/session/idle_continuation.py
-  - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-27
-spec_version: 71
 ---
 
-# External Channel Delivery and Channel Work
+# External Channel delivery
+
+Explicit publication, Channel Work, provider presentation, attachments and notification boundaries.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [External Channels](../domain/external-channel.md)
+- [External Channel ingress](external-channel-provider-ingress.md)
+- [File exchange and storage](file-exchange-storage.md)
+- [Scheduled Tasks](../domain/scheduled-task.md)
+- [Toolkits](../domain/toolkit.md)
 
 ## Explicit Publication Boundary
 
@@ -734,196 +682,80 @@ or failed publication remains evidence, not an outbox retry queue. Existing
 Slack/Discord connection, route, resource and provider-effect authority remain
 required; the Routine cannot choose a new destination or complete ordinary Work.
 
-## Changelog
+## Channel action tool contract
 
-- **2026-10-27** (spec_version 71) — Validate Discord reply content before thread provisioning.
-- 2026-10-19: Document current-Primary, one-attempt Routine notification without
-  Channel Work terminalization, fallback or uncertain replay.
+`channel_action` is a conditional auto-bound tool, not a Workspace
+`ToolkitConfig` and not an automatic assistant-output relay. Runtime includes its
+unprefixed executable entry only when the current root AgentSession has an active
+External Channel binding. Tool Search defers its model-visible schema when enabled;
+otherwise the complete catalog exposes it directly. A minimal static prompt always
+states that ordinary assistant output is not delivered externally and that external
+publication, participant-input requests, continuation, and silent completion use
+`channel_action`.
 
-- **2026-10-07** (spec_version 68) — Recreate Discord Trackers for ordered task-title
-  list changes regardless of reply presence; retain in-place edits for status and
-  metadata changes.
-- **2026-10-05** (spec_version 67) — Completed exact thread-title authority in a native read-only repository before credential decoding and the one-shot Discord effect.
+Normal turns do not inject canonical Channel Work snapshots dynamically. Tool-specific
+mode, binding, task-list, and file guidance belongs to the relevant tool description
+and input schema. The `channel_action` description permits calls for the current
+External Channel turn or continuation and for an ordinary user who explicitly asks
+for external publication. Active bindings or prior External Channel history alone do
+not classify the current ordinary user input as an External Channel request.
+Compaction preserves only unfinished work continuity: binding, provider, resource
+label, current title, ordered tasks, and a provider-neutral awaiting-participant-input
+indicator. It omits state revisions, requesting Run identity, provider projection
+diagnostics, and provider-effect outcomes.
 
+Ingress creates the current work cycle before Agent execution and creates an initial
+Slack or Discord Activity Tracker only when that cycle is visible. Ordinary
+all-messages admission may start hidden; an explicit invocation or unfinished Todo
+publication promotes visibility monotonically. Slack native Work presence is
+independent from this Tracker policy. The tool atomically commits an optional
+conversational reply and
+an optional current-work title plus complete ordered task replacement before any
+provider call. Complete Actions for the same Binding are serialized by the current
+service instance; Actions for separate Bindings remain independent. It then executes
+the returned process-local provider effects in order and returns ordered sanitized
+`delivered`, `failed`, `unknown`, or `not_attempted`
+outcomes. The normal Tool call/result events are the only durable execution history;
+the tool creates no Action, Delivery, provider-operation, retry, or recovery record.
+Task updates require a same-call title. The tool guides the Agent to
+write a concise concrete in-progress phrase in the participant's language ending in
+an ellipsis. Tasks have stable IDs, `pending`, `in_progress`, `completed`, or
+`failed` state, and optional details, output, and labeled URL sources. One update
+supports at most 49 tasks, and its complete desired progress snapshot must fit the
+64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
+projects the complete latest Tracker; every continue invalidates older awaiting
+settlement, while message-only continuation leaves progress and Tracker position
+unchanged. For Discord, the ordered titles of explicitly supplied tasks are compared
+with the canonical pre-transition task titles. A renamed, added, removed, or reordered
+title removes or detaches the current Tracker and creates the complete latest Tracker
+as a notification-suppressed standalone message, regardless of message presence.
+Any requested reply parts are attempted after relocation.
+Replacement creation depends on confirmed current-host removal but not on reply
+delivery. Completion, reopening, IDs, details, output, and sources are excluded from
+this comparison. An unchanged task-title list or work-title-only change updates the
+current standalone or reply host in place, or creates a missing standalone host.
+Later progress changes
+repair failed or ambiguous best-effort projection without durable retry work.
+`request_input` requires a
+participant-visible message, preserves active Work, and establishes binding-scoped
+awaiting state only after every reply part is confirmed delivered. Failed, unknown, or
+stale delivery stays ready. Newly created same-binding human input or `continue`
+resumes the Work. `finish` requires a final reply, ends the work cycle, and attempts
+Tracker deletion
+only after the direct reply effect is delivered. An
+`ignore` is always present beside `finish` and `continue`. It accepts no message,
+title, task update, or files and finishes existing active Work regardless of recorded
+task status. The transition clears desired progress, retains current provider
+projection observation until cleanup settles, and attempts deletion of each current
+`PRESENT` Activity Tracker for only the selected binding without requiring a final
+reply. It sends no reply, progress create/update, file, or unrelated provider effect.
+The finished Work is no longer eligible for idle continuation. Ordinary Session Todo
+state remains separate and never becomes the Channel Work source of truth.
 
-- **2026-10-05** (spec_version 66) — Moved Channel Action and Scheduled Channel
-  presentation transaction ownership into completed repository operations, retaining
-  native read-only descriptions, atomic terminal preparation, and post-scope provider I/O.
+## References
 
-- **2026-10-05** (spec_version 66) — Reconciled code-path discovery with current
-  defining modules; system behavior is unchanged.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-10-05** (spec_version 65) — Documented short nonlocking effect admission and Work cycle/revision CAS settlement independently of exact critical Session output fencing; control delete capture does not claim execution.
-
-- **2026-10-03** (spec_version 64) — Required running Session and AgentRun authority
-  for Discord typing, preserving retained Work after stop, failure, or completion.
-
-- **2026-09-30** (spec_version 63) — Documented HTTP-authoritative 128 MiB ingress,
-  direct Runner GET/PUT, and the unchanged trusted provider-delivery boundary.
-
-- **2026-09-12** (spec_version 61) — Fenced Agent-owned Channel Work and
-  provider effect admission/settlement by Session owner generation while retaining
-  transaction-free provider I/O and no ambiguous replay.
-- **2026-09-30** (spec_version 63) — Clarified confirmed missing Tracker update
-  recovery through the next ordinary progress Action without hiding failed
-  delivery outcomes or changing authority and revision fencing.
-- **2026-09-12** (spec_version 62) — Added the single-shot post-commit external
-  model-change notice, immutable actor audit, separate delivery outcome, and
-  no-replay/no-fallback failure boundary.
-- **2026-09-08** (spec_version 60) — Moved pure provider contracts and
-  Discord presentation lowering below service orchestration without changing
-  provider payloads, serialization, operation keys, or delivery behavior.
-- **2026-09-07** (spec_version 59) — Made Discord Scheduled Task
-  `PROGRESS_CREATE` Tracker messages notification-suppressed without changing
-  registration, deletion, progress reply, terminal result, update, or cleanup
-  delivery.
-- **2026-09-07** (spec_version 58) — Applied the Discord connection-level
-  URL-preview policy across Channel Action, Scheduled Task, multipart file, and
-  Tracker create, update, and cleanup mutations while preserving intentional Embeds.
-- **2026-09-07** (spec_version 57) — Changed message-free Discord task updates to
-  edit the current Tracker host in place, while retaining remove-before-silent-create
-  relocation for task changes accompanied by a conversational message.
-- **2026-09-07** (spec_version 56) — Made changed complete task snapshots relocate
-  Discord Trackers through current-host removal and silent standalone creation,
-  retained current host position for unchanged tasks, and removed final-reply identity
-  attachment from process-local effects.
-- **2026-09-05** (spec_version 55) — Moved Discord conversational Trackers to
-  messages that accompany changed progress: replies deliver first, the previous
-  standalone or reply-hosted Tracker is removed, and a partial edit attaches the
-  complete Tracker to the final reply. Added persisted host classification,
-  same-Binding Action serialization, process-local effect dependencies,
-  notification-suppressed standalone creation, exact progress-revision revalidation,
-  and best-effort later-update recovery.
-- **2026-08-31** (spec_version 54) — Added concise `request_input` guidance,
-  delivery-confirmed binding-scoped awaiting state, same-binding human-input and
-  `continue` resume, ready-only idle continuation, awaiting compaction, Slack idle
-  presence, Discord typing suspension, and the version-4 Channel Work migration.
-- **2026-08-29** (spec_version 53) — Added leased Slack channel/thread Work presence,
-  aligned Slack Tracker visibility and promotion with Discord, moved recurring
-  conversation settings onto visible Slack Trackers, and removed settings-only
-  follow-up controls without changing Scheduled Task actions or reply targeting.
-- **2026-08-29** (spec_version 52) — Made unfinished Todo publication promote hidden
-  Discord Work and create its current Tracker, while preserving hidden initial
-  checking, one Tracker identity, typing, Slack, and Scheduled Task behavior.
-- **2026-08-29** (spec_version 51) — Added the existing signed Binding settings action
-  to every visible conversational Discord Tracker create/update, removed the separate
-  Discord follow-up settings-only control, and preserved Slack, joined presence,
-  hidden Work, and Scheduled Task presentation.
-- **2026-08-28** (spec_version 50) — Made Discord conversational Trackers
-  mention-gated per Work cycle, retained hidden canonical progress, and added
-  lease-fenced public-SDK typing for every active Discord conversational Work.
-- **2026-08-20** (spec_version 48) — Made new Discord Thread creation use the
-  connection-owned four-value automatic archive policy while leaving existing and
-  reconciled Threads unchanged.
-- **2026-08-17** (spec_version 47) — Replaced Discord Scheduled Task native edit
-  controls with exact Session Web editor links and added provider-authorized
-  ephemeral cancellation confirmation; Slack and Web destructive copy now use
-  Cancel terminology.
-
-- **2026-08-17** (spec_version 46) — Added Scheduled terminal file delivery through
-  the exact current Binding with the same outbound file validation and Runtime
-  transfer context as `channel_action`.
-
-- **2026-08-17** (spec_version 45) — Made Slack and Discord Scheduled Task
-  registration messages title-first with human-readable schedule and next-run
-  labels while retaining canonical schedule detail and signed controls.
-
-- **2026-08-16** (spec_version 44) — Added commit-first Scheduled registration,
-  progress, exact-thread terminal presentation, and explicit no-replay behavior.
-
-- **2026-08-11** (spec_version 42) — Made silent `ignore` completion delete the
-  selected binding's current Slack or Discord Activity Tracker without a final reply,
-  while retaining `finish` cleanup gating on delivered final replies.
-- **2026-08-11** (spec_version 41) — Reused one authenticated pinned `discord.py`
-  session across each multi-operation Discord delivery effect and moved supported
-  text, thread, message, history, and attachment operations to the isolated private
-  HTTP adapter without changing one-attempt, nonce, validation, or ambiguity
-  semantics.
-- **2026-08-11** (spec_version 40) — Kept authorized `exchange://` Channel
-  publication available without a managed Runtime while retaining Runtime storage
-  admission for absolute Runtime paths and mixed-source calls.
-- **2026-08-09** (spec_version 39) — Exposed `ignore` on every model input boundary,
-  removed continuation binding scope, and made silent active-Work completion
-  independent of recorded task status.
-- **2026-08-05** (spec_version 38) — Suppressed the provider leave-presence
-  control when Session archive terminalizes a binding, while retaining the terminal
-  transition and Activity Tracker cleanup.
-- **2026-08-04** (spec_version 37) — Added continuation-only `ignore`, with
-  tool-follow-up scope retention, atomic unfinished-task rejection, and zero provider
-  effects.
-- **2026-08-04** (spec_version 36) — Removed provider-delivery capability gating. The required service now resolves Runtime readiness only during file-bearing Tool execution.
-- **2026-08-03** (spec_version 35) — Made binding-specific Session-bound Toolkit
-  State the sole Channel Work and current provider-projection authority while
-  preserving commit-before-I/O delivery and cycle/revision settlement fences.
-- **2026-08-03** (spec_version 34) — Added the Run-local adjacent-turn verbosity
-  guard for repeated `channel_action` calls with the same binding and mode.
-- **2026-08-03** (spec_version 33) — Added canonical `View session` controls to
-  initial and updated Slack and Discord Activity Trackers.
-- **2026-08-03** (spec_version 32) — Retained exact provisional-title evidence only
-  for direct Discord thread creation and added one post-title-commit GET plus
-  conditional name-only PATCH with no retry or delivery-attempt ledger.
-- **2026-08-02** (spec_version 31) — Replaced durable Channel Action, delivery
-  attempt, Worker recovery, and lifecycle intent authority with ordinary Tool
-  call/result history, immediate ordered effects, owner-local current projection, and
-  process-local post-commit controls.
-- **2026-08-02** (spec_version 29) — Added direct parent-channel targeting, versioned
-  conversation-settings presence actions, and bounded existing-Binding control
-  reconciliation without history rewrite.
-- **2026-08-01** (spec_version 28) — Replaced the button-only Session link with
-  joined-presence controls and added one leave-presence control to every binding
-  termination path, including post-purge delivery through an in-memory captured
-  target that retains the same durable one-attempt fence.
-- **2026-08-01** (spec_version 27) — Decoupled initial Session-link and progress
-  provider-control outcomes from canonical mailbox promotion, Session wake, and
-  AgentRun creation.
-- **2026-07-31** (spec_version 25) — Required durable Session-link and initial
-  progress intents, removed transient ingress health from outbound REST authority,
-  and derived new Discord thread titles from the routed Agent name.
-- **2026-07-31** (spec_version 24) — Replaced the file key in place with direct
-  provider coordinates and removed Session-event source lookup and legacy key fallback.
-- **2026-07-30** (spec_version 22) — Added Worker-owned bounded provider-control
-  recovery and clarified the claim, provider-I/O, and final-settlement split with
-  same-attempt authority revalidation.
-- **2026-07-29** (spec_version 21) — Moved Discord's retained functional Channel Work
-  Tracker from ordinary message text into one bounded Embed while preserving its
-  durable create, update, replacement, recovery, and cleanup lifecycle.
-- **2026-07-28** (spec_version 20) — Replaced Discord's multi-page Embed Activity
-  Tracker with one bounded retained text message that keeps every ordered task visible,
-  prioritizes useful task context and sources, and clears legacy Embed cards.
-- **2026-07-28** (spec_version 19) — Limited visible Slack and Discord Agent-name prefixes to multi-app connections; single-app delivery now relies on the dedicated App identity.
-- **2026-07-28** (spec_version 18) — Replaced dynamic Channel Work prompt injection with a minimal capability-aware static publication boundary, deferred Channel tools through Tool Search, and kept only unfinished-work continuity in compaction.
-
-- **2026-07-28** (spec_version 17) — Promoted the completed Runtime File Transfer
-  cutover for file-bearing replies: every Runtime source uses a verified-object
-  consumer claim and bounded provider stream, failures before mutation fail closed,
-  and provider mutation is never replayed after start or ambiguity.
-- **2026-07-28** (spec_version 16) — Added reconciliation-fenced Discord initial
-  Session/work delivery and persisted root-thread targeting for all later output.
-- **2026-07-26** (spec_version 15) — Added nonce-fenced Discord approval-control
-  creation and provider-aware post-decision control deletion through the normal
-  delivery ledger.
-- **2026-07-26** (spec_version 14) — Added nonce-fenced Discord message and
-  multipart delivery, ordered bounded progress pages, and conservative
-  classification of rate-limit, rejection, and ambiguous provider outcomes.
-- **2026-07-26** (spec_version 13) — Added the required bold Agent-name prefix for
-  Agent-associated Slack output and capability-aware icon override with safe fallback.
-- **2026-07-26** (spec_version 14) — Replaced Runtime `FileStorage` range-read relay with
-  capability-gated verified-object provider streaming, one Runtime upload per source, batch-held
-  claims, post-provider acknowledgement/settlement, and fail-closed pre-cutover wiring.
-- **2026-07-26** (spec_version 13) — Added the required bold Agent-name prefix for
-  Agent-associated Slack output and capability-aware icon override with safe fallback.
-- **2026-07-25** (spec_version 12) — Added authority-resolved `exchange://` outbound
-  sources, explicit source-kind manifests, post-commit Exchange revalidation, supported
-  source guidance, and form-encoded Slack external-upload completion.
-- **2026-07-23** (spec_version 11) — Added file-bearing `channel_action` replies,
-  pre-commit Runtime manifests and limits, sequential 1 MiB streaming, one ordered Slack
-  completion, and one-attempt failure/ambiguity outcomes.
-- **2026-07-23** (spec_version 10) — Added Agent-authored progress titles, rich provider-neutral task snapshots, Slack-native complete Plan lowering without streaming, and confirmed approval-control rejection classification.
-- **2026-07-23** (spec_version 8) — Removed summary-card progress chrome whenever Todo cards exist so the active Todo exclusively owns the circular indicator.
-- **2026-07-23** (spec_version 7) — Reconciled approval decisions with late control-message delivery so either completion order creates and consumes one idempotent delete intent without lock inversion.
-- **2026-07-23** (spec_version 6) — Separated the one-time Session-link message, switched the Tracker to native read-only task cards, limited work to 49 Todos, made successful final replies delete the Tracker, and restricted replacement to active desired work with race-safe cleanup reconciliation.
-- **2026-07-23** (spec_version 5) — Rendered provider participant identity in approval controls as Slack plain text rather than untrusted mrkdwn.
-- **2026-07-23** (spec_version 4) — Added automatic pre-execution Activity Tracker creation, one-message checking/working/completed transitions, delivered-final-reply completion gating, retained normal completion, confirmed-deletion recreation, and latest-revision replacement reconciliation.
-- **2026-07-23** (spec_version 3) — Added post-decision approval-control deletion and delivery-derived Activity Tracker projection states with canonical task presentation.
-- **2026-07-23** (spec_version 2) — Added Slack Markdown reply payloads, provider-bound length validation, and Block Kit operational/approval delivery with accessible fallback text.
-- **2026-07-22** (spec_version 1) — Promoted direct `channel_action`, binding-scoped Channel Work, commit-before-call delivery, terminal outcomes, one-attempt Slack operations, continuation, and cleanup delivery.
+- [`python/apps/azents/src/azents/services/external_channel/channel_action.py`](../../../../python/apps/azents/src/azents/services/external_channel/channel_action.py)
+- [`python/apps/azents/src/azents/services/external_channel/discord_http.py`](../../../../python/apps/azents/src/azents/services/external_channel/discord_http.py)

@@ -1,96 +1,21 @@
 ---
-title: "Periodic Execution Flow Spec"
+title: "Periodic execution"
 created: 2026-06-20
 tags: [backend, engine, infra]
-spec_type: flow
-code_paths:
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/repos/active_model_capabilities.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/engine/events/model_support_contract.py
-  - python/apps/azents/src/azents/core/agent_errors.py
-  - python/apps/azents/src/azents/core/chat_data.py
-  - python/apps/azents/src/azents/core/chat_projection.py
-  - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/core/session_workspace_paths.py
-  - python/apps/azents/src/azents/repos/chat_operations.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
-  - python/apps/azents/src/azents/repos/model_metadata_operations.py
-  - python/apps/azents/src/azents/scheduler/types.py
-  - python/apps/azents/src/azents/scheduler/registry.py
-  - python/apps/azents/src/azents/scheduler/executor.py
-  - python/apps/azents/src/azents/scheduler/service.py
-  - python/apps/azents/src/azents/scheduler/deps.py
-  - python/apps/azents/src/azents/repos/scheduler_state_operations.py
-  - python/apps/azents/src/azents/scheduler/user_scheduled_task_dispatch.py
-  - python/apps/azents/src/azents/job_runtime/deps.py
-  - python/apps/azents/src/azents/job_runtime/local.py
-  - python/apps/azents/src/azents/job_runtime/registry.py
-  - python/apps/azents/src/azents/job_runtime/types.py
-  - python/apps/azents/src/azents/services/historical_memory/**
-  - python/apps/azents/src/azents/repos/historical_memory/**
-  - python/apps/azents/src/azents/repos/historical_memory_consolidation/**
-  - python/apps/azents/src/azents/rdb/models/historical_memory_execution.py
-  - python/apps/azents/src/azents/worker/run/memory_execution.py
-  - python/apps/azents/src/azents/worker/session/runner.py
-  - python/apps/azents/src/azents/repos/memory_execution_events.py
-  - python/apps/azents/src/azents/repos/session_execution_file.py
-  - python/apps/azents/src/azents/rdb/models/historical_memory.py
-  - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
-  - python/apps/azents/src/azents/services/external_account_link.py
-  - python/apps/azents/src/azents/services/external_account_oauth/service.py
-  - python/apps/azents/src/azents/repos/external_account_link/**
-  - python/apps/azents/src/azents/repos/external_account_oauth/**
-  - python/apps/azents/src/azents/utils/logging.py
-  - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
-  - python/apps/azents/src/azents/rdb/models/agent_avatar_cleanup.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/src/azents/services/archived_session_retention.py
-  - python/apps/azents/src/azents/services/archived_session_purge.py
-  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
-  - python/apps/azents/src/azents/repos/lifecycle_target.py
-  - python/apps/azents/src/azents/repos/session_archive_operations.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
-  - python/apps/azents/src/azents/repos/archived_session_retention_operations.py
-  - python/apps/azents/src/azents/repos/file_lifecycle_cleanup_operations.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
-  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
-  - python/apps/azents/src/azents/repos/external_channel_lifecycle_participant.py
-  - python/apps/azents/src/azents/core/archived_session_purge_data.py
-  - python/apps/azents/src/azents/core/archived_session_retention_data.py
-  - python/apps/azents/src/azents/core/file_lifecycle_cleanup_data.py
-  - python/apps/azents/src/azents/core/session_lifecycle_purge.py
-  - python/apps/azents/src/azents/services/chat/__init__.py
-  - python/apps/azents/src/azents/services/agent_decommission.py
-  - python/apps/azents/src/azents/services/agent_runtime_removal/**
-  - python/apps/azents/src/azents/services/owner_lifecycle.py
-  - python/apps/azents/src/azents/services/llm_catalog/**
-  - python/apps/azents/src/azents/services/model_metadata_projection.py
-  - python/apps/azents/src/azents/repos/archived_session_retention/**
-  - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
-  - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
-  - python/apps/azents/src/azents/rdb/models/scheduled_task_state.py
-  - python/apps/azents/src/azents/rdb/models/scheduled_task.py
-  - python/apps/azents/src/azents/repos/scheduled_task/**
-  - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
-  - python/apps/azents/src/azents/services/scheduled_task/service.py
-  - python/apps/azents/src/azents/services/scheduled_task/management.py
-  - python/apps/azents/src/azents/services/scheduled_task/control.py
-  - python/apps/azents/src/azents/core/scheduled_task_management.py
-  - python/apps/azents/src/azents/core/scheduled_task_control.py
-  - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
-  - python/apps/azents/src/cli/scheduler.py
-  - python/apps/azents/src/cli/devserver.py
-  - python/apps/azents/bin/scheduler.sh
-  - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
-  - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-19
-spec_version: 39
 ---
 
-# Periodic Execution Flow Spec
+# Periodic execution
+
+Scheduler admission for maintenance, Scheduled Tasks and Routine source checks with separate authorities.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Scheduled Tasks](../domain/scheduled-task.md)
+- [Session Routines](../domain/routine.md)
+- [Memory](../domain/memory.md)
+- [Agent deletion](../domain/agent-deletion.md)
 
 Azents periodic execution uses one dedicated Scheduler role for code-registered
 maintenance jobs and for bounded admission of user/agent-facing Scheduled Tasks.
@@ -605,89 +530,11 @@ Empty source sets and ongoing incomplete work do not create new work.
 Testenv-only exact-aware dispatch delegates to the same service and returns
 admission counts; it does not manufacture judgment or completion.
 
-## Changelog
+## References
 
-- 2026-10-19: Support typed task-directed next execution times; align Routine
-  checks with judgment completion while retaining other tasks' fixed delay.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- 2026-10-19: Add source-only Routine dispatch through the ordinary Session inbox;
-  retain Scheduled Task and maintenance-job authorities.
-
-- **2026-10-13** (spec_version 38) — Registered independent five-minute compacted
-  event cleanup with bounded deletion and default Unlimited policy.
-
-- **2026-10-07** (spec_version 37) — Route summary-only integration to common
-  Session Workers; record explicit submission, immutable takeover cutoffs and
-  retained audit, and remove Scheduler-local integration capacity/cleanup.
-
-- **2026-10-07** (spec_version 36) — Generalized the existing archive retention
-  and purge pipeline to common lifecycle roots and singleton internal Sessions.
-
-- **2026-10-06** (spec_version 34) — Distinguished immutable attempt-bounded
-  pre-unit waiting from current renewable-lease admission after acquisition;
-  participant waits preserve independent heartbeat and same-claim DB recovery.
-
-- **2026-10-05** (spec_version 31) — Moved archive retention, purge participant
-  checkpoints/finalization, and file cleanup database lifetimes into completed
-  repository operations, preserving leases, policy snapshots, cursor CAS, and
-  transaction-free external cleanup.
-
-- **2026-10-05** (spec_version 30) — Recorded completed Scheduled claim,
-  admission, management, and provider-control ownership with native read-only
-  inspection and preserved post-commit effect boundaries.
-
-- **2026-10-05** (spec_version 29) — Removed candidate freshness locks from
-  expired OAuth housekeeping while preserving exact claim/consumption authority.
-
-- **2026-10-04** (spec_version 26) — Promoted consolidation discovery/recovery/
-  cleanup and PostgreSQL ownership, preparation12/consolidation2 combined14
-  local capacity and per-replica scaling semantics.
-
-- **2026-10-03** (spec_version 25) — Kept source collection in the existing
-  system projection task while replacing revision publication with current rows,
-  normalized prices, and current synchronization facts.
-- **2026-10-02** (spec_version 24) — Completed Scheduler registration/read/trigger/
-  claim/settlement transaction ownership while preserving clock, lease, Job Runtime,
-  normal stale outcomes, and cancellation/error ordering.
-- **2026-10-02** (spec_version 23) — Added enabled five-minute Historical
-  discovery, bounded rolling admission, and separate coalesced per-Agent
-  preparation with durable recovery and reserved background capacity.
-- **2026-10-01** (spec_version 22) — Removed the temporary integration
-  reprojection task after cleanup validated generic provenance on every current
-  conversation catalog.
-- **2026-10-01** (spec_version 21) — Made the existing system catalog task
-  publish generic metadata authority and added bounded, network-free integration
-  catalog reprojection from stored current entries.
-- **2026-09-13** (spec_version 20) — Replaced legacy origin/candidate proof
-  reclamation with the hourly `external_account_oauth_cleanup` task for retained
-  OAuth attempts.
-
-- **2026-09-12** — v19. Added bounded hourly reclamation of expired external-account
-  proof rows while keeping synchronous expiry checks as correctness authority.
-- **2026-09-06** — v18. Added Runtime Control to local devserver composition and
-  made it ready before Worker dependency resolution.
-- **2026-08-18** — v16. Added durable scheduler-owned cleanup for avatars
-  superseded by committed Agent replacement/removal, plus exact observation of
-  Local Job Runtime handler failures that settle during cancellation grace.
-- **2026-08-31** — v17. Replaced numeric ModelFile GC order ranges with event-ID head
-  and cursor ranges.
-- **2026-08-17** — v15. Removed the shared Job Runtime diagnostics introduced in
-  v13 while preserving the current Scheduled Task dispatcher behavior.
-- **2026-08-17** — v14. Added the code-owned user Scheduled Task dispatcher to the
-  existing Scheduler role while keeping product `scheduled_tasks` and cycle
-  Toolkit State separate from maintenance `scheduled_task_states`.
-- **2026-08-16** — v13. Added the shared Job Runtime's content-free structured
-  handler-failure and stage-specific absolute-deadline diagnostics.
-- **2026-08-15** — v12. Replaced the removed `TaskExecutor` description with the shared
-  Job Runtime execution path, completed the registered task inventory, and added current Job Runtime
-  and lifecycle-service authority paths. Removed obsolete ArgoCD manifest references.
-- **2026-07-24** — v10. Clarified that lifecycle cleanup treats typed file provenance and nullable
-  unresolved ModelFile Run lineage as metadata, never as User or execution authority.
-- **2026-07-26** — v11. Added the bounded five-minute `session_auto_archive` task and its
-  lock-and-recheck eligibility behavior.
-- **2026-07-23** — v9. Made existing Git worktree participant retries database-only so they converge without Runtime availability.
-- **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.
-- **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.
-- **2026-07-21** — v6. Isolated per-root purge failures so a bounded scheduler pass logs and retries the failed root before continuing with later due roots.
-- **2026-07-21** — v7. Added durable Agent decommission scheduling with retention-purge and Runtime-acknowledgement finalization gates.
-- **2026-07-22** — v8. Kept participant snapshot validation failures inside per-root retry isolation while leaving database transaction failures at the scheduler boundary.
+- [`python/apps/azents/src/azents/scheduler`](../../../../python/apps/azents/src/azents/scheduler)
+- [`python/apps/azents/src/azents/job_runtime`](../../../../python/apps/azents/src/azents/job_runtime)
+- [`python/apps/azents/src/azents/services/file_lifecycle_cleanup.py`](../../../../python/apps/azents/src/azents/services/file_lifecycle_cleanup.py)

@@ -1,136 +1,24 @@
 ---
-title: "External Channel"
+title: "External Channels"
 created: 2026-07-22
 tags: [backend, frontend, external-channel, slack, discord, security]
-spec_type: domain
-domain: external-channel
-owner: "@Hardtack"
-code_paths:
-  - python/apps/azents/src/azents/core/external_channel_impact.py
-  - python/apps/azents/src/azents/core/external_channel_limits.py
-  - python/apps/azents/src/azents/core/external_channel_labels.py
-  - python/apps/azents/src/azents/core/external_channel_management.py
-  - python/apps/azents/src/azents/core/external_channel_management_errors.py
-  - python/apps/azents/src/azents/core/agent_automatic_project.py
-  - python/apps/azents/src/azents/core/exchange_file_errors.py
-  - python/apps/azents/src/azents/core/external_channel_access.py
-  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
-  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
-  - python/apps/azents/src/azents/core/external_channel_discord_selector_scope.py
-  - python/apps/azents/src/azents/core/external_channel_ingestion.py
-  - python/apps/azents/src/azents/core/external_channel_mailbox_payload.py
-  - python/apps/azents/src/azents/core/external_channel_participation_state.py
-  - python/apps/azents/src/azents/core/external_channel_selector_state.py
-  - python/apps/azents/src/azents/core/root_agent_session_creation.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
-  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
-  - python/apps/azents/src/azents/repos/external_channel/slack_presence_operations.py
-  - python/apps/azents/src/azents/repos/external_channel/slack_socket_operations.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
-  - python/apps/azents/src/azents/repos/user_stop.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/e4cd231524e4_add_setup_claim_preparation_ownership.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/43a0fbdc96fe_retire_external_channel_inbound_file_.py
-  - python/apps/azents/src/azents/core/external_account_link.py
-  - python/apps/azents/src/azents/core/external_account_oauth.py
-  - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
-  - python/apps/azents/src/azents/core/external_model_settings.py
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/core/external_channel.py
-  - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
-  - python/apps/azents/src/azents/core/external_channel_file.py
-  - python/apps/azents/src/azents/core/external_channel_projection.py
-  - python/apps/azents/src/azents/core/external_channel_progress.py
-  - python/apps/azents/src/azents/core/external_channel_reference.py
-  - python/apps/azents/src/azents/core/external_channel_session_presence.py
-  - python/apps/azents/src/azents/core/external_channel_title.py
-  - python/apps/azents/src/azents/core/external_channel_provider.py
-  - python/apps/azents/src/azents/core/external_channel_provider_effect.py
-  - python/apps/azents/src/azents/core/slack_external_channel_progress.py
-  - python/apps/azents/src/azents/core/enums.py
-  - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
-  - python/apps/azents/src/azents/rdb/models/external_channel.py
-  - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
-  - python/apps/azents/src/azents/rdb/models/external_account_link.py
-  - python/apps/azents/src/azents/rdb/models/external_account_oauth.py
-  - python/apps/azents/src/azents/rdb/models/external_model_settings.py
-  - python/apps/azents/src/azents/repos/external_account_link/**
-  - python/apps/azents/src/azents/repos/external_account_oauth/**
-  - python/apps/azents/src/azents/repos/external_channel/**
-  - python/apps/azents/src/azents/repos/active_model_capabilities.py
-  - python/apps/azents/src/azents/repos/external_channel/connection.py
-  - python/apps/azents/src/azents/services/external_channel/**
-  - python/apps/azents/src/azents/services/external_account_link.py
-  - python/apps/azents/src/azents/services/external_account_oauth/**
-  - python/apps/azents/src/azents/services/external_account_oauth_system_setting/**
-  - python/apps/azents/src/azents/services/external_channel/connection.py
-  - python/apps/azents/src/azents/job_runtime/**
-  - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
-  - python/apps/azents/src/azents/cli/external_channel_ingress.py
-  - python/apps/azents/src/azents/services/session_title.py
-  - python/apps/azents/src/azents/services/scheduled_task/channel.py
-  - python/apps/azents/src/azents/repos/scheduled_task_cycle/progress.py
-  - python/apps/azents/src/azents/repos/scheduled_task_cycle/progress_data.py
-  - python/apps/azents/src/azents/broker/types.py
-  - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/repos/agent_automatic_project/**
-  - python/apps/azents/src/azents/api/public/external_channel/**
-  - python/apps/azents/specs/public/openapi.json
-  - python/libs/azents-public-client/src/azentspublicclient/api/external_channel_v1_api.py
-  - python/libs/azents-public-client/src/azentspublicclient/models/account_link_*.py
-  - python/libs/azents-public-client/src/azentspublicclient/models/external_account_link_*.py
-  - python/libs/azents-public-client/src/azentspublicclient/models/external_channel_*.py
-  - python/libs/azents-public-client/src/azentspublicclient/models/managed_*.py
-  - typescript/apps/azents-web/src/features/external-channel-approval/**
-  - typescript/apps/azents-web/src/features/external-channel-management/**
-  - typescript/apps/azents-web/src/features/external-channel-workspace/**
-  - typescript/apps/azents-web/src/features/session-channels/**
-  - typescript/apps/azents-web/src/features/external-account-links/**
-  - typescript/apps/azents-web/src/app/(app)/account/external-accounts/**
-  - typescript/apps/azents-web/src/app/(app)/oauth/external-account/**
-  - typescript/apps/azents-web/src/shared/lib/discord-thread-auto-archive-duration*
-  - typescript/apps/azents-web/src/app/(app)/w/[handle]/(workspace)/integrations/slack/**
-  - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
-  - typescript/apps/azents-web/src/shared/components/AccountSidebar.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ExternalChannelMessage.tsx
-  - typescript/apps/azents-web/src/features/chat/externalChannelMessage.ts
-  - typescript/apps/azents-web/src/trpc/account-link-error.ts
-  - typescript/apps/azents-web/src/trpc/routers/externalChannel.ts
-  - typescript/apps/azents-web/src/trpc/routers/account-links.ts
-api_routes:
-  - /external-channel/v1/account-links
-  - /external-channel/v1/account-links/providers
-  - /external-channel/v1/account-links/oauth/{provider}/start
-  - /external-channel/v1/account-links/oauth/{provider}/exchange
-  - /external-channel/v1/account-links/{link_id}
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord/url-preview-suppression
-  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi
-  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
-  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi
-  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
-  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/url-preview-suppression
-  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
-  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
-  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{interaction_id}
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
-  - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-10-27
-spec_version: 90
 ---
 
-# External Channel
+# External Channels
+
+Connections, routes, resources, bindings and Session Primary ownership for Slack and Discord.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [External Channel ingress](../flow/external-channel-provider-ingress.md)
+- [External Channel authorization](../flow/external-channel-authorization.md)
+- [External Channel delivery](../flow/external-channel-delivery.md)
+- [External Channel lifecycle](../flow/external-channel-lifecycle.md)
+- [Agent](agent.md)
+- [Workspaces and membership](workspace.md)
+- [Conversations and events](conversation.md)
 
 ## Overview
 
@@ -737,276 +625,123 @@ invalid, disconnected or failed Primary is failure evidence, not authority for
 fallback, uncertain replay or a second copy. Routine completion does not finish
 ordinary External Channel Work or add a destination selector.
 
-## Changelog
+## Agent connection ownership
 
-- **2026-10-27** (spec_version 90) — Validate Discord reply content and supported
-  file combinations before provisioning a delivery thread.
+Agent administrators own the Single App management surface for their Agent. A Single
+App has exactly one route to that Agent and exposes setup guidance, health,
+validation, complete credential replacement, grants/blocks, and terminal disconnect.
+Removing the association disconnects the App; it never converts the connection into
+a Multi App.
 
-- **2026-10-27** (spec_version 89) — Corrected the Slack management handoff
-  route's interaction identifier parameter.
+Workspace-owned Multi Apps can also include the Agent, but their catalog and
+connection lifecycle are not Agent-admin mutations. Agent settings show those
+associations as read-only context and direct operators to Workspace integrations.
+Agent visibility does not grant Workspace External Channel permissions.
 
-- **2026-10-26** (spec_version 88) — Added claim-owned first-Discord-mention
-  preparation metadata, bounded recovery, attachment-count preservation, terminal
-  diagnostics and atomic control-dispatch reservation with final authority checks.
+Provider participants use External Channel principal authorization rather than an
+AgentAdmin identity. They may complete initial Agent/location setup or mutate a safely
+scoped parent/thread conversation setting through provider-native controls. Shared
+repository mutation units preserve the distinct provider-principal and Web User actor
+provenance; no synthetic User or AgentAdmin bypass is created.
 
-- 2026-10-19: Document Session Primary authority and independent Routine
-  notification, including no-fallback/no-retry delivery.
+## Workspace connection management
 
-- **2026-10-07** (spec_version 86) — Base Discord Tracker relocation on ordered task
-  titles independently of reply presence, retaining hosts for status and metadata edits.
+Workspace is the Web management authority for Slack and Discord Multi Apps. Owners and Managers can
+list, create, inspect, validate, edit, and disconnect Multi Apps; manage their
+available/removed Agent catalog; preview destructive impact; and replace or clear
+channel defaults. Members cannot read or mutate this surface. These permissions are
+independent from AgentAdmin, which owns only Single App management.
 
-- **2026-10-05** (spec_version 85) — Completed Slack presence/Socket lease
-  repository operations, preserving lease fencing, CAS and health bookkeeping
-  before SDK and ingestion effects.
+A Multi App can be created with zero Agents. Agent associations are many-to-many:
+one Multi App may expose several Workspace Agents and one Agent may appear in several
+Apps. App mode is immutable, route addition/re-enable remains rollout-gated, and
+destructive route/default/App mutations use the current connection generation.
+Disconnected Multi Apps remain readable history but are not mutable.
 
-- **2026-10-05** (spec_version 85) — Reconciled code-path discovery with current
-  defining modules; system behavior is unchanged.
+Discord Multi App setup defaults its connection-wide new-Thread automatic archive
+duration to one day and offers exactly one hour, one day, three days, or seven days.
+Owners and Managers may replace this non-secret policy with the current management
+generation without replacing credentials or resetting callback, Gateway, identity,
+capability, or health authority. The Select has no helper copy, and disconnected
+history remains read-only.
 
-- **2026-10-05** (spec_version 84) — Separated plain Work descriptions/private CAS and short effect-owner admission from critical finalization; made bounded OAuth cleanup and interaction projection/mode metadata writes independent of read gates.
+A provider participant may establish the first channel default only through the
+provider-native selector and only from routes that principal may currently invoke.
+That default stores provider-principal provenance; Web mutations store the authenticated
+Workspace User provenance. Replacing or clearing a default atomically invalidates the
+old participation setting and pending setup claim, disconnects only the old parent
+Binding, and preserves every established thread Binding and Session. Impact previews
+and mutation responses expose the participation-setting and parent-Binding counts.
 
-- **2026-10-03** (spec_version 82) — Required running execution for Discord typing,
-  separating retained Channel Work from actual Run activity.
+Azents Web exposes Multi management under Workspace integrations. Agent settings
+show Multi associations only as read-only context. An opaque Slack management
+handoff can open the current channel in the Workspace surface, but the Web request
+must authenticate a current Owner or Manager and revalidate handoff expiry and scope
+before reading or replacing the default.
 
-- **2026-09-30** (spec_version 81) — Aligned provider ingress with shared 128 MiB
-  eligibility and direct Runner GET/PUT, retaining trusted staging and outbound policy.
+## Session Primary binding authority
 
-- **2026-09-14** (spec_version 80) — Omitted unavailable provider controls and
-  explanatory status text from normal end-user account-linking surfaces while
-  retaining recovery results for already-started OAuth flows.
+The common Session has a nullable `primary_channel_binding_id`, distinct from a
+Conversation's team-primary kind. A channel-created Session designates its
+originating connected Binding in the connection owner transaction. Exact Binding
+disconnect clears that reference atomically; physical Binding deletion clears it
+through the foreign key. Primary resolution revalidates Session, Agent, route,
+connection and resource ownership. An invalid retained reference is an error,
+not permission to choose another destination. Existing-Binding backfill preserves
+connections, designates only an unambiguous connected owner and rejects multiple
+or incompatible candidates before mutation. Primary does not impose one Binding
+per Session and does not add a public mutation interface.
 
-- **2026-09-13** (spec_version 79) — Replaced the Workspace-scoped browser-code
-  proof flow with authenticated Slack/Discord OAuth attempts, platform-wide link
-  management, direct native Web actions, provider availability, and the legacy
-  origin/candidate removal boundary.
+## Conversation event projection
 
-- **2026-09-12** (spec_version 78) — Kept confirmation exit recovery available
-  throughout elevation and projected provider scope changes as a typed terminal
-  return-to-provider state.
-- **2026-09-12** (spec_version 77) — Added optional Workspace external-account
-  linking, immutable two-sided proof, private native model drafts, generation-fenced
-  shared Apply, personal web management, and guest/execution-identity preservation.
-- **2026-09-12** (spec_version 76) — Fenced direct Channel Work commit,
-  provider admission, awaiting-input and effect settlement, and Discord delivery
-  recording by the executing Session owner generation.
-- **2026-09-08** (spec_version 75) — Moved External Channel connection creation,
-  Workspace-scoped configuration reads, and generation-fenced health persistence to
-  completed repository operations while preserving provider validation outside database
-  transactions.
-- **2026-09-08** (spec_version 74) — Moved Scheduled progress provider/Runtime
-  effects outside database transactions through completed preparation, admission,
-  and desired-revision-fenced settlement operations without adding replay or
-  cross-I/O locking.
-- **2026-09-07** (spec_version 73) — Added connection-level Discord automatic
-  URL-preview suppression for Single and Multi Apps, defaulted it on for existing and
-  new connections, kept it out of Session and binding state, and exposed credential-free
-  configuration-only updates.
-- **2026-09-07** (spec_version 72) — Kept message-free Discord task changes on the
-  current Tracker host, preserved silent standalone relocation for task changes that
-  accompany a message, and retained missing-host creation.
-- **2026-09-07** (spec_version 71) — Made complete ordered task changes the sole
-  Discord Tracker relocation trigger, recreated changed-task Trackers as silent
-  standalone messages after current-host removal, and retained current host position
-  for identical-task and title-only updates.
-- **2026-09-06** (spec_version 70) — Corrected the current Channel Work state and
-  nested desired-progress schema versions and completed the projection-part field
-  summary with ordered identity and Tracker host kind.
-- **2026-09-05** (spec_version 69) — Added standalone-versus-reply Tracker host
-  ownership to Channel Work projection parts so Discord can move one conversational
-  Tracker without deleting reply content.
-- **2026-09-01** (spec_version 68) — Added the schema-v4 awaiting Run identity to
-  the domain model, aligned hidden-Work promotion with both progress-update modes,
-  excluded awaiting Work from Discord typing, and recorded bounded fresh-client
-  recovery after a continuous unready interval.
-- **2026-08-31** (spec_version 67) — Added version-4 binding-scoped awaiting input,
-  delivery-confirmed `request_input`, same-binding resume authority, ready-only
-  continuation, and idle Slack/Discord processing presence while retaining Trackers.
-- **2026-08-29** (spec_version 66) — Added configuration-fenced Slack Work presence
-  leases and canonical channel/thread status coordinates, made ordinary Slack
-  all-messages Work Tracker-hidden like Discord, placed signed settings access on
-  visible conversational Trackers, and removed the Slack settings-only follow-up.
-- **2026-08-29** (spec_version 65) — Made Agent-authored unfinished Todo publication
-  promote hidden Discord Work to one visible Activity Tracker while retaining
-  lightweight initial checking and monotonic explicit-mention promotion.
-- **2026-08-28** (spec_version 64) — Added cycle-scoped mention-gated Discord
-  Activity Tracker visibility and lease-fenced active-Work typing reconciliation on
-  the existing Gateway Client while preserving Slack and Scheduled Task presentation.
-- **2026-08-20** (spec_version 63) — Added the connection-owned Discord Thread
-  automatic archive duration, one-day migration/default, and non-secret Single/Multi
-  policy updates that preserve active connection authority.
-- **2026-08-16** (spec_version 62) — Added exact opaque Scheduled Task Binding
-  authority, signed provider controls, and Scheduled-owned provider projection
-  state distinct from Channel Work.
+An authorized External Channel ingress batch admits each canonical provider message as
+one independent `external_channel_message` mailbox row. Rows from one processing
+batch share one order group and use contiguous sequence values in queue and provider-history
+order. The ingress finalization transaction atomically advances the conversation position,
+commits the mailbox rows, and makes the Session runnable. Promotion consumes each FIFO row
+into one `external_channel_message` event. Provider-control delivery has no promotion gate.
 
-- **2026-08-14** (spec_version 61) — Corrected Discord Thread isolation to include
-  independent participation: an unbound Thread requires its own explicit invocation,
-  and parent `all_messages` authority applies only after the Thread owns a Binding.
-- **2026-08-14** (spec_version 60) — Kept every existing Discord Thread as an
-  independent conversation even when the parent participation location is `channel`;
-  new Thread Bindings inherit the parent route and response mode, and `all_messages`
-  may admit the first eligible ordinary Thread message.
-- **2026-08-13** (spec_version 59) — Retained the bounded live-callback file count in
-  content-free ingress items and treated a provider-history trigger snapshot with
-  fewer files as a temporary failure so Slack and Discord attachment races reuse the
-  existing queue retry policy.
-- **2026-08-11** (spec_version 58) — Distinguished provider-native explicit
-  invocation evidence from canonical prompt role: every active admitted item's exact
-  human trigger correlates to `prompt_role=invocation`, including connected
-  `all_messages` ordinary traffic, while unrelated retained history remains context.
-- **2026-08-11** (spec_version 57) — Made `channel_action ignore` delete the
-  requested binding's current Activity Tracker without a final reply while preserving
-  `finish` reply-delivery gating and existing best-effort provider outcomes.
-- **2026-08-11** (spec_version 56) — Reused one authenticated pinned `discord.py`
-  Client session across caller-owned Discord REST workflows and isolated supported
-  private HTTP calls behind signature-checked typed payload validation while retaining
-  the existing direct-transport gaps and public Gateway lifecycle.
-- **2026-08-10** (spec_version 55) — Clarified that every new Binding requires an
-  explicit invocation and that `all_messages` authorizes only ordinary continuation on
-  an existing connected Binding.
-- **2026-08-10** (spec_version 54) — Generalized active ingress from
-  Session-keyed drains to effective-conversation owners with source/target Resource
-  separation, nullable Binding/Session readiness, Discord thread-before-Session
-  preparation, bounded owner failure, and owner-scoped recovery.
-- **2026-08-10** (spec_version 53) — Added active PostgreSQL ingress Session/item
-  authority, first-one/later-ten draining, independent per-message mailbox rows,
-  `prompt_role`, retry-tail/cursor-CAS recovery, one post-batch wake, and bounded
-  diagnostics while removing synchronous callback processing and legacy batch-shaped
-  mailbox authority.
-- **2026-08-09** (spec_version 52) — Classified Discord current-Application
-  Interaction Endpoint configuration as a narrow direct-transport gap until the
-  adopted public SDK can transmit the endpoint field correctly.
-- **2026-08-09** (spec_version 51) — Made silent Channel Work completion available
-  for ordinary, initial, continuation, and mixed input through normal binding
-  authority, without an unfinished-task veto.
-- **2026-08-05** (spec_version 50) — Added Azents-owned typed Slack and Discord
-  projection decoding at durable JSON boundaries while retaining request-local signed
-  bodies and public SDK object ownership.
-- **2026-08-04** (spec_version 49) — Removed `expected_size_bytes` and provider
-  metadata-size gating from Slack and Discord downloads. The authenticated final URL
-  `Content-Length` now exclusively declares transfer size and must match the streamed
-  body exactly.
-- **2026-08-04** (spec_version 48) — Added continuation-scoped binding authority for
-  silent Channel Work completion that rejects unfinished tasks and produces no
-  provider effect.
-- **2026-08-04** (spec_version 47) — Distinguished required Runtime transfer services from provider connection capabilities and moved Runtime readiness resolution to Tool execution.
-- **2026-08-03** (spec_version 46) — Moved binding-specific Channel Work and its
-  ordered current provider projection parts into one Session-bound Toolkit State
-  payload with independent whole-state optimistic concurrency and a stable work-cycle
-  identity.
-- **2026-08-03** (spec_version 45) — Preserved raw Slack and Discord user/channel
-  references in model input and moved resolved names into a shared XML mapping appendix.
-- **2026-08-03** (spec_version 44) — Added canonical `View session` navigation to
-  every initial and updated Slack and Discord Activity Tracker without persisting
-  URLs or changing Work projection ownership.
-- **2026-08-03** (spec_version 43) — Applied saved lightweight-model title output modes and
-  prompt-only invocation-markup guidance to External Channel creation without mutating canonical
-  provider evidence or Discord projection ownership.
-- **2026-08-03** (spec_version 42) — Added creation-bound one-shot automatic Session
-  title eligibility and direct-created Discord provisional-title evidence, followed
-  by one non-blocking post-title-commit GET and conditional PATCH with no recovery
-  state.
-- **2026-08-02** (spec_version 41) — Made normal Session Tool history the sole
-  Agent-requested publication history, replaced non-Tool delivery work with
-  process-local direct controls, and retained only owner-local current provider
-  projection state.
-- **2026-08-02** (spec_version 40) — Removed the deployment participation gate and
-  made first-mention setup, participation settings, parent-channel Resources, and
-  provider settings controls unconditional canonical behavior.
-- **2026-08-02** (spec_version 39) — Added provider-channel participation settings,
-  latest-source setup claims, explicit parent-channel Resources, setup continuation,
-  provider-native settings controls, selected-Agent lifecycle coupling, and direct
-  parent delivery without eager Binding or Session creation.
-- **2026-08-01** (spec_version 38) — Added Agent defaults and concrete binding
-  response modes, creation-time copy semantics, connected-only management, and
-  `all_messages` compatibility for existing data.
-- **2026-08-01** (spec_version 37) — Replaced the initial button-only Session
-  navigation control with joined-presence copy and added leave-presence delivery to
-  binding termination while retaining the canonical Session link.
-- **2026-08-01** (spec_version 36) — Made the conversation position the sole
-  duplicate-prevention authority and made Session-link and progress delivery
-  independent from canonical mailbox acceptance, Session wake, and Agent execution.
-- **2026-07-31** (spec_version 35) — Corrected Slack Bot User identity persistence
-  to `auth.test.user_id` and recognized authenticated callback Bot User mentions when
-  Slack delivers a human mention as a normal message event.
-- **2026-07-31** (spec_version 34) — Added the dedicated External Channel
-  continuation contract across runtime, persistence, model lowering, API, and UI.
-- **2026-07-31** (spec_version 32) — Made `disconnected_at` the only binding
-  connectedness authority, added canonical `/w` Session navigation, and removed
-  transient ingress health from outbound REST authority.
-- **2026-07-31** (spec_version 31) — Unified Slack Socket Mode and Discord Gateway
-  ownership in one provider-neutral External Channel Gateway runtime and removed
-  persistent transport ownership from general Agent Workers.
-- **2026-07-31** (spec_version 30) — Replaced provider message/revision,
-  conversation-admission, invocation-batch, provisioning, and wake-dispatch ownership
-  with content-free interaction/access replay boundaries and one canonical mailbox
-  item; changed file keys to carry direct provider coordinates.
-- **2026-07-31** (spec_version 29) — Delegated Slack Socket endpoint acquisition,
-  stale recovery, queue dispatch, and reconnect to the SDK; projected Slack and
-  Discord typed lifecycle evidence through fenced health transitions; and made
-  unexpected Slack Socket manager completion terminate Worker supervision.
-- **2026-07-30** (spec_version 28) — Raised verified inbound attachment eligibility to
-  500 MiB and retained provider bytes only in trusted verified staging. Caller-selected
-  and provider metadata-size agreement from this version was removed by spec_version
-  49.
+Each event retains provider, resource/binding, canonical message and revision,
+sender, author type, provider timestamp, `prompt_role = context | invocation`, lifecycle, and
+nullable validated original URL. Revisions may additionally retain bounded
+provider ID-to-display-name mappings; model lowering preserves raw IDs and
+renders the batch mapping table after the source messages. It is distinct from `user_message`: the
+external participant is not the current Azents Web user. Live and durable
+projections use the same semantic identity so durable history replaces live
+state without duplicate timeline rows.
 
-- **2026-07-30** (spec_version 27) — Removed bot-trigger policy and inbound
-  edit/delete correction behavior, made pending admission metadata-only and
-  human-triggered, retained other visible author classes as history context, and
-  documented safe Discord embed projection. Slack history identity enrichment resolves
-  retained message senders even when their IDs do not appear in message bodies.
-- **2026-07-30** (spec_version 26) — Replaced durable provider events,
-  hydration/pending-context activation, and truncation projections with typed
-  synchronous ingestion and provider-history content authority. The later
-  `provider-260731` replacement removed the intermediate batch and wake owners.
-- **2026-07-29** (spec_version 25) — Moved Discord's retained functional Channel Work
-  Tracker into one bounded Embed without duplicating its body as ordinary message
-  content.
-- **2026-07-29** (spec_version 24) — Delegated Slack Socket Mode WebSocket transport
-  mechanics to the public aiohttp SDK client while retaining Azents-owned lease,
-  admission-before-acknowledgement, endpoint lifecycle policy, and reconnect decisions.
-- **2026-07-28** (spec_version 23) — Aligned the provider boundary with high-level
-  Slack Web API methods and SDK typed Socket envelopes while retaining Azents-owned
-  Socket lifecycle, documented the single-message compact Discord Tracker, and made
-  admitted-event processing resilient to transient iteration failures.
-- **2026-07-28** (spec_version 22) — Promoted Runtime File Transfer as the current
-  inbound/outbound file boundary: metadata-only durable state, authorized
-  provider-to-Runtime staging, verified Runtime-to-provider publication, and no
-  transfer-object authority outside trusted services.
-- **2026-07-28** (spec_version 21) — Replaced custom Discord Gateway transport
-  state with high-level typed `discord.py` callbacks, SDK-owned reconnect/Resume,
-  provider-event idempotency, and lease-fenced canonical admission.
-- **2026-07-28** (spec_version 20) — Added bounded Discord root/thread hydration,
-  reconciliation-fenced activation, durable provisioned delivery-thread retention,
-  and provider-correct Discord Multi management across public and Workspace surfaces.
-- **2026-07-27** (spec_version 19) — Added route-scoped open human access and
-  external-bot admission controls, with rejected authors excluded from releasable
-  pending context and connected-bot loop prevention preserved.
-- **2026-07-26** (spec_version 18) — Removed the Discord rollout gate, made the
-  Gateway Worker part of every Server deployment, and specified provisional fenced
-  callback authority so Discord's immediate PING verification can succeed without
-  authorizing ordinary interactions.
-- **2026-07-26** (spec_version 17) — Promoted Discord as a supported External
-  Channel provider with customer-owned Single/Multi Apps, signed callback and
-  Gateway authority, provider-safe attachment retrieval, rollout gating, and
-  production-versus-deterministic-test endpoint boundaries.
-- **2026-07-26** (spec_version 16) — Added immutable Single/Multi App modes,
-  mode-aware route cardinality and resolution, durable selector/default state,
-  Workspace Multi management, generation fences, and read-only disconnected history.
-- **2026-07-24** (spec_version 15) — Defined provider-principal provenance as distinct from
-  Userless Team Session execution and made External Channel wake-ups routing-only.
-- **2026-07-24** (spec_version 14) — Added automatic Project policy snapshotting for
-  new External Channel binding Sessions and immutable snapshot reuse for existing
-  bindings.
-- **2026-07-23** (spec_version 13) — Added metadata-only provider files, binding-scoped
-  locators, independent file capabilities, Runtime transfer manifests, and the
-  no-durable-file-body boundary.
-- **2026-07-23** (spec_version 12) — Added provider-neutral titled Channel Work with rich typed tasks and failed state, Slack-native complete Plan rendering, typed management/UI projection, and visible-only Slack reference resolution.
-- **2026-07-23** (spec_version 10) — Made approval-control delivery and access decisions converge in either completion order on one idempotent post-decision delete intent.
-- **2026-07-23** (spec_version 9) — Separated raw Slack block normalization from trusted Azents admission projections so provider-supplied `normalized_text` cannot bypass supported-block traversal.
-- **2026-07-23** (spec_version 8) — Separated one-time Session navigation from native task-card Activity Trackers, limited work cycles to 49 Todos, deleted Trackers after delivered final answers, and restricted replacement to active desired work.
-- **2026-07-23** (spec_version 7) — Added work-cycle-owned Activity Tracker identity, pre-execution creation, retained delivered-answer completion, confirmed-deletion replacement, and current-work projection scoping.
-- **2026-07-23** (spec_version 6) — Added bounded Block Kit fallback normalization, durable approval-control deletion, hard grant removal, delivery-derived Activity Tracker state, complete provider identities, in-product confirmations, and narrow-screen presentation behavior.
-- **2026-07-23** (spec_version 5) — Added immutable bounded Slack reference mappings, readable external-message presentation, and connected-app self-message exclusion while retaining canonical provider IDs and bodies.
-- **2026-07-23** (spec_version 4) — Removed route lifecycle state from persistence, routing, management responses, and UI. Connection health, Agent lifecycle, and binding/work/resource state now own their respective admission and termination decisions.
-- **2026-07-22** (spec_version 3) — Separated provider health from Agent route lifecycle, fenced stale validation results, and required Slack conversation metadata scopes.
-- **2026-07-22** (spec_version 2) — Added copy-ready Slack App setup guidance, App/Token ownership validation, complete connection replacement, unconditional idempotent disconnect, and active-list filtering for disconnected connections.
-- **2026-07-22** (spec_version 1) — Promoted the External Channel ownership model, persistence graph, management API, security boundaries, Slack-first provider scope, and Session binding contract.
+Edits and deletes do not rewrite a revision already projected into Session
+history. A later authorized release may append a source-attributed correction.
+Provider history remains outside Conversation persistence; the source-attributed
+Event snapshots and other Session-owned projection state follow the AgentSession
+lifecycle.
+
+## API route entrypoints
+
+- `/external-channel/v1/account-links`
+- `/external-channel/v1/account-links/oauth/{provider}/exchange`
+- `/external-channel/v1/account-links/oauth/{provider}/start`
+- `/external-channel/v1/account-links/providers`
+- `/external-channel/v1/account-links/{link_id}`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord/url-preview-suppression`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode`
+- `/external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents`
+- `/external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/url-preview-suppression`
+- `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{interaction_id}`
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/external_channel`](../../../../python/apps/azents/src/azents/services/external_channel)
+- [`python/apps/azents/src/azents/repos/external_channel`](../../../../python/apps/azents/src/azents/repos/external_channel)
+- [`python/apps/azents/src/azents/core/external_channel.py`](../../../../python/apps/azents/src/azents/core/external_channel.py)

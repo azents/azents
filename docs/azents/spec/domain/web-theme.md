@@ -1,25 +1,20 @@
 ---
-title: "Main Web Theme and Contrast"
+title: "Web theme and contrast"
 created: 2026-10-22
-updated: 2026-10-23
 tags: [web, theme, accessibility, contrast]
-spec_type: domain
-domain: web-theme
-code_paths:
-  - typescript/apps/azents-web/src/shared/theme.ts
-  - typescript/apps/azents-web/src/shared/theme.module.css
-  - typescript/apps/azents-web/src/shared/providers/mantine.tsx
-  - typescript/apps/azents-web/src/shared/ThemeContrast.stories.tsx
-  - typescript/apps/azents-web/src/shared/storybook/contrast.ts
-  - typescript/apps/azents-web/src/features/chat/components/ChatHumanMessageBody.stories.tsx
-  - typescript/apps/azents-web/src/features/workspace/components/WorkspaceHome.module.css
-  - typescript/apps/azents-web/src/shared/toolkits/components/GoogleSetup.stories.tsx
-  - scripts/ci/component_portfolio.py
-last_verified_at: 2026-10-23
-spec_version: 1
 ---
 
-# Main Web Theme and Contrast
+# Web theme and contrast
+
+Main Web semantic colors, contrast and shared Storybook rendering contracts.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Conversations and events](conversation.md)
+- [Chat resynchronization](../flow/chat-session-resync.md)
+- [Testing and CI](../flow/test-strategy-e2e-primary.md)
 
 Main Web and its Storybook use the same `AppMantineProvider`, theme, and semantic
 CSS-variable resolver. The primary monochrome fill uses shade 9 in light mode
@@ -84,3 +79,11 @@ enabled. Explicit caller override fixtures instead verify preservation.
 This is shared-control regression protection, not a claim that every possible
 custom color, translucent background, media surface, or existing product screen
 has completed an accessibility audit.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`typescript/apps/azents-web/src/shared/theme.ts`](../../../../typescript/apps/azents-web/src/shared/theme.ts)
+- [`typescript/apps/azents-web/src/shared/providers/mantine.tsx`](../../../../typescript/apps/azents-web/src/shared/providers/mantine.tsx)

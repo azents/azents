@@ -1,23 +1,26 @@
 ---
 title: "azents documentation structure"
 created: 2026-02-25
-updated: 2026-10-02
+updated: 2026-11-04
 tags: [documentation, process]
 ---
 # azents Documentation Structure
 
 This directory contains all azents project documentation.
 
-## Living Spec Overview
+## Spec Wiki and Reference Documents
 
 Azents is an AI agent platform, so much of the system behavior lives outside the public API contract: runtime decisions, memory policy, tool selection, and similar behavior cannot be fully described by OpenAPI alone. The project therefore uses a four-layer documentation model.
 
 - **Requirements** (`requirements/`) — confirmed user or system outcomes for one development snapshot.
 - **ADR** (`adr/`) — why a material architecture or product-contract decision was made. Append-only decision log.
 - **Design** (`design/`) — how the system was designed to satisfy the Requirements and ADR decisions at development time.
-- **SPEC.md** (`spec/domain/`, `spec/flow/`) — how the current system actually behaves. These are living documents linked to code through `code_paths`.
+- **Spec Wiki** (`spec/`) — connected pages describing how the current system behaves.
 
-SPEC documents use the `code_paths` frontmatter field to link the spec to source files. When code changes, update the related spec's `last_verified_at` so drift can be detected.
+Only `spec/` is the LLM Wiki. Requirements, ADRs, Designs, implementation and tests
+remain references outside it. Begin at [the wiki index](spec/index.md) and follow
+the [wiki maintenance guide](spec/AGENTS.md) for ingest, query and semantic lint.
+References support claims; they are not exhaustive coverage declarations.
 
 Automation tool: `/spec-review`.
 
@@ -34,8 +37,7 @@ Requirements, ADR, and design documents use their location and content as their 
 | --- | --- | --- | --- |
 | `requirements/` | Confirmed user needs, scope, constraints, and acceptance criteria for one development snapshot. | `slack-260721-channel-agent-conversation.md` | `title`, `created`, `tags`; add `implemented` after verified implementation |
 | `adr/` | Material architecture or product-contract decisions for one development snapshot. Keep all snapshot decisions in one append-only ADR. | `slack-260721-channel-agent-conversation.md` | `title`, `created`, `tags` |
-| `spec/domain/` | Current domain model specs such as Agent, Session, Team, Memory. | `agent.md`, `workspace.md` | plus `spec_type: domain`, `domain`, `code_paths`, `last_verified_at`, `spec_version` |
-| `spec/flow/` | Current flow specs such as the ReAct loop or message routing. | `agent-execution-loop.md`, `message-routing.md` | plus `spec_type: flow`, `code_paths`, `last_verified_at`, `spec_version` |
+| `spec/` | LLM-maintained current-system wiki, organized by concepts and flows with an editorial index. | `index.md`, `domain/agent.md`, `flow/agent-execution-loop.md` | `title`; optional `created`, `tags` |
 | `design/` | Primary development-snapshot Designs and supporting design-time records. | `slack-260721-channel-agent-conversation.md`, `feature-audit-report-YYYY-MM-DD.md` | `title`, `created`, `tags`; use `updated` while drafting and add `implemented` after verified implementation |
 | `plans/` | Temporary multi-phase implementation plans and phase execution plans used while shipping a feature. Remove them in the feature cleanup phase. | `feature-implementation-plan.md`, `feature-phase-1.md` | `title`, `created`, `tags`; use `updated` while implementation is active |
 | `notes/` | Pre-design product/architecture blueprints, unresolved model exploration, or discussion summaries. | `agent-thread-session-blueprint.md` | `title`, `created`, `tags` |
@@ -43,34 +45,15 @@ Requirements, ADR, and design documents use their location and content as their 
 
 ## Document Discovery
 
-Document frontmatter is the source of truth for catalog and discovery. Do not
-rely on a tracked generated index or read the entire documentation tree.
+Start with `spec/index.md`, follow relevant page connections, and use ordinary text,
+filename and symbol searches when needed. Agents determine relevance from behavior,
+ownership and source evidence, not code-path matches. Keep the wiki's editorial
+index and contextual links current; do not read the entire documentation tree.
 
-Use `scripts/docs_catalog.py` to narrow the search before opening documents:
-
-- Find current behavior from related domain and flow Specs first.
-- Use `related --code-path` when starting from implementation files.
-- Use `snapshot <snapshot_id>` to find matching Requirements, ADR, and Design.
-- Read Requirements for confirmed intent, ADR for decision rationale, and Design
-  only for implementation-time context.
-- Expand to title or tag search only when code-path and snapshot lookup do not
-  find the document.
-
-Common commands:
-
-```console
-python scripts/docs_catalog.py search external-channel
-python scripts/docs_catalog.py related --code-path <repository-path>
-python scripts/docs_catalog.py snapshot <snapshot-id>
-python scripts/docs_catalog.py list --type spec --spec-type domain
-python scripts/docs_catalog.py list --tag external-channel
-python scripts/docs_catalog.py stale --before <YYYY-MM-DD>
-python scripts/docs_catalog.py validate
-```
-
-Use `--format paths` for shell pipelines and `--format json` for automation.
-Catalog output is derived from frontmatter. Do not commit generated catalog
-listings in ordinary feature branches.
+Find a reference snapshot through a specific page link or search its shared
+basename under `requirements/`, `adr/` and `design/`. Read Requirements for confirmed
+intent, ADRs for decisions, and Designs for implementation-time context. Those
+collections are not wiki pages and do not need a second catalog.
 
 ### Shared Development Snapshot Naming and References
 
@@ -228,8 +211,8 @@ tags: [backend, engine]
   - New primary snapshot Design: `{word}-{YYMMDD}-{slug}.md`, matching Requirements and ADR
   - Supporting Design record: descriptive filename with `document_role: supporting` and `document_type: supporting-*`
   - Audit/verification report: `{feature}-audit-report-YYYY-MM-DD.md`, `{feature}-spec-sync-YYYY-MM-DD.md`, `{feature}-testenv-report-YYYY-MM-DD.md`
-- When searching for a document, prefer catalog queries by filename prefix, slug,
-  or `tags` frontmatter over browsing directory-wide indexes.
+- Search reference documents by filename prefix, slug, tags or relevant text
+  rather than maintaining directory-wide reference indexes.
 
 ### Additional Rules for `plans/`
 
@@ -247,31 +230,21 @@ tags: [backend, engine]
 - Remove the feature's multi-phase plan and all phase plans in its cleanup PR.
   The directory may disappear when no tracked plans remain.
 
-### Additional Fields for `spec/`
+### Wiki Page Format
 
-All `spec/domain/` and `spec/flow/` documents require these fields:
+Wiki pages require a title and ordinary Markdown content; `created` and `tags`
+are optional aids. Give each page a clear scope, contextual connections, detailed
+current contracts and selected reference links. Keep structured API inventories
+in the body. See `spec/AGENTS.md` for complete guidance.
 
-```yaml
-spec_type: domain       # or flow
-domain: agent           # domain name, only for spec/domain/
-code_paths:
-  - python/apps/azents/src/azents/services/agent_service.py
-  - python/apps/azents/src/azents/repos/agent_repo.py
-last_verified_at: 2026-04-20
-spec_version: 1
-```
-
-- `spec_type` — `domain` or `flow`
-- `domain` — domain name such as `agent`, `session`, `team`, `memory`, `user`, `toolkit`, or `trigger`
-- `code_paths` — repository-root-relative source file paths covered by this spec
-- `last_verified_at` — last date the spec was checked against code
-- `spec_version` — spec schema version, currently `1`
+The wiki uses neither `code_paths` nor per-page version/freshness metadata.
+Git records history. Agents own navigation, synthesis and consistency checks.
 
 ### CI Validation
 
-The pre-commit hooks run catalog tests and `python scripts/docs_catalog.py
-validate`. Validation reads `docs/azents/**/*.md` frontmatter without generating
-or modifying tracked indexes.
+The pre-commit hooks run `python scripts/validate_docs.py` and its unit tests.
+This small validator checks frontmatter and development-snapshot relationships;
+it does not select relevant wiki pages, infer coverage or validate behavior.
 
 Validation requires canonical `{word}-{YYMMDD}-{slug}.md` filenames for
 Requirements, ADRs, and primary Designs. It enforces the Requirements
@@ -284,7 +257,8 @@ Supporting Design records may use descriptive filenames when explicitly
 classified with `document_role: supporting` and
 `document_type: supporting-*`.
 
-Spec validation continues to enforce `spec_type`, `code_paths`, `last_verified_at`, and `spec_version`.
+Wiki validation requires `title` only. Perform semantic lint and inspect local
+links as described in `spec/AGENTS.md`.
 
 ## New Document Flow
 
@@ -295,7 +269,7 @@ Decision tree:
 3. Primary feature design? → `design/{same-basename}.md`.
 4. Authority-audited, feasible, and approved feature ready for phased implementation? → create the high-level
    and phase-specific plans under `plans/`.
-5. Current behavior spec? → `spec/domain/{domain}.md` or `spec/flow/{flow}.md`.
+5. Current behavior? → update the owning wiki page, or add a distinct concept/flow page and link it from `spec/index.md`.
 6. Bug or operational issue? → `issues/{name}.md`.
 7. Pre-design blueprint or discussion summary? → `notes/{name}.md`.
 8. Unresolved discussion? → keep discussion in GitHub Issue/Discussion, optionally summarize in `notes/`, then move confirmed intent and decisions into Requirements/ADR/design/spec when settled.
@@ -310,7 +284,7 @@ Writing order:
 5. Audit Design authority and feasibility, then record complete Design approval.
 6. For phased implementation, create `plans/` when absent, then store both the
    multi-phase implementation plan and each phase execution plan there.
-7. Validate locally with `python scripts/docs_catalog.py validate`.
+7. Run wiki semantic lint and `python scripts/validate_docs.py`.
 
 ## Deletion and Move Rules
 
@@ -351,17 +325,9 @@ Spec document:
 
 ```yaml
 ---
-title: "Agent Domain Spec"
+title: "Agent"
 created: 2026-05-01
 tags: [backend, engine]
-spec_type: domain
-domain: agent
-code_paths:
-  - python/apps/azents/src/azents/services/agent_service.py
-  - python/apps/azents/src/azents/repos/agent_repo.py
-  - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-05-01
-spec_version: 1
 ---
 ```
 

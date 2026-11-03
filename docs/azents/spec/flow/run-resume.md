@@ -1,62 +1,21 @@
 ---
-title: "Run Resume"
+title: "Run recovery"
 created: 2026-05-10
 tags: [backend, engine]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, conversation]
-code_paths:
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/repos/active_model_capabilities.py
-  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
-  - python/apps/azents/src/azents/repos/worker_executor_model.py
-  - python/apps/azents/src/azents/repos/worker_executor_model_data.py
-  - python/apps/azents/src/azents/core/agent_session_input_data.py
-  - python/apps/azents/src/azents/core/chat_data.py
-  - python/apps/azents/src/azents/core/mailbox_errors.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/core/session_workspace_items.py
-  - python/apps/azents/src/azents/core/session_workspace_paths.py
-  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
-  - python/apps/azents/src/azents/repos/engine_event_repositories.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/skill_state_store.py
-  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
-  - python/apps/azents/src/azents/repos/user_stop.py
-  - python/apps/azents/src/azents/core/vfs.py
-  - python/apps/azents/src/azents/broker/redis.py
-  - python/apps/azents/src/azents/broker/memory.py
-  - python/apps/azents/src/azents/broker/deps.py
-  - python/apps/azents/src/azents/broker/types.py
-  - python/apps/azents/src/azents/process_lifecycle.py
-  - python/apps/azents/src/cli/devserver.py
-  - python/apps/azents/src/azents/worker/worker.py
-  - python/apps/azents/src/azents/services/agent_session_input.py
-  - python/apps/azents/src/azents/services/session_git_worktree/**
-  - python/apps/azents/src/azents/services/vfs.py
-  - python/apps/azents/src/azents/repos/action_execution/**
-  - python/apps/azents/src/azents/repos/agent_execution/**
-  - python/apps/azents/src/azents/repos/agent_runtime/**
-  - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
-  - python/apps/azents/src/azents/repos/runtime_reconciliation*
-  - python/apps/azents/src/azents/repos/session_execution/**
-  - python/apps/azents/src/azents/repos/model_candidate_health/**
-  - python/apps/azents/src/azents/runtime/control_protocol/reconciler.py
-  - python/apps/azents/src/azents/engine/run/contracts.py
-  - python/apps/azents/src/azents/engine/events/**
-  - python/apps/azents/src/azents/engine/run/types.py
-  - python/apps/azents/src/azents/engine/run/errors.py
-  - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/worker/run/**
-  - python/apps/azents/src/azents/services/team_session_cutover_replay.py
-  - python/apps/azents/src/azents/repos/session_execution/cutover_replay_operations.py
-  - python/apps/azents/src/azents/repos/session_execution/cutover_replay_data.py
-  - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-10-27
-spec_version: 44
 ---
 
-# Run Resume
+# Run recovery
+
+Durable worker takeover, interrupted tools, retry state and preserved occurrence recovery.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Agent execution](agent-execution-loop.md)
+- [Conversations and events](../domain/conversation.md)
+- [Scheduled Tasks](../domain/scheduled-task.md)
+- [Session Routines](../domain/routine.md)
 
 Run resume handles worker shutdown, process crash, stale running state, and interrupted tool calls.
 The event runtime resumes from durable transcript and `agent_runs`, not SDK serialized
@@ -464,64 +423,11 @@ run to observe `check_stop()` as true.
 - Recovery and replay never reconstruct an execution User. Canonical durable Session/work state is
   the only execution authority after a routing signal.
 
+## References
 
-## Changelog
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-10-27** (spec_version 44) — Clarified canonical recovery eligibility for
-  preserved started Scheduled Task and Routine work in archived Sessions.
-
-- **2026-10-10** (spec_version 43) — Removed a deleted action-execution service
-  from source discovery; current repository and Worker ownership paths remain.
-
-- **2026-10-05** (spec_version 41) — Moved cutover preflight and exact batch
-  fencing into completed repository operations, preserving candidate checks,
-  whole-batch rollback and commit before broker purge or wake-up.
-
-- **2026-10-05** (spec_version 40) — Scoped durable owner exclusion to critical
-  commit groups while retaining stale-output rejection and independent
-  preparation/private projections.
-
-- **2026-10-02** (spec_version 38) — Completed reconciliation snapshot, marker,
-  repair-read, and timeout ownership while preserving convergence and dispatch authority.
-- **2026-09-13** (spec_version 37) — Added recovery of frozen foreground/compaction candidate
-  operations, attempted-identity cursors, and generation-fenced probe/reservation claims from
-  PostgreSQL when Redis is unavailable or empty.
-- **2026-09-13** (spec_version 36) — Documented fallback and Session-intent replacement when Agent option updates invalidate accepted pending or retry labels.
-- **2026-09-12** (spec_version 35) — Fenced execution persistence and
-  operation recovery by durable owner generation and supervised ownership loss
-  without stale cleanup.
-- **2026-09-12** (spec_version 34) — Made recovered automatic model-provider
-  retries resolve current Session-applied inference intent after remaining
-  backoff.
-- **2026-09-08** (spec_version 33) — Documented repository-owned Runtime
-  lifecycle dispatch admission/outcome boundaries and preserved
-  generation-fenced reconciliation after cancellation or ambiguous dispatch.
-- **2026-08-23** (spec_version 31) — Documented closed operation-action
-  decode/dispatch at the existing owner-generation and no-reexecution recovery
-  boundary.
-- **2026-08-20** (spec_version 30) — Corrected the active-run recovery source
-  description to separate run-owned requested intent from Session-owned resolved
-  inference state.
-- **2026-08-20** (spec_version 29) — Persisted each pending run's selected requested inference profile at activation and copied it into manual failed-run retries, so recovery retains the original profile intent without restoring resolved Session state from the run.
-- **2026-08-12** (spec_version 27) — Added Agent-managed worktree bridge recovery: cancelled
-  no-replay terminal continuation, atomic history/continuation handoff, predecessor-Run fencing,
-  and idempotent fresh-Run promotion.
-- **2026-08-10** (spec_version 26) — Made Runtime identity optional during recovery, added
-  capability/version and Session-binding revalidation for Runtime-dependent resume, and prevented
-  removing-state takeover or retry from reviving fenced Agent work.
-
-- **2026-07-24** (spec_version 25) — Added Userless canonical recovery and bounded
-  PostgreSQL-derived cutover preflight/replay with pure broker notifications.
-- **2026-07-21** (spec_version 24) — Preserved completed-run idle continuation across Worker shutdown through a durable Session pointer and conditional recovery outcome.
-- **2026-07-21** (spec_version 23) — Made recovery and synthetic client-tool terminal settlement explicitly dialect-preserving.
-- **2026-07-18** (spec_version 21) — Preserved bounded provider failure state and complete retry budgets across handover while giving terminal User Stop precedence over retry finalization.
-- **2026-07-16** (spec_version 20) — Scoped takeover retry recovery to the active model turn and made committed model output plus retry-state removal one durable boundary.
-- **2026-07-14** (spec_version 19) — Replaced operation resume with owner-generation-fenced live execution, atomic terminal snapshot/delete handover, 30-second graceful shutdown, and cancelled no-reexecution takeover recovery.
-- **2026-07-12** (spec_version 18) — Made ownership generation and durable call/result state authoritative for no-reexecution tool recovery.
-- **2026-07-12** (spec_version 17) — Promoted Session-owned per-turn inference recovery, handled preparation failure, buffer-only action transport, buffer-keyed action recovery, and same-run context rebuild.
-- **2026-07-11** (spec_version 16) — Added recovery semantics for pre-resolved `spawn_override` child runs and later session-last-used re-resolution.
-- **2026-07-10** (spec_version 15) — Added pending/activated profile recovery, retry intent re-resolution, and exact inherited parent-run snapshot recovery.
-- **2026-07-08** (spec_version 14) — Clarified that failed TurnActions continue FIFO processing and context invalidation uses a cancelled run boundary plus follow-up wake-up, not a completed run marker.
-- **2026-07-08** (spec_version 13) — Clarified that running workers process TurnActions at model-call turn boundaries and hand off after context invalidation.
-- **2026-07-06** (spec_version 12) — Removed session-initialization recovery and documented durable terminal action result recovery.
-- **2026-07-05** (spec_version 11) — Added operation TurnAction recovery semantics for action-based Git worktree setup.
+- [`python/apps/azents/src/azents/worker`](../../../../python/apps/azents/src/azents/worker)
+- [`python/apps/azents/src/azents/repos/session_execution`](../../../../python/apps/azents/src/azents/repos/session_execution)
+- [`python/apps/azents/src/azents/core/session_resource_authority.py`](../../../../python/apps/azents/src/azents/core/session_resource_authority.py)

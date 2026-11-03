@@ -1,175 +1,114 @@
 ---
 name: living-spec-audit
-description: Audit current implementation against `docs/azents/spec/**/*.md`, update Living Specs to match reachable implementation behavior, and maintain bounded recurring coverage checkpoints. Use for full or recurring spec-drift audits, periodic Living Spec synchronization, stale `code_paths` checks, or requests to make specs reflect the implementation without changing code.
+description: "Audit the Azents Spec Wiki against current implementation and its connected claims. Use for full or recurring spec-drift audits, wiki consistency checks, or requests to make the current-system wiki reflect verified behavior without changing implementation."
 ---
+# Spec Wiki Audit
 
-# Living Spec Audit
+The existing `/living-spec-audit` invocation now audits the LLM-maintained wiki;
+there is no separate Living Spec catalog or file-path planner. Read
+`docs/azents/spec/AGENTS.md` and start at `docs/azents/spec/index.md`.
+Only `spec/` is the wiki. Requirements, ADRs, Designs, code and tests remain
+references and retain their independent lifecycles.
 
-Compare Living Specs with reachable current implementation behavior. Treat the
-implementation as authoritative after excluding unambiguous defects, and correct
-only `docs/azents/spec/**/*.md`. Never change implementation as an audit correction.
+## Scope and continuity
 
-Keep coverage checkpoints in `.claude/living-spec-audit-state.json`. Keep findings,
-reasoning, issue identifiers, and pull request identifiers out of that state file.
+Record the exact target commit, start time, selected page/topic and intended checks
+in a temporary working note before inspection. Keep the audited source commit
+fixed; make corrections in a separate worktree when necessary. Remove the working
+note after consolidating the result into the normal audit report.
 
-Run commands from the repository root. Keep the audit checkout at the planned commit
-until checkpoint completion. Make spec corrections in a separate worktree so that
-the audit checkout remains fixed and clean.
+- **Full:** inspect every current topic/page reachable from the index, and search
+  for unindexed pages and missing concepts. Do not claim completion for a partial
+  traversal or merely checking links.
+- **Incremental / recurring:** inspect one bounded semantic topic (normally one
+  owning page and necessary neighbor claims), plus an independent review of
+  implementation and wiki changes in the preceding 24 hours. Do not substitute
+  one lane for the other or enlarge the window using an old global checkpoint.
 
-## Select a mode
+Use the existing audit reporting destination's successful reports for continuity:
+record exact checked pages/sections, source commit, completion time and remaining
+coverage. Select an uninspected page before repeating recently checked pages, then
+prefer the least recently checked topic. If prior coverage is unavailable, say so,
+start from the first unverified topic in the index and claim only the inspected
+scope. Old file-bucket checkpoints do not certify semantic wiki coverage.
+Do not introduce a replacement planner, hash-bucket state or duplicate run log.
 
-### Full audit
+## Inspect the selected topic
 
-Use full mode only when the requester explicitly asks to inspect every current audit
-range at one commit.
+1. Read its owning wiki page and relevant connections. Identify the contract:
+   actors, authority, state, data, interfaces, lifecycle, failure and recovery.
+2. Follow the selected references and search actual source symbols and callers.
+   References are entrypoints, not an exhaustive map. Inspect adjacent unlinked
+   implementation when it can affect the contract.
+3. Compare reachable production behavior and relevant models/tests with the claims.
+   Use mechanical evidence for moved symbols, routes, configuration and links;
+   use agent reasoning for semantic relevance and consistency. Do not run product
+   tests by default; use a focused test only to resolve a concrete uncertainty.
+4. Check connected pages for contradictions, duplicated definitions, orphan concepts,
+   missing links and stale historical statements presented as current behavior.
+5. Ground findings in precise page sections and implementation locations. A
+   verification of one claim does not mark an entire large page audited.
 
-```bash
-python .agents/skills/living-spec-audit/scripts/audit_state.py plan \
-  --mode full \
-  --output /tmp/living-spec-audit-plan.json
-```
+## Independently inspect recent changes
 
-Do not complete a full plan unless every planned range was inspected.
+At the recorded target commit and audit start time, use ordinary Git tools to
+identify commits in the preceding 24-hour window and inspect their actual diffs.
+Include additions, removals, renames and merge-introduced changes; for a merge,
+compare it to its first parent so old branch commits newly merged into the window
+are not missed. Review the behavior of those diffs even when no wiki reference
+mentions the file.
 
-### Incremental audit
+For each material change, navigate by concept and ownership to the affected wiki
+pages. Determine whether current explanations, connections or references need
+updates. Classify behavior-preserving and documentation-only changes explicitly;
+do not turn every changed file into a new wiki page. State the exact time window
+and any incomplete recent-change review in the result.
 
-Use incremental mode for recurring audits. It checks:
+## Correct confirmed drift
 
-1. one existing bounded range, selected by its range checkpoint, comparing its
-   mapped Living Specs with current reachable implementation; and
-2. independently, commits from the 24 hours ending at plan creation, checking
-   changed or deleted implementation and Living Specs for drift.
+- Integrate verified current behavior into the owning page; repair related links,
+  references and the editorial index in the same focused documentation PR.
+- Replace superseded claims instead of appending patch notes. Use Git history,
+  not page versions, global verification dates or changelogs.
+- Merge or remove obsolete pages only after preserving still-current contracts
+  and updating current inbound links.
+- Do not modify implementation, Requirements, accepted ADRs or implemented Designs
+  as an audit correction. Read them for intent or rationale when relevant.
+- If implementation is unambiguously defective, preserve the intended contract
+  established by reliable evidence and create a verification/defect issue for
+  durable handoff. Do not silently document the bug as desired behavior.
+- If behavior is uncertain or evidence conflicts, report it precisely; do not
+  invent a contract. Create a verification issue when a durable handoff is needed.
 
-Inspect missing `code_paths` in the selected scope and classify relevant unmapped
-changes. The old global change checkpoint does not extend the 24-hour window.
+## Verify and report
 
-```bash
-python .agents/skills/living-spec-audit/scripts/audit_state.py plan \
-  --mode incremental \
-  --output /tmp/living-spec-audit-plan.json
-```
-
-An empty range checkpoint means the range has not been audited. Do not mark
-uninspected ranges complete or advance the old global change checkpoint.
-
-Inspect rotation health with:
-
-```bash
-python .agents/skills/living-spec-audit/scripts/audit_state.py status \
-  --rotation-days 14
-```
-
-## Inspect the plan
-
-The plan is disposable execution data and must remain outside the repository.
-
-- `changed_checks` groups exact changed implementation files by bounded range.
-- `changed_specs` and `deleted_specs` identify direct Living Spec changes.
-- `deleted_checks` identifies removed implementation paths and their mapped specs.
-- `missing_code_paths` identifies current patterns that match no tracked file.
-- `full_ranges` contains every range for full mode.
-- `rotation_ranges` contains exactly one selected range for incremental mode.
-- Each range contains exact files, matched specs, per-file spec mappings, and
-  unmapped implementation files.
-
-New implementation files receive a deterministic path-based range automatically.
-Unmapped files are findings to classify, not files to silently discard.
-
-For the selected range and the recent changed checks:
-
-1. Read `docs/azents/AGENTS.md` and the applicable path instructions.
-2. Run mechanical checks first: missing paths, moved symbols, routes, models,
-   configuration keys, state values, and deleted behavior.
-3. Inspect reachable production call paths. Do not run tests by default; use the
-   minimum targeted test only when needed to resolve a specific uncertainty.
-4. Compare current behavior, APIs, data models, permissions, state transitions,
-   errors, recovery, and user-visible behavior with the matched specs.
-5. Search adjacent callers and tests only as needed to establish actual behavior.
-6. Ground every finding in exact implementation and spec locations.
-
-For unmapped implementation files, determine whether they introduce or change
-material current behavior. Add them to an existing spec's `code_paths`, create a
-new spec only when a distinct current-behavior boundary exists, or record that no
-Living Spec coverage is needed.
-
-## Correct drift
-
-For clear drift:
-
-- rewrite the Living Spec to describe reachable current behavior;
-- repair `code_paths`;
-- update `last_verified_at`;
-- increment `spec_version` and add a changelog entry when behavior text changes;
-- delete or consolidate a stale spec rather than adding freshness/status flags; and
-- create a focused pull request containing documentation corrections only.
-
-Do not modify Requirements, accepted ADRs, implemented Designs, or implementation.
-Read those documents only for terminology or historical context.
-
-If reachable behavior is unambiguously defective, do not encode the defect as product
-behavior. Preserve the existing correct Spec contract, or correct it only when the
-intended behavior is established by reliable product evidence. Create a GitHub issue
-for the implementation defect before completing the audit.
-
-If competing implementation paths make the actual behavior uncertain, do not invent
-spec text; report the ambiguity and create a verification issue when durable handoff
-is required.
-
-## Report
-
-Use this concise structure:
+Run the wiki guide's semantic lint and `python scripts/validate_docs.py`. Check
+local links and report exactly which implementation claims were verified. Do not
+create placeholder edits, issues or verification stamps when no drift exists.
 
 ```markdown
-## Living Spec Audit
+## Spec Wiki Audit
 
 - Mode: full | incremental
-- Target commit: `<sha>`
-- Ranges checked: `<ranges>`
-- Changed implementation files checked: `<count>`
+- Target commit: <sha>
+- Topic and exact pages/sections checked: <scope>
+- Independent recent-change window: <start/end with timezone>
+- Recent diffs checked: <commits and behavioral scope>
 
 ### Drift corrected
-- `<spec path>` — <implemented behavior reflected>
+- <page/section> — <verified correction and source evidence>
 
 ### Unresolved verification
-- `<implementation/spec locations>` — <why behavior is not yet provable>
+- <locations> — <uncertainty, defect or issue>
 
-### Result
-<spec PR, issues, no-drift result, and remaining coverage>
+### Coverage and result
+- <completed scope, no-drift finding or PRs, and uninspected remainder>
+- Next topic: <next uninspected / least recently checked semantic topic>
 ```
 
-State explicitly when no drift was found. Do not create placeholder changes or
-issues.
-
-## Complete the checkpoint
-
-Advance the checkpoint only after:
-
-- every item represented by the plan was inspected;
-- the result was successfully reported;
-- every required verification issue was created; and
-- every intended spec correction pull request was created.
-
-Completion means the range was inspected, not that every finding was fixed. A
-confirmed unresolved finding may advance after durable handoff succeeds.
-
-```bash
-python .agents/skills/living-spec-audit/scripts/audit_state.py complete \
-  --plan /tmp/living-spec-audit-plan.json
-rm /tmp/living-spec-audit-plan.json
-```
-
-The completion command rejects a dirty audit checkout, a modified or incomplete
-plan, a changed HEAD, a changed state file, changed Living Spec scope, or changed
-required work. It verifies plan integrity, not whether the inspection actually
-occurred; the auditor remains responsible for completing the planned review.
-
-After completion writes the state file, submit that checkpoint through the normal
-pull request workflow. Include it in the spec correction PR or use a state-only PR
-when no documentation correction exists.
-
-## State boundaries
-
-`.claude/living-spec-audit-state.json` is a bounded checkpoint snapshot, not a run
-log. It retains the historical change checkpoint and each range's latest checked
-commit, time, and scope revision. Incremental completion updates only the selected
-range; it does not claim the older unchecked changes were reviewed.
+Treat inspection as completed only after all selected checks were performed, the
+report was successfully persisted/delivered, and every intended correction PR or
+required handoff issue was created. A failed or partial investigation must retain
+its incomplete scope in the report and must not advance coverage. A confirmed
+unresolved finding may count as inspected after successful durable handoff.
+There is no script that can certify semantic inspection on the Agent's behalf.

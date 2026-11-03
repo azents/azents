@@ -1,51 +1,23 @@
 ---
-title: "Scheduled Task Domain Spec"
+title: "Scheduled Tasks"
 created: 2026-08-16
 tags: [backend, engine, scheduler, toolkit, external-channel, api, frontend]
-spec_type: domain
-domain: scheduled-task
-code_paths:
-  - python/apps/azents/src/azents/repos/session_execution/ownership.py
-  - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
-  - python/apps/azents/src/azents/core/scheduled_task.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
-  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
-  - python/apps/azents/src/azents/repos/mailbox/promotion.py
-  - python/apps/azents/src/azents/services/mailbox.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/src/azents/api/public/scheduled_task/**
-  - python/apps/azents/src/azents/api/testenv/scheduler/**
-  - python/apps/azents/src/azents/engine/tools/scheduled.py
-  - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
-  - python/apps/azents/src/azents/core/external_channel_provider.py
-  - python/apps/azents/src/azents/core/external_channel_provider_effect.py
-  - python/apps/azents/src/azents/rdb/models/scheduled_task.py
-  - python/apps/azents/src/azents/repos/scheduled_task/**
-  - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
-  - python/apps/azents/src/azents/resources/vfs/toolkits/scheduled/**
-  - python/apps/azents/src/azents/scheduler/user_scheduled_task_dispatch.py
-  - python/apps/azents/src/azents/services/scheduled_task/**
-  - python/apps/azents/src/azents/services/external_channel/channel_action.py
-  - python/apps/azents/src/azents/services/external_channel/discord_http.py
-  - python/libs/azents-public-client/src/azentspublicclient/api/scheduled_task_v1_api.py
-  - python/libs/azents-public-client/src/azentspublicclient/models/scheduled_task_*.py
-  - typescript/apps/azents-web/src/features/chat/**
-  - typescript/apps/azents-web/src/shared/chat-presentation/**
-  - typescript/apps/azents-web/src/features/scheduled-tasks/**
-  - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
-  - typescript/apps/azents-web/src/trpc/routers/scheduledTask.ts
-  - typescript/apps/azents-web/src/app/(app)/w/[handle]/(agent)/agents/[agentId]/sessions/[sessionId]/**
-  - testenv/azents/e2e/src/tests/required/public/test_scheduled_tasks.py
-api_routes:
-  - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
-  - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
-  - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-10-26
-spec_version: 17
 ---
 
-# Scheduled Task Domain Spec
+# Scheduled Tasks
+
+Session-owned one-time or cron work with mandatory per-occurrence terminal results.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Session Routines](routine.md)
+- [Periodic execution](../flow/periodic-execution.md)
+- [Run recovery](../flow/run-resume.md)
+- [External Channel delivery](../flow/external-channel-delivery.md)
+- [Conversations and events](conversation.md)
+- [Toolkits](toolkit.md)
 
 ## Overview
 
@@ -380,59 +352,6 @@ schedule labels, canonical secondary details, execution guidance, and the exact
 prompt. The result payload contains only title, scheduled instant, terminal status,
 and result text.
 
-## Changelog
-
-- **2026-10-05** (spec_version 16) — Made Scheduled descriptions independent of
-  ownership gates and retained exact target/owner mutation admission so Task
-  creation cannot escape archive and admitted-versus-started deletion stays atomic.
-- **2026-10-01** (spec_version 14) — Moved Scheduled Toolkit cycle reads and
-  management mutations behind completed repository operations while preserving
-  authority, mutation lock order, execution-state projection, and post-commit
-  channel effects.
-- **2026-10-01** (spec_version 13) — Defined schedule and `scheduled_for` values
-  as occurrence start triggers that do not imply completion deadlines, removed
-  duplicate full-message rendering from the dynamic Toolkit prompt, and preserved
-  explicit or authoritatively discovered completion constraints.
-- **2026-09-12** (spec_version 12) — Bound Scheduled progress, initial
-  channel tracking, terminal state, and provider settlement to the current Session
-  execution owner.
-- **2026-09-08** (spec_version 11) — Split Scheduled progress into
-  repository-owned preparation and admission, transaction-free provider/Runtime
-  effects, and fresh fenced Tracker settlement while retaining one-attempt
-  ordering and explicitly recording the lock-free admission-to-call race.
-- **2026-09-07** (spec_version 10) — Made Discord Scheduled Task progress Tracker
-  creation notification-suppressed while preserving registration, deletion, reply,
-  terminal-result, update, cleanup, and Slack behavior.
-- **2026-08-21** (spec_version 8) — Made Scheduled Task creation normalize empty
-  `at`, `cron`, and `timezone` strings to omitted values before canonical schedule
-  validation.
-
-- **2026-08-20** (spec_version 7) — Extended exact-Binding deletion notices to
-  provider-native cancellation controls and required the Scheduled Task Skill to
-  preserve a reliably known requester timezone offset in one-time `at` input,
-  including duration-relative schedules.
-
-- **2026-08-20** (spec_version 6) — Removed duplicate standalone Scheduled Task
-  status/title content from Discord registration and deletion notifications while
-  preserving Multi-App Agent identity presentation.
-
-- **2026-08-20** (spec_version 5) — Added best-effort exact-Binding deletion
-  notifications after explicit Toolkit and Public API/Web deletion commits.
-
-- **2026-08-17** (spec_version 4) — Moved Web management into each concrete
-  Session tab, fixed creation and editing to that Session, renamed destructive UI
-  behavior to cancellation, and replaced Discord native editing with an exact Web
-  edit link plus ephemeral confirmed cancellation.
-
-- **2026-08-17** (spec_version 3) — Added terminal result file publication through
-  the exact Scheduled cycle Binding, explicit Session-only file rejection, Runtime
-  file-context injection, and same-conversation execution guidance.
-
-- **2026-08-17** (spec_version 2) — Added collapsible title-first Web trigger and
-  continuation presentation, human-first schedule labels, Schedule activity
-  grouping, enriched Scheduled tool rows, and explicit Skill schedule-shape
-  exclusivity.
-
 ## Verification
 
 Required E2E uses the generated Python client and user-facing APIs. A
@@ -469,3 +388,73 @@ provider-coordinate target, per-occurrence Session, Redis scheduling leader,
 retry counter, legacy `schedule_create`/`schedule_list`/`schedule_delete` aliases,
 compatibility mode, rollout flag, second scheduler, durable provider replay, or
 Channel Work ownership.
+
+## Transcript event integration
+
+The closed Mailbox and Event contracts include
+`scheduled_task_trigger`, `scheduled_task_continuation`, and
+`scheduled_task_result`.
+
+Trigger and continuation Mailbox items are internal wake-producing Session input.
+Promotion appends their dedicated Event kinds and preserves their source identity;
+they are not editable user-authored chat messages. A trigger promotion also binds
+the new AgentRun to the exact admitted Scheduled Task cycle. Continuation starts a
+fresh Run for an already-started cycle.
+
+`scheduled_task_result` is the canonical durable terminal result. Its payload
+contains title, scheduled instant, `finished` or `failed` status, and result text.
+The history API preserves the typed Event payload even though Scheduled control
+events do not project into ordinary chat-message rows. Pending live projections
+identify trigger and continuation work with dedicated Scheduled Task
+presentations.
+
+## Scheduled Toolkit contract
+
+Scheduled Toolkit is a root-only, automatically connected Toolkit with no
+Workspace ToolkitConfig. All four tools are always available in eligible
+root Runs:
+
+- `add_scheduled_task`
+- `list_scheduled_tasks`
+- `delete_scheduled_task`
+- `submit_scheduled_task_result`
+
+`submit_scheduled_task_result` validates the current Run's cycle and execution
+authority when invoked, independently of its unconditional visibility. Dynamic
+cycle guidance still requires an exact valid started cycle. The terminal tool
+commits the canonical Session result and returns a terminal Tool result so execution ends without
+another model turn.
+
+Scheduled occurrence state uses Session-scoped Toolkit State with namespace
+`scheduled` and one cycle-specific state identity. It remains distinct from Todo,
+Goal, and External Channel Work state. The Toolkit registers both
+`on_session_idle` and `on_compaction_summary`: idle continuation emits typed
+Scheduled Task inputs for every current started cycle, while compaction replaces
+the sanitized active-work snapshot without creating another persistence source.
+
+The Toolkit also owns the release-bundled `scheduled-task` managed Skill under
+the immutable `azents://` VFS. The Skill is projected for eligible root Runs
+without requiring a separate Toolkit setup row.
+
+Scheduled Toolkit active-cycle resolution, started-cycle continuity reads, Task
+creation, Task listing with execution-state derivation, and Task deletion use
+completed repository operations. Creation and deletion validate the existing
+Session, Agent, and optional Binding predicates inside the operation. Deletion
+retains the canonical Mailbox, cycle, and Task lock order and atomically removes
+an admitted trigger/cycle with its Task. Channel registration and deletion
+notification execute only after the operation returns.
+
+## API route entrypoints
+
+- `/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks`
+- `/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}`
+- `/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle`
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/scheduled_task`](../../../../python/apps/azents/src/azents/services/scheduled_task)
+- [`python/apps/azents/src/azents/repos/scheduled_task`](../../../../python/apps/azents/src/azents/repos/scheduled_task)
+- [`python/apps/azents/src/azents/engine/tools/scheduled.py`](../../../../python/apps/azents/src/azents/engine/tools/scheduled.py)

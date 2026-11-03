@@ -1,98 +1,21 @@
 ---
-title: "Agent Runtime Persistence"
+title: "Runtime persistence"
 created: 2026-05-25
 tags: [backend, engine, infra]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, workspace, conversation]
-code_paths:
-  - python/apps/azents/src/azents/core/runtime_admission.py
-  - python/apps/azents/src/azents/repos/runtime_operation_admission.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/5074c3290716_add_bounded_automatic_runtime_start_.py
-  - python/apps/azents/src/azents/core/chat_data.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/core/session_workspace_paths.py
-  - python/apps/azents/src/azents/repos/session_execution/ownership.py
-  - python/apps/azents/src/azents/repos/skill_state_store.py
-  - proto/azents/runtime_control/v1/**
-  - python/libs/azents-runtime-control/**
-  - python/apps/azents/src/azents/rdb/models/agent_runtime.py
-  - python/apps/azents/src/azents/rdb/models/agent_runtime_add.py
-  - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
-  - python/apps/azents/src/azents/rdb/models/runtime_profile.py
-  - python/apps/azents/src/azents/rdb/models/runtime_web.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/a32efa82fd63_replace_runtime_web_service_authority.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/409e9e3cb85a_migrate_envvar_toolkits_to_runtime_.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/d4bf6286235d_add_agent_runtime_environment.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/615047857119_add_workspace_environment_opt_in.py
-  - python/apps/azents/src/azents/rdb/models/agent.py
-  - python/apps/azents/src/azents/core/runtime_environment.py
-  - python/apps/azents/src/azents/repos/agent_runtime_environment.py
-  - python/apps/azents/src/azents/repos/workspace_environment.py
-  - python/apps/azents/src/azents/core/workspace_environment.py
-  - python/apps/azents/src/azents/rdb/models/workspace_environment.py
-  - python/apps/azents/src/azents/services/workspace_environment.py
-  - python/apps/azents/src/azents/api/public/workspace/v1/environment.py
-  - python/apps/azents/src/azents/services/agent_runtime_environment.py
-  - python/apps/azents/src/azents/engine/tools/builtin.py
-  - python/apps/azents/src/azents/core/runtime_profile.py
-  - python/apps/azents/src/azents/repos/agent_runtime/**
-  - python/apps/azents/src/azents/repos/agent_runtime_add/**
-  - python/apps/azents/src/azents/repos/agent_runtime_removal/**
-  - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
-  - python/apps/azents/src/azents/repos/agent_runtime_removal_finalizer/**
-  - python/apps/azents/src/azents/repos/agent_decommission/**
-  - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
-  - python/apps/azents/src/azents/services/agent_runtime_removal/**
-  - python/apps/azents/src/azents/services/agent_decommission.py
-  - python/apps/azents/src/azents/repos/runtime_profile/**
-  - python/apps/azents/src/azents/repos/runtime_report*
-  - python/apps/azents/src/azents/repos/runtime_stream_route*
-  - python/apps/azents/src/azents/services/agent_runtime/**
-  - python/apps/azents/src/azents/services/runtime_terminal/**
-  - python/apps/azents/src/azents/services/runtime_web/**
-  - python/apps/azents/src/azents/services/terminal_policy/**
-  - python/apps/azents/src/azents/services/agent_runtime_system_metrics/**
-  - python/apps/azents/src/azents/api/public/agent_runtime/**
-  - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
-  - python/apps/azents/src/azents/services/runtime_profile_resolution/**
-  - python/apps/azents/src/azents/services/runtime_recreation/**
-  - python/apps/azents/src/azents/services/chat/workspace.py
-  - python/apps/azents/src/azents/services/session_workspace_project/**
-  - python/apps/azents/src/azents/repos/session_working_folder_binding/**
-  - python/apps/azents/src/azents/repos/session_git_worktree/**
-  - python/apps/azents/src/azents/services/session_git_worktree/**
-  - python/apps/azents/src/azents/services/agent_project_catalog/**
-  - python/apps/azents/src/azents/runtime/**
-  - python/apps/azents-runtime-provider-docker/**
-  - python/apps/azents-runtime-provider-kubernetes/**
-  - python/apps/azents-runtime-runner/**
-  - python/apps/azents/specs/public/openapi.json
-  - python/libs/azents-public-client/**
-  - typescript/packages/azents-public-client/**
-  - typescript/apps/azents-web/src/shared/runtime-metrics/**
-  - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
-  - typescript/apps/azents-web/src/features/agents/AgentRuntimeSettingsPage.tsx
-  - typescript/apps/azents-web/src/features/agents/AgentRuntimeEnvironmentVariablesSection.tsx
-  - typescript/apps/azents-web/src/features/agents/AgentWorkspaceEnvironmentSection.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentWorkspaceEnvironmentSelection*
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentWorkspaceEnvironmentSelection.ts
-  - typescript/apps/azents-web/src/features/workspace-settings/WorkspaceEnvironmentPage.tsx
-  - typescript/apps/azents-web/src/features/workspace-settings/containers/useWorkspaceEnvironmentContainer.ts
-  - typescript/apps/azents-web/src/trpc/routers/workspace.ts
-  - typescript/apps/azents-web/src/shared/runtime-environment/**
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeEnvironmentVariablesContainer.ts
-  - typescript/apps/azents-web/src/trpc/routers/agent.ts
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
-  - typescript/apps/azents-web/src/features/chat/workspace/**
-  - typescript/apps/azents-web/src/trpc/routers/chat.ts
-  - infra/charts/azents/**
-last_verified_at: 2026-10-26
-spec_version: 45
 ---
 
-# Agent Runtime Persistence
+# Runtime persistence
+
+Provider-owned Workspace durability, environment settings, Projects and automatic-start boundaries.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Runtime Providers](../domain/runtime-provider.md)
+- [Workspaces and membership](../domain/workspace.md)
+- [Runtime control](agent-runtime-control.md)
+- [Session Browser](session-browser.md)
 
 ## Overview
 
@@ -729,99 +652,94 @@ Required checks:
   clients, localized web presentation, and the real Docker Runtime browser journey without direct
   database writes.
 
-## Changelog
+## Workspace runtime state and filesystem authority
 
-- **2026-10-16** (spec_version 45) — Added command-time Browser public metadata
-  injection and Skill-delivered Runtime script/dependency ownership while
-  retaining delegated credential environment and existing persistence boundaries.
+`AgentWorkspaceFileService` receives the completed
+`AgentWorkspaceAccessRepository` as an injected collaborator. The repository
+loads the Agent and exact requester membership in a native PostgreSQL read-only
+scope and returns detached authority after that scope closes. File orchestration
+does not construct access owners from database managers or narrower repositories;
+Runtime operation targets, Runner-reported paths, and file outcomes remain
+independently authoritative.
 
-- **2026-10-05** (spec_version 42) — Recorded nonlocking Runtime/binding/worktree
-  observations and exact mutation-only owner, reclaim-attempt and resource-ack
-  boundaries while preserving path overlap and Workspace durability.
-- **2026-10-02** (spec_version 41) — Recorded completed route/report transaction
-  ownership with unchanged nonce, epoch, atomicity, and retained-applied evidence semantics.
-- **2026-09-30** (spec_version 40) — Included the exact Platform object-storage route
-  in strict-mode direct-transfer prerequisites without changing Workspace persistence.
+Agent Workspace API exposes Agent Runtime capability and lifecycle state. Read APIs do not ensure or
+start a Runtime. Server reads PostgreSQL capability, optional logical Runtime, Provider/Runner state,
+configuration state, and durable removal progress as source of truth. When a logical Runtime exists,
+the Agent Runtime response and Agent Workspace bootstrap response expose the same server-computed
+lifecycle presentation: desired target, convergence, direct Provider connection/resource facts,
+direct Runner state, overall availability, one bounded reason code, and desired generation.
 
-- **2026-09-15 (spec_version=39)** — Replaced Session endpoint, request, and cycle
-  persistence with one Agent-and-port service row, exposure deadline, revision, and
-  destructive legacy-data cutover.
-- **2026-09-14 (spec_version=38)** — Added one exact current
-  `runtime_web_session_routes` Owner lease, made logical streams and Runtime capacity
-  Redis-optional ephemeral state, and removed the legacy tunnel and
-  endpoint/user/Agent admission tables without a compatibility reader.
-- **2026-09-13 (spec_version=37)** — Removed persisted Runtime Web browser-profile
-  state and retained the latest ended cycle pointer so refreshed projections preserve
-  explicit closed authority.
-- **2026-09-13 (spec_version=36)** — Removed Runtime Web configuration versions,
-  epochs, and duration revisions in favor of current configuration plus explicit
-  browser authentication invalidation.
-- **2026-09-03 (spec_version=34)** — Added the non-persistent Terminal
-  ticket/attachment/replay/PTY boundary and mapped Terminal policy plus Runtime
-  removal authority.
-- **2026-09-01 (spec_version=33)** — Separated three-level interactive-Terminal
-  policy from Runtime configuration and Toolkit authority, and removed the obsolete
-  Agent Shell column and removal-finalizer mutation.
-- **2026-09-01 (spec_version=32)** — Replaced HOME-relative Nix state with Pixi
-  global environments, exposed commands, manifest, and cache under the existing
-  persistent Runner HOME.
-- **2026-09-01 (spec_version=31)** — Added image-installed Nix whose writable
-  store and state use the existing persistent Runner HOME.
-- **2026-08-26 (spec_version=30)** — Separated Provider-authorized host lifecycle from
-  ready-Runner data-plane usability and allowed a retained applied configuration to keep
-  serving operations while a future desired selection is unavailable or pending recreation.
-- **2026-08-25 (spec_version=29)** — Fenced Kubernetes Lease creation/renewal/takeover with
-  absence or exact-resourceVersion optimistic concurrency and made terminal-delete acknowledgement
-  wait for observed absence of every Provider-owned Runtime resource.
-- **2026-08-24 (spec_version=27)** — Added the optional Runner system-metrics capability,
-  generation-scoped volatile 60-sample series, privacy-safe Agent read projection, and shared
-  chat/settings overview while preserving Provider, PostgreSQL, lifecycle, and Agent Workspace
-  ownership.
-- **2026-08-13 (spec_version=26)** — Added Kubernetes Provider v3 hierarchical strict-network
-  resources, logical-Runtime CA and public trust boundaries, mandatory host mappings, aggregate
-  enforcement acknowledgement, mode-aware replacement, and PVC-preserving lifecycle evidence.
-- **2026-08-12 (spec_version=25)** — Added infrastructure Profile hard deletion with current
-  Workspace-reference blocking, applied-only Runtime evidence retention, recreation
-  terminalization, and no Runtime or Agent Workspace mutation.
-- **2026-08-11 (spec_version=24)** — Replaced configuration revision history with one bounded
-  desired/applied current-state row and Runtime-owned sequence high-water, added exact
-  sequence/digest/generation promotion and cleanup, and documented Owner hard delete without
-  fallback or running Workspace disruption.
-- **2026-08-11 (spec_version=23)** — Removed process-containment selection and derived status from
-  persisted Runtime configuration while retaining historical null-field normalization and
-  fail-closed rejection of active values.
-- **2026-08-11 (spec_version=22)** — Removed the Kubernetes process-containment deployment feature
-  flag and made Pod Profile schema v2 a permanent Provider capability.
-- **2026-08-10 (spec_version=21)** — Made AgentRuntime optional, added durable add/removal
-  transition persistence and bounded cleanup evidence, preserved the empty automatic Project policy
-  authority, and defined acknowledged higher-generation re-add with a fresh Workspace.
+Workspace retains its separate Runtime and access unions only for file-browser layout. Lifecycle
+actions come from the same `AgentRuntimeService` authority used by Runtime Settings. The UI renders
+one user-impact lifecycle status, separate execution-environment, Runtime-connection, and
+host-control facts, and only actions that the server currently authorizes. It does not consume a
+public single-summary projection or recompute availability and operation completion from
+Provider/Runner raw state. Frontend-side judgment is limited to API failure and network error.
 
-- **2026-08-09 (spec_version=20)** — Removed live Provider connectivity from immutable
-  configuration revision identity while retaining connection-gated lifecycle dispatch and
-  operation qualification.
-- **2026-08-09 (spec_version=19)** — Added persisted Profile v1/v2 containment choice, derived
-  containment status without new lifecycle state, Provider-specific temporary-storage lifetimes,
-  and Workspace-preserving containment adoption and rollback.
-- **2026-08-07 (spec_version=18)** — Made Runtime Profile source reads lock-free and fenced the
-  desired pointer attachment by exact versioned source evidence, Runtime generation, and durable
-  reconcile convergence after a stale attachment.
-- **2026-08-05 (spec_version=17)** — Serialized the bounded repair target with the Runtime row
-  through exact configuration lookup and Provider append, and preserved migration history through
-  successor schema removal.
-- **2026-08-05 (spec_version=16)** — Removed durable Runtime drift/repair projection and made a
-  current correlated `OBSERVE` completion the sole one-shot NetworkPolicy repair handoff; periodic
-  observation is the retry boundary.
-- **2026-08-04 (spec_version=15)** — Advanced Kubernetes Provider admission to v2 and removed
-  Provider-local NetworkPolicy lifecycle authority.
-- **2026-08-03 (spec_version=14)** — Made Runner-reported current-generation workspace evidence authoritative, retained Provider mount configuration as deployment state only, and removed fixed-path and Provider-equality fallback behavior.
-- **2026-07-31 (spec_version=13)** — Replaced Provider selection and execution-policy snapshots
-  with exact Workspace Runtime Profile binding, immutable desired/applied configuration revisions,
-  current-capability evidence, migration-only legacy conversion, and explicit recreation.
-- **2026-07-28 (spec_version=12)** — Mounted the Agent Workspace and Pod-local `/tmp` into the Runner and DIND sidecar at identical paths to support ordinary Docker and Compose bind mounts.
-- **2026-07-28 (spec_version=11)** — Replaced the policy Gateway with a direct Runtime-private DIND socket, collapsed Docker operations into one capability, and removed unenforceable PID, nested-container, and Profile network controls while retaining Kubernetes resource, storage, and deployment hard-cap boundaries.
-- **2026-07-27 (spec_version=10)** — Added all implemented Profile network modes, Kubernetes request/limit resource semantics, and Profile-controlled PVC expansion with destructive shrink application.
-- **2026-07-27 (spec_version=9)** — Removed Platform execution-policy state and made the selected Profile the complete versioned ceiling and snapshot source.
-- **2026-07-27 (spec_version=7)** — Added lazy exact-Provider binding and initial policy snapshot attachment for pre-contract Runtime rows without workspace replacement.
-- **2026-07-26 (spec_version=6)** — Added durable execution-policy target/applied snapshots, reset-free restrictive convergence, fixed Kubernetes topology isolation, and separate unqualified nested-engine storage.
-- **2026-07-26 (spec_version=5)** — Added storage-preserving periodic convergence for desired-running Runtime workload image and configuration drift.
-- **2026-07-03 (spec_version=3)** — Reflected Project-first Workspace browser ownership and registry-scoped Project root action boundary.
+Managed Runtime surfaces also render the server-derived system-metrics overview. One
+Agent-authorized response supplies CPU, memory, disk, Runner-observable scope, freshness/lifecycle
+states, and a bounded one-hour series without Runtime, Runner, Provider, generation, hostname,
+path, mount, device, or process identifiers. The concrete-session Runtime/Workspace panel polls
+every 60 seconds only while the panel is visible; Agent Runtime settings polls while mounted.
+Lifecycle mutations invalidate both lifecycle and metrics queries. Both surfaces share the same
+localized responsive component, preserve unavailable samples and missed intervals as trend gaps,
+show explicit loading/error/unsupported/unavailable/stale/stopped/disconnected states, and never
+derive zero values or browser-owned history. When a current percentage exists, the component pairs
+it with a 0–100 usage bar and a labeled locally scaled area trend. The trend has no persistent or
+active point markers, tooltip, or touch/hover visual state.
+
+The concrete-session Workspace panel requests the Project browser manifest only while the
+server-provided Agent Workspace state is `READY`. Manifest loading or failure does not replace
+lifecycle state and actions while the Agent Workspace is unavailable or transitioning. Workspace
+and Runtime-backed directory pickers poll while lifecycle convergence is non-stable, permanent
+removal is active, or configuration is waiting for recreation. They render the shared lifecycle
+presentation and expose Start or Restart only when the corresponding server action is available.
+
+| Runtime authority | Lifecycle availability | Workspace response and behavior |
+|---|---|---|
+| capability `none` | no lifecycle presentation | `UNAVAILABLE`; show the Runtime-free state and Add Runtime only when authorized |
+| capability `removing` | `removing` | `UNAVAILABLE`; Runtime access is revoked while irreversible removal remains pending, with progress and no add/cancel action |
+| stopped target and resource | `stopped` | `UNAVAILABLE`; expose Start only when the server action is available |
+| starting, stopping, resetting, or recovering convergence | `transitioning` | `UNAVAILABLE` or `CONNECTING`; show convergence and do not expose `READY` early |
+| no ready Runner and Provider command authority disconnected | `provider_disconnected` | `UNAVAILABLE`; explain that host controls are unavailable and show only server-authorized recovery actions |
+| no ready Runner and desired configuration unavailable | `configuration_blocked` | `UNAVAILABLE`; explain the configuration impact and block actions that require a usable desired configuration |
+| Provider resource running without a ready Runner | `runner_unavailable` | `UNAVAILABLE`; show the direct Runner fact, bounded reason, and only server-authorized actions |
+| current-generation Runtime or Provider failure | `failed` | `UNAVAILABLE`; show the bounded lifecycle reason and only server-authorized actions |
+| ready current-generation Runner serving an applied configuration | `ready` | `READY` when the current Runner-reported Agent Workspace path and exact applied operation target are valid, including while Provider host control is disconnected or a future desired selection is blocked or waiting for recreation |
+
+Runtime-dependent file, browser, Project, directory-validation, and worktree operations resolve one
+shared exact operation target. The resolver may request start/wait when the explicit operation
+allows it; that host transition requires a usable desired configuration and Provider authority.
+For an already-ready Runner, the target instead freezes the applied configuration sequence,
+digest, and target generation plus the Runner generation and current Runner-reported Agent
+Workspace path. Provider disconnection, Provider resource observation mismatch, or an unapplied
+future desired configuration does not fence that current target. Missing or invalid Runner
+evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or `RUNNER_WORKSPACE_PATH_INVALID`. Runner loss,
+terminal deletion, capability-version change, serving-authority supersession, timeout, or authority
+drift fails closed, and the server does not invent a fallback path. The read-only Workspace summary
+itself remains non-starting.
+
+The Runtime response includes desired and applied current configuration-state status and evidence
+without a process-containment projection. The UI keeps selected and applied Runtime Profile,
+execution Profile, and effective network values visible for verification, while omitting sequence,
+target-generation, digest, raw reason code, missing-capability identifiers, and acknowledgement
+details from the normal product surface. It renders the status supplied by the server and does not
+reconstruct physical security claims from raw Provider/Runner states.
+
+Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding and character-count truncation metadata; their byte size does not reject an otherwise bounded character preview. Binary preview candidates remain byte-size bounded, return no text body, and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, resolve and normalize the Runner-reported root, stat a regular file, and open a response-scoped verified Runtime transfer consumer. The consumer exposes only its opaque verified object through a bounded S3 iterator; the stream verifies exact size and SHA-256, keeps its lease renewed while the body is consumed, and acknowledges and settles only after exact EOF plus successful final ASGI body-send return. Source failure, lease/deadline loss, disconnect, or cancellation before that boundary abandons and cancels the attempt. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
+
+Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile and ordinary
+recreation do not delete Agent Workspace data. Only explicit `reset` and terminal delete may delete
+Agent Workspace data. Workspace, directory-picker, and Runtime Settings Restart controls require
+explicit confirmation that storage is preserved while compute is temporarily unavailable. Reset
+uses a distinct destructive confirmation and is rendered only when the server returns the Reset
+action.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/core/session_workspace_paths.py`](../../../../python/apps/azents/src/azents/core/session_workspace_paths.py)
+- [`python/apps/azents/src/azents/repos/agent_workspace_access.py`](../../../../python/apps/azents/src/azents/repos/agent_workspace_access.py)
+- [`python/apps/azents-runtime-provider-docker`](../../../../python/apps/azents-runtime-provider-docker)

@@ -1,80 +1,21 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-22
 tags: [backend, frontend, admin, scheduler, security, infra]
-spec_type: domain
-domain: system-settings
-owner: "@Hardtack"
-code_paths:
-  - python/apps/azents/src/azents/core/system_setting.py
-  - python/apps/azents/src/azents/core/system_setting_registry.py
-  - python/apps/azents/src/azents/core/system_setting_data.py
-  - python/apps/azents/src/azents/core/system_setting_payload.py
-  - python/apps/azents/src/azents/core/system_setting_deps.py
-  - python/apps/azents/src/azents/core/github_system_setting.py
-  - python/apps/azents/src/azents/core/google_system_setting.py
-  - python/apps/azents/src/azents/services/google_application/**
-  - python/apps/azents/src/azents/core/github_system_setting_data.py
-  - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
-  - python/apps/azents/src/azents/core/historical_memory_system_setting.py
-  - python/apps/azents/src/azents/services/historical_memory/execution_policy.py
-  - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
-  - python/apps/azents/src/azents/api/admin/system_setting/**
-  - python/apps/azents/src/azents/services/system_setting/**
-  - python/apps/azents/src/azents/services/github_platform_system_setting/**
-  - python/apps/azents/src/azents/services/external_account_oauth_system_setting/**
-  - python/apps/azents/src/azents/repos/system_setting/**
-  - python/apps/azents/src/azents/repos/github_platform_system_setting/**
-  - python/apps/azents/src/azents/rdb/models/system_setting.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - typescript/apps/azents-admin-web/src/app/system-settings/**
-  - typescript/apps/azents-admin-web/src/features/system-settings/**
-  - typescript/apps/azents-admin-web/src/app/client-layout.tsx
-  - typescript/apps/azents-admin-web/src/shared/AdminShellContainer.tsx
-  - typescript/apps/azents-admin-web/src/shared/components/AdminShell.tsx
-  - typescript/apps/azents-admin-web/src/shared/components/MasterDetailLayout.tsx
-  - typescript/apps/azents-admin-web/src/shared/containers/useAdminShellContainer.ts
-  - typescript/apps/azents-admin-web/src/shared/containers/useMasterDetailLayoutContainer.ts
-  - typescript/apps/azents-admin-web/src/shared/lib/admin-navigation.ts
-  - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
-  - infra/charts/azents/templates/server/apiserver-deployment.yaml.tpl
-  - infra/charts/azents/templates/server/adminserver-deployment.yaml.tpl
-  - infra/charts/azents/templates/server/worker-deployment.yaml.tpl
-  - infra/charts/azents/values.yaml
-  - infra/charts/azents/values.schema.json
-  - python/apps/azents/src/azents/api/admin/system/v1/**
-  - python/apps/azents/src/azents/api/admin/system_setting/v1/**
-  - python/apps/azents/src/azents/services/archived_session_retention.py
-  - python/apps/azents/src/azents/services/compacted_event_retention.py
-  - python/apps/azents/src/azents/repos/compacted_event_retention.py
-  - python/apps/azents/src/azents/repos/archived_session_retention/**
-  - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
-  - python/apps/azents/src/azents/scheduler/registry.py
-  - typescript/apps/azents-admin-web/src/app/retention/**
-  - typescript/apps/azents-admin-web/src/features/retention/**
-  - typescript/apps/azents-admin-web/src/trpc/routers/retention.ts
-api_routes:
-  - /system-setting/v1/sections
-  - /system-setting/v1/sections/external-channel-files
-  - /system-setting/v1/sections/historical-memory-execution
-  - /system-setting/v1/sections/external-account-oauth/{provider}
-  - /system-setting/v1/sections/external-account-oauth/{provider}/health-check
-  - /system-setting/v1/sections/platform-github-app
-  - /system-setting/v1/sections/platform-github-app/candidate/validate
-  - /system-setting/v1/sections/platform-github-app/candidate/confirm
-  - /system-setting/v1/sections/platform-github-app/candidate
-  - /system-setting/v1/sections/platform-github-app/health-check
-  - /system-setting/v1/audit-events
-  - /system/v1/settings/file-lifecycle
-  - /system/v1/settings/file-lifecycle/compacted-event-retention
-  - /system/v1/settings/file-lifecycle/archive-retention/preview
-  - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-22
-spec_version: 10
 ---
 
 # System Settings
+
+Instance-wide operator configuration and retention, integration and transfer policies.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Users and authentication](user-auth.md)
+- [Toolkits](toolkit.md)
+- [Google connections](google-connection.md)
+- [Periodic execution](../flow/periodic-execution.md)
 
 ## Overview
 
@@ -521,35 +462,22 @@ page resumes the application returned by the settings endpoint.
 - Owned file cleanup is defined in
   [`../flow/file-exchange-storage.md`](../flow/file-exchange-storage.md).
 
-## Changelog
+## API route entrypoints
 
-- **2026-10-13** (spec_version 10) — Added independent Unlimited-default retention
-  of compacted events, first-displacement TTL and administrator controls.
+- `/system-setting/v1/audit-events`
+- `/system-setting/v1/sections/external-account-oauth/{provider}`
+- `/system-setting/v1/sections/external-account-oauth/{provider}/health-check`
+- `/system-setting/v1/sections/external-channel-files`
+- `/system-setting/v1/sections/platform-github-app`
+- `/system-setting/v1/sections/platform-github-app/candidate`
+- `/system-setting/v1/sections/platform-github-app/candidate/confirm`
+- `/system-setting/v1/sections/platform-github-app/candidate/validate`
+- `/system-setting/v1/sections/platform-github-app/health-check`
 
-- **2026-10-02** — v8. Moved Section lifecycle, concrete GitHub impact/confirmation
-  and audit lifetimes into completed database-only repository operations, with
-  canonical shared payload/DI contracts and unchanged committed-expiry, fencing,
-  redaction and external validation behavior. Removed the dormant generic service
-  migration callback capability while preserving migration infrastructure.
+## References
 
-- **2026-09-30** — v7. Retired the persisted inbound file limit in schema version 2,
-  preserved outbound policy, and documented the shared 128 MiB ingress authority.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-09-13** — v6. Added direct-activation Slack and Discord identity OAuth
-  Sections, redacted Admin cards, explicit secret actions, callback projections,
-  health checks, and public provider availability.
-
-- **2026-07-30** — v5. Raised the External Channel inbound per-file default and
-  configured ceiling to 500 MiB while retaining lower operator policy overrides.
-
-- **2026-07-23** — v4. Added the direct-activation provider-neutral External Channel file
-  limits, optimistic Admin API, generated clients, audit behavior, and whole-MiB
-  direct-save Admin surface.
-- **2026-07-20** — v3. Retired the legacy unbound Platform GitHub App transition state, required App IDs for persisted installation rows and Platform Toolkits, and retained impact confirmation only for actual App identity changes.
-- **2026-07-20** — v2. Added the provider-neutral typed Section lifecycle, encrypted current/candidate
-  persistence, field-level environment precedence, Platform GitHub App validation and impact
-  confirmation, metadata-only health/audit projections, Admin Web contract, and dedicated Helm Secret
-  delivery.
-- **2026-07-19** — v1. Added the database-backed archived-session retention policy, Admin-only
-  optimistic update and preview API, selectable application scope, durable recalculation, and Admin Web
-  progress recovery.
+- [`python/apps/azents/src/azents/services/system_setting`](../../../../python/apps/azents/src/azents/services/system_setting)
+- [`python/apps/azents/src/azents/core/system_setting_registry.py`](../../../../python/apps/azents/src/azents/core/system_setting_registry.py)

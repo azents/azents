@@ -117,7 +117,8 @@ Keep fixes at the narrowest layer that removes proven waste while retaining beha
 1. Deterministic unit/support tests for the changed mechanism.
 2. Format, lint and strict type checks for affected projects and shared tooling.
 3. Smallest real integration/E2E selection when product boundaries change.
-4. Independent read-only `code-review`, then `spec-review` and matching Living Spec.
+4. Independent read-only `code-review`, then semantic `spec-review` and the owning
+   Spec Wiki pages, connections and references.
 5. `ship-pr` for PR creation/monitoring; request `hardtack` when verification is ready.
 
 Preserve required behavioral coverage, not an arbitrary number of tests. Remove or

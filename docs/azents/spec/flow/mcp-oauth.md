@@ -1,39 +1,20 @@
 ---
-title: "MCP OAuth Flow"
+title: "MCP OAuth"
 created: 2026-04-20
 tags: [backend, engine, security, api]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [toolkit, user-auth, agent]
-code_paths:
-  - python/apps/azents/src/azents/core/toolkit_errors.py
-  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
-  - python/apps/azents/src/azents/services/toolkit/**
-  - python/apps/azents/src/azents/services/toolkit_oauth/**
-  - python/apps/azents/src/azents/repos/toolkit_oauth_operations.py
-  - python/apps/azents/src/azents/repos/toolkit_oauth_data.py
-  - python/apps/azents/src/azents/repos/account_access.py
-  - python/apps/azents/src/azents/engine/tools/mcp_base.py
-  - python/apps/azents/src/azents/engine/tools/mcp.py
-  - python/apps/azents/src/azents/core/mcp_transport.py
-  - python/apps/azents/src/azents/core/mcp_discovery.py
-  - python/apps/azents/src/azents/core/oauth2.py
-  - python/apps/azents/src/azents/api/public/toolkit/v1/oauth.py
-  - python/apps/azents/src/azents/api/public/toolkit/v1/personal_oauth.py
-  - python/apps/azents/src/azents/repos/toolkit/personal_management.py
-  - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
-  - python/apps/azents/src/azents/rdb/models/toolkit.py
-  - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
-  - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
-  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
-  - typescript/apps/azents-web/src/features/toolkits/**
-  - typescript/apps/azents-web/src/shared/toolkits/**
-  - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-10-17
-spec_version: 15
 ---
 
-# MCP OAuth Flow
+# MCP OAuth
+
+Shared Toolkit connection setup, discovery, token storage and runtime refresh.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Toolkits](../domain/toolkit.md)
+- [Workspaces and membership](../domain/workspace.md)
+- [Users and authentication](../domain/user-auth.md)
 
 ## Overview
 
@@ -375,24 +356,10 @@ Displayed fields:
 
 The compact Agent connection list keeps readiness and applicable authorize/reconnect actions visible. Details expose existing granted token scope/expiration separately from configured requested scopes, without performing remote grant introspection. A persisted Toolkit may be added before OAuth completes; addition does not claim connected external authorization. Parent Agent settings do not require another save. The UI does not display account identity. An Agent-owned callback posts only a fixed event type and success boolean to its opener, refreshes the Agent management projection, and offers a fallback return link to the owning Agent settings Toolkit section.
 
-## Changelog
+## References
 
-- **2026-10-02** (spec_version 9) — Completed shared setup read/store/disconnect
-  transaction ownership and repeated existing requester/Workspace/Toolkit
-  authority after external work, preserving shared versus Agent callback rules,
-  full-upsert token semantics, and the separate runtime refresh policy.
-- **2026-10-01** (spec_version 8) — Moved runtime OAuth connection loads and
-  refresh success/failure finalization into completed repository-owned
-  transactions while keeping provider HTTP refresh outside transactions and
-  preserving stale-snapshot and reconnect-required behavior.
-- **2026-09-25** (spec_version 7) — Exposed ownership-gated OAuth connect and
-  reconnect directly from saved-Agent Toolkit cards without changing the
-  Workspace or Agent OAuth endpoint authority.
-- **2026-09-07** (spec_version 6) — Added Agent-owned MCP OAuth nested routes,
-  encrypted Agent callback context, current Owner-or-AgentAdmin revalidation, and
-  saved-Agent callback return behavior while retaining Workspace-shared OAuth.
-- **2026-09-04** (spec_version 5) — Documented fail-closed typed validation for
-  protected-resource metadata, authorization-server metadata, and DCR response
-  payloads.
-- **2026-06-23** (spec_version 3) — Replaced per-user OAuth spec with toolkit-level OAuth connections. Current code: `mcp_oauth_connections`, connect/exchange/disconnect APIs, toolkit response summary, lazy row-locked refresh, Notion/Sentry `auth_type=oauth2`, and per-user table/API/runtime removal.
-- **2026-04-20** (spec_version 1) — Initial per-user OAuth spec.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/toolkit_oauth`](../../../../python/apps/azents/src/azents/services/toolkit_oauth)
+- [`python/apps/azents/src/azents/repos/toolkit_oauth_operations.py`](../../../../python/apps/azents/src/azents/repos/toolkit_oauth_operations.py)

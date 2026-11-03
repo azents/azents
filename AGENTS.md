@@ -26,7 +26,7 @@ Azents is an AI agent platform. This repository contains the backend, runtime pr
 | `typescript/packages/azents-admin-client/` | Generated TypeScript admin API client |
 | `swift/apps/azents-ios/` | Native iOS application and UI tests |
 | `testenv/azents/` | Fixture/prerequisite support and E2E tests |
-| `docs/azents/` | ADR, design, issues, notes, plans, and living specs |
+| `docs/azents/` | Spec Wiki, Requirements, ADR, design, issues, notes, and plans |
 | `infra/charts/azents/` | Helm chart |
 | `proto/azents/` | Runtime control protobuf definitions |
 
@@ -120,10 +120,12 @@ $ pnpm run dev --filter=@azents/admin-web
 
 ## Azents Documentation System
 
-The azents project uses the Living Spec system:
+Azents records current behavior in an LLM-maintained [Spec Wiki](docs/azents/spec/index.md).
+Read its [maintenance guide](docs/azents/spec/AGENTS.md) before changing wiki pages.
+The wiki is the Spec itself, not a second summary or generated catalog.
 
 - **Requirements** (`docs/azents/requirements/`) — confirmed user or system outcomes and acceptance criteria for one development snapshot. Implemented Requirements are immutable.
-- **SPEC.md** (`docs/azents/spec/`) — current system behavior. Update when code changes.
+- **Spec Wiki** (`docs/azents/spec/`) — interconnected current-system knowledge, updated with behavior changes.
 - **ADR** (`docs/azents/adr/`) — append-only decision history. Implemented/adopted ADRs are immutable.
 - **Design** (`docs/azents/design/`) — development-time design documents. Do not rewrite implemented design documents as living specs; current behavior belongs in spec docs.
 
@@ -134,11 +136,21 @@ mutable; the normal immutability rules apply after that migration.
 
 Development snapshots use one shared `{word}-{YYMMDD}-{slug}.md` basename across Requirements, ADR, and Design. Use `{word}-{YYMMDD}` as the snapshot ID and typed references such as `<snapshot>/REQ-N`, `<snapshot>/ADR-DN`, and `<snapshot>/DESIGN`. Legacy numbered ADRs and pre-migration Design filenames are historical inputs only; current core documents must use dated snapshot filenames. Preserve legacy references only in explicit provenance or ambiguity records.
 
-Always read `docs/azents/spec/` first for current behavior. Read Requirements, ADRs, and design documents only when product intent, rationale, or historical context is needed.
+Start at `docs/azents/spec/index.md`, follow relevant concept and flow links, and
+consult references as needed. Requirements, ADRs, Designs, code and tests are
+references outside the wiki; they retain their own authority and lifecycle.
+Agents discover impact semantically from behavior and ownership using ordinary
+search and source inspection. Do not maintain code-path coverage inventories,
+glob-match impact scripts, generated document catalogs or path-bucket wiki audits.
+Maintain one owner for each detailed contract, contextual cross-links and selected
+evidence. Use Git/PR history rather than page versions or duplicate change logs.
 
 When modifying azents-scoped areas:
 
-- Update related spec files directly in the same PR when needed.
+- Ingest verified behavior changes into the owning wiki pages in the same PR;
+  update affected neighbors and the index, then lint for contradictions, missing
+  contracts, broken links and unsupported claims. `/spec-review` handles semantic
+  diff impact; `/living-spec-audit` handles bounded wiki/implementation verification.
 - For new technical feature design, confirm a Requirements document before creating its same-basename ADR or Design.
 - When a large feature is split into stacked phases, run spec review once in a separate phase right before QA.
 - For material architecture or product-contract decisions, record the accepted

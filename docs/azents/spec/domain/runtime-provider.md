@@ -1,86 +1,20 @@
 ---
-title: "Runtime Provider"
+title: "Runtime Providers"
 created: 2026-07-22
 tags: [backend, frontend, admin, runtime, security, infra]
-spec_type: domain
-domain: runtime-provider
-code_paths:
-  - python/apps/azents/src/azents/core/runtime_profile_workspace.py
-  - python/apps/azents/src/azents/core/runtime_provider_admin.py
-  - python/apps/azents/src/azents/core/runtime_provider_contract_errors.py
-  - python/apps/azents/src/azents/repos/runtime_profile_workspace_operations.py
-  - python/apps/azents/src/azents/repos/runtime_provider_admin_operations.py
-  - python/apps/azents/src/azents/repos/runtime_provider_contract_operations.py
-  - python/apps/azents/src/azents/core/agent_runtime_removal.py
-  - python/apps/azents/src/azents/repos/agent_runtime/lifecycle_operations.py
-  - python/apps/azents/src/azents/repos/agent_runtime_removal/operations.py
-  - python/apps/azents/src/azents/core/runtime_provider_data.py
-  - python/apps/azents/src/azents/core/runtime_provider_control.py
-  - python/apps/azents/src/azents/core/runtime_recreation.py
-  - python/apps/azents/src/azents/repos/runtime_recreation_operations.py
-  - python/apps/azents/src/azents/core/runtime_profile_deletion.py
-  - python/apps/azents/src/azents/core/runtime_provider_bootstrap.py
-  - python/apps/azents/src/azents/repos/runtime_provider_bootstrap_operations.py
-  - python/apps/azents/src/azents/repos/runtime_profile_resolution_operations.py
-  - python/apps/azents/src/azents/repos/runtime_profile_reconciliation_operations.py
-  - python/apps/azents/src/azents/repos/runtime_provider_auth_operations.py
-  - python/apps/azents/src/azents/repos/runtime_terminal_authority_read.py
-  - python/apps/azents/src/azents/repos/agent_runtime_transition_operations.py
-  - python/apps/azents/src/azents/rdb/models/runtime_provider.py
-  - python/apps/azents/src/azents/rdb/models/runtime_provider_bootstrap.py
-  - python/apps/azents/src/azents/rdb/models/runtime_provider_policy.py
-  - python/apps/azents/src/azents/rdb/models/runtime_provider_binding.py
-  - python/apps/azents/src/azents/rdb/models/runtime_provider_control.py
-  - python/apps/azents/src/azents/repos/runtime_provider/**
-  - python/apps/azents/src/azents/repos/runtime_provider_binding/**
-  - python/apps/azents/src/azents/repos/runtime_provider_control/**
-  - python/apps/azents/src/azents/repos/runtime_provider_policy/**
-  - python/apps/azents/src/azents/repos/runtime_profile/**
-  - python/apps/azents/src/azents/services/runtime_provider_admin/**
-  - python/apps/azents/src/azents/services/runtime_provider_binding_admin/**
-  - python/apps/azents/src/azents/services/runtime_provider_bootstrap/**
-  - python/apps/azents/src/azents/services/runtime_provider_control/**
-  - python/apps/azents/src/azents/services/runtime_provider_contract/**
-  - python/apps/azents/src/azents/services/runtime_provider_public/**
-  - python/apps/azents/src/azents/core/runtime_profile.py
-  - python/apps/azents/src/azents/rdb/models/runtime_profile.py
-  - python/apps/azents/src/azents/repos/runtime_profile/**
-  - python/apps/azents/src/azents/services/runtime_profile_admin/**
-  - python/apps/azents/src/azents/services/runtime_profile_compatibility/**
-  - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
-  - python/apps/azents/src/azents/services/runtime_profile_resolution/**
-  - python/apps/azents/src/azents/services/runtime_profile_workspace/**
-  - python/apps/azents/src/azents/services/runtime_recreation/**
-  - python/apps/azents/src/azents/api/admin/runtime_provider/**
-  - python/apps/azents/src/azents/api/admin/runtime_provider_enrollment/**
-  - python/apps/azents/src/azents/api/public/runtime_provider/**
-  - python/apps/azents/src/azents/api/public/runtime_profile/**
-  - python/apps/azents/src/azents/api/public/agent_runtime/**
-  - python/apps/azents/src/azents/rdb/models/agent_runtime.py
-  - python/apps/azents/src/azents/services/agent_runtime/**
-  - python/apps/azents-runtime-provider-kubernetes/**
-  - python/apps/azents-runtime-provider-docker/**
-  - python/apps/azents-runtime-runner/**
-  - python/libs/azents-runtime-control/src/azents_runtime_control/**
-  - proto/azents/runtime_control/v1/runtime_provider_control.proto
-  - infra/charts/azents/templates/runtime-provider-kubernetes/**
-  - infra/charts/azents/templates/server/rbac.yaml.tpl
-  - infra/charts/azents/templates/server/runtime-control-deployment.yaml.tpl
-  - infra/charts/azents/templates/server/runtime-provider-bootstrap-configmap.yaml.tpl
-  - infra/charts/azents/values.yaml
-  - infra/charts/azents/values.schema.json
-  - typescript/apps/azents-admin-web/src/app/runtime-providers/**
-  - typescript/apps/azents-admin-web/src/features/runtime-providers/**
-  - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
-  - typescript/apps/azents-web/src/features/runtime-profiles/**
-  - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-  - testenv/azents/e2e/src/tests/conftest.py
-  - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
-last_verified_at: 2026-10-26
-spec_version: 43
 ---
 
-# Runtime Provider
+# Runtime Providers
+
+Provider registration, authentication, infrastructure profiles and Runtime binding authority.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Runtime control](../flow/agent-runtime-control.md)
+- [Runtime persistence](../flow/agent-runtime-persistence.md)
+- [Workspaces and membership](workspace.md)
 
 ## Overview
 
@@ -218,7 +152,6 @@ Session ownership, Profile and applied-state checks finish in one native read-on
 authority operation. Runner coordination, policy projection and working-folder
 resolution consume its detached snapshot after closure, preserving fail-closed
 reason ordering.
-
 
 An Agent may be Runtime-free and have no logical Runtime row or Provider binding. Explicit Runtime
 addition selects one available Workspace Runtime Profile, creates or rearms the one logical Runtime
@@ -469,111 +402,11 @@ hardening and substrate controls, while node security, RuntimeClass selection, A
 network controls, and infrastructure access are operator responsibilities outside Profile input.
 Admin Profile editing cannot mutate those deployment boundaries.
 
-## Version history
+## References
 
-- **42 (2026-10-05):** Completed Workspace Profile/default and Provider
-  policy/availability/contract operations in repository-owned scopes. Existing CAS,
-  error translation and reconcile enqueue remain atomic; terminal invalidation and
-  deletion logging follow completion.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **41 (2026-10-05):** Completed Agent Runtime lifecycle and irreversible removal
-  database operations before external coordination. Configuration CAS, exact
-  removal idempotency/lease/deletion evidence and cleanup/finalization atomic groups
-  retain their existing acceptance predicates.
-
-- **40 (2026-10-05):** Added completed Provider enrollment, connection acceptance,
-  Runner authentication and recreation operations to the common authority and
-  Admin boundaries, preserving generation/attempt fencing and detached reads.
-
-- **39 (2026-10-05):** Integrated completed resolution/reconciliation, atomic
-  explicit Runtime addition, credential verification and read-only Terminal
-  authority with Profile/binding Admin operations. Retained scoped lifecycle
-  checks, atomic authority groups and external effects after database completion.
-
-- **38 (2026-10-05):** Completed Profile/binding administrative database operations
-  and bootstrap enrollment target reads while preserving atomic authority groups
-  and postcommit terminal invalidation.
-
-
-- **37 (2026-10-05):** Separated ordinary recreation target description from actual
-  dispatch fencing and retained the checked target version and item-attempt identity.
-  Moved public Workspace Provider discovery into a completed read-only repository
-  operation without changing eligibility or safe output.
-
-- **35 (2026-10-04):** Removed row-lock modes from independent revision, Profile
-  and retained configuration-state getters while preserving mutation fencing.
-
-- **34 (2026-09-30):** Promoted direct-file storage readiness and Platform-owned
-  object-storage Service routes/host mappings, preserving strict customer-network authority.
-
-- **33 (2026-09-18):** Clarified that Workspace Upload object-storage endpoints
-  are deployment/operator configuration outside Kubernetes Runtime network authority,
-  and that the optional public endpoint falls back to the primary endpoint.
-- **32 (2026-09-18):** Restored optional public-endpoint fallback and removed the
-  unapproved Workspace Upload chart and Runtime network gates.
-- **31 (2026-09-18):** Removed the duplicated Azents chart and Runtime Control CORS
-  contract; object-storage CORS remains an operator-owned prerequisite.
-- **30 (2026-09-18):** Added Docker Provider and Runner Runtime network CA
-  propagation for browser-direct Workspace Upload: read-only public CA mount,
-  writable combined trust bundle, verified direct HTTPS downloads, digest-fenced
-  managed-container reuse, and preservation of Workspace storage during replacement.
-- **29 (2026-09-17):** Added Workspace Upload's deployment-owned public S3 endpoint
-  prerequisite, exact Platform transfer egress projection across Kubernetes Runtime modes,
-  host-route restrictions, and fail-closed object-storage readiness validation.
-- **28 (2026-08-26):** Separated Provider host-management authority from existing
-  ready-Runner data-plane operations while retaining Provider connection requirements
-  for lifecycle dispatch and compute creation or replacement.
-- **27 (2026-08-18):** Corrected Kubernetes Provider deployment authority to include
-  namespace-scoped strict-network Service, ConfigMap, NetworkPolicy, and logical-Runtime CA Secret
-  operations while preserving server-only TokenReview and credential-Secret-free authentication.
-- **26 (2026-08-13):** Added Kubernetes Profile v3 and Workspace Policy v2 hierarchical network
-  authority, strict `proxy_required` and `no_network` enforcement bundles, Provider protocol v3
-  aggregate `network_enforcement`, operator-attested capability diagnostics, mode-aware lifecycle
-  impact, bounded API/UI projection, deterministic control-plane E2E, and focused
-  Provider/proxy manifest, protocol, lifecycle, trust, and forwarding validation.
-- **25 (2026-08-12):** Added System-Admin exact-version infrastructure Profile hard deletion,
-  fresh blocking-reference and applied-only impact projection, target-scoped recreation
-  terminalization, Runtime/Workspace preservation, and membership-independent Admin Workspace
-  Runtime Profile detail.
-- **24 (2026-08-11):** Replaced Agent Runtime configuration-history references with bounded
-  desired/applied state slots, positive sequence/digest/generation fencing, exact promotion and
-  cleanup, and Owner hard-delete behavior without fallback or running-Workspace disruption.
-- **23 (2026-08-11):** Removed the Azents-owned process-containment capability, Profile module,
-  derived status projections, and Provider deployment preparation while retaining schema-v2
-  compatibility for historical null fields and rejecting active containment requests.
-- **22 (2026-08-11):** Made Kubernetes process containment a permanent Provider capability and
-  removed the deployment feature flag that conditionally advertised Profile schema v2.
-- **21 (2026-08-10):** Added optional logical Runtime binding, explicit stopped add and
-  higher-generation rearm, and reconnect-safe exact-generation terminal deletion for permanent
-  Agent Runtime removal.
-
-- **20 (2026-08-09):** Separated durable Runtime configuration identity from live Provider
-  connectivity so transient rollout reconnect gaps retain ready desired state while dispatch and
-  operation qualification still require current connection authority.
-- **19 (2026-08-09):** Added Profile v2 portable process containment, deployment-owned capability
-  advertisement plus per-Runtime qualification, explicit recreation, safe derived product
-  projections, and fail-closed Docker/Kubernetes preparation.
-- **18 (2026-08-05):** Serialized bounded repair configuration lookup and append with the current
-  Runtime row, added lifecycle/terminal fences, and recorded transient structured correlation logs.
-- **17 (2026-08-05):** Removed durable Runtime drift/repair projection. A live-stream-correlated
-  `OBSERVE` completion may make one fenced `UPDATE_CONFIGURATION` handoff; periodic observation is
-  the sole retry path.
-- **16 (2026-08-04):** Removed Kubernetes Provider-local NetworkPolicy lifecycle authority, added
-  strict v2 structured drift evidence, and made Runtime Control the durable fenced repair owner.
-- **15 (2026-08-03):** Removed Agent Workspace metadata from Provider capability and lifecycle reports; bundled Providers now configure Runner `HOME` and working directory while Runner reports the effective path.
-- **14 (2026-07-31):** Replaced accepted-contract and hierarchical execution-policy authority with
-  the authenticated current valid capability, Provider-owned typed infrastructure Profiles,
-  Workspace-owned exact Runtime Profiles, desired/applied configuration evidence, and scoped
-  recreation.
-- **13 (2026-07-28):** Removed the Container Policy Gateway and unenforceable granular Docker, network, PID, and nested-container controls; Docker is one complete direct-DIND capability bounded by Kubernetes resources, storage, and the deployment NetworkPolicy hard cap.
-- **12 (2026-07-27):** Persisted the exact current Provider advertisement separately from accepted history, made Admin readiness and acceptance follow that pointer, and made dependent storage/network policy projection atomic.
-- **11 (2026-07-27):** Made the currently advertised Provider contract the sole approval target, deleted stale never-accepted proposals, and allowed a previously accepted digest to be proposed again after drift.
-- **10 (2026-07-27):** Unified every unreleased execution-policy module on v1, migrated stored policies without a v2 compatibility path, replaced protobuf Struct and snapshot JSONB with canonical JSON text, and prevented stale contract acceptance.
-- **9 (2026-07-27):** Advertised all implemented network modes, defined resource module v1 request/limit semantics, and added Profile-controlled persistent workspace capacity with deferred shrink.
-- **8 (2026-07-27):** Removed the installation-wide execution-policy ceiling and made each editable Profile the complete authority ceiling.
-- **7 (2026-07-27):** Made unrestricted direct outbound networking the installation and reserved Standard default while leaving nested container authority disabled.
-- **6 (2026-07-27):** Added accepted typed execution-policy capabilities as the authority source for Kubernetes engine features.
-- **5 (2026-07-27):** Connected authenticated Provider contract proposal, immutable candidate persistence, explicit Admin acceptance, and storage-preserving legacy Runtime policy binding.
-- **4 (2026-07-26):** Added restrictive Runtime Execution Profile compatibility, explicit Apply versus automatic tightening convergence, safe policy projections, and the current fail-closed privileged-engine boundary.
-- **3 (2026-07-23):** Promoted durable authentication bindings, explicit issued-token and Kubernetes ServiceAccount methods, Admin binding lifecycle, TokenReview workload identity, secret-free Helm deployment, and Runtime storage preservation behavior.
-- **2 (2026-07-23):** Added Provider policy, selection, and credential-bootstrap deployment behavior.
+- [`python/apps/azents/src/azents/core/runtime_provider_admin.py`](../../../../python/apps/azents/src/azents/core/runtime_provider_admin.py)
+- [`python/apps/azents/src/azents/runtime`](../../../../python/apps/azents/src/azents/runtime)
+- [`python/apps/azents-runtime-provider-kubernetes`](../../../../python/apps/azents-runtime-provider-kubernetes)

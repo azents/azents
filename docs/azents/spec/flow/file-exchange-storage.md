@@ -1,110 +1,23 @@
 ---
-title: "File Exchange Storage"
+title: "File exchange and storage"
 created: 2026-05-10
 tags: [backend, engine, frontend]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, conversation, workspace, toolkit, memory]
-code_paths:
-  - python/apps/azents/src/azents/core/agent_session_input_data.py
-  - python/apps/azents/src/azents/core/chat_data.py
-  - python/apps/azents/src/azents/core/exchange_file_errors.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/core/session_workspace_paths.py
-  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
-  - python/apps/azents/src/azents/repos/chat_write_operations.py
-  - python/apps/azents/src/azents/repos/input_attachment_claim.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
-  - python/apps/azents/src/azents/repos/vfs_read_authority.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/src/azents/core/vfs.py
-  - python/apps/azents/src/azents/core/config.py
-  - python/apps/azents/src/azents/core/s3/deps.py
-  - python/apps/azents/src/azents/runtime/transfer/**
-  - python/apps/azents/src/azents/services/external_channel/channel_action.py
-  - python/apps/azents/src/azents/services/exchange_file/**
-  - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/services/file_storage.py
-  - python/apps/azents/src/azents/services/artifact.py
-  - python/apps/azents/src/azents/services/model_file.py
-  - python/apps/azents/src/azents/repos/session_resource_authority.py
-  - python/apps/azents/src/azents/services/agent_session_input.py
-  - python/apps/azents/src/azents/services/vfs.py
-  - python/apps/azents/src/azents/services/vfs_read.py
-  - python/apps/azents/src/azents/services/memory_vfs.py
-  - python/apps/azents/src/azents/engine/tools/readable_storage.py
-  - python/apps/azents/src/azents/repos/artifact/**
-  - python/apps/azents/src/azents/repos/model_file/**
-  - python/apps/azents/src/azents/repos/model_file_pin.py
-  - python/apps/azents/src/azents/rdb/models/model_file_pin.py
-  - python/apps/azents/src/azents/repos/exchange_file/**
-  - python/apps/azents/src/azents/repos/file_metadata_authority.py
-  - python/apps/azents/src/azents/repos/provider_output_operation.py
-  - python/apps/azents/src/azents/repos/external_channel/file_access.py
-  - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/repos/archived_session_retention/**
-  - python/apps/azents/src/azents/rdb/models/artifact.py
-  - python/apps/azents/src/azents/rdb/models/model_file.py
-  - python/apps/azents/src/azents/rdb/models/exchange_file.py
-  - python/apps/azents/src/azents/services/session_storage.py
-  - python/apps/azents/src/azents/services/archived_session_purge.py
-  - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
-  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
-  - python/apps/azents/src/azents/repos/file_lifecycle_cleanup_operations.py
-  - python/apps/azents/src/azents/core/archived_session_purge_data.py
-  - python/apps/azents/src/azents/core/file_lifecycle_cleanup_data.py
-  - python/apps/azents/src/azents/services/uploads/**
-  - python/apps/azents/src/azents/services/chat/workspace.py
-  - python/apps/azents/src/azents/core/file_transfer.py
-  - python/apps/azents/src/azents/core/exchange_upload.py
-  - typescript/apps/azents-web/src/shared/file-upload/fileHash.ts
-  - typescript/apps/azents-web/src/shared/file-upload/fileHash.worker.ts
-  - typescript/apps/azents-web/src/shared/file-upload/incrementalSha256.ts
-  - typescript/apps/azents-web/src/shared/file-upload/browserFileUpload.ts
-  - typescript/apps/azents-web/src/shared/file-upload/fileUploadCancellation.ts
-  - typescript/apps/azents-web/src/app/(app)/api/chat/upload/[uploadId]/finalize/**
-  - python/apps/azents/src/azents/services/browser_file_download.py
-  - python/apps/azents/src/azents/rdb/models/exchange_upload_operation.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/9462aab292cc_add_exchange_browser_upload_operations.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/0c18705eb6cb_retain_completed_exchange_upload_.py
-  - python/apps/azents/src/azents/engine/run/resolve.py
-  - python/apps/azents/src/azents/engine/events/file_parts.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
-  - python/apps/azents/src/azents/engine/events/responses_lowering.py
-  - python/apps/azents/src/azents/engine/events/fork_context.py
-  - python/apps/azents/src/azents/engine/events/model_file_parts.py
-  - python/apps/azents/src/azents/engine/events/model_file_materializer.py
-  - python/apps/azents/src/azents/engine/events/provider_output.py
-  - python/apps/azents/src/azents/engine/events/generated_files.py
-  - python/apps/azents/src/azents/engine/events/tool_invocation.py
-  - python/apps/azents/src/azents/engine/tools/xai_image_generation.py
-  - python/apps/azents/src/azents/api/public/chat/v1/**
-  - python/apps/azents/src/azents/engine/tools/import_file.py
-  - python/apps/azents/src/azents/engine/tools/import_resolver.py
-  - python/apps/azents/src/azents/engine/tools/present_file.py
-  - python/apps/azents/src/azents/engine/tools/read_image.py
-  - python/apps/azents/src/azents/engine/tools/browser.py
-  - python/apps/azents/src/azents/engine/tools/run_tool_to_file.py
-  - typescript/apps/azents-web/src/shared/file-upload/useFileUpload.ts
-  - typescript/apps/azents-web/src/shared/file-upload/browserDownloadRedirect.ts
-  - typescript/apps/azents-web/src/app/(app)/api/chat/exchange-files/**
-  - typescript/apps/azents-web/src/app/(app)/api/chat/agents/*/workspace/download/**
-  - typescript/apps/azents-web/src/features/chat/containers/AttachmentPreviewBarContainer.tsx
-  - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
-  - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
-  - typescript/apps/azents-web/src/features/chat/components/AttachmentMarkdownPreview.tsx
-  - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ProviderToolCallCard.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
-  - typescript/packages/azents-session-core/src/toolActivityPresentation.ts
-last_verified_at: 2026-10-20
-spec_version: 61
 ---
 
-# File Exchange Storage
+# File exchange and storage
+
+Exchange attachments, Artifacts, model input files and managed VFS transfer boundaries.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Runtime control](agent-runtime-control.md)
+- [Conversations and events](../domain/conversation.md)
+- [External Channel delivery](external-channel-delivery.md)
+- [Periodic execution](periodic-execution.md)
+- [Workspaces and membership](../domain/workspace.md)
+- [Toolkits](../domain/toolkit.md)
 
 ## Overview
 
@@ -563,130 +476,140 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Session Workspace file/project state follows [`../domain/workspace.md`](../domain/workspace.md).
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
-## Changelog
+## Agent Workspace Upload
 
-- **2026-10-15** (spec_version 61) — Request uncompressed Discord CDN attachment
-  bytes for exact length verification and retain controlled provider failure diagnostics.
+Agent Workspace Upload is a separate direct-object transfer and is not Project Source
+provisioning. The public JSON lifecycle is exposed through
+`POST /chat/v1/agents/{agent_id}/workspace/uploads`,
+`GET /chat/v1/agents/{agent_id}/workspace/uploads/{upload_id}`, and the
+`/finalize`, `/cancel`, and `/retry` subroutes. Create returns requester-scoped
+status plus a transient PUT ticket; the browser uploads bytes directly to the
+primary object-storage endpoint. When an optional public endpoint is configured, it
+overrides the endpoint used for browser- and Runner-reachable presigned URLs; when it
+is omitted, the primary endpoint is reused. The Main Web/API never relays the file
+body. Signed URLs, signatures, object keys, and signed headers are not returned in
+durable status or logs.
 
-- **2026-10-05** (spec_version 60) — Made file cleanup and archived-root purge
-  metadata preparation/settlement repository-owned, retaining exact lease/cursor
-  predicates and object deletion strictly between completed database operations.
+Runtime Control owns source verification and admission. It verifies the expected size
+and SHA-256 of the retained object, then admits a `DIRECT_OBJECT` download to the
+current generation Runner, which streams and verifies the object before atomically
+publishing the destination path under the Agent Workspace. Requests remain fenced by
+requester, Workspace, Agent, Session, revision, Runtime generation, and transfer
+deadline. Finalize, cancellation, expiry, conflict, and retry settle through the
+same durable upload record; retry reuses the retained object and requires explicit
+overwrite authority after a destination conflict.
 
-- **2026-10-05** (spec_version 59) — Recorded completed read-only Exchange
-  publication recovery and its narrow database-error boundary, retaining
-  conservative verified-object compensation behavior.
+The concrete-session Workspace UI computes SHA-256 in a worker, shows bounded
+uploading/uploaded/conflict/cancelled/failed states, and refreshes the FileBrowser
+only after authoritative commit. Upload begins from an exact directory row's
+actions menu, and files selected by that picker retain that directory as their
+destination; the global browser toolbar does not expose a separate upload or
+destination-selection action. A conflict does not overwrite the existing file
+implicitly, and cancellation does not publish a partial destination.
 
-- **2026-10-05** (spec_version 58) — Separated finalized upload-publication
-  observation from upload/Agent mutation locks while preserving exact uploader,
-  scope, manifest and lifecycle checks and actual claim/finalization fencing.
-- **2026-10-03** (spec_version 56) — Removed the Workspace publication allowlist
-  from `present_file`; retained absolute Runtime paths, filesystem permissions,
-  Session authority, and verified direct-transfer requirements.
-- **2026-10-02** (spec_version 55) — Distinguished generic read-only live
-  Memory VFS access from immutable managed Skills import; Memory creates no
-  transferable file-exchange object and has no import/transfer capability.
-- **2026-10-01** (spec_version 54) — Moved generated provider-output scope,
-  retry-metadata, and cleanup-protection reads behind completed repository
-  operations while preserving atomic Event/metadata admission and
-  transaction-free object upload/compensation.
-- **2026-09-30** (spec_version 53) — Made the general-file limit injectable across
-  consumers for small boundary tests with a lowering-only gated testenv override;
-  retained the production 128 MiB default and independent semantic limits.
+## Agent Workspace browser download
 
-- **2026-09-30** (spec_version 52) — Promoted verified Chat direct PUT, Runner direct
-  GET/PUT consumers, authorized browser GET redirects, shared 128 MiB eligibility,
-  retained semantic bounds, and capability-safe publication/cleanup contracts.
+A Workspace file download authorizes the requester and current Runtime path, applies
+the shared 128 MiB general-file policy, and prepares one verified Runner direct PUT
+object. The API issues a request-local presigned GET with safe filename/content-type
+overrides and at most a one-minute lifetime. API and Next return empty `302` responses
+with `no-store` and `no-referrer` rather than following GET or relaying the body.
+The browser owns native navigation/download. Transfer settlement records ticket handoff,
+not browser EOF, and cleanup protects the source through the bounded capability read
+grace. Text preview remains a separate bounded read and returns `413` with preview-limit
+guidance above that limit. Workspace Upload retains its existing direct PUT/GET,
+authorization, conflict, cancellation, integrity, and durable cleanup contract.
 
-- **2026-09-25** — v51. Documented bounded Brave proxy-thumbnail
-  materialization as multiple model and visible attachment parts in one result.
-- **2026-09-17** — v50. Added response-scoped bounded Exchange HTTP downloads with
-  HEAD size validation, exact size/hash verification, explicit source cleanup, and
-  unchanged byte-returning internal consumers and public error/header behavior.
-- **2026-09-12** — v49. Isolated generated-file preparation and compensation
-  by owner generation while keeping object I/O outside metadata transactions.
-- **2026-09-08** — v48. Moved Artifact, ExchangeFile, and ModelFile metadata,
-  authorization, expiration, and final publication transactions into completed
-  repository operations. S3 and Runtime-facing work remains outside database
-  transactions, and final publication or deletion revalidates current authority
-  before metadata mutation. Recorded provider-output's temporary dependency tunnel
-  as an unresolved, separately owned boundary rather than completed migration,
-  removed the unrelated Engine builtin session tunnel, and separated
-  authority-independent recovery reads from mutation authorization.
+## Higher-order Runtime output Tool
 
-- **2026-09-05** — v47. Added `run_tool_to_file` Runtime bundles for complete
-  visible client Tool output, authorized text/Exchange/Artifact/ModelFile/generated
-  sources, per-file verified transfers with unique operation IDs, a bounded manifest,
-  and failed-part-only result projection.
-- **2026-09-04** — v46. Updated the file-upload hook mapping after its
-  behavior-preserving move to the shared frontend layer.
-- **2026-09-04** — v45. Separated the trusted internal Workspace S3 endpoint from
-  the optional browser-reachable endpoint used to generate presigned URLs.
-- **2026-09-04** — v44. Mapped the Composer attachment preview container and
-  documented data-loss-safe object retention when verified publication commit
-  outcome cannot be disproven.
-- **2026-09-03** — v43. Kept failed Composer attachments removable while
-  presenting their localized reason and available detail inline in a wrapping error
-  tile.
-- **2026-08-18** — v42. Documented the Main Web five-attachment Composer
-  boundary and the shared 20 MiB per-upload client/API limit.
+Runtime Toolkit owns the unprefixed direct `run_tool_to_file` capability, while the Engine assembles
+it because only the Engine owns the final per-call Tool Catalog. The Runtime Toolkit supplies file
+storage, transfer, source-resolution, resource-authority, and exact Runtime-target dependencies.
+The Engine binds a one-shot target invoker to the exact provider-visible client Tools from that call,
+excluding the higher-order Tool itself. Stable usage guidance lives in the Tool description and its
+four input fields; it adds no static or dynamic prompt.
 
-- **2026-08-10** — v41. Separated Runtime-independent product file retention and model input from
-  Runtime transfer/materialization authority, added capability/version fencing, and preserved
-  Exchange/Artifact/ModelFile resources across permanent Runtime removal and fresh re-add.
+The target follows its prepared JSON-function or plaintext-custom handler, Tool Search recency,
+Runtime hooks, validation, and cancellation route. Ordinary direct calls retain the global output
+cap, while the higher-order Tool may consume the same normalized successful output before that cap
+and save it through authorized Runtime transfer. Target failure cannot be reclassified as storable
+output. Stored parts are suppressed from the outer result; only failed parts and a final
+already-executed notice remain model-visible after partial Runtime storage failure.
 
-- **2026-08-04** — v40. Removed caller-selected and provider-metadata size gating
-  from External Channel downloads. The authenticated final URL `Content-Length` is the
-  sole declared transfer size, with the streamed body required to match it exactly.
-- **2026-08-04** — v39. Removed optional Runtime file-transfer capability gating. Runtime transfer, publication, and provider-delivery services are always bound, while Runtime readiness is resolved only when the corresponding Tool executes.
-- **2026-08-03** — v38. Bound `present_file` publication to the current Runner-reported Agent Workspace root instead of Provider metadata or a fixed path.
-- **2026-08-02** — v37. Removed the obsolete durable External Channel
-  Action/Delivery manifest claim and documented request-local file publication with
-  sanitized ordinary Tool results.
-- **2026-07-30** — v36. Added bounded verified External Channel ingress up to
-  500 MiB; Runtime delivery waits fairly at chunk boundaries rather than rejecting
-  independent files for aggregate admission capacity. Caller-selected and metadata
-  size gating from this version was removed by v40.
-- **2026-07-30** — v34. Reverified the External Channel locator, authority
-  revalidation, verified Runtime transfer, provider settlement, and no-durable-body
-  boundaries after synchronous ingress contraction; no semantic change.
-- **2026-07-30** — v35. Moved Runtime image materialization and Agent Workspace complete downloads onto verified Runtime-to-server transfer objects; bounded text reads use direct strict-decoded Control text rather than Base64 chunks.
-- **2026-07-28** — v33. Clarified `present_file` recovery after empty volatile transfer
-  state and state-independent one-hour orphan cleanup without reviving S3 objects.
-- **2026-07-28** — v32. Promoted the common Runtime File Transfer behavior for
-  `import_file`, External Channel ingress, and `present_file`: bounded
-  Control-mediated streaming, incremental VFS/provider staging, S3-native
-  managed-object copy, verified-object publication, and no application-memory
-  complete-file relay.
-- **2026-07-26** — v31. Moved Runtime External Channel outbound sources to verified Runtime
-  upload and provider-native streaming with post-provider settlement, while preserving the
-  no-product-file-side-effect boundary.
-- **2026-07-25** — v30. Added authority-resolved Exchange files as an explicit outbound
-  External Channel source while retaining Runtime paths and rejecting Artifact, managed
-  VFS, and relative sources.
-- **2026-07-24** — v29. Separated requester-authorized public file access from
-  Session/Run-authorized internal resource operations; added typed Exchange provenance and exact or
-  explicitly unresolved ModelFile Run lineage.
-- **2026-07-24** — v28. Added formatted safe Markdown attachment preview, empty-text
-  preview support, and conservative filename-assisted safe text recognition.
-- **2026-07-23** — v27. Distinguished explicit External Channel Runtime/provider transfer
-  from Exchange, Artifact, and ModelFile storage, including bounded inbound writes,
-  outbound chunk streaming, and no durable transferred-byte object.
-- **2026-07-23** — v26. Clarified that only required file/blob cleanup can block Session purge; Git worktree state is outside the file-storage purge boundary.
-- **2026-07-20** — v23. Unified attachment-bearing client and provider tool output as standalone deliveries that close ordered Activity without nested duplication.
-- **2026-07-20** — v22. Promoted validated generated-image attachments to standalone Agent deliverables, preserved raw diagnostic ownership, and suppressed only duplicate nested image URIs.
-- **2026-07-20** — v21. Extended attachment text previews to Markdown, common textual application media types, and safe UTF-8 files with unknown media types while excluding invalid UTF-8 and binary-control content.
-- **2026-07-20** — v20. Added attachment preview navigation through gallery overflow, pointer and keyboard gestures, and modal-aware browser history behavior.
-- **2026-07-19** — v19. Added atomic root-retention claims for ExchangeFile source/preview rows, same-tree access, archive preservation, and cleanup-before-cascade file purge semantics.
-- **2026-07-19** — v18. Moved provider-generated Exchange attachments into canonical provider-call semantic output alongside ModelFile-backed replay parts.
+The outer call retains an authoritative target identity snapshot for presentation,
+including its selected wire dialect and persisted Toolkit source when present.
+Result metadata retains a target-output preview under the ordinary 30,000-character
+text cap plus its existing semantic metadata for the target's UI renderer. This
+presentation metadata is not included in model-visible output; full output parts
+remain in Runtime files.
 
-- **2026-07-18** — v17. Reused generated-image dual materialization for xAI client tool results while preserving provider/client event ownership and Base64-free durable storage.
-- **2026-07-17** — v16. Added provider-hosted generated-image dual materialization, retry-safe admission, request-local replay, and direct provider-tool attachment presentation.
-- **2026-07-15** — v15. Required preallocated object keys, S3 upload outside DB sessions,
-  ownership revalidation, and compensation cleanup before metadata becomes visible.
-- **2026-07-15** — v14. Clarified that input-buffer promotion resolves only Exchange attachment
-  metadata outside its locking transaction and reuses creation-boundary FileParts without download
-  or rematerialization.
-- **2026-07-11** — v13. Added persisted previews for uploaded text files and delegated original-image zooming to the browser's native image viewer.
-- **2026-07-11** — v12. Clarified universal preview activation, isolated download actions, unsupported-file fallback, and original-only Agent image galleries.
-- **2026-07-11** — v11. Documented compact attachment strips, Agent image galleries and mixed groups, dynamic overflow masks, and the shared responsive preview viewer.
-- **2026-07-08** — v10. Documented subagent context-fork FilePart placeholder degradation and the no-blob-copy boundary.
+Dynamic prompt preparation may return visible text plus server-only native replay
+compatibility metadata in one result. Ordinary toolkit strings are unchanged.
+Memory binds native replay compatibility to the actual authorized context text.
+Catalog projections preserve that binding without treating it as access authority;
+changed or denied context resets incompatible native replay while retaining
+durable visible Events.
+
+## Registered VFS and Generic Storage Ownership
+
+The DI-owned VFS backend registry maps canonical mounts to native read backends;
+duplicate registration is fatal. There is no static supported-mount allowlist
+or whole-backend materialization fallback. Exact-file, file/directory search,
+and glob-pattern URI validation are separate; traversal, encoded aliases,
+backslashes, user info, ports, queries, and fragments are rejected.
+
+One auto-bound `readable_storage` Toolkit owns exactly one `read`, `grep`, and
+`glob` for both root and subagent execution, even without Runtime. Absolute
+Runtime paths lazily resolve the existing filesystem adapter under the current
+Runtime capability/version gate. Canonical `azents://` paths route to their
+registered backend under a server-created Run/concrete/root Session/Agent/
+Workspace/User/owner context. Relative or ambiguous locations are invalid.
+Unsupported backend operations fail explicitly.
+
+The same routed storage surface owns exactly one generic `write`, `edit`,
+`delete` and `apply_patch`. Absolute Runtime paths delegate to the existing
+Runtime filesystem implementations/capability checks. Canonical VFS mutations
+use separately registered optional mutation and atomic-patch capabilities;
+read-only backends need no mutation members or throwing placeholder methods.
+Patch admission rejects mixed backends and commits all-or-none within a backend.
+Unsupported VFS operations fail without Runtime fallback. Foreground Skills and
+Memory remain read-only. Internal consolidation uses the common Session execution
+file backend under `azents://execution/`, with read-only provided inputs and
+writable authored files. File operations and accepted submission retain the exact
+execution owner-generation fence; the foreground Memory mount exposes none of
+these internal files.
+
+Skills reads use the immutable current AgentRun projection. Memory reads use live
+PostgreSQL queries and independently recheck Memory enablement and current root/
+source authority. The Memory tree includes a README, Saved Agent/User entries,
+Historical Team/User summaries, and source Session/event/exact result files using
+database IDs. Broad regex search excludes tool-result bodies; exact result reads
+contain persisted text only, not inputs, artifacts, references, or bytes.
+Denied source use is non-enumerating and archive/access loss applies to the next
+operation. See [`memory.md`](../domain/memory.md) for namespace and lifecycle detail.
+
+Read results use common bounded character ranges, grep file/line results, and
+sorted canonical glob URIs. Backend limits are no greater than common tool caps,
+and truncation plus exact stop reason survives through generic output, including
+empty truncated results. Skills/Memory regex work runs in a killable subprocess;
+deadline or cancellation kills and reaps the child. Memory operations have a
+two-second bound, at most 1,000 glob candidates/results, and row/byte admission
+bounds. Content-free logs retain backend/operation/duration/count/stop metadata.
+
+RuntimeToolkit owns process, image, transfer and Runtime filesystem adapter
+implementations, not duplicate generic storage tool names. Optional
+transfer-read is a backend capability: Skills retains its immutable import path,
+while Memory explicitly does not support transfer or import.
+
+## API route entrypoints
+
+- `/chat/v1/exchange-files/{file_id}/download`
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/exchange_file`](../../../../python/apps/azents/src/azents/services/exchange_file)
+- [`python/apps/azents/src/azents/services/file_lifecycle_cleanup.py`](../../../../python/apps/azents/src/azents/services/file_lifecycle_cleanup.py)
+- [`python/apps/azents/src/azents/engine/tools/import_file.py`](../../../../python/apps/azents/src/azents/engine/tools/import_file.py)

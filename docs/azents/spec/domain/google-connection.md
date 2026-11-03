@@ -1,47 +1,21 @@
 ---
-title: "Google Connection"
+title: "Google connections"
 created: 2026-10-14
-updated: 2026-10-30
 tags: [google, toolkit, oauth, backend, frontend, engine, security]
-spec_type: domain
-domain: google-connection
-code_paths:
-  - python/apps/azents/src/azents/core/google_*.py
-  - python/apps/azents/src/azents/core/tools.py
-  - python/apps/azents/src/azents/services/google_application/**
-  - python/apps/azents/src/azents/services/google_oauth/**
-  - python/apps/azents/src/azents/services/google_workspace/**
-  - python/apps/azents/src/azents/repos/google_oauth/**
-  - python/apps/azents/src/azents/rdb/models/google_oauth.py
-  - python/apps/azents/src/azents/api/public/toolkit/v1/google.py
-  - python/apps/azents/src/azents/api/public/toolkit/v1/personal_google.py
-  - python/apps/azents/src/azents/api/admin/system_setting/v1/google.py
-  - python/apps/azents/src/azents/engine/tools/google*.py
-  - python/apps/azents/src/azents/engine/tools/deps.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/d1142f351e96_cut_over_google_workspace_direct_tool_.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/e5bb444eed80_add_google_connection_authority.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/f512e037a843_add_google_tool_group_selections.py
-  - typescript/apps/azents-web/src/shared/toolkits/google-*.ts
-  - typescript/apps/azents-web/src/shared/toolkits/components/Google*.tsx
-  - typescript/apps/azents-web/src/shared/toolkits/containers/useGoogle*.ts
-  - typescript/apps/azents-web/src/shared/toolkits/containers/useToolkitFormContainer.ts
-  - typescript/apps/azents-web/src/shared/toolkits/toolkit-form-lifecycle.ts
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
-  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
-  - typescript/apps/azents-web/src/features/toolkits/*Google*.tsx
-  - typescript/apps/azents-web/src/features/toolkits/containers/useGoogleCallbackContainer.ts
-  - typescript/apps/azents-web/src/trpc/routers/google.ts
-  - typescript/apps/azents-admin-web/src/features/system-settings/*Google*.tsx
-  - typescript/apps/azents-admin-web/src/features/system-settings/google-application-state.ts
-  - typescript/apps/azents-admin-web/src/features/system-settings/components/GoogleApplicationCard.tsx
-  - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
-  - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
-  - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
-last_verified_at: 2026-10-30
-spec_version: 3
 ---
 
-# Google Connection
+# Google connections
+
+Typed Gmail, Calendar and Drive access constrained by selected groups and actual OAuth grants.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Toolkits](toolkit.md)
+- [System Settings](system-settings.md)
+- [Users and authentication](user-auth.md)
+- [File exchange and storage](../flow/file-exchange-storage.md)
 
 The `google` provider exposes a closed typed catalog of Gmail, Calendar and Drive
 operations using the official Google API Python Client and Google authentication
@@ -340,3 +314,12 @@ certification, quota/load evidence or compliance approval. Live OAuth, real Pick
 restricted-scope review, real account ACLs and Google format conversion remain
 external prerequisites. No live Google account, production migration, merge,
 deployment or release is claimed.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/google_workspace`](../../../../python/apps/azents/src/azents/services/google_workspace)
+- [`python/apps/azents/src/azents/services/google_oauth`](../../../../python/apps/azents/src/azents/services/google_oauth)
+- [`python/apps/azents/src/azents/services/google_application`](../../../../python/apps/azents/src/azents/services/google_application)

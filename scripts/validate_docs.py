@@ -1,12 +1,9 @@
-"""Validate and query Azents documentation frontmatter."""
+"""Validate Azents document metadata and development-snapshot relationships."""
 
 import argparse
 import csv
-import json
 import re
 import sys
-from dataclasses import asdict, dataclass
-from datetime import date
 from io import StringIO
 from pathlib import Path
 from typing import TypeAlias
@@ -15,9 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FRONTMATTER_PATTERN = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 FIELD_PATTERN = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):[^\S\r\n]*(.*)$")
-EXCLUDED = {"INDEX.md"}
+EXCLUDED = {"INDEX.md", "CLAUDE.md"}
 COMMON_REQUIRED_FIELDS = ("title",)
-SPEC_REQUIRED_FIELDS = ("spec_type", "code_paths", "last_verified_at", "spec_version")
 CORE_DOCUMENT_DIRS = ("requirements", "adr", "design")
 DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN = re.compile(
     r"^(?P<word>[a-z][a-z0-9]*)-(?P<date>\d{6})-"
@@ -25,61 +21,6 @@ DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN = re.compile(
 )
 
 FrontmatterValue: TypeAlias = str | tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class DocInfo:
-    """Frontmatter-backed document metadata exposed by the catalog."""
-
-    rel_path: str
-    title: str = ""
-    document_type: str = ""
-    document_role: str = ""
-    snapshot_id: str = ""
-    tags: tuple[str, ...] = ()
-    spec_type: str = ""
-    domain: str = ""
-    owner: str = ""
-    created: str = ""
-    updated: str = ""
-    implemented: str = ""
-    last_verified_at: str = ""
-    spec_version: str = ""
-    code_paths: tuple[str, ...] = ()
-
-    @property
-    def top_dir(self) -> str:
-        """Top-level directory name relative to the documentation root."""
-        parts = Path(self.rel_path).parts
-        return parts[0] if len(parts) > 1 else ""
-
-    @property
-    def catalog_type(self) -> str:
-        """Stable document type used by catalog filters."""
-        return self.top_dir or "root"
-
-    @property
-    def short_id(self) -> str:
-        """Return the canonical short ID for a development snapshot document."""
-        if self.snapshot_id:
-            return self.snapshot_id
-        if self.top_dir not in CORE_DOCUMENT_DIRS:
-            return ""
-        match = DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN.fullmatch(
-            Path(self.rel_path).name
-        )
-        if match is None:
-            return ""
-        return f"{match.group('word')}-{match.group('date')}"
-
-    def as_json(self) -> dict[str, str | list[str]]:
-        """Return JSON-serializable catalog metadata."""
-        result: dict[str, str | list[str]] = {}
-        for key, value in asdict(self).items():
-            result[key] = list(value) if isinstance(value, tuple) else value
-        result["catalog_type"] = self.catalog_type
-        result["short_id"] = self.short_id
-        return result
 
 
 def resolve_docs_root(value: str) -> Path:
@@ -155,20 +96,6 @@ def scalar(fields: dict[str, FrontmatterValue], name: str) -> str:
     """Read a scalar frontmatter field."""
     value = fields.get(name, "")
     return value if isinstance(value, str) else ""
-
-
-def list_value(fields: dict[str, FrontmatterValue], name: str) -> tuple[str, ...]:
-    """Read a list frontmatter field."""
-    value = fields.get(name, ())
-    return value if isinstance(value, tuple) else ()
-
-
-def parse_iso_date(value: str) -> date | None:
-    """Parse an ISO date without making query commands fail on invalid metadata."""
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        return None
 
 
 def validate_snapshot_document(
@@ -270,28 +197,11 @@ def validate_doc(path: Path, docs_root: Path) -> list[str]:
     if top_dir in CORE_DOCUMENT_DIRS:
         errors.extend(validate_snapshot_document(path, rel_path, fields))
 
-    if rel_path.startswith("spec/"):
-        for field_name in SPEC_REQUIRED_FIELDS:
-            if field_name == "code_paths":
-                if not list_value(fields, field_name):
-                    errors.append("Missing non-empty `code_paths` frontmatter list")
-            elif not scalar(fields, field_name):
-                errors.append(f"Missing `{field_name}` frontmatter field")
-
-        spec_type = scalar(fields, "spec_type")
-        if spec_type not in {"domain", "flow"}:
-            errors.append("`spec_type` must be `domain` or `flow`")
-        if spec_type == "domain" and not scalar(fields, "domain"):
-            errors.append("Missing `domain` frontmatter field for domain spec")
-        last_verified_at = scalar(fields, "last_verified_at")
-        if last_verified_at and parse_iso_date(last_verified_at) is None:
-            errors.append("`last_verified_at` must use `YYYY-MM-DD`")
-
     return errors
 
 
 def _markdown_paths(docs_root: Path) -> list[Path]:
-    """Return catalog source files in deterministic order."""
+    """Return document files in deterministic order."""
     return sorted(
         path
         for path in docs_root.rglob("*.md")
@@ -389,245 +299,21 @@ def validate_docs(docs_root: Path) -> list[str]:
     return errors
 
 
-def load_docs(docs_root: Path) -> list[DocInfo]:
-    """Load documentation metadata into the queryable catalog."""
-    docs: list[DocInfo] = []
-    for path in _markdown_paths(docs_root):
-        rel_path = path.relative_to(docs_root).as_posix()
-        fields = parse_frontmatter(path)
-        docs.append(
-            DocInfo(
-                rel_path=rel_path,
-                title=scalar(fields, "title"),
-                document_type=scalar(fields, "document_type"),
-                document_role=scalar(fields, "document_role"),
-                snapshot_id=scalar(fields, "snapshot_id"),
-                tags=list_value(fields, "tags"),
-                spec_type=scalar(fields, "spec_type"),
-                domain=scalar(fields, "domain"),
-                owner=scalar(fields, "owner"),
-                created=scalar(fields, "created"),
-                updated=scalar(fields, "updated"),
-                implemented=scalar(fields, "implemented"),
-                last_verified_at=scalar(fields, "last_verified_at"),
-                spec_version=scalar(fields, "spec_version"),
-                code_paths=list_value(fields, "code_paths"),
-            )
-        )
-    return docs
-
-
-def _add_common_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--type", dest="catalog_type")
-    parser.add_argument("--spec-type", choices=("domain", "flow"))
-    parser.add_argument("--tag", action="append", default=[])
-    parser.add_argument(
-        "--format",
-        choices=("table", "paths", "json"),
-        default="table",
-    )
-
-
-def _filter_docs(
-    docs: list[DocInfo],
-    *,
-    catalog_type: str | None,
-    spec_type: str | None,
-    tags: list[str],
-) -> list[DocInfo]:
-    required_tags = {tag.casefold() for tag in tags}
-    return [
-        doc
-        for doc in docs
-        if (catalog_type is None or doc.catalog_type == catalog_type)
-        and (spec_type is None or doc.spec_type == spec_type)
-        and required_tags.issubset({tag.casefold() for tag in doc.tags})
-    ]
-
-
-def _path_related(requested: str, documented: str) -> bool:
-    requested_path = requested.strip("/")
-    documented_path = documented.strip("/")
-    return (
-        requested_path == documented_path
-        or requested_path.startswith(f"{documented_path}/")
-        or documented_path.startswith(f"{requested_path}/")
-    )
-
-
-def _render_table(docs: list[DocInfo]) -> str:
-    headers = ("TYPE", "PATH", "TITLE", "SNAPSHOT", "VERIFIED")
-    rows = [
-        (
-            doc.catalog_type,
-            doc.rel_path,
-            doc.title or "-",
-            doc.short_id or "-",
-            doc.last_verified_at or "-",
-        )
-        for doc in docs
-    ]
-    widths = [
-        max(len(headers[index]), *(len(row[index]) for row in rows))
-        if rows
-        else len(headers[index])
-        for index in range(len(headers))
-    ]
-    lines = [
-        "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
-        "  ".join("-" * width for width in widths),
-    ]
-    lines.extend(
-        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
-        for row in rows
-    )
-    return "\n".join(lines)
-
-
-def render_docs(docs: list[DocInfo], output_format: str) -> str:
-    """Render catalog query results."""
-    if output_format == "paths":
-        return "\n".join(doc.rel_path for doc in docs)
-    if output_format == "json":
-        return json.dumps(
-            [doc.as_json() for doc in docs],
-            ensure_ascii=False,
-            indent=2,
-        )
-    return _render_table(docs)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the command-line parser."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--docs-root",
-        default="docs/azents",
-        help="Repository-relative documentation root (default: docs/azents)",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    subparsers.add_parser("validate", help="Validate documentation frontmatter")
-
-    list_parser = subparsers.add_parser("list", help="List catalog documents")
-    _add_common_filters(list_parser)
-
-    search_parser = subparsers.add_parser(
-        "search", help="Search titles, paths, tags, snapshots, and code paths"
-    )
-    search_parser.add_argument("query")
-    _add_common_filters(search_parser)
-
-    snapshot_parser = subparsers.add_parser(
-        "snapshot", help="List one development snapshot"
-    )
-    snapshot_parser.add_argument("snapshot_id")
-    snapshot_parser.add_argument(
-        "--format",
-        choices=("table", "paths", "json"),
-        default="table",
-    )
-
-    related_parser = subparsers.add_parser(
-        "related", help="Find Specs related to a repository code path"
-    )
-    related_parser.add_argument("--code-path", required=True)
-    related_parser.add_argument(
-        "--format",
-        choices=("table", "paths", "json"),
-        default="table",
-    )
-
-    stale_parser = subparsers.add_parser(
-        "stale", help="List Specs verified before a date"
-    )
-    stale_parser.add_argument("--before", required=True)
-    stale_parser.add_argument(
-        "--format",
-        choices=("table", "paths", "json"),
-        default="table",
-    )
-    return parser
-
-
 def main(argv: list[str] | None = None) -> int:
-    """Run documentation validation or catalog queries."""
-    args = build_parser().parse_args(argv)
+    """Run mechanical validation without catalog or semantic discovery."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--docs-root", default="docs/azents")
+    args = parser.parse_args(argv)
     docs_root = resolve_docs_root(args.docs_root)
     if not docs_root.is_dir():
         print(f"Documentation root does not exist: {docs_root}", file=sys.stderr)
         return 2
-
-    if args.command == "validate":
-        validation_errors = validate_docs(docs_root)
-        if validation_errors:
-            for error in validation_errors:
-                print(error, file=sys.stderr)
-            return 1
-        print(
-            f"Validated documentation frontmatter under {docs_root.relative_to(ROOT)}"
-        )
-        return 0
-
-    docs = load_docs(docs_root)
-    if args.command in {"list", "search"}:
-        docs = _filter_docs(
-            docs,
-            catalog_type=args.catalog_type,
-            spec_type=args.spec_type,
-            tags=args.tag,
-        )
-
-    if args.command == "search":
-        query = args.query.casefold()
-        docs = [
-            doc
-            for doc in docs
-            if query
-            in "\n".join(
-                (
-                    doc.rel_path,
-                    doc.title,
-                    doc.short_id,
-                    doc.domain,
-                    doc.owner,
-                    doc.document_type,
-                    *doc.tags,
-                    *doc.code_paths,
-                )
-            ).casefold()
-        ]
-    elif args.command == "snapshot":
-        snapshot_order = {"requirements": 0, "adr": 1, "design": 2}
-        docs = sorted(
-            (doc for doc in docs if doc.short_id == args.snapshot_id),
-            key=lambda doc: snapshot_order.get(doc.catalog_type, 3),
-        )
-    elif args.command == "related":
-        docs = [
-            doc
-            for doc in docs
-            if doc.catalog_type == "spec"
-            and any(
-                _path_related(args.code_path, code_path) for code_path in doc.code_paths
-            )
-        ]
-    elif args.command == "stale":
-        try:
-            cutoff = date.fromisoformat(args.before)
-        except ValueError:
-            print("`--before` must use YYYY-MM-DD", file=sys.stderr)
-            return 2
-        docs = [
-            doc
-            for doc in docs
-            if doc.catalog_type == "spec"
-            and doc.last_verified_at
-            and (verified_at := parse_iso_date(doc.last_verified_at)) is not None
-            and verified_at < cutoff
-        ]
-
-    print(render_docs(docs, args.format))
+    errors = validate_docs(docs_root)
+    if errors:
+        for error in errors:
+            print(error, file=sys.stderr)
+        return 1
+    print("Validated document metadata and development snapshots")
     return 0
 
 

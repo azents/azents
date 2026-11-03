@@ -1,76 +1,21 @@
 ---
-title: "External Channel Lifecycle"
+title: "External Channel lifecycle"
 created: 2026-07-22
 tags: [backend, external-channel, lifecycle, session, agent, discord]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [external-channel, agent, conversation]
-code_paths:
-  - python/apps/azents/src/azents/repos/session_primary_channel.py
-  - python/apps/azents/src/azents/repos/hierarchy_contention.py
-  - python/apps/azents/src/azents/repos/routine/primary_contention_test.py
-  - python/apps/azents/src/azents/core/exchange_file_errors.py
-  - python/apps/azents/src/azents/core/external_channel_access.py
-  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
-  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
-  - python/apps/azents/src/azents/core/external_channel_ingestion.py
-  - python/apps/azents/src/azents/core/session_lifecycle_registry.py
-  - python/apps/azents/src/azents/core/session_lifecycle_schema.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_schema.py
-  - python/apps/azents/src/azents/services/session_lifecycle/schema.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
-  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
-  - python/apps/azents/src/azents/repos/chat_operations.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
-  - python/apps/azents/src/azents/core/external_channel_session_presence.py
-  - python/apps/azents/src/azents/core/session_lifecycle.py
-  - python/apps/azents/src/azents/repos/external_channel/connection.py
-  - python/apps/azents/src/azents/repos/external_channel/connection_revocation_operations.py
-  - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
-  - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
-  - python/apps/azents/src/azents/repos/external_channel_lifecycle_participant.py
-  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
-  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
-  - python/apps/azents/src/azents/core/session_lifecycle_purge.py
-  - python/apps/azents/src/azents/repos/external_channel/management_operations.py
-  - python/apps/azents/src/azents/repos/external_channel/management_operation_data.py
-  - python/apps/azents/src/azents/repos/external_channel/work_state.py
-  - python/apps/azents/src/azents/repos/external_channel/file_access.py
-  - python/apps/azents/src/azents/repos/discord_connection_operations.py
-  - python/apps/azents/src/azents/rdb/models/external_model_settings.py
-  - python/apps/azents/src/azents/services/external_channel/connection.py
-  - python/apps/azents/src/azents/services/external_channel/lifecycle.py
-  - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/services/external_channel/management.py
-  - python/apps/azents/src/azents/services/external_channel/discord_activation.py
-  - python/apps/azents/src/azents/services/external_channel/discord_api.py
-  - python/apps/azents/src/azents/services/external_channel/discord_endpoint.py
-  - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
-  - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
-  - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
-  - python/apps/azents/src/azents/services/external_channel/slack_presence_manager.py
-  - python/apps/azents/src/azents/services/external_channel/slack_socket.py
-  - python/apps/azents/src/azents/services/external_channel/socket_manager.py
-  - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
-  - python/apps/azents/src/cli/externalchannelgateway.py
-  - python/apps/azents/src/azents/worker/worker.py
-  - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
-  - python/apps/azents/src/azents/services/external_channel/access.py
-  - python/apps/azents/src/azents/services/session_lifecycle/orchestrator.py
-  - python/apps/azents/src/azents/services/session_lifecycle/registry.py
-  - python/apps/azents/src/azents/services/archived_session_purge.py
-  - python/apps/azents/src/azents/services/agent_decommission.py
-  - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
-  - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
-  - typescript/apps/azents-web/src/features/external-channel-management/**
-  - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-20
-spec_version: 52
 ---
 
-# External Channel Lifecycle
+# External Channel lifecycle
+
+Disconnect, archive, purge and Agent decommission effects across channel-owned resources.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [External Channels](../domain/external-channel.md)
+- [Agent deletion](../domain/agent-deletion.md)
+- [Conversations and events](../domain/conversation.md)
+- [Session Routines](../domain/routine.md)
 
 ## Direct Management Transitions
 
@@ -427,145 +372,10 @@ Restore does not recreate Routines. Purge waits for preserved started work, then
 rechecks namespace absence before finalization. Judgment history follows normal
 event retention; Routine observation alone does not refresh autoarchive activity.
 
-## Changelog
+## References
 
-- 2026-10-19: Add Primary cleanup and Routine participant
-  archive/restore/preserved-work/purge boundaries.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-10-18** (spec_version 51) — Added atomic Primary clearing to Binding
-  termination and included the affected completed terminal database owners in
-  confirmed-abort contention recovery, retaining one-attempt provider effects.
-
-- **2026-10-05** (spec_version 50) — Moved External Channel and Scheduled
-  lifecycle participant DB composition below services while preserving atomic
-  archive/purge finalization and detached post-commit provider cleanup.
-
-- **2026-10-05 (spec_version49)** — Integrated completed channel action/revocation
-  and Scheduled Channel effects with selection/scheduled/lease ownership, retaining
-  exact owner, configuration and claim fences at atomic mutation boundaries.
-
-- **2026-10-05** (spec_version 48) — Made authenticated Slack revocation a
-  completed repository operation with atomic conditional terminal/purge mutation,
-  rollback on purge failure, and detached post-commit cleanup plans.
-
-- **2026-10-05** (spec_version 47) — Made Multi disconnect impact previews independent of connection/route locks and kept exact Single/Multi credential-generation transitions separate from ordinary metadata captures.
-
-- **2026-10-03** (spec_version 46) — Restricted typing restoration and renewal to
-  Work with running execution, including after stop-request cleanup.
-
-- **2026-09-12** (spec_version 45) — Added Session purge ordering for private
-  external model drafts and clarified Workspace/User link-proof cleanup and retained
-  mutation-history boundaries.
-- **2026-09-08** (spec_version 44) — Moved direct management transaction ownership
-  into completed repository operations while preserving two-stage Single App
-  disconnect and post-commit provider effects.
-- **2026-09-08** (spec_version 43) — Made connection configuration reads and fenced
-  health persistence completed repository operations, preserving provider validation
-  after the read transaction closes.
-- **2026-09-05** (spec_version 42) — Made Discord lifecycle cleanup host-aware:
-  standalone Trackers are deleted while reply-hosted Trackers are detached without
-  deleting conversational content.
-- **2026-09-01** (spec_version 41) — Preserved brief SDK-owned Discord Resume while
-  replacing a continuously unready client after one minute, and excluded awaiting
-  Work from lifecycle-restored typing targets.
-- **2026-08-29** (spec_version 40) — Added Slack Work presence lease reset to
-  configuration replacement and terminal connection cleanup, and excluded finished
-  Work from both Slack presence and Discord typing renewal.
-- **2026-08-28** (spec_version 39) — Added lifecycle removal and restart recovery
-  rules for lease-fenced Discord typing targets without introducing durable typing
-  state or provider stop operations.
-- **2026-08-25** (spec_version 38) — Required Discord activation to confirm the
-  provider-reported Interaction Endpoint postcondition and made Gateway login
-  terminalize absent or mismatched endpoint authority as reconnect-required.
-- **2026-08-16** (spec_version 37) — Added Scheduled Task Binding termination,
-  Session archive/restore, started-cycle preservation, and purge absence rules.
-
-- **2026-08-11** (spec_version 36) — Reused one authenticated pinned `discord.py`
-  Client session across Discord activation metadata and command reconciliation while
-  preserving configuration fencing, activation deadlines, and the existing direct
-  endpoint and command-create gaps.
-- **2026-08-09** (spec_version 35) — Classified automatic Discord Interaction
-  Endpoint registration as a removable direct-transport gap while the adopted public
-  SDK cannot transmit the endpoint field.
-- **2026-08-09** (spec_version 34) — Removed continuation-only and unfinished-task
-  restrictions from silent Work completion while preserving binding lifecycle and
-  provider-cleanup boundaries.
-- **2026-08-09** (spec_version 33) — Corrected automatic Discord Interaction Endpoint
-  registration to edit the Bot-authenticated current Application and clarified that
-  users do not manually copy opaque callback URLs into Discord Developer Portal.
-- **2026-08-05** (spec_version 32) — Kept Session archive binding termination and
-  Activity Tracker cleanup while suppressing the provider leave-presence control.
-- **2026-08-03** (spec_version 31) — Clarified that eligible silent Work completion
-  leaves the binding lifecycle unchanged and produces no lifecycle cleanup plan.
-- **2026-08-03** (spec_version 30) — Moved Channel Work archive, restore, purge, and
-  verification to binding-specific Session-bound Toolkit State and removed the
-  dedicated Work table from lifecycle roots and Agent finalization.
-- **2026-08-02** (spec_version 29) — Replaced lifecycle delivery intents and
-  bookkeeping with bounded process-local post-commit plans while retaining terminal
-  canonical state and owner-local current projection.
-- **2026-08-02** (spec_version 28) — Coupled parent location and selected-Agent
-  transitions to participation-setting generations, setup-claim invalidation, and
-  parent-only Binding terminalization while preserving thread conversations and
-  allowing later parent-Binding recreation.
-- **2026-08-01** (spec_version 27) — Added connected-only binding response-mode
-  replacement as a lifecycle-preserving management transition and retained the final
-  mode as read-only terminal history.
-- **2026-08-01** (spec_version 26) — Added one durable leave-presence control to every
-  binding termination path, including manual disconnect, route or connection removal,
-  Session archive, Agent decommission, and authenticated App uninstall. Terminal
-  connection paths capture delivery authority before credential purge and revalidate
-  durable terminal identity after commit without persisting another credential copy.
-- **2026-08-01** (spec_version 25) — Made the conversation position plus canonical
-  mailbox own Allow replay acceptance and wake recovery while provider-control
-  delivery remains independent.
-- **2026-07-31** (spec_version 23) — Made binding disconnect a timestamp-only
-  terminal boundary and separated outbound REST authority from transient persistent-
-  ingress health.
-- **2026-07-31** (spec_version 22) — Unified Slack Socket Mode and Discord Gateway
-  lifecycle supervision in the provider-neutral External Channel Gateway and decoupled
-  persistent connections from Agent Worker lifecycle.
-- **2026-07-31** (spec_version 21) — Removed invocation-batch and provider-message
-  lifecycle ownership; Session cleanup now covers retained External Channel roots while
-  canonical mailbox and Session-event state follow their existing Session owners.
-- **2026-07-31** (spec_version 20) — Made Slack and Discord typed SDK lifecycle
-  callbacks the fenced connection-health authority while leaving recoverable
-  connection mechanics inside each provider SDK.
-- **2026-07-31** (spec_version 19) — Removed pending-context and waiting-hydration
-  lifecycle state and made Allow replay synchronous through immutable conversation
-  positions. The later `provider-260731` replacement removed accepted-batch ownership.
-- **2026-07-28** (spec_version 18) — Replaced immediate Discord Allow activation
-  with shared bounded hydration and reconciliation fences before initial work and wake.
-- **2026-07-27** (spec_version 17) — Restored `configuring` provisional PING
-  authority when retrying a Discord callback activation from `reconnect_required`.
-- **2026-07-27** (spec_version 16) — Persisted controlled Discord activation
-  failure codes, returned already-created setup connections after activation
-  failures, and rendered localized durable recovery guidance.
-- **2026-07-27** (spec_version 15) — Released Discord App claims during terminal
-  disconnect and configuration replacement, reclaimed claims from disconnected
-  history during activation, and made setup-failure diagnostics structured and
-  secret-free.
-- **2026-07-27** (spec_version 14) — Made terminal Discord Gateway failures
-  atomically fence, release, and suppress further scheduler claims until reactivation.
-- **2026-07-26** (spec_version 13) — Added provider-aware Allow activation:
-  immediate Discord binding/work/invocation release and approval-control deletion,
-  while preserving Slack hydration activation.
-- **2026-07-26** (spec_version 12) — Defined Discord's provisional PING-only
-  callback activation order, fenced cleanup after registration failure, and removal of
-  the deployment-scoped Discord rollout gate.
-- **2026-07-26** (spec_version 11) — Added fenced Discord credential/callback
-  replacement, Gateway lease/checkpoint invalidation, and provider-health repair
-  behavior without rerouting retained bindings.
-- **2026-07-26** (spec_version 10) — Added mode-specific association removal,
-  generation-fenced Multi route/default/App mutations, invalidated defaults,
-  historical route snapshots, and read-only disconnected Multi Apps.
-- **2026-07-23** (spec_version 9) — Applied existing binding, connection, Session, and
-  Agent fences to every file transfer and clarified that transferred bytes add no
-  retention or purge participant.
-- **2026-07-23** (spec_version 8) — Made normal delivered-answer completion delete the transient Activity Tracker while retaining terminal lifecycle cleanup for any remaining provider identity.
-- **2026-07-23** (spec_version 7) — Clarified that normal completion retains Activity Trackers while binding, connection, Session, and Agent lifecycle transitions own terminal provider deletion.
-- **2026-07-23** (spec_version 6) — Added hard grant removal, complete access identities, in-product destructive confirmations, and task/progress lifecycle presentation.
-- **2026-07-23** (spec_version 5) — Removed route lifecycle transitions. Connection status owns disconnect and provider health, while Agent lifecycle owns new-execution eligibility.
-- **2026-07-22** (spec_version 4) — Kept provider health failures and App uninstall independent from Agent route lifecycle and fenced stale validation results.
-- **2026-07-22** (spec_version 3) — Made connection disconnect unconditional and idempotent, committed terminal state before provider cleanup, omitted disconnected rows from active management, and replaced reconnect/transport actions with complete Slack configuration editing.
-- **2026-07-22** (spec_version 2) — Preserved already-fenced participant snapshots across registry growth while retaining restrictive finalization safety.
-- **2026-07-22** (spec_version 1) — Promoted terminal disconnect, archive/restore policy, restrictive purge ownership, post-commit cleanup, and Agent decommission behavior.
+- [`python/apps/azents/src/azents/services/external_channel`](../../../../python/apps/azents/src/azents/services/external_channel)
+- [`python/apps/azents/src/azents/services/agent_decommission.py`](../../../../python/apps/azents/src/azents/services/agent_decommission.py)

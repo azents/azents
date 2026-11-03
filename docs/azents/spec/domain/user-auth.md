@@ -1,145 +1,22 @@
 ---
-title: "User & Authentication"
-spec_type: domain
-domain: user-auth
-owner: "@Hardtack"
+title: "Users and authentication"
 created: 2026-04-20
-updated: 2026-10-08
 tags: [backend, security, api]
-code_paths:
-  - python/apps/azents/src/azents/core/auth/**
-  - python/apps/azents/src/azents/core/account_access.py
-  - python/apps/azents/src/azents/core/credential_read.py
-  - python/apps/azents/src/azents/core/signup_token_operations.py
-  - python/apps/azents/src/azents/core/user.py
-  - python/apps/azents/src/azents/core/user_email.py
-  - python/apps/azents/src/azents/core/system_user_role.py
-  - python/apps/azents/src/azents/core/retirement_data.py
-  - python/apps/azents/src/azents/core/email/**
-  - python/apps/azents/src/azents/api/public/auth/v1/**
-  - python/apps/azents/src/azents/api/admin/auth/v1/**
-  - python/apps/azents/src/azents/api/admin/system/v1/**
-  - python/apps/azents/src/azents/api/admin/system_setting/v1/**
-  - python/apps/azents/src/azents/api/admin/bootstrap/v1/**
-  - python/apps/azents/src/azents/api/admin/__init__.py
-  - python/apps/azents/src/azents/app.py
-  - python/apps/azents/src/azents/api/public/user/v1/**
-  - python/apps/azents/src/azents/rdb/models/user.py
-  - python/apps/azents/src/azents/rdb/models/user_email.py
-  - python/apps/azents/src/azents/rdb/models/session.py
-  - python/apps/azents/src/azents/rdb/models/password_login.py
-  - python/apps/azents/src/azents/rdb/models/email_verification.py
-  - python/apps/azents/src/azents/rdb/models/signup_token.py
-  - python/apps/azents/src/azents/rdb/models/password_reset_token.py
-  - python/apps/azents/src/azents/rdb/models/system_user_role.py
-  - python/apps/azents/src/azents/rdb/models/owner_lifecycle.py
-  - python/apps/azents/src/azents/rdb/models/workspace_user.py
-  - python/apps/azents/src/azents/repos/user/**
-  - python/apps/azents/src/azents/repos/user_email/**
-  - python/apps/azents/src/azents/repos/auth_operation/**
-  - python/apps/azents/src/azents/repos/account_access.py
-  - python/apps/azents/src/azents/repos/credential_read_operations.py
-  - python/apps/azents/src/azents/repos/security_operation/**
-  - python/apps/azents/src/azents/repos/session/**
-  - python/apps/azents/src/azents/repos/password_login/**
-  - python/apps/azents/src/azents/repos/email_verification/**
-  - python/apps/azents/src/azents/repos/email_verification_operation/**
-  - python/apps/azents/src/azents/repos/signup_token/**
-  - python/apps/azents/src/azents/repos/signup_token_operations.py
-  - python/apps/azents/src/azents/repos/password_reset_token/**
-  - python/apps/azents/src/azents/repos/system_user_role/**
-  - python/apps/azents/src/azents/repos/system_bootstrap/**
-  - python/apps/azents/src/azents/repos/owner_lifecycle/**
-  - python/apps/azents/src/azents/repos/owner_lifecycle_operations.py
-  - python/apps/azents/src/azents/services/auth/**
-  - python/apps/azents/src/azents/services/account_access.py
-  - python/apps/azents/src/azents/services/email_verification/**
-  - python/apps/azents/src/azents/services/signup_token/**
-  - python/apps/azents/src/azents/services/credential/**
-  - python/apps/azents/src/azents/services/password_reset_token/**
-  - python/apps/azents/src/azents/services/system_user_role/**
-  - python/apps/azents/src/azents/services/system_bootstrap/**
-  - python/apps/azents/src/azents/services/security/**
-  - python/apps/azents/src/azents/services/user/**
-  - python/apps/azents/src/azents/services/user_email/**
-  - python/apps/azents/src/azents/services/workspace/**
-  - python/apps/azents/src/azents/services/workspace_invitation/**
-  - python/apps/azents/src/azents/services/workspace_user/**
-  - python/apps/azents/src/azents/services/owner_lifecycle.py
-  - python/apps/azents/src/azents/scheduler/registry.py
-  - python/apps/azents/src/cli/system_admin.py
-  - typescript/apps/azents-admin-web/src/app/api/session/**
-  - typescript/apps/azents-admin-web/src/config.ts
-  - typescript/apps/azents-admin-web/src/config/server.ts
-  - typescript/apps/azents-admin-web/src/features/login/**
-  - typescript/apps/azents-admin-web/src/providers/auth-provider.ts
-  - typescript/apps/azents-admin-web/src/shared/lib/auth-cookies.ts
-  - typescript/apps/azents-admin-web/src/shared/lib/auth-policy.ts
-  - typescript/apps/azents-admin-web/src/trpc/**
-  - typescript/apps/azents-web/src/app/(app)/page.tsx
-  - typescript/apps/azents-web/src/app/(app)/login/**
-  - typescript/apps/azents-web/src/features/auth/**
-  - typescript/apps/azents-web/src/features/account/**
-  - typescript/apps/azents-web/src/features/signup/**
-  - typescript/apps/azents-web/src/features/password-reset/**
-  - typescript/apps/azents-web/src/features/security/**
-  - typescript/apps/azents-web/src/shared/auth/**
-  - typescript/apps/azents-web/src/shared/elevation/**
-  - typescript/apps/azents-web/src/config/server.ts
-  - typescript/apps/azents-web/src/app/(app)/api/chat/upload/route.ts
-  - typescript/apps/azents-web/src/app/(app)/api/trpc/**
-  - typescript/apps/azents-web/src/app/(app)/runtime-web/auth/**
-  - typescript/apps/azents-web/src/features/runtime-web/runtimeWebAuthBootstrap*
-  - typescript/apps/azents-web/src/features/runtime-web/RuntimeWebAuthPage.tsx
-  - typescript/apps/azents-web/src/features/runtime-web/containers/RuntimeWebAuthContainer.tsx
-  - typescript/apps/azents-web/src/features/runtime-web/components/RuntimeWebAuth.tsx
-  - typescript/apps/azents-web/src/features/runtime-web/containers/useRuntimeWebAuthContainer.ts
-  - typescript/apps/azents-web/src/shared/lib/auth-cookie-policy*
-  - typescript/apps/azents-web/src/shared/lib/cookies.ts
-  - typescript/apps/azents-web/src/shared/lib/getInitialAuthState.ts
-  - typescript/apps/azents-web/src/shared/lib/account-locale*
-  - typescript/apps/azents-web/src/shared/lib/locale.ts
-  - typescript/apps/azents-web/src/shared/lib/request-origin*
-  - typescript/apps/azents-web/src/shared/lib/runtime-web-auth*
-  - typescript/apps/azents-web/src/shared/lib/runtime-web-return-target*
-  - typescript/apps/azents-web/src/shared/providers/account-locale-sync.tsx
-  - typescript/apps/azents-web/src/shared/providers/locale.tsx
-  - typescript/apps/azents-web/src/i18n/request.ts
-  - typescript/apps/azents-web/src/app/(app)/layout.tsx
-  - typescript/apps/azents-web/src/app/providers.tsx
-  - typescript/apps/azents-web/src/shared/components/AppLayout.tsx
-  - python/apps/azents/src/azents/services/runtime_web/gateway_auth*
-  - python/apps/azents/src/azents/services/runtime_web/gateway_auth_deps.py
-  - python/apps/azents/src/azents/api/public/runtime_web/v1/**
-  - python/apps/azents/src/azents/runtime_web_gateway/**
-  - typescript/apps/azents-web/src/shared/components/AppBar.tsx
-  - typescript/apps/azents-web/src/shared/lib/admin-access.ts
-  - typescript/apps/azents-web/src/shared/lib/login-redirect.ts
-  - typescript/apps/azents-web/src/trpc/context.ts
-  - typescript/apps/azents-web/src/trpc/routers/_app.ts
-  - typescript/apps/azents-web/src/trpc/routers/auth.ts
-  - typescript/apps/azents-web/src/trpc/routers/user.ts
-  - infra/charts/azents/templates/admin-web/**
-  - infra/charts/azents/templates/server/adminserver-deployment.yaml.tpl
-  - infra/charts/azents/templates/web/configmap.yaml.tpl
-  - infra/charts/azents/values.yaml
-  - infra/charts/azents/values.schema.json
-api_routes:
-  - /auth/v1
-  - /runtime-web/v1/auth
-  - /user/v1
-  - /security/v1
-  - /workspace/v1
-  - /system/v1
-  - /system-setting/v1
-  - /debug/v1
-last_verified_at: 2026-10-08
-spec_version: 29
 ---
 
-# User & Authentication
+# Users and authentication
 
-## 1. Overview
+Signup, login, refresh sessions, elevation and instance-administrator boundaries.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Workspaces and membership](workspace.md)
+- [System Settings](system-settings.md)
+- [External Channel authorization](../flow/external-channel-authorization.md)
+
+## Overview
 
 This domain covers azents user accounts, email, signup, login, session, and security elevation. One platform-wide account can join multiple workspaces as member, and authentication uses JWT access token plus DB-based refresh token session (rotation + grace period) structure.
 
@@ -161,7 +38,7 @@ Core characteristics:
 - **Account-owned locale** — authenticated Main Web rendering prefers the persisted
   account locale and synchronizes a stale rendered locale after authentication.
 
-## 2. Domain Model
+## Domain Model
 
 ```mermaid
 erDiagram
@@ -263,9 +140,9 @@ erDiagram
     }
 ```
 
-## 3. Signup and Login Behavior
+## Signup and Login Behavior
 
-### 3.1 Email OTP login
+### Email OTP login
 
 `POST /auth/v1/email/send-code` creates OTP and CSRF token and tries email delivery. `POST /auth/v1/email/verify` finds verification row by `(email, csrf_token)` and validates code/expiry/single-use conditions.
 
@@ -292,7 +169,7 @@ After verify succeeds:
 - If user email is absent and `registration_mode=open`, create user for legacy compatibility.
 - If user email is absent and default `registration_mode=signup_token` or `closed`, return `RegistrationRequired` and do not create user.
 
-### 3.2 Signup token lifecycle
+### Signup token lifecycle
 
 Signup token returns plaintext token to user only once or delivers it as email link. DB stores only SHA-256 hash.
 
@@ -324,7 +201,7 @@ and revocation retains timestamp capture inside its owned scope. These boundarie
 add no registration, creator-role or enabled-user filter, lock, retry, isolation,
 TTL or public-schema policy.
 
-### 3.3 Email signup delivery
+### Email signup delivery
 
 `POST /auth/v1/signup/email` creates email-bound signup token and sends `/signup?token=...` link by email if email service is configured. If email service is not configured, it fails with `SignupEmailDeliveryUnavailable`. Manual delivery uses admin signup token create API.
 
@@ -337,7 +214,7 @@ False, raised or cancelled delivery does not revoke or replay the already-create
 token. Ordinary HTTP error handling does not expose transport text or plaintext
 token data. The precreation predicate and postcommit token semantics are unchanged.
 
-### 3.4 Password login
+### Password login
 
 `POST /auth/v1/login/password` loads an active-user password credential snapshot
 in a completed repository read, verifies the bcrypt hash outside database
@@ -351,7 +228,7 @@ mismatch, or authority loss before Session issuance are all unified as
 
 Main Web post-authentication redirects accept only same-origin path references that begin with exactly one `/`. The login flow filters `next` before forwarding it to password or email OTP steps and validates it again before the already-authenticated, password-success, and OTP-success redirects. Missing or rejected targets fall back to `/workspaces`.
 
-### 3.5 Credential projection
+### Credential projection
 
 Credential providers produce an internal credential summary with `configured`, `valid`, `can_login`, `can_elevate`, `can_remove`, and optional `unavailable_reason`.
 
@@ -380,7 +257,7 @@ SMTP effect. These are read snapshots with no post-provider final mutation or
 new authorization/isolation guarantee; actual password removal keeps its separate
 conditional database authority.
 
-### 3.6 Admin-issued password reset
+### Admin-issued password reset
 
 Password reset is not self-service email recovery. An admin creates a reset token for an existing user by `user_id` or email lookup. The token row is user_id-bound and does not snapshot email.
 
@@ -410,7 +287,7 @@ token evidence returns. Exceptions and cancellation roll back all group writes.
 Terminal invalidation follows committed success and cannot compensate or replay
 accepted redemption if publication fails. No login token is issued.
 
-### 3.7 System roles and Admin API authorization
+### System roles and Admin API authorization
 
 `system_user_roles` stores instance-wide assignments separately from Workspace membership. The only current role is `system_admin`. Every operational Admin API request decodes the ordinary Azents access token, verifies its live Session/User, and reads the current assignment from PostgreSQL. Role state is not embedded in the JWT, so grant or revoke applies immediately to an already-issued access token.
 
@@ -463,7 +340,7 @@ rolling back earlier successful grants. This is the only initial-promotion and r
 users exist. It neither creates a user nor issues a session, and migrations, startup, Workspace
 ownership, and environment configuration do not auto-promote users.
 
-### 3.8 Admin bootstrap
+### Admin bootstrap
 
 `GET /system/v1/bootstrap/status` returns only `{ available }`. `POST /system/v1/bootstrap/first-admin` accepts the setup token in `X-Azents-Setup-Token` and succeeds only when the total User count is zero and the singleton token hash is active and unconsumed.
 
@@ -486,7 +363,7 @@ construction and success logging; a post-commit JWT failure does not roll back o
 reopen bootstrap. Generated-token logging follows completed initialization only
 when that operation actually persisted a new generated hash.
 
-### 3.9 Admin Web session
+### Admin Web session
 
 Admin Web uses Public API password login and refresh, but stores its own `az-admin-token`, `az-admin-refresh`, and `az-admin-token-expires-at` HTTP-only cookies. Production cookies are `Secure`, `SameSite=Lax`, and scoped to the configured Admin Web public base path. Admin Web and Main Web sessions are independent even on the same host.
 
@@ -504,7 +381,7 @@ cross-origin, out-of-base-path, and login-loop targets use the prefixed `/worksp
 fallback. Logout uses the same native prefixed navigation. A root public base keeps
 the ordinary Refine/SPA redirect contract instead.
 
-### 3.10 Runtime Web browser identity
+### Runtime Web browser identity
 
 The Main Web authentication connection screen starts its existing same-origin
 JSON POST through a self-contained inline bootstrap in the initial HTML. It does
@@ -572,19 +449,19 @@ For both modes, the Gateway scans all raw Cookie headers and rejects more than o
 exact identity-cookie value before validating the sole opaque secret, authentication
 Session, user, expiry, revocation, and current service authority.
 
-### 3.11 Workspace invitation integration
+### Workspace invitation integration
 
 Workspace invitation remains email-bound membership intent. Invitation can be created for email without user, and after signup token redeem with same email and login, pending invitation API returns it.
 
 When sending invitation email, if target email is not yet registered as user email and email service is configured, invitation email includes signup token URL. If email service is not configured, invitation is created as-is and signup token is not created.
 
-### 3.12 Surface routing and deployment configuration
+### Surface routing and deployment configuration
 
 Main Web, Admin Web, Public API, and Admin API use explicit public or internal URLs instead of deriving topology from hard-coded prefixes. Admin Web's public base URL may include a gateway path and controls redirects plus cookie path. Server-to-server calls use separately configured Public/Admin API internal URLs. Main Web receives only an optional public Admin Web URL.
 
 Helm keeps Admin Web public routing separate from internal API services. An operator-provided bootstrap token is referenced through an existing Kubernetes Secret and injected only into the Admin API/server boundary; chart defaults contain no secret literal. Obsolete GitHub Admin login and Admin API OAuth2 client-credential settings are not part of the chart contract.
 
-### 3.13 Account locale resolution
+### Account locale resolution
 
 `User.locale` stores one supported BCP 47 account locale: `en-US`, `ko-KR`,
 `ja-JP`, or `fr-FR`. Authenticated `GET /user/v1/me` returns it, and
@@ -612,7 +489,7 @@ Saving a locale from Account settings updates the account first. A successful
 response uses the same cookie-and-reload boundary; the browser does not treat a
 local-only language selection as authoritative over the persisted account.
 
-## 4. Session / Refresh Token Lifecycle
+## Session / Refresh Token Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -646,7 +523,7 @@ stateDiagram-v2
   errors, elevation context, and permission projection remain outside repository
   operations.
 
-## 5. Password and Elevation
+## Password and Elevation
 
 Password policy:
 
@@ -656,7 +533,7 @@ Password policy:
 
 Sensitive operations require `elv=true` access token. Elevation is acquired by email OTP or password re-entry. Password change/delete requires elevation, not direct old password confirmation. Password deletion is allowed only when at least one valid credential remains after deletion. For example, if SMTP is disabled and password is the only valid credential, password deletion is rejected with `409 Conflict`.
 
-## 6. Business Rules
+## Business Rules
 
 Security User/password reads and password mutations complete inside
 `SecurityOperationRepository` before returning to the service. Password hashing,
@@ -709,7 +586,7 @@ Session lookup does not inherit it.
 - `[password-reset-single-use]` — successful redeem sets `used_at`, so password reset token cannot be reused.
 - `[password-reset-no-auto-login]` — password reset redeem revokes existing sessions and does not issue login token.
 
-## 7. API Reference
+## API Reference
 
 ### Public — `/auth/v1`
 
@@ -766,7 +643,7 @@ All other Admin API operations, including `/auth/v1` token operations, `/system-
 
 `AuthMethod` contains `type`, `enabled`, `configured`, `valid`, `can_login`, `can_elevate`, `can_remove`, and nullable `unavailable_reason`.
 
-## 8. Frontend Routes
+## Frontend Routes
 
 - `/` — has no presentation surface. Requests with Main Web authentication cookies redirect to `/workspaces`; requests without them redirect to `/login`. Protected routes retain authoritative downstream session checks.
 - `/login` — server rendering checks instance email-delivery availability before
@@ -784,87 +661,15 @@ Admin Web `/login` selects one of two modes from Admin bootstrap status. An empt
 
 Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
-## 9. Changelog
+## API route entrypoints
 
-- **2026-10-08** — Replaced transient Runtime Web authentication history entries
-  while preserving the native separate-domain exchange and original return URL.
+- `/debug/v1`
 
-- **2026-10-08** — Preserved Runtime Web service path, query and fragment through
-  authentication, Main Web login and Off-service activation without changing
-  the authentication screen design or identity authority.
+## References
 
-- **2026-10-08** — Removed application-bundle hydration from Runtime Web
-  authentication bootstrap while preserving the existing screen and identity
-  exchange protocol.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-10-07** — Added instance login availability lookup without an email and
-  single-screen email/password login when email delivery is disabled.
-
-- **2026-10-05** (v29) — Integrated completed owner-lifecycle transaction ownership
-  with password reset and first-admin bootstrap. Preserved root retirement,
-  atomic account finalization, single-use authority rechecks and post-commit
-  provider/Broker effects.
-
-- **2026-10-05** (v28) — Completed password-reset and first-admin bootstrap
-  repository operations, retaining single-use atomic mutation groups and final
-  authority revalidation with hash preparation before SQL and effects after commit.
-
-
-- **2026-10-03** (v25) — Completed all five SignupToken database groups in domain
-  repository operations. Preserved prepared-clock/crypto ordering, atomic
-  claim/account/password/Session/audit behavior, public errors and post-commit
-  JWT/email failure retention; shared domain failures use canonical pure definitions.
-- **2026-10-02** (v24) — Completed Credential grouped-read transaction ownership
-  and session-free provider projection while preserving query/order/duplicate
-  behavior, public/admission contracts and separate password deletion authority.
-  Clarified existing any-verified-linked-email configuration semantics.
-- **2026-10-02** (v23) — Moved User, UserEmail, system-role and authentication
-  admission lifetimes into completed repository operations. Preserved shared
-  role/deletion locking, final-admin protection, atomic access-disable and purge
-  scheduling, post-commit effects, and existing authentication/API behavior.
-- **2026-09-16** (v22) — Removed the public product-marketing landing surface and
-  made the Main Web root redirect unauthenticated requests to `/login` and
-  authenticated requests to `/workspaces`.
-- **2026-09-15** (v21) — Added account-locale persistence, SSR resolution
-  precedence, authenticated client convergence, and Account settings update
-  behavior.
-- **2026-09-15** (v20) — Added the authenticated Off-service activation route
-  with service-ID authorization and revision-fenced On control, without an approval
-  resource or URL credential.
-- **2026-09-13** (v19) — Removed Runtime Web browser-profile and capability-probe
-  authorization, made identity issuance browser-neutral, and documented exact raw
-  identity-cookie cardinality before opaque-secret validation.
-- **2026-09-13** (v18) — Replaced Runtime Web configuration-epoch rejection with
-  explicit identity revocation and pending binding and ticket removal when security
-  configuration changes.
-- **2026-09-08** (v16) — Moved Security User/password operations into completed
-  DB-only repository transactions; made password setup an atomic upsert and
-  revalidated verified-email eligibility in the final password deletion.
-
-- **2026-09-08** (v15) — Moved Auth user resolution, password credential reads,
-  active-user Session issuance, refresh eligibility/rotation, and logout revocation
-  into completed repository-owned operations. Recorded conditional refresh race
-  behavior, User-row serialization against account disable-and-revoke, and
-  post-commit JWT, password verification, and terminal invalidation boundaries.
-- **2026-09-08** (v14) — Moved email verification delivery, conditional mark,
-  cleanup, and administration reads into completed repository operations while
-  preserving the separate verified-mark, user-resolution, and Session-issuance
-  phases.
-- **2026-09-03** (v13) — Added path-prefixed Admin Web native authentication
-  navigation, safe `returnTo` preservation, `/workspaces` fallback, and the
-  corresponding auth-policy authority mapping.
-- **2026-08-18** (v12) — Restricted Main Web post-login `next` propagation and redirects to same-origin path references, with `/workspaces` as the invalid or absent fallback.
-- **2026-08-18** (v11) — Corrected the existing-install operator CLI contract to
-  accept repeated exact-email options, process grants sequentially, and preserve
-  earlier successful grants when a later email is missing.
-- **2026-08-06** — v10. Added owner-lifecycle persistence and integration paths to the spec authority inventory.
-- **2026-08-06** — v9. Documented User Session owner lifecycle on membership loss and account deletion.
-- **2026-07-20** (v8) — Confirmed that System Settings inventory, mutation, health, and audit operations reuse the live persisted `system_admin` boundary without changing bootstrap, promotion, or final-admin invariants.
-- **2026-07-13** (v7) — Replaced public first-owner Workspace bootstrap with one-time Admin bootstrap, added persisted live system-administrator authorization and CLI recovery, and documented independent Admin Web user sessions.
-- **2026-04-20** (v1) — Initial living spec.
-- **2026-05-09** (v2) — Refresh/session/elevation behavior verified.
-- **2026-06-17** (v3) — Signup-on-first-verify replaced by signup-token controlled registration. Added signup token model/service/API, email signup delivery, invitation signup-link integration, first owner bootstrap, and frontend `/signup`/`/setup` routes.
-- **2026-06-29** (v5) — Removed GitHub PAT credential storage from the user-auth domain; GitHub auth is now toolkit-level only.
-- **2026-06-18** (v3) — Verified cleanup: signup token failed redeem paths no longer consume `used_count`; login signup CTA is gated by signup status; preview exposes a masked email hint; account signup-token admin UI is documented.
-- **2026-06-18** (v4) — Added credential provider projection, SMTP-gated email credential validity, last valid credential deletion invariant, and admin-issued password reset tokens.
-- **2026-07-08** (v6) — Moved first-owner bootstrap to public Workspace API for main web and removed main-web admin-issued token management pending a system admin permission model.
+- [`python/apps/azents/src/azents/services/auth`](../../../../python/apps/azents/src/azents/services/auth)
+- [`python/apps/azents/src/azents/api/public/auth`](../../../../python/apps/azents/src/azents/api/public/auth)
+- [`python/apps/azents/src/azents/core/auth`](../../../../python/apps/azents/src/azents/core/auth)

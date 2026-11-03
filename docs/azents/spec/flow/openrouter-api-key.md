@@ -1,43 +1,20 @@
 ---
-title: "OpenRouter API Key Provider Flow"
+title: "OpenRouter API keys"
 created: 2026-07-19
 tags: [backend, frontend, engine, security, api, testenv]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, workspace, model-catalog]
-code_paths:
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/core/model_provider_declarations.py
-  - python/apps/azents/src/azents/services/active_model_capabilities.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/src/azents/core/credentials.py
-  - python/apps/azents/src/azents/core/enums.py
-  - python/apps/azents/src/azents/core/llm_mapping.py
-  - python/apps/azents/src/azents/core/openrouter.py
-  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
-  - python/apps/azents/src/azents/repos/llm_provider_integration/**
-  - python/apps/azents/src/azents/services/llm_provider_integration/**
-  - python/apps/azents/src/azents/services/model_listing/**
-  - python/apps/azents/src/azents/services/subscription_usage/**
-  - python/apps/azents/src/azents/repos/subscription_usage_read.py
-  - python/apps/azents/src/azents/services/llm_catalog/**
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
-  - python/apps/azents/src/azents/engine/providers/**
-  - python/apps/azents/src/azents/engine/model_stream.py
-  - typescript/apps/azents-web/src/features/llm-settings/**
-  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
-  - typescript/apps/azents-web/src/shared/subscription-usage/**
-  - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-  - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-10-05
-spec_version: 9
 ---
 
-# OpenRouter API Key Provider Flow
+# OpenRouter API keys
+
+Account-discovered models, credit usage, pricing and native provider execution.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Model catalog](../domain/model-catalog.md)
+- [Agent](../domain/agent.md)
+- [xAI API keys](xai-api-key.md)
 
 ## Overview
 
@@ -200,14 +177,11 @@ rejection remains an availability failure rather than a model substitution.
 - Runtime tests mock transport and verify fixed credentials, attribution, web-search lowering, cache-control isolation, streaming, usage, and bounded provider failures.
 - Live account catalog or inference verification is optional and requires a separately prepared operator credential snapshot.
 
-## Changelog
+## References
 
-| Date | Version | Change | Rationale |
-|---|---:|---|---|
-| 2026-10-03 | 7 | Adopted current catalog/latest sync state and embedded normalized selection prices | Preserve exact publisher identity, account visibility and reported charge priority |
-| 2026-10-01 | 6 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep every valid account-visible text model independent of optional generic metadata |
-| 2026-09-30 | 5 | Replaced executable transport with the public Pydantic AI Responses/SDK boundary and exact raw model identity | Preserve the existing account, envelope and execution-control contracts |
-| 2026-09-04 | 4 | Mapped the shared subscription-usage state and container modules | Keep bounded-key usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
-| 2026-07-19 | 3 | Added API-key credit usage with bounded-key percentage and manager financial details; unlimited keys remain hidden | Reuse the shared usage surface without presenting a meaningless limit for `null` OpenRouter key limits |
-| 2026-07-19 | 2 | Extended OpenRouter response-handle acquisition to 60 seconds while preserving common stream idle and absolute bounds | Prevent transient upstream routing and model preparation from crossing the common 15-second acquisition deadline |
-| 2026-07-19 | 1 | Documented the stable OpenRouter API-key integration, account catalog, runtime, UI, and security behavior | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-290) and the verified OpenRouter implementation |
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/llm_catalog`](../../../../python/apps/azents/src/azents/services/llm_catalog)
+- [`python/apps/azents/src/azents/core/model_provider_declarations.py`](../../../../python/apps/azents/src/azents/core/model_provider_declarations.py)
+- [`python/apps/azents/src/azents/engine/events`](../../../../python/apps/azents/src/azents/engine/events)
