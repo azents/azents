@@ -63,7 +63,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-11-02
+last_verified_at: 2026-11-04
 spec_version: 87
 ---
 
@@ -494,6 +494,17 @@ Always-on required CI does not depend on external credentials.
   Existing fixture health, failure propagation, lifecycle ownership and final drain
   remain authoritative. Prepared-image worker plans explicitly record zero builds.
   Lane artifacts retain receipts, verification, per-image and total load durations.
+  Before preparation, each disposable GitHub-hosted Linux E2E job reclaims only
+  the unused Android SDK at `/usr/local/lib/android/sdk` when free root-filesystem
+  capacity is below 32 GiB. Roomier workers skip unnecessary deletion. This
+  conservative cleanup eligibility budget is not a disk sufficiency guarantee.
+  The helper refuses other execution environments and symlinks or non-directories
+  anywhere in that fixed path. Genuine absence is a no-op; inspection, permission
+  and deletion errors remain failures. Exclusive before/after capacity receipts
+  retain the target, filesystem bytes, eligibility budget, explicit removed/
+  missing/sufficient-capacity outcome, observed free-space delta and elapsed time.
+  This preparation does not prune Docker, remove other toolchains, change runner
+  allocation or introduce a failing capacity gate.
   Before import, one preparation owner overlaps exact same-run artifact downloads
   through two bounded exact-name GitHub CLI download slots with pulls of the five
   existing public prerequisite images. Both tasks, every download and every
