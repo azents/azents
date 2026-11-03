@@ -159,8 +159,8 @@ class DockerRuntimeProvider:
                 f"unsupported Runner environment variables: "
                 f"{', '.join(sorted(unknown_runner_env))}"
             )
-        self._docker = docker
-        self._config = config
+        self.docker = docker
+        self.config = config
         self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
         self._tmp_mount_path = _absolute_posix_path(config.tmp_mount_path)
@@ -188,9 +188,7 @@ class DockerRuntimeProvider:
     ) -> RuntimeLifecycleResult:
         """Stop the Runtime container without deleting workspace data."""
         self._validate_cleanup_command(command)
-        await self._docker.remove_container(
-            _container_name(command.identity.runtime_id)
-        )
+        await self.docker.remove_container(_container_name(command.identity.runtime_id))
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.STOP,
             report=self._report(
@@ -228,9 +226,7 @@ class DockerRuntimeProvider:
         self._validate_command(command)
         if command.reset_final_desired_state is None:
             raise InvalidResetFinalDesiredState("reset final desired state is required")
-        await self._docker.remove_container(
-            _container_name(command.identity.runtime_id)
-        )
+        await self.docker.remove_container(_container_name(command.identity.runtime_id))
         self._delete_runtime_root(command.identity.runtime_id)
         if command.reset_final_desired_state is RuntimeDesiredState.RUNNING:
             await self._ensure_container(command, replace=False)
@@ -264,9 +260,7 @@ class DockerRuntimeProvider:
     ) -> RuntimeLifecycleResult:
         """Remove the Runtime container and all Provider-owned host data."""
         self._validate_cleanup_command(command)
-        await self._docker.remove_container(
-            _container_name(command.identity.runtime_id)
-        )
+        await self.docker.remove_container(_container_name(command.identity.runtime_id))
         self._delete_runtime_root(command.identity.runtime_id)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
@@ -288,7 +282,7 @@ class DockerRuntimeProvider:
     ) -> RuntimeProviderReport:
         """Observe one Runtime container and report Provider-owned metadata."""
         self._validate_command(command)
-        container = await self._docker.get_container(
+        container = await self.docker.get_container(
             _container_name(command.identity.runtime_id)
         )
         if container is None:
@@ -312,10 +306,10 @@ class DockerRuntimeProvider:
         """Scan labelled containers and host directories after Provider restart."""
         reports: list[RuntimeProviderReport] = []
         seen_runtime_ids: set[str] = set()
-        containers = await self._docker.list_containers(
+        containers = await self.docker.list_containers(
             {
                 _LABEL_MANAGED_BY: "azents-runtime-provider-docker",
-                _LABEL_PROVIDER_ID: self._config.provider_id,
+                _LABEL_PROVIDER_ID: self.config.provider_id,
             }
         )
         for container in containers:
@@ -330,7 +324,7 @@ class DockerRuntimeProvider:
                     "evidence",
                     extra={
                         "runtime_id": runtime_id,
-                        "provider_id": self._config.provider_id,
+                        "provider_id": self.config.provider_id,
                         "container_name": container.name,
                     },
                 )
@@ -352,31 +346,31 @@ class DockerRuntimeProvider:
         profile = self._validate_command(command)
         runtime_id = command.identity.runtime_id
         container_name = _container_name(runtime_id)
-        container = await self._docker.get_container(container_name)
+        container = await self.docker.get_container(container_name)
         if container is not None and (
             replace or not self._container_reusable(container, command, profile)
         ):
-            await self._docker.remove_container(container_name)
+            await self.docker.remove_container(container_name)
             container = None
         self._ensure_workspace_dirs(runtime_id)
         if profile.network_name is None:
             raise UnsupportedRuntimeConfiguration(
                 "Docker Container Profile requires a Provider-managed network name."
             )
-        await self._docker.ensure_network(profile.network_name)
-        await self._docker.ensure_image(command.runner_image)
+        await self.docker.ensure_network(profile.network_name)
+        await self.docker.ensure_image(command.runner_image)
         if container is None:
-            await self._docker.create_container(
+            await self.docker.create_container(
                 self._container_spec(command, profile=profile)
             )
-        await self._docker.start_container(container_name)
+        await self.docker.start_container(container_name)
 
     async def _remove_owned_container(
         self,
         command: RuntimeLifecycleCommand,
     ) -> None:
         container_name = _container_name(command.identity.runtime_id)
-        container = await self._docker.get_container(container_name)
+        container = await self.docker.get_container(container_name)
         if container is None:
             return
         labels = dict(container.labels)
@@ -387,7 +381,7 @@ class DockerRuntimeProvider:
             raise UnsupportedRuntimeConfiguration(
                 "Docker container name is owned by a different Runtime or Provider."
             )
-        await self._docker.remove_container(container_name)
+        await self.docker.remove_container(container_name)
 
     def _container_spec(
         self,
@@ -495,7 +489,7 @@ class DockerRuntimeProvider:
         identity = command.identity
         return {
             _LABEL_MANAGED_BY: "azents-runtime-provider-docker",
-            _LABEL_PROVIDER_ID: self._config.provider_id,
+            _LABEL_PROVIDER_ID: self.config.provider_id,
             _LABEL_RUNTIME_ID: identity.runtime_id,
             _LABEL_AGENT_ID: identity.agent_id,
             _LABEL_WORKSPACE_ID: identity.workspace_id,
@@ -525,7 +519,7 @@ class DockerRuntimeProvider:
             _ENV_RUNTIME_ID: identity.runtime_id,
             _ENV_AGENT_ID: identity.agent_id,
             _ENV_WORKSPACE_ID: identity.workspace_id,
-            _ENV_PROVIDER_ID: self._config.provider_id,
+            _ENV_PROVIDER_ID: self.config.provider_id,
             _ENV_HOME: self._workspace_mount_path,
         }
         if self._runtime_network_ca_digest is not None:
@@ -608,7 +602,7 @@ class DockerRuntimeProvider:
     ) -> RuntimeProviderReport:
         return RuntimeProviderReport(
             runtime_id=command.identity.runtime_id,
-            provider_id=self._config.provider_id,
+            provider_id=self.config.provider_id,
             provider_generation=command.provider_generation,
             observed_state=observed_state,
             observed_desired_generation=command.desired_generation,
@@ -628,7 +622,7 @@ class DockerRuntimeProvider:
         observation = _observed_state(container)
         return RuntimeProviderReport(
             runtime_id=container.labels[_LABEL_RUNTIME_ID],
-            provider_id=self._config.provider_id,
+            provider_id=self.config.provider_id,
             provider_generation=_int_label(container, _LABEL_PROVIDER_GENERATION),
             observed_state=observation.state,
             observed_desired_generation=_int_label(
@@ -661,7 +655,7 @@ class DockerRuntimeProvider:
             desired_generation=command.desired_generation,
             expected_provider_kind="docker",
         )
-        if configuration.provider.logical_id != self._config.provider_id:
+        if configuration.provider.logical_id != self.config.provider_id:
             raise UnsupportedRuntimeConfiguration(
                 "Runtime configuration is bound to a different Docker Provider."
             )
@@ -681,7 +675,7 @@ class DockerRuntimeProvider:
             desired_generation=command.desired_generation,
             expected_provider_kind="docker",
         )
-        if provider.logical_id != self._config.provider_id:
+        if provider.logical_id != self.config.provider_id:
             raise UnsupportedRuntimeConfiguration(
                 "Runtime configuration is bound to a different Docker Provider."
             )
@@ -689,7 +683,7 @@ class DockerRuntimeProvider:
     def _runtime_root(self, runtime_id: str) -> Path:
         if not _RUNTIME_ID_RE.fullmatch(runtime_id):
             raise InvalidRuntimeId(runtime_id)
-        return self._config.host_data_root / "agent-runtimes" / runtime_id
+        return self.config.host_data_root / "agent-runtimes" / runtime_id
 
     def _workspace_host_dir(self, runtime_id: str) -> Path:
         return self._runtime_root(runtime_id) / "workspace"
