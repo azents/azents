@@ -297,10 +297,10 @@ convention/interface corrections.
 - TypeScript formatting, lint, typecheck, affected tests, and build
 - Provider fake and deterministic External Channel E2E
 - Redis and in-memory conversation-lock contracts
-- Documentation frontmatter and index validation
+- Document metadata validation and Spec Wiki semantic/link checks
 - `git diff --check`
 
-## Phase 4 — Living-spec correction
+## Phase 4 — Spec Wiki correction
 
 ### Deliverables
 
@@ -313,7 +313,8 @@ convention/interface corrections.
   - `docs/azents/spec/flow/agent-execution-loop.md`;
   - `docs/azents/spec/flow/test-strategy-e2e-primary.md`; and
   - other files identified by `/spec-review`.
-- Update `code_paths` and `last_verified_at` where the covered implementation changed.
+- Update owning wiki contracts, connections and selected references through semantic
+  impact review; follow `docs/azents/spec/AGENTS.md` rather than path matching.
 - Correct or supersede the 2026-07-29 validation report's claims that:
   - pending approval retained no provider content;
   - provider-visible fidelity was complete;

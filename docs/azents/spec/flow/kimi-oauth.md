@@ -1,47 +1,20 @@
 ---
-title: "Kimi OAuth Flow"
+title: "Kimi OAuth"
 created: 2026-07-19
 tags: [backend, frontend, engine, security, api]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, workspace, model-catalog, conversation]
-code_paths:
-  - python/apps/azents/src/azents/core/route_capability_constraints.py
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/core/model_provider_declarations.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/kimi_oauth_runtime.py
-  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
-  - python/apps/azents/src/azents/core/kimi_oauth.py
-  - python/apps/azents/src/azents/core/credentials.py
-  - python/apps/azents/src/azents/api/public/kimi_oauth/**
-  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
-  - python/apps/azents/src/azents/services/kimi_oauth/**
-  - python/apps/azents/src/azents/services/oauth_runtime_clients.py
-  - python/apps/azents/src/azents/services/subscription_usage/**
-  - python/apps/azents/src/azents/repos/subscription_usage_read.py
-  - python/apps/azents/src/azents/services/model_listing/providers.py
-  - python/apps/azents/src/azents/services/llm_catalog/__init__.py
-  - python/apps/azents/src/azents/repos/kimi_oauth_session/**
-  - python/apps/azents/src/azents/rdb/models/kimi_oauth_session.py
-  - python/apps/azents/src/azents/engine/run/resolve.py
-  - python/apps/azents/src/azents/core/llm_mapping.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
-  - python/apps/azents/src/azents/engine/providers/**
-  - typescript/apps/azents-web/src/features/llm-settings/**
-  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
-  - typescript/apps/azents-web/src/features/chat/**
-  - typescript/apps/azents-web/src/shared/chat-presentation/**
-  - typescript/apps/azents-web/src/shared/subscription-usage/**
-  - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-05
-spec_version: 9
 ---
 
-# Kimi OAuth Flow
+# Kimi OAuth
+
+Experimental Kimi subscription authorization, refresh, entitlement and execution.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Model catalog](../domain/model-catalog.md)
+- [ChatGPT OAuth](chatgpt-oauth.md)
+- [xAI OAuth](xai-oauth.md)
 
 ## Overview
 
@@ -252,13 +225,8 @@ An enabled Kimi integration exposes live usage through the existing integration 
 Azents does not persist usage snapshots, poll in the background, aggregate workspaces, or use usage to
 change execution entitlement.
 
-The integration and decrypted typed secrets are loaded by one completed native
-PostgreSQL read-only repository operation. Missing integration is classified
-before foreign-Workspace access, preserving the existing error and privacy
-contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
-calls run only after that read closes; existing OAuth persistence operations own
-their separate writes. Usage persistence, financial-field authorization and
-provider/secrets redaction retain their existing contracts.
+The [subscription integration read boundary](../domain/model-catalog.md#subscription-integration-read-boundary)
+applies before provider OAuth work; provider-specific setup and refresh rules follow below.
 
 The usage adapter ensures fresh credentials and requests `GET /usages` with the access token and
 compatibility headers. It accepts an optional `usage` summary and zero or more `limits` entries,
@@ -318,15 +286,10 @@ message submission, or integration management.
   may change or be restricted.
 - Kimi Search and Fetch services are not advertised or implemented by this provider.
 
-## Changelog
+## References
 
-| Date | Version | Change | Rationale |
-|---|---:|---|---|
-| 2026-10-05 | 9 | Completed Device OAuth session and atomic integration-save repository ownership | Preserve existing provider flow, consume predicates and credential outcomes |
-| 2026-10-05 | 8 | Reconciled code-path discovery with current defining modules | Keep implementation discovery aligned with the current source tree; system behavior is unchanged |
-| 2026-10-03 | 6 | Adopted current catalog entries/latest sync without snapshot history | Retain Kimi account visibility and existing synchronization policy |
-| 2026-10-01 | 5 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep Kimi model visibility independent of optional generic metadata |
-| 2026-09-30 | 4 | Documented public Pydantic AI Chat Completions/SDK execution with raw model IDs | Retain Kimi OAuth device identity and existing engine ownership without the executable shared package |
-| 2026-09-23 | 3 | Documented the shared subscription reauthentication action for connected and failed integrations | Match the current connection-row and management-modal behavior |
-| 2026-09-04 | 2 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
-| 2026-07-19 | 1 | Documented Kimi device authorization, encrypted identity, refresh, catalog, Moonshot runtime routing, usage, and UI behavior | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-289) and validated implementation |
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/kimi_oauth`](../../../../python/apps/azents/src/azents/services/kimi_oauth)
+- [`python/apps/azents/src/azents/repos/kimi_oauth_runtime.py`](../../../../python/apps/azents/src/azents/repos/kimi_oauth_runtime.py)

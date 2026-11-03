@@ -2,40 +2,20 @@
 title: "Session Context Inspector"
 tags: [chat, observability, event-events, frontend]
 created: 2026-05-30
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, conversation]
-last_verified_at: 2026-10-27
-spec_version: 31
-code_paths:
-  - python/apps/azents/src/azents/core/chat_data.py
-  - python/apps/azents/src/azents/services/agent/**
-  - python/apps/azents/src/azents/api/public/agent/**
-  - python/apps/azents/src/azents/services/chat/context.py
-  - python/apps/azents/src/azents/repos/chat_context_snapshot.py
-  - python/apps/azents/src/azents/api/public/chat/v1/__init__.py
-  - python/apps/azents/src/azents/api/public/chat/v1/data.py
-  - python/apps/azents/src/azents/repos/agent_execution/__init__.py
-  - python/apps/azents/src/azents/repos/agent_session_system_prompt_snapshot/__init__.py
-  - python/apps/azents/src/azents/rdb/models/agent_session_system_prompt_snapshot.py
-  - python/apps/azents/src/azents/engine/events/types.py
-  - python/apps/azents/src/azents/engine/events/execution.py
-  - python/apps/azents/src/azents/engine/events/openai_responses.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
-  - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
-  - python/apps/azents/src/azents/core/model_pricing.py
-  - typescript/apps/azents-web/src/shared/agent-session/AgentSessionHeader.tsx
-  - typescript/apps/azents-web/src/features/agents/AgentContextPage.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
-  - typescript/apps/azents-web/src/features/chat/components/TokenUsageIndicator.tsx
-  - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-  - typescript/apps/azents-web/src/shared/session-context/SessionContextView.tsx
-  - typescript/apps/azents-web/src/shared/session-context/containers/session-context-usage.ts
-  - typescript/apps/azents-web/src/shared/session-context/containers/session-context-usage.test.mts
-  - typescript/apps/azents-web/src/shared/session-context/SessionContextView.stories.tsx
 ---
 
 # Session Context Inspector
+
+Read-only context, prompt, usage and raw-event inspection in the Chat supporting panel.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Conversations and events](../domain/conversation.md)
+- [Context compaction](context-compaction.md)
+- [Memory](../domain/memory.md)
+- [Chat resynchronization](chat-session-resync.md)
 
 ## Current Behavior
 
@@ -212,31 +192,10 @@ supports top-of-list pull-to-refresh, an accessible refresh icon, and back-icon
 navigation that restores list scroll and focus. Ordinary tools remain separate
 from the judgment observation.
 
-## Changelog
+## References
 
-- **2026-10-27** (spec_version 31) — Corrected the public context endpoint path.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- 2026-10-19: Add isolated Routine judgment disclosure and read-only Session
-  inspection without changing ordinary Context usage/prompt baselines.
-
-- **2026-10-05** — v28. Moved the authorized Context snapshot read into a
-  completed read-only repository operation before service rendering.
-- **2026-10-03** — v27. Switched local estimate capture to saved candidate prices
-  and physical call time, preserving historical costs without current-source lookup.
-- **2026-10-03** — v26. Reflected captured data-only pricing authority and
-  complete directed Google usage accounting without recalculating historical costs.
-- **2026-10-01** — v25. Made the captured generic `genai_prices` snapshot the
-  sole local estimate authority after removal of the former source schema.
-- **2026-09-30** — v24. Documented captured-source cost estimation and truthful usage provenance
-  without changing the Context inspector's amount display or historical inference snapshot rules.
-- **2026-09-29** — v23. Added processing-speed intent and unavailable Ultrafast
-  pricing without substituting Standard estimates or losing token usage.
-- **2026-09-13** — v22. Added immutable actual-candidate route details, including candidate role
-  and ordinal, without deriving historical provenance from current Agent configuration.
-- **2026-09-12** — v21. Embedded the unchanged Context inspector in the unified
-  session panel while keeping Chat mounted.
-
-- **2026-09-06** — v20. Distinguished absent or invalid public-pricing estimates
-  from unexpected calculator defects that remain visible to monitoring.
-- **2026-09-04** — v19. Updated the Session Context view mapping after its
-  behavior-preserving move to the shared frontend layer.
+- [`python/apps/azents/src/azents/services/chat/context.py`](../../../../python/apps/azents/src/azents/services/chat/context.py)
+- [`python/apps/azents/src/azents/repos/chat_context_snapshot.py`](../../../../python/apps/azents/src/azents/repos/chat_context_snapshot.py)

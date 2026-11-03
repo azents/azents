@@ -1,49 +1,20 @@
 ---
-title: "xAI OAuth Flow"
+title: "xAI OAuth"
 created: 2026-07-10
 tags: [backend, frontend, engine, security, api]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, workspace, model-catalog]
-code_paths:
-  - python/apps/azents/src/azents/core/route_capability_constraints.py
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/core/model_provider_declarations.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/repos/engine_event_repositories.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/841e7188d527_bind_oauth_reauthentication_targets.py
-  - python/apps/azents/src/azents/core/xai.py
-  - python/apps/azents/src/azents/core/xai_oauth.py
-  - python/apps/azents/src/azents/core/config.py
-  - python/apps/azents/src/azents/core/credentials.py
-  - python/apps/azents/src/azents/api/public/xai_oauth/**
-  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
-  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
-  - python/apps/azents/src/azents/services/xai_oauth/**
-  - python/apps/azents/src/azents/services/oauth_runtime_clients.py
-  - python/apps/azents/src/azents/services/llm_catalog/**
-  - python/apps/azents/src/azents/services/model_listing/providers.py
-  - python/apps/azents/src/azents/services/subscription_usage/**
-  - python/apps/azents/src/azents/repos/subscription_usage_read.py
-  - python/apps/azents/src/azents/repos/xai_oauth_session/**
-  - python/apps/azents/src/azents/repos/xai_oauth_runtime/**
-  - python/apps/azents/src/azents/repos/oauth_persistence_errors.py
-  - python/apps/azents/src/azents/rdb/models/xai_oauth_session.py
-  - python/apps/azents/src/azents/engine/run/resolve.py
-  - python/apps/azents/src/azents/core/llm_mapping.py
-  - python/apps/azents/src/azents/engine/events/**
-  - python/apps/azents/src/azents/engine/providers/**
-  - typescript/apps/azents-web/src/features/llm-settings/**
-  - typescript/apps/azents-web/src/shared/subscription-usage/**
-  - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-21
-spec_version: 13
 ---
 
-# xAI OAuth Flow
+# xAI OAuth
+
+Experimental subscription authorization, refresh and catalog identity independent from developer keys.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [xAI API keys](xai-api-key.md)
+- [Model catalog](../domain/model-catalog.md)
+- [ChatGPT OAuth](chatgpt-oauth.md)
 
 ## Overview
 
@@ -216,13 +187,8 @@ child endpoint. The read is integration-scoped and read-through: Azents does not
 snapshots, collect history, poll in the background, aggregate workspaces, or use usage to change Agent
 execution entitlement.
 
-The integration and decrypted typed secrets are loaded by one completed native
-PostgreSQL read-only repository operation. Missing integration is classified
-before foreign-Workspace access, preserving the existing error and privacy
-contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
-calls run only after that read closes; existing OAuth persistence operations own
-their separate writes. Usage persistence, financial-field authorization and
-provider/secrets redaction retain their existing contracts.
+The [subscription integration read boundary](../domain/model-catalog.md#subscription-integration-read-boundary)
+applies before provider OAuth work; provider-specific setup and refresh rules follow below.
 
 The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limit and reset metadata to
 readers. Prepaid balance, pay-as-you-go values, and auto top-up configuration are included only when the
@@ -323,18 +289,10 @@ read a newer source to estimate usage.
 - Subscription-usage adapters and logs never expose OAuth tokens, account identifiers, emails, request headers, provider bodies, provider exception serialization, redirect values, or unauthorized financial values.
 - Operational usage requires integration read permission. Prepaid, pay-as-you-go, and auto top-up fields require integration write permission and are omitted otherwise.
 
-## Changelog
+## References
 
-| Date | Version | Change | Rationale |
-|---|---|---|---|
-| 2026-10-03 | 11 | Adopted current catalog/latest sync and saved exact-scope prices | Preserve OAuth host identity independently of API-key source twins |
-| 2026-09-30 | 10 | Documented public Pydantic AI/SDK HTTP inference and raw model identity | Preserve OAuth-specific credentials, endpoints and account semantics during executable package removal |
-| 2026-09-23 | 9 | Documented integration-targeted device reauthentication, shared management UI, and the target migration | Match the implemented in-place subscription credential replacement |
-| 2026-09-04 | 8 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |
-| 2026-08-18 | 7 | Replaced global OAuth model visibility with refreshed account-specific integration discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |
-| 2026-07-19 | 6 | Added integration-scoped CLI-proxy subscription usage, trusted redirects, permission-projected financial details, and card-local presentation | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-291) and validated subscription usage implementation |
-| 2026-07-18 | 5 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
-| 2026-07-18 | 4 | Applied the bounded common provider-failure contract and complete Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |
-| 2026-07-10 | 3 | Clarified separation from the stable API-key provider and documented shared xAI transport/catalog behavior | `docs/azents/design/xai-260710-xai-api-key.md` |
-| 2026-07-10 | 2 | Adopted the public Grok CLI client identity and made the experimental provider available without operator OAuth configuration | OpenCode xAI OAuth and ChatGPT OAuth parity review |
-| 2026-07-10 | 1 | Wrote current xAI OAuth device, runtime refresh, catalog, and UI behavior | `docs/azents/design/oauth-260710-xai-oauth.md` |
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/xai_oauth`](../../../../python/apps/azents/src/azents/services/xai_oauth)
+- [`python/apps/azents/src/azents/core/model_provider_declarations.py`](../../../../python/apps/azents/src/azents/core/model_provider_declarations.py)

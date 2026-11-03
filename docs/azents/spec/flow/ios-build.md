@@ -1,21 +1,19 @@
 ---
-title: "iOS Codebase and Build Artifacts"
+title: "iOS builds"
 created: 2026-10-15
 tags: [ios, swift, ci, build]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: []
-code_paths:
-  - swift/**
-  - .github/workflows/ios.yaml
-  - .claude/conventions/swift/**
-  - .claude/rules/swift-conventions.md
-  - scripts/generate-conventions-index.py
-last_verified_at: 2026-10-27
-spec_version: 2
 ---
 
-# iOS Codebase and Build Artifacts
+# iOS builds
+
+Native Swift bootstrap, simulator checks and unsigned CI build evidence.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Testing and CI](test-strategy-e2e-primary.md)
+- [Public releases](public-release.md)
 
 ## Scope
 
@@ -98,6 +96,10 @@ compilation, UI launch, simulator screenshot, and device archive creation requir
 the macOS workflow. The app has no domain logic requiring artificial unit-test
 layers; new pure logic must gain deterministic unit tests when introduced.
 
-## Changelog
+## References
 
-- 2026-10-27: Corrected pull-request checkout provenance and simulator startup ownership.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`swift/apps/azents-ios`](../../../../swift/apps/azents-ios)
+- [`.github/workflows/ios.yaml`](../../../../.github/workflows/ios.yaml)

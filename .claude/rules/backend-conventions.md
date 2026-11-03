@@ -13,6 +13,6 @@ Read the referenced body when its title applies to the change.
 
 | Convention | File |
 | --- | --- |
-| When changing persisted table structure or resource dependencies, update the owning Living Spec in the same PR with keys, relationships, delete behavior, and cleanup ownership. | [schema-dependencies-in-living-specs](../conventions/backend/schema-dependencies-in-living-specs.md) |
+| When changing persisted table structure or resource dependencies, update the owning Spec Wiki page in the same PR with keys, relationships, delete behavior, and cleanup ownership. | [schema-dependencies-in-living-specs](../conventions/backend/schema-dependencies-in-living-specs.md) |
 
 <!-- END_TABLE -->

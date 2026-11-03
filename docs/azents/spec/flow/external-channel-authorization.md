@@ -1,71 +1,21 @@
 ---
-title: "External Channel Authorization"
+title: "External Channel authorization"
 created: 2026-07-22
 tags: [backend, frontend, external-channel, authorization, security, discord]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [external-channel, agent, conversation]
-code_paths:
-  - python/apps/azents/src/azents/core/external_channel_interaction.py
-  - python/apps/azents/src/azents/core/external_channel_selection.py
-  - python/apps/azents/src/azents/core/external_channel_participation.py
-  - python/apps/azents/src/azents/core/external_channel_shortcut_source.py
-  - python/apps/azents/src/azents/repos/external_channel/interaction_operations.py
-  - python/apps/azents/src/azents/repos/external_channel/selector_operations.py
-  - python/apps/azents/src/azents/repos/external_channel/participation_operations.py
-  - python/apps/azents/src/azents/repos/external_channel/shortcut_source_operations.py
-  - python/apps/azents/src/azents/core/agent_automatic_project.py
-  - python/apps/azents/src/azents/core/external_channel_access.py
-  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
-  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
-  - python/apps/azents/src/azents/core/external_channel_ingestion.py
-  - python/apps/azents/src/azents/core/external_channel_participation_state.py
-  - python/apps/azents/src/azents/core/external_channel_selector_state.py
-  - python/apps/azents/src/azents/core/mailbox_errors.py
-  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
-  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
-  - python/apps/azents/src/azents/services/external_channel/access.py
-  - python/apps/azents/src/azents/services/external_channel/ingestion.py
-  - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
-  - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
-  - python/apps/azents/src/azents/services/external_channel/interaction.py
-  - python/apps/azents/src/azents/services/external_channel/selector.py
-  - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
-  - python/apps/azents/src/azents/services/external_channel/discord_events.py
-  - python/apps/azents/src/azents/services/external_channel/discord_http.py
-  - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
-  - python/apps/azents/src/azents/services/external_channel/discord_settings.py
-  - python/apps/azents/src/azents/services/external_channel/discord_settings_scope.py
-  - python/apps/azents/src/azents/services/external_channel/model_settings.py
-  - python/apps/azents/src/azents/services/external_account_link.py
-  - python/apps/azents/src/azents/services/external_channel/participation.py
-  - python/apps/azents/src/azents/services/external_channel/management.py
-  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
-  - python/apps/azents/src/azents/repos/agent_automatic_project/**
-  - python/apps/azents/src/azents/repos/external_channel/repository.py
-  - python/apps/azents/src/azents/repos/external_channel/model_settings.py
-  - python/apps/azents/src/azents/repos/external_channel/management.py
-  - python/apps/azents/src/azents/repos/external_account_link/**
-  - python/apps/azents/src/azents/repos/session_model_profile/**
-  - python/apps/azents/src/azents/repos/workspace_user/__init__.py
-  - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
-  - python/apps/azents/src/azents/services/mailbox.py
-  - python/apps/azents/src/azents/broker/types.py
-  - python/apps/azents/src/azents/worker/session/execution_snapshot.py
-  - typescript/apps/azents-web/src/app/(app)/external-channel/access/**
-  - typescript/apps/azents-web/src/features/external-channel-approval/**
-api_routes:
-  - /external-channel/v1/approval-requests/{access_request_id}
-  - /external-channel/v1/approval-requests/{access_request_id}/decision
-  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-10-06
-spec_version: 32
 ---
 
-# External Channel Authorization
+# External Channel authorization
+
+External principals, approval decisions, scoped grants and exact-binding release authority.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [External Channels](../domain/external-channel.md)
+- [Users and authentication](../domain/user-auth.md)
+- [External Channel ingress](external-channel-provider-ingress.md)
+- [External Channel delivery](external-channel-delivery.md)
 
 ## Principal Boundary
 
@@ -362,83 +312,16 @@ provider principal, durable interaction, current Task target, and exact connecte
 Binding before Edit or Delete. A valid provider principal for another Binding or
 Session cannot mutate the Task.
 
-## Changelog
+## API route entrypoints
 
-- **2026-10-06** (spec_version 32) — Replaced nonwaiting model/OAuth fences with
-  ordinary acquisition and post-wait authority/expiry checks, preserving existing
-  bounded model recovery and single-use exchange/generation/audit/notice effects.
+- `/external-channel/v1/approval-requests/{access_request_id}`
+- `/external-channel/v1/approval-requests/{access_request_id}/decision`
+- `/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access`
 
-- **2026-10-05** (spec_version 30) — Completed selector and participation repository
-  ownership with native read-only descriptive operations, writable atomic
-  authorization/selection groups and post-commit replay/cleanup intents; retained
-  existing actor, generation, timestamp and immutable-route fences.
+## References
 
-- **2026-10-05** (spec_version 30) — Reconciled code-path discovery with current
-  defining modules; system behavior is unchanged.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-10-05** (spec_version 29) — Clarified ordinary model-editor authorization versus final Apply/security guards and the exact Agent/principal absent-block/grant-revocation protocol.
-
-- **2026-09-12** (spec_version 26) — Added two-sided external-account proof and
-  exact-target linked User model-setting authorization while preserving independent
-  provider-principal admission, guest grants, blocks, and execution identity.
-- **2026-08-16** (spec_version 24) — Added fail-closed exact-Binding authority for
-  Scheduled Task management and signed provider controls.
-
-- **2026-08-11** (spec_version 23) — Made exact active-trigger correlation explicit
-  for approval replay and connected ingress: the replayed or `all_messages` trigger is
-  invocation-role, while unrelated retained history remains context.
-- **2026-08-10** (spec_version 22) — Replaced synchronous access replay and one
-  batch-shaped mailbox item with DB-only ingress admission, leased provider-history
-  drain, per-message `prompt_role` mailbox rows, cursor CAS, and one post-batch wake.
-- **2026-08-03** (spec_version 21) — Allowed only the root-Session-creating legacy
-  Allow path to pass one-time automatic-title eligibility into canonical replay;
-  compatible repeats and existing Bindings remain ineligible.
-- **2026-08-02** (spec_version 20) — Replaced access-control delivery intents with
-  access-request-owned current projection and one-shot process-local create/delete
-  plans while preserving authorization and mailbox replay authority.
-- **2026-08-02** (spec_version 19) — Added setup-linked authorization that resumes
-  location selection without Binding replay, provider-principal channel-default and
-  settings authority, exact scope proof, and the no-synthetic-User boundary.
-- **2026-08-01** (spec_version 18) — Added AgentAdmin-managed Agent and binding
-  response modes, creation-time default copy in Allow, connected ownership scoping,
-  and mention-only authorization-preserving admission.
-- **2026-08-01** (spec_version 17) — Replaced the initial button-only Session link
-  with a joined-presence control that retains canonical Session navigation.
-- **2026-08-01** (spec_version 16) — Made Allow replay converge through the
-  conversation position and canonical mailbox while provider-control delivery remains
-  independent.
-- **2026-07-31** (spec_version 14) — Replaced binding active/inactive state with
-  terminal `disconnected_at` authority and retained durable Session-link and
-  initial-progress delivery intents as independent provider controls.
-- **2026-07-31** (spec_version 13) — Moved selector replay state into the owning
-  interaction, kept approval replay in the access request, and made the canonical
-  mailbox item the sole accepted-input and wake-recovery identity.
-- **2026-07-30** (spec_version 12) — Removed bot-trigger admission and its route
-  policy, made selector and approval state metadata-only, and excluded inbound
-  edit/delete lifecycle corrections while retaining provider-visible nonhuman history
-  as context for later human triggers.
-- **2026-07-30** (spec_version 11) — Replaced pending-context and
-  waiting-hydration release with immutable access-request replay boundaries and shared
-  synchronous provider-history ingestion that converges before or after position
-  advancement, and aligned Multi selector admission with route-level bot policy.
-- **2026-07-28** (spec_version 10) — Verified that Discord selector and approval
-  bindings use the shared hydration-fenced activation and source-provenance boundary.
-- **2026-07-27** (spec_version 9) — Added route-scoped open human access by
-  default, an opt-in external-bot admission setting, connected-bot loop exclusion,
-  and the rule that rejected author classes never enter releasable pending context.
-- **2026-07-26** (spec_version 8) — Extended the provider-neutral principal,
-  source-retention, selector, and approval boundary to signed Discord interactions
-  without allowing a callback actor to replace source provenance.
-- **2026-07-26** (spec_version 7) — Inserted explicit Multi App selection before
-  Agent-specific access evaluation while preserving source provenance, callback actor
-  isolation, and duplicate selection/decision convergence.
-- **2026-07-24** (spec_version 6) — Kept External Channel principal and administrator identity
-  outside Team Session execution, which now derives only from canonical durable work after a
-  routing-only wake.
-- **2026-07-24** (spec_version 5) — Added atomic Agent automatic Project policy
-  snapshotting for Allow-created binding Sessions and existing-binding snapshot
-  reuse.
-- **2026-07-23** (spec_version 4) — Added complete participant identity in approval controls, atomic post-decision control-message deletion intents, and hard removal of revoked grants.
-- **2026-07-23** (spec_version 3) — Rendered Slack approval control messages as accessible Block Kit button actions.
-- **2026-07-23** (spec_version 2) — Removed route lifecycle state from authorization admission; route identity remains while Agent lifecycle and resource state determine eligibility.
-- **2026-07-22** (spec_version 1) — Promoted external-principal isolation, opaque approval, idempotent decisions, scoped grants/blocks, hydration-fenced activation, and same-binding pending-context release.
+- [`python/apps/azents/src/azents/repos/external_channel`](../../../../python/apps/azents/src/azents/repos/external_channel)
+- [`python/apps/azents/src/azents/services/external_channel`](../../../../python/apps/azents/src/azents/services/external_channel)

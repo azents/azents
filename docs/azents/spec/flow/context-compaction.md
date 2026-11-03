@@ -1,65 +1,22 @@
 ---
-title: "Context Compaction"
+title: "Context compaction"
 created: 2026-05-10
 tags: [backend, engine]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, conversation, external-channel, memory]
-code_paths:
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/repos/active_model_capabilities.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/engine/events/model_support_contract.py
-  - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/repos/engine_event_repositories.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/model_metadata_operations.py
-  - python/apps/azents/src/azents/engine/context/compaction.py
-  - python/apps/azents/src/azents/engine/provider_model_operation.py
-  - python/apps/azents/src/azents/engine/context/window.py
-  - python/apps/azents/src/azents/services/model_metadata.py
-  - python/apps/azents/src/azents/engine/responses.py
-  - python/apps/azents/src/azents/engine/providers/**
-  - python/apps/azents/src/azents/engine/events/**
-  - python/apps/azents/src/azents/engine/hooks/**
-  - python/apps/azents/src/azents/engine/tooling/tool_search.py
-  - python/apps/azents/src/azents/core/goal.py
-  - python/apps/azents/src/azents/core/toolkit_state.py
-  - python/apps/azents/src/azents/core/engine_tool_state.py
-  - python/apps/azents/src/azents/core/historical_memory_snapshot.py
-  - python/apps/azents/src/azents/core/historical_memory_context.py
-  - python/apps/azents/src/azents/services/historical_memory/context_snapshot.py
-  - python/apps/azents/src/azents/services/historical_memory/execution_context.py
-  - python/apps/azents/src/azents/repos/memory_execution_events.py
-  - python/apps/azents/src/azents/worker/run/memory_execution.py
-  - python/apps/azents/src/azents/repos/memory_context_snapshot.py
-  - python/apps/azents/src/azents/repos/historical_memory_consolidation/foreground.py
-  - python/apps/azents/src/azents/repos/historical_memory/**
-  - python/apps/azents/src/azents/repos/goal/**
-  - python/apps/azents/src/azents/repos/toolkit_state/**
-  - python/apps/azents/src/azents/repos/compaction_operation.py
-  - python/apps/azents/src/azents/repos/session_execution_record.py
-  - python/apps/azents/src/azents/core/session_execution_data.py
-  - python/apps/azents/src/azents/repos/model_operation_completion.py
-  - python/apps/azents/src/azents/engine/tools/scheduled.py
-  - python/apps/azents/src/azents/engine/tools/routine.py
-  - python/apps/azents/src/azents/core/routine_presentation.py
-  - python/apps/azents/src/azents/repos/routine/completion.py
-  - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
-  - python/apps/azents/src/azents/repos/model_candidate_health/**
-  - python/apps/azents/src/azents/repos/scheduled_task/presentation.py
-  - python/apps/azents/src/azents/engine/run/commands.py
-  - python/apps/azents/src/azents/engine/run/contracts.py
-  - python/apps/azents/src/azents/engine/run/resolve.py
-  - python/apps/azents/src/azents/rdb/models/agent_session.py
-  - python/apps/azents/src/azents/rdb/models/agent_run.py
-  - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-19
-spec_version: 58
 ---
 
-# Context Compaction
+# Context compaction
+
+Bounded model context, durable summaries, memory boundaries and preserved pending work.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Memory](../domain/memory.md)
+- [Conversations and events](../domain/conversation.md)
+- [Agent execution](agent-execution-loop.md)
+- [Run recovery](run-resume.md)
+- [Agent](../domain/agent.md)
 
 Planning, owner fencing and model-input-head mutation use the common execution
 record. They require neither a public Conversation profile nor a participant
@@ -483,87 +440,45 @@ Ordinary idle continuation remains separate: it selects the oldest eligible
 incomplete occurrence, supplies one full context and references the remaining
 identities. Neither path regenerates objectives from judgment.
 
-## Changelog
+## Model input limits and compaction budgeting
 
-- 2026-10-19: Separate Routine judgment context/usage from ordinary inference and
-  preserve admitted incomplete work across compaction.
+Each selectable model snapshot can carry a default input window and a maximum
+input window. A missing default resolves to the maximum. For each option, an unset
+`context_window_tokens` cap uses the resolved default; an explicit cap uses the
+requested value up to the resolved maximum. Metadata from the local validated
+current source-model exact-key read fills only a missing maximum; it cannot lower a
+provider default. If maximum and source metadata are absent but a default exists,
+that default supplies the maximum. The 128,000-token fallback applies only when
+all three are absent. Library profiles and installed model maps are not fallback
+authorities, and this resolution does not fetch remote source or model listings.
 
-- **2026-10-13** (spec_version 57) — Record first compaction displacement age and
-  describe optional scheduled removal of expired original history.
+Main and lightweight calculations share one coherent capture of requested exact keys when
+either saved maximum is missing. Known saved maxima require no source read for
+context-limit computation. Agent list responses group only missing-maximum exact
+keys across the entire list, without restoring a full source dataset.
+Foreground resolution, compaction, subagent scheduling, worker calculations and
+API displays use the same pure limit math and exact semantic model/source lookup.
 
-- **2026-10-09** (spec_version 56) — Force bounded foreground compaction on
-  native request-size or provider context overflow across both lowerers,
-  terminating persistent overflow without unchanged-input retries.
+Explicit selection copies the current catalog entry's normalized available or unavailable
+pricing definition into every saved candidate. Primary, fallback, lightweight, compaction,
+and subagent selection propagation preserves that definition without mutable price lookup.
+Catalog refresh does not change saved prices. Historical selection JSON without pricing
+decodes read-only as absent; actual dispatch leaves local estimation unavailable rather
+than enriching or rewriting the selection.
 
-- **2026-10-07** (spec_version 55) — Describe common internal Memory Session
-  compaction, persistent files/correction continuity and scope-only aggregate
-  snapshot authority.
+`effective_context_window_tokens` in Agent response is calculated from the smaller
+of the default main option's resolved effective input window and the default
+lightweight option's resolved effective input window. A user cap may be larger than
+the model maximum, in which case the maximum wins.
+`effective_auto_compaction_threshold_tokens` is 90% of the effective context
+window.
 
-- **2026-10-07** (spec_version 54) — Moved planning, owner fences and head
-  mutation to common execution records without public Conversation prerequisites.
+Prepared foreground turns use the prompt-selected option instead of the default main option for the foreground side of the same calculation. Automatic compaction runs with the lightweight model snapshot; the lightweight option context cap participates in input budgeting, but its `max_output_tokens` setting does not replace the compactor's dynamic summary output budget.
 
-- **2026-10-05** (spec_version 52) — Separated plain compaction planning from
-  explicit execution-owned critical finalization and retained owner exclusion
-  for the complete summary/head/reset commit.
+## References
 
-- **2026-10-04** (spec_version 49) — Replaced source ranking/packing with whole
-  independently authorized 10k Team/personal documents and up to 20k foreground
-  assembly while retaining Run/compaction refresh boundaries and revision denial.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-10-03** (spec_version 48) — Replaced complete-source context capture
-  with grouped exact current maxima and retained saved candidate pricing for compaction.
-- **2026-10-02** (spec_version 47) — Replaced the execution context's
-  live-session completion callback with typed authority while retaining direct
-  repository-composed compaction settlement and its existing atomic group.
-- **2026-10-02** (spec_version 46) — Added root Run-start Memory preparation and
-  existing-hook invalidation followed by same-Run committed-compaction refresh,
-  preserving unchanged selected content and failed-compaction isolation.
-- **2026-10-02** (spec_version 45) — Documented initial/new-summary Memory
-  snapshot selection and ordinary-turn authorization filtering without reselection.
-- **2026-10-01** (spec_version 44) — Moved compaction plan capture and atomic
-  marker/summary/head, model-operation success, and Tool Search reset
-  finalization into completed repository-owned operations. Summary generation
-  and enrichment remain outside database transactions.
-- **2026-10-01** (spec_version 43) — Moved Tool Search working-set persistence
-  into repository-owned operations while retaining the compaction-composed clear
-  in the same summary/head transaction.
-- **2026-09-30** (spec_version 42) — Documented local validated-source context fallback and
-  provider-specific Pydantic AI summary execution while retaining native OpenAI and compaction ownership.
-- **2026-09-13** (spec_version 41) — Added an independent frozen Lightweight candidate chain for
-  compaction, quota-before-retry progression, shared Workspace cooldown, and recovery-preserved
-  compaction cursor state.
-- **2026-09-12** (spec_version 40) — Allowed freshly resolved retry profiles to
-  replace effective context and compaction thresholds before the next model
-  attempt.
-- **2026-09-08** (spec_version 39) — Updated Goal and Toolkit State ownership
-  paths after pure models moved to core and database handles and completed
-  operations moved to repositories; compaction behavior is unchanged.
-- **2026-09-01** (spec_version 38) — Removed the deleted event model-order field
-  from the continuity projection metadata exclusions.
-- **2026-09-01** (spec_version 37) — Included External Channel invocation-role
-  messages in compaction summary input and the mixed-source last-five Recent User
-  Messages continuity selection while keeping context-role messages out of both.
-- **2026-08-31** (spec_version 36) — Made event ID the only compaction order and
-  replaced logical summary insertion with head-and-tail stale-plan validation.
-- **2026-08-27** (spec_version 35) — Added distinct model default and maximum input
-  windows, maximum-only fallback, and centralized per-option user-cap resolution
-  before the smaller main/lightweight compaction calculation.
-- **2026-08-16** (spec_version 34) — Added deterministic sanitized Scheduled Task
-  started-cycle summary replacement before bounded continuity history.
-
-- **2026-08-03** (spec_version 33) — Increased dynamic summary output headroom to 8% with a 50k-character limit and made checkpoint detail scale with task complexity without imposing a fixed target length.
-- **2026-08-03** (spec_version 32) — Reframed compaction output as an execution-ready general-agent checkpoint that reconstructs the current objective and furthest verified execution state.
-- **2026-07-22** (spec_version 31) — Added source-attributed External Channel compaction input, token estimation, continuity rendering, and immutable revision semantics.
-
-- **2026-07-21** (spec_version 30) — Omitted plaintext-custom client-tool input from compaction accounting and continuity while retaining bounded result continuity.
-- **2026-07-20** (spec_version 29) — Reset the Session Tool Search working set in the successful compaction transaction while preserving it on skipped or unsuccessful attempts.
-- **2026-07-19** (spec_version 28) — Updated compaction rendering and token estimation for one durable provider call with canonical output-part metadata.
-
-- **2026-07-18** (spec_version 27) — Added provider-tool semantic input, output, and reference rendering
-  to summary input, bounded continuity, and model-visible token estimation without native-artifact
-  parsing.
-- **2026-07-18** (spec_version 26) — Routed unclassified compaction provider outcomes through
-  internal-error handling instead of provider retry state.
-- **2026-07-18** (spec_version 25) — Deferred the adjacent compaction marker/summary pair until one
-  successful commit, projected one stable context-preparation operation, and routed every
-  provider-attributed automatic or manual compaction failure through the owning Run's full retry budget.
+- [`python/apps/azents/src/azents/engine/events`](../../../../python/apps/azents/src/azents/engine/events)
+- [`python/apps/azents/src/azents/core/historical_memory_settings.py`](../../../../python/apps/azents/src/azents/core/historical_memory_settings.py)

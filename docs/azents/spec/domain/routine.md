@@ -1,43 +1,23 @@
 ---
-title: "Session Routine Domain Spec"
+title: "Session Routines"
 created: 2026-10-19
 tags: [routine, agent, conversation, toolkit, scheduler, frontend]
-spec_type: domain
-domain: routine
-code_paths:
-  - python/apps/azents/src/azents/core/routine*.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/e67a51c3c652_separate_routine_tick_and_minimum_.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/08a588456917_add_session_routine_foundation.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/f18bc3d0bf09_add_agent_routine_check_interval.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/854782c43687_add_routine_judgment_observation_event.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/00a4743d1962_add_routine_execution_fifo_event_kinds.py
-  - python/apps/azents/src/azents/core/model_operation.py
-  - python/apps/azents/src/azents/rdb/models/routine*.py
-  - python/apps/azents/src/azents/repos/routine/**
-  - python/apps/azents/src/azents/repos/session_primary_channel.py
-  - python/apps/azents/src/azents/services/routine/**
-  - python/apps/azents/src/azents/scheduler/routine_source_dispatch.py
-  - python/apps/azents/src/azents/engine/routine_judgment*.py
-  - python/apps/azents/src/azents/engine/tools/routine*.py
-  - python/apps/azents/src/azents/resources/vfs/toolkits/routine/skills/routines/SKILL.md
-  - python/apps/azents/src/azents/worker/run/routine_judgment*.py
-  - python/apps/azents/src/azents/worker/run/executor.py
-  - python/apps/azents/src/azents/api/public/chat/v1/routine_api_test.py
-  - typescript/apps/azents-web/src/features/session-routines/**
-  - typescript/apps/azents-web/src/features/chat/routineTool*
-  - typescript/apps/azents-web/src/features/chat/components/Routine*
-  - typescript/apps/azents-web/src/trpc/routers/routine.ts
-  - typescript/packages/azents-session-core/src/routinePresentation*
-  - testenv/azents/e2e/src/tests/required/public/test_routine*.py
-  - testenv/azents/e2e/src/tests/web/public/test_routines.py
-api_routes:
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug}
-last_verified_at: 2026-10-21
-spec_version: 3
 ---
 
-# Session Routine Domain Spec
+# Session Routines
+
+Ongoing objectives whose eligible source checks judge whether ordinary Session work is useful.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Scheduled Tasks](scheduled-task.md)
+- [Goals and Session Todos](../automation/goals.md)
+- [Periodic execution](../flow/periodic-execution.md)
+- [Agent execution](../flow/agent-execution-loop.md)
+- [Conversations and events](conversation.md)
+- [Toolkits](toolkit.md)
 
 A Routine is an ongoing objective owned by one concrete Session. Eligible source
 checks ask the Session's selected model whether work is useful. A positive choice
@@ -268,3 +248,54 @@ retired; judgment uses the ordinary inbox/Run mechanism.
 Agent cadence authority: [cadence-261019/REQ](../../requirements/cadence-261019-agent-routine-check-interval.md),
 [ADR-D1](../../adr/cadence-261019-agent-routine-check-interval.md), and
 [Design revision 1](../../design/cadence-261019-agent-routine-check-interval.md).
+
+## Transcript events and Session lifecycle integration
+
+[Session Routines](routine.md) belong to the exact Session. Source checks enter
+the existing FIFO as an internal `routine_judgment` action, not a public input
+variant or an independently owned Run. `routine_trigger` and
+`routine_continuation` carry ordinary inference-producing admitted work.
+`routine_judgment` is durable neutral observation: considered candidates,
+Structured decisions or diagnostic failure, model and nullable per-call usage.
+It is projected live and after reload without ordinary turn/Chat usage or normal
+activity-clock effects. `routine_notification` is the chat delivery projection
+when the originating Session has no Primary channel.
+
+Public Routine inspection authorizes the requested active Session and exact
+Agent/Workspace/member boundary, returning 404 without cross-Session fallback.
+Archive removes definitions, retained records and pre-start work. Preserved
+started Routine-only work may finish without recreating removed data; unrelated
+active work still blocks archive. Restore does not reconstruct Routine state.
+Purge waits for preserved work and verifies namespace absence. Team Primary
+archive protection is unchanged.
+
+## Routine Toolkit contract
+
+The automatically connected root Routine Toolkit provides `create_routine`,
+`list_routines`, `inspect_routine`, `update_routine`, `delete_routine`,
+`read_routine_context` and `record_routine_result`. It binds exact current Session
+execution authority. Definitions and retained records use their durable domain
+repositories; check and admitted execution state use existing Session Toolkit
+State with distinct identities and fences. See [Routine domain](routine.md).
+
+Update compares complete prior content before applying separate supplied
+changes. Work completion uses admitted identity, closes only that occurrence,
+and returns canonical stored work on duplicate completion. Tool activity presents
+requested content separately from observed completed output; failure,
+interruption or cancellation does not imply successful mutation. Compaction and
+idle continuation hooks preserve incomplete admitted objectives without
+introducing an independent Routine execution owner.
+
+## API route entrypoints
+
+- `/chat/v1/agents/{agent_id}/sessions/{session_id}/routines`
+- `/chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug}`
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/routine`](../../../../python/apps/azents/src/azents/services/routine)
+- [`python/apps/azents/src/azents/repos/routine`](../../../../python/apps/azents/src/azents/repos/routine)
+- [`python/apps/azents/src/azents/core/routine.py`](../../../../python/apps/azents/src/azents/core/routine.py)

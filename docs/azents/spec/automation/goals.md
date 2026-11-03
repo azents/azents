@@ -1,48 +1,29 @@
 ---
-title: "Goal Domain Spec"
-created: 2026-06-15
-tags: [backend, engine]
-spec_type: domain
-domain: goal
-code_paths:
-  - python/apps/azents/src/azents/core/agent_session_input_data.py
-  - python/apps/azents/src/azents/core/chat_data.py
-  - python/apps/azents/src/azents/core/chat_projection.py
-  - python/apps/azents/src/azents/core/exchange_file_errors.py
-  - python/apps/azents/src/azents/core/mailbox_errors.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/core/session_workspace_paths.py
-  - python/apps/azents/src/azents/repos/chat_operations.py
-  - python/apps/azents/src/azents/repos/goal/store.py
-  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
-  - python/apps/azents/src/azents/repos/skill_state_store.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
-  - python/apps/azents/src/azents/repos/user_stop.py
-  - python/apps/azents/src/azents/engine/tools/goal.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
-  - python/apps/azents/src/azents/engine/events/system_reminders.py
-  - python/apps/azents/src/azents/engine/hooks/**
-  - python/apps/azents/src/azents/worker/worker.py
-  - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/services/mailbox.py
-  - python/apps/azents/src/azents/services/turn_action.py
-  - python/apps/azents/src/azents/rdb/models/mailbox_item.py
-  - python/apps/azents/src/azents/services/chat/**
-  - python/apps/azents/src/azents/api/public/chat/v1/**
-  - typescript/apps/azents-web/src/features/chat/**
-  - typescript/apps/azents-web/src/shared/chat-presentation/**
-last_verified_at: 2026-10-05
-spec_version: 18
+title: "Goals and Session Todos"
+created: 2026-11-04
+tags: [wiki]
 ---
 
-# Goal Domain Spec
+# Goals and Session Todos
+
+Owns explicitly requested long-running objectives and the independently displayed Todo list. Neither represents a scheduled occurrence, a Routine’s usefulness judgment or Channel Work completion.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Session Routines](../domain/routine.md)
+- [Scheduled Tasks](../domain/scheduled-task.md)
+- [Agent execution](../flow/agent-execution-loop.md)
+- [Toolkit State and execution binding](../execution/tool-state.md)
+- [Toolkits](../domain/toolkit.md)
 
 Goal is a session-scoped objective tracked across multiple turns of one `AgentSession`. A Goal is
 created only when the user explicitly asks to set a longer-running objective or when system
 instructions explicitly require one. The runtime must not create a Goal merely because a task is
 large or long-running.
 
-## 1. State Model
+## State Model
 
 Goal state is stored in `toolkit_states` at session scope.
 
@@ -82,7 +63,7 @@ append current transcript output; ordinary Goal descriptions never inherit that
 critical Event fence. Public requester mutations explicitly use their existing
 non-execution authority rather than inventing a Worker owner.
 
-## 2. Tool Contract
+## Tool Contract
 
 Goal Toolkit exposes these unprefixed tools in turns that have session context:
 
@@ -112,7 +93,7 @@ update `toolkit_states`; they are not model tools. UI/API can move a Goal betwee
 `resume_hint` is user-provided context data only. UI/API cannot directly set `blocked`; only the
 agent/model tool can mark an active Goal blocked.
 
-## 3. Idle Continuation
+## Idle Continuation
 
 Goal continuation is produced through the general session idle lifecycle.
 
@@ -153,7 +134,7 @@ A broker wake-up with no pending mailbox item still starts a turn when the trans
 latest run marker contains an actionable direct control event, including `goal_updated`. A wake-up
 with neither pending mailbox item nor an actionable transcript tail is ignored.
 
-## 4. Goal Control Events
+## Goal Control Events
 
 Goal control events are not user-authored chat messages. The UI must not expose them as editable or
 deletable user bubbles.
@@ -220,7 +201,7 @@ Forbidden behavior:
 - Do not store `goal_continuation` in any runtime-bound mailbox item.
 - Do not render `goal_continuation` or `goal_updated` as user-authored chat bubbles.
 
-## 5. Prompt Rendering Boundary
+## Prompt Rendering Boundary
 
 Goal control prompts are not stored as frontend-only copy or WebSocket-only payloads. The runtime
 stores normalized state and metadata, then materializes model-visible prompt prose at lowering time.
@@ -247,7 +228,7 @@ Lowering rules:
   children. User-provided values appear only as `<data><item ...>...</item></data>` entries.
 - `EventKind.GOAL_BRIEFING` is UI-only and is not lowered into model input.
 
-## 6. UI Projection
+## UI Projection
 
 Chat UI renders Goal state and Goal control events separately.
 
@@ -280,7 +261,7 @@ Goal briefing:
 - The card shows the completed Goal, elapsed time from Goal creation to completion, and completion
   timestamp.
 
-## 7. Verification
+## Verification
 
 Primary checks:
 
@@ -294,22 +275,45 @@ Primary checks:
 - `cd typescript && pnpm run lint --filter=@azents/web`
 - `cd typescript && pnpm run typecheck --filter=@azents/web`
 
+## Session Todo state
 
-## Changelog
+TodoToolkit stores todo list as session-scope Toolkit State.
 
-- **2026-10-05** (spec_version 18) — Reconciled code-path discovery with current
-  defining modules; system behavior is unchanged.
+- scope: `session`
+- toolkit namespace: `todo`
+- state name: `todo`
+- schema version: `1`
 
-- **2026-10-05** (spec_version 17) — Made private Goal payload operations independent of root-tree owner gates while retaining exact owner Session fencing for durable Goal briefing Events.
+Payload is `items` array. Each item has `content`, `status`. Status values allowed are only `pending`, `in_progress`, `completed`.
 
-- **2026-09-30** (spec_version 16) — Mapped Goal-owned continuation to current provider
-  model-message lowering without changing Goal state, event ownership or idle-continuation policy.
-- **2026-08-23** (spec_version 15) — Documented the Goal TurnAction's shared
-  closed policy and Goal-owned preparation without changing its state or event
-  contract.
-- **2026-07-31** (spec_version 14) — Made `goal_continuation` Goal-only and
-  removed metadata-based External Channel lowering and presentation.
-- **2026-07-28** (spec_version 13) — Reduced External Channel idle-continuation metadata to actionable active binding handles.
-- **2026-07-23** (spec_version 11) — Documented provider-specific `goal_continuation` metadata, lowering, and External Channel UI presentation.
-- **2026-07-16** (spec_version 9) — Clarified that actionable direct Goal control events can start a run without a pending InputBuffer.
-- **2026-07-01** (spec_version 8) — Added unfinished Goal compaction summary enrichment behavior.
+TodoToolkit is always-on toolkit not exposed as user Toolkit config, like shell/builtin, and provides unprefixed `update_todo` tool. Operations:
+
+- `replace`: replace entire list with input item array.
+- `clear`: clear entire list.
+
+After `update_todo`, saved snapshot is exposed to UI through chat live state `todo` field and WebSocket `todo_state_changed` event. Todo is not durable transcript event and is not separately injected into compaction input.
+
+## Prompt and result stability
+
+Goal and Todo auto-bound toolkits expose fixed tool definitions independent of current stored state. Their Toolkit prompts are fixed instruction text and do not include the current Goal objective/status or Todo list. The model can call `get_goal` when it needs exact Goal state; Todo UI/state snapshots remain the user-visible source of truth for Todo state. Goal Toolkit is root/user-facing and is filtered out of subagent-mode auto-binding.
+
+`update_todo` persists the new state and publishes `TodoStateChanged`, but returns compact acknowledgement text (`Done`) instead of echoing the full Todo JSON. During compaction, Todo Toolkit appends a readable `Todo Snapshot` to the compaction summary only when the Todo list is non-empty. Goal Toolkit similarly appends a readable `Goal Snapshot` only for unfinished non-empty Goal state.
+
+## Goal Toolkit eligibility
+
+Goal Toolkit is a session-scoped Toolkit State tool that is always auto-bound without user settings. State namespace/name is `goal/goal`; it stores `schema_version`, `objective`, `status`, `created_at`, `updated_at`. Supported statuses are `active`, `paused`, `blocked`, `complete`.
+
+Exposed tools are `get_goal`, `create_goal`, `update_goal`. `create_goal` fails if unfinished Goal already exists. `update_goal` only allows transitioning active Goal to `complete` or `blocked`.
+
+Goal Toolkit registers `on_session_idle` runtime hook. If active Goal exists, it returns continuation input containing Goal objective. Dispatcher merges continuations from multiple providers in provider order and attaches provider slug/index metadata.
+
+- **2026-06-22 (spec_version=33)** — Removed Team-scoped Toolkit visibility. ToolkitScope is workspace-only.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/engine/tools/goal.py`](../../../../python/apps/azents/src/azents/engine/tools/goal.py)
+- [`python/apps/azents/src/azents/repos/goal/store.py`](../../../../python/apps/azents/src/azents/repos/goal/store.py)
+- [`python/apps/azents/src/azents/engine/tools/todo.py`](../../../../python/apps/azents/src/azents/engine/tools/todo.py)

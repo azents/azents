@@ -1,19 +1,20 @@
 ---
-title: "Agent Inference Proxy"
+title: "Inference Proxy"
 created: 2026-10-29
 tags: [engine, inference, security, infra]
-spec_type: domain
-domain: inference-proxy
-code_paths:
-  - python/apps/azents-llm-proxy/src/azents_llm_proxy/**
-  - python/apps/azents-llm-proxy/Dockerfile
-  - python/apps/azents-llm-proxy/pyproject.toml
-  - infra/charts/azents/templates/llm-proxy/**
-last_verified_at: 2026-10-30
-spec_version: 2
 ---
 
-# Agent Inference Proxy
+# Inference Proxy
+
+Independent LiteLLM Proxy ingress, request-local credentials and provider dispatch.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Inference authority](inference-authority.md)
+- [Model catalog](model-catalog.md)
+- [Public releases](../flow/public-release.md)
 
 This independently packaged service runs the original LiteLLM Proxy application,
 configuration loader, lifespan, provider SDK dispatch and Responses streaming.
@@ -197,7 +198,10 @@ Deterministic fixtures, package/image/Helm checks and real-provider entitlement 
 separate evidence. No real account login, paid inference, production deployment,
 Worker/Runtime migration or live hosted-tool entitlement follows from these tests.
 
-## Changelog
+## References
 
-- **2026-10-30** (spec_version 2) — Clarified configured authority CA bundle
-  selection and system-default trust behavior.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents-llm-proxy`](../../../../python/apps/azents-llm-proxy)
+- [`python/libs/azents-llm-contract`](../../../../python/libs/azents-llm-contract)

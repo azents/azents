@@ -1,28 +1,20 @@
 ---
-title: "Agent Inference Authority"
+title: "Inference authority"
 created: 2026-10-28
 tags: [backend, engine, security]
-spec_type: domain
-domain: inference-authority
-code_paths:
-  - python/apps/azents/src/azents/core/llm_access.py
-  - python/apps/azents/src/azents/rdb/models/llm_access.py
-  - python/apps/azents/src/azents/repos/llm_access.py
-  - python/apps/azents/src/azents/repos/llm_authority.py
-  - python/apps/azents/src/azents/services/llm_access.py
-  - python/apps/azents/src/azents/services/llm_authority.py
-  - python/apps/azents/src/azents/services/llm_bedrock_sessions.py
-  - python/apps/azents/src/azents/api/llm_authority_route.py
-  - python/apps/azents/src/azents/api/admin/llm_access.py
-  - python/apps/azents/src/azents/api/internal/llm.py
-  - python/apps/azents/src/cli/llm_access.py
-  - python/libs/azents-llm-contract/src/azents_llm_contract/**
-  - python/apps/azents/db-schemas/rdb/migrations/versions/3ac042ea72bd_add_agent_inference_access_supplies_and_.py
-last_verified_at: 2026-10-29
-spec_version: 1
 ---
 
-# Agent Inference Authority
+# Inference authority
+
+Agent bearer identity, current candidate resolution and private inference authorization.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Inference Proxy](inference-proxy.md)
+- [Agent](agent.md)
+- [Model catalog](model-catalog.md)
 
 This additive server authority does not reroute Worker inference. It authenticates
 system-issued Agent bearers and resolves current Agent-owned candidates over a
@@ -220,3 +212,12 @@ credential field names. This retains structured errors/fingerprints but reduces
 diagnostic payload detail. Application code continues to use ordinary logging,
 not direct Sentry calls. This does not sanitize arbitrary third-party verbose
 Proxy output; the Proxy must separately avoid emitting secret-bearing messages.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/llm_authority.py`](../../../../python/apps/azents/src/azents/services/llm_authority.py)
+- [`python/apps/azents/src/azents/services/llm_access.py`](../../../../python/apps/azents/src/azents/services/llm_access.py)
+- [`python/apps/azents/src/azents/api/internal/llm.py`](../../../../python/apps/azents/src/azents/api/internal/llm.py)

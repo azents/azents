@@ -1,20 +1,19 @@
-"""Tests for documentation frontmatter validation and catalog queries."""
+"""Tests for document metadata and development-snapshot validation."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from scripts import docs_catalog
+from scripts import validate_docs
 
 
-class DocsCatalogTest(unittest.TestCase):
-    """Validate snapshot relationships and frontmatter-backed discovery."""
+class ValidateDocsTest(unittest.TestCase):
+    """Validate snapshot relationships and minimal wiki metadata."""
 
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(
-            prefix=".tmp-docs-catalog-tests-",
-            dir=docs_catalog.ROOT,
+            prefix=".tmp-validate-docs-tests-",
+            dir=validate_docs.ROOT,
         )
         self.docs_root = Path(self.temp_dir.name) / "docs"
 
@@ -32,11 +31,6 @@ class DocsCatalogTest(unittest.TestCase):
         include_snapshot_metadata: bool = True,
         include_tags: bool = True,
         tags: tuple[str, ...] = ("documentation",),
-        spec_type: str = "",
-        domain: str = "",
-        code_paths: tuple[str, ...] = (),
-        last_verified_at: str = "",
-        spec_version: str = "",
     ) -> None:
         path = self.docs_root / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,7 +46,7 @@ class DocsCatalogTest(unittest.TestCase):
         if document_type:
             fields.append(f"document_type: {document_type}")
         if include_snapshot_metadata:
-            match = docs_catalog.DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN.fullmatch(
+            match = validate_docs.DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN.fullmatch(
                 path.name
             )
             if match is not None and not document_role:
@@ -65,22 +59,11 @@ class DocsCatalogTest(unittest.TestCase):
                 )
         if include_tags:
             fields.append(f"tags: [{', '.join(tags)}]")
-        if spec_type:
-            fields.append(f"spec_type: {spec_type}")
-        if domain:
-            fields.append(f"domain: {domain}")
-        if code_paths:
-            fields.append("code_paths:")
-            fields.extend(f"  - {code_path}" for code_path in code_paths)
-        if last_verified_at:
-            fields.append(f"last_verified_at: {last_verified_at}")
-        if spec_version:
-            fields.append(f"spec_version: {spec_version}")
         fields.extend(["---", "", f"# {path.stem}", ""])
         path.write_text("\n".join(fields), encoding="utf-8")
 
     def errors(self) -> list[str]:
-        return docs_catalog.validate_docs(self.docs_root)
+        return validate_docs.validate_docs(self.docs_root)
 
     def test_allows_progressive_snapshot_states(self) -> None:
         basename = "docids-260721-shared-development-snapshot-identifiers.md"
@@ -108,7 +91,7 @@ class DocsCatalogTest(unittest.TestCase):
             "slack-260721-channel-agent-conversation.md",
             "memory-260721-agent-memory-management.md",
         ):
-            for top_dir in docs_catalog.CORE_DOCUMENT_DIRS:
+            for top_dir in validate_docs.CORE_DOCUMENT_DIRS:
                 self.write_doc(f"{top_dir}/{basename}")
 
         self.assertEqual(self.errors(), [])
@@ -266,103 +249,30 @@ class DocsCatalogTest(unittest.TestCase):
             any("Missing `snapshot_id` frontmatter field" in error for error in errors)
         )
 
-    def test_loads_tags_and_code_paths_for_queries(self) -> None:
-        self.write_doc(
-            "spec/domain/agent.md",
-            tags=("backend", "agent"),
-            spec_type="domain",
-            domain="agent",
-            code_paths=("python/apps/azents/src/azents/services/agent_service.py",),
-            last_verified_at="2026-09-01",
-            spec_version="1",
-        )
-
-        docs = docs_catalog.load_docs(self.docs_root)
-
-        self.assertEqual(len(docs), 1)
-        self.assertEqual(docs[0].tags, ("backend", "agent"))
-        self.assertEqual(
-            docs[0].code_paths,
-            ("python/apps/azents/src/azents/services/agent_service.py",),
-        )
+    def test_wiki_page_requires_only_title(self) -> None:
+        path = self.docs_root / "spec" / "index.md"
+        path.parent.mkdir(parents=True)
+        path.write_text('---\ntitle: "Wiki"\n---\n\n# Wiki\n', encoding="utf-8")
         self.assertEqual(self.errors(), [])
 
-    def test_rejects_invalid_spec_verification_date(self) -> None:
-        self.write_doc(
-            "spec/flow/example.md",
-            spec_type="flow",
-            code_paths=("python/apps/azents/src/azents/engine",),
-            last_verified_at="not-a-date",
-            spec_version="1",
-        )
+    def test_rejects_missing_document_title(self) -> None:
+        path = self.docs_root / "spec" / "topic.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("---\ntags: [wiki]\n---\n\n# Topic\n", encoding="utf-8")
+        self.assertTrue(any("Missing `title`" in error for error in self.errors()))
 
-        self.assertTrue(
-            any(
-                "`last_verified_at` must use `YYYY-MM-DD`" in error
-                for error in self.errors()
-            )
-        )
+    def test_rejects_missing_frontmatter(self) -> None:
+        path = self.docs_root / "spec" / "topic.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("# Topic\n", encoding="utf-8")
+        self.assertTrue(any("Missing frontmatter" in error for error in self.errors()))
 
-    def test_filters_by_type_tag_snapshot_and_related_code_path(self) -> None:
-        basename = "agent-260721-agent-management.md"
-        for top_dir in docs_catalog.CORE_DOCUMENT_DIRS:
-            self.write_doc(
-                f"{top_dir}/{basename}",
-                tags=("agent", "architecture"),
-            )
-        self.write_doc(
-            "spec/domain/agent.md",
-            tags=("agent", "backend"),
-            spec_type="domain",
-            domain="agent",
-            code_paths=("python/apps/azents/src/azents/services",),
-            last_verified_at="2026-09-01",
-            spec_version="1",
-        )
-        docs = docs_catalog.load_docs(self.docs_root)
-
-        filtered = docs_catalog._filter_docs(
-            docs,
-            catalog_type="spec",
-            spec_type="domain",
-            tags=["agent"],
-        )
-        snapshot = [doc for doc in docs if doc.short_id == "agent-260721"]
-        related = [
-            doc
-            for doc in docs
-            if any(
-                docs_catalog._path_related(
-                    "python/apps/azents/src/azents/services/agent_service.py",
-                    code_path,
-                )
-                for code_path in doc.code_paths
-            )
-        ]
-
-        self.assertEqual([doc.rel_path for doc in filtered], ["spec/domain/agent.md"])
-        self.assertEqual(len(snapshot), 3)
-        self.assertEqual([doc.rel_path for doc in related], ["spec/domain/agent.md"])
-
-    def test_json_output_contains_catalog_metadata(self) -> None:
-        self.write_doc(
-            "spec/flow/example.md",
-            tags=("flow",),
-            spec_type="flow",
-            code_paths=("python/apps/azents/src/azents/engine",),
-            last_verified_at="2026-09-01",
-            spec_version="2",
-        )
-        docs = docs_catalog.load_docs(self.docs_root)
-
-        payload = json.loads(docs_catalog.render_docs(docs, "json"))
-
-        self.assertEqual(payload[0]["catalog_type"], "spec")
-        self.assertEqual(payload[0]["tags"], ["flow"])
-        self.assertEqual(
-            payload[0]["code_paths"],
-            ["python/apps/azents/src/azents/engine"],
-        )
+    def test_instruction_import_is_not_a_document_page(self) -> None:
+        path = self.docs_root / "spec" / "CLAUDE.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("@AGENTS.md\n", encoding="utf-8")
+        self.write_doc("spec/AGENTS.md")
+        self.assertEqual(self.errors(), [])
 
 
 if __name__ == "__main__":

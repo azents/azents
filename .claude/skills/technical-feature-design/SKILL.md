@@ -26,7 +26,8 @@ Artifact responsibilities:
 - **Requirements**: requester-confirmed, public-safe outcomes and observable acceptance criteria for this repository snapshot.
 - **ADR**: why material technical, architecture, or implementation-contract decisions were chosen.
 - **Design**: how the approved intent and decisions will be implemented.
-- **Spec**: how the implemented system currently behaves.
+- **Spec Wiki**: connected current-system knowledge under `docs/azents/spec/`.
+  Requirements, ADRs, Designs and code remain references outside the wiki.
 
 ## Input routing
 
@@ -71,7 +72,8 @@ Both modes keep the complete material-decision map and accepted choices visible 
 
 Before the first requirement or design question:
 
-1. read applicable Living Specs;
+1. start at `docs/azents/spec/index.md`, follow relevant wiki connections and
+   consult source references as needed; use semantic relevance, not path matching;
 2. inspect relevant code, contracts, tests, fixtures, generated surfaces, and configuration;
 3. identify current behavior, terminology, ownership, lifecycle, and boundaries;
 4. distinguish current behavior from the requested outcome; and
@@ -120,7 +122,7 @@ Requirements → ADR → Design
 
 Return to the requester for a new actor, user-visible behavior, required scope, contract, relaxed constraint, changed success signal, or changed primary system outcome. Do not attempt to update or locate an external product document.
 
-After verified implementation, set the matching Requirements and Design `implemented` date and treat the Requirements, accepted ADR, and Design as one immutable historical snapshot. Later changes require a new snapshot; current behavior belongs in Living Specs.
+After verified implementation, set the matching Requirements and Design `implemented` date and treat the Requirements, accepted ADR, and Design as one immutable historical snapshot. Later changes require a new snapshot; current behavior belongs in the Spec Wiki.
 
 ## Phase 2: Frame the system problem
 
@@ -249,7 +251,7 @@ Finalize only when Requirements, ADR, Design authority, feasibility evidence, an
 - requirement-level feasibility evidence;
 - remaining non-blocking risks;
 - implementation phases or one focused PR; and
-- Living Spec and verification work.
+- Spec Wiki ingest, connections, references and verification work.
 
 Do not include private document provenance or inaccessible links in repository artifacts or the final implementation brief. Do not start implementation until the requester asks; then switch to the appropriate shipping workflow.
 
@@ -265,5 +267,5 @@ Do not include private document provenance or inaccessible links in repository a
 - Brief the complete technical decision map before individual decisions and after a material change.
 - Do not finalize unauthorized mechanisms or treat feasibility as authority.
 - Do not proceed without revision-bound complete Design approval.
-- Keep implemented Requirements, ADRs, and Designs immutable and current behavior in Living Specs.
+- Keep implemented Requirements, ADRs, and Designs immutable and current behavior in the Spec Wiki.
 - Keep git-tracked artifacts in English.

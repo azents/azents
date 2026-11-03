@@ -1,43 +1,26 @@
 ---
-title: "Agent Deletion Ownership and Database Dependencies"
+title: "Agent deletion"
 created: 2026-10-20
 tags: [agent, lifecycle, backend, database]
-spec_type: domain
-domain: agent-deletion
-code_paths:
-  - python/apps/azents/src/azents/core/agent_deletion.py
-  - python/apps/azents/src/azents/core/agent_deletion_registry.py
-  - python/apps/azents/src/azents/core/agent_deletion_schema.py
-  - python/apps/azents/src/azents/core/session_lifecycle_schema.py
-  - python/apps/azents/src/azents/services/agent_deletion.py
-  - python/apps/azents/src/azents/services/agent_decommission.py
-  - python/apps/azents/src/azents/repos/agent_deletion_fence.py
-  - python/apps/azents/src/azents/repos/agent_deletion_verification.py
-  - python/apps/azents/src/azents/repos/agent_decommission_operations.py
-  - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
-  - python/apps/azents/src/azents/repos/session_lifecycle_schema.py
-  - python/apps/azents/src/azents/repos/agent_mutation_guard.py
-  - python/apps/azents/src/azents/core/agent_mutation.py
-  - python/apps/azents/src/azents/rdb/models/agent_decommission.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/2944b0e66140_retain_agent_deletion_failure_boundary.py
-  - python/apps/azents/src/azents/rdb/models/historical_memory_legacy_audit.py
-  - python/apps/azents/src/azents/core/historical_memory_legacy_audit.py
-  - python/apps/azents/src/azents/repos/agent_decommission/**
-  - python/apps/azents/src/azents/repos/external_channel/agent_mutation.py
-  - python/apps/azents/src/azents/api/agent_mutation_errors.py
-  - python/apps/azents/src/azents/services/agent/**
-  - typescript/apps/azents-web/src/shared/agent-session/AgentDeletionStatus.tsx
-  - typescript/apps/azents-web/src/shared/agent-session/useAgentLifecycle.ts
-last_verified_at: 2026-10-20
-spec_version: 1
 ---
 
-# Agent Deletion Ownership and Database Dependencies
+# Agent deletion
 
-The asynchronous admission and retention policy remain in [Agent decommission](agent.md#26-agent-decommission).
-This document records current cleanup ownership and the exact relationships relevant to deleting
-`agents` and `agent_runtimes`, including incoming restrictive references and transitive database
-children. It is not a replacement for each domain's full schema specification.
+Cleanup ownership and database dependency gates for permanent Agent deletion.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Agent](agent.md)
+- [External Channel lifecycle](../flow/external-channel-lifecycle.md)
+- [Runtime control](../flow/agent-runtime-control.md)
+
+Start with [decommission admission and retention](#decommission-admission-and-retention)
+for the user/API lifecycle. The remaining sections define cleanup ownership and
+the relationships relevant to deleting `agents` and `agent_runtimes`, including
+incoming restrictive references and transitive database children. Each resource's
+full schema remains in its owning topic.
 
 ## Execution and Ownership
 
@@ -258,3 +241,84 @@ PostgreSQL for same-owner stale attempts and current-generation acknowledgement.
 exercise registry ordering and exact handler/resource coverage. The catalog does not discover
 arbitrary non-FK external resources; their explicit declarations, native owner tests and the
 backend same-PR Living Spec convention remain necessary.
+
+## Decommission admission and retention
+
+Cleanup participants, attempt fencing, current completion evidence, and the
+column-scoped PostgreSQL dependency catalog are specified in
+[Agent deletion ownership](agent-deletion.md). That registry is the shared source for
+execution ordering and final verification; the finalizer has no independent manual
+model-deletion or lifecycle-root list.
+
+`DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}` is an asynchronous decommission
+request, not immediate row deletion. An Agent administrator or Workspace owner can request it only
+when the archived-session retention policy is finite. The operation atomically marks the Agent
+`decommissioning`, creates or returns one content-free durable job, and returns `202 Accepted` with
+`{ job_id, status, created_at }`. Unlimited (`null`) retention returns `409 Conflict` before any
+state mutation.
+
+Authorized Agent list/detail responses expose required nullable `deletion_status`:
+null for active Agents, `deleting` for normal progress, and `deletion_error` for
+unresolved failure evidence or a missing required job. Job diagnostics and internal
+identifiers stay private. Claims and ordinary waits preserve an unresolved error;
+only exact fenced recovery or verified root completion clears it.
+
+Both deletion states present read-only controls across Agent settings and owned
+resources, Session controls, uploads, Terminal and Browser, with localized badges in
+lists and desktop/mobile headers. Navigation and permitted inspection remain usable.
+The owning write transaction rechecks the canonical Agent row after authorization and
+returns safe HTTP 409 `agent_decommissioning` if deletion won; UI state is not authority.
+Final upload/OAuth attachment rechecks this boundary after external I/O. Native cleanup,
+safety Stop and shared Workspace/provider authorities remain independent. Repeated
+authorized DELETE returns the same job; no manual retry/cancel/force-delete control is
+introduced. Foreground refresh preserves known deletion evidence until actual removal,
+after which list results omit the Agent and detail returns 404.
+
+Decommissioning fences new session creation/recovery, input/action admission, archived-session
+restore, runtime actions, and stuck-run recovery. The coordinator retires eligible roots through the
+normal session lifecycle, waits for retention purge to own permanent Session deletion, then requires
+current-generation Runtime terminal-delete acknowledgement before finalization. The completed job
+remains a content-free tombstone; no public immediate-delete or request-specific purge-deadline
+path exists.
+
+Runtime recreation operation items retain the Runtime ID as immutable historical target
+evidence, not a foreign-key ownership claim on the live Runtime row. Terminal Runtime
+deletion and Agent finalization preserve those items, operation counters, and other
+Agents' targets. A recreation worker encountering an already deleted Runtime completes
+the item as failed with `runtime_not_found`, without dispatching Runtime work.
+
+Scheduler claim, phase/retry updates, root retirement, direct-root cleanup
+preparation and finalization finish in complete repository-owned database
+operations. Root and Runtime resource-binding descriptions use native read-only
+scopes. Locked retirement retains Scheduled active-cycle eligibility, durable
+stop writes, descriptive retention lookup, ordered lifecycle participant
+termination, archive/purge scheduling and job phase update in one database-only
+group. Every decommission phase, retry and finalization write carries the claimed
+attempt count together with lease-owner identity; reclaim by the same scheduler
+invalidates an older attempt, and failed attempt CAS rolls back the whole root
+or direct-root preparation group. Provider cleanup, Broker stop publication,
+Runtime requests and S3/avatar deletion occur between completed operations;
+post-commit effect failure cannot undo committed state. Unlimited-retention
+rejection and current-generation Runtime acknowledgement remain unchanged.
+
+External Channel state follows the same irreversible coordinator boundary.
+Decommission disconnects an Agent-owned Single App, removes only the Agent's route
+from Workspace-owned Multi Apps, terminalizes affected active bindings, ends Channel
+Work, commits one leave-presence control per newly disconnected binding plus required
+Tracker cleanup without calling the provider inside the lifecycle transaction, and
+removes direct Agent-owned grants/blocks only after Session lifecycle ownership is
+satisfied. Single App cleanup captures its provider target before credential purge
+and revalidates durable terminal identity after commit; Multi route cleanup continues
+through current connection authority without purging the shared App. Historical Multi
+routes retain an immutable Agent snapshot with no routable Agent ID. Canonical
+provider resources, messages, revisions, and delivery audit roots are not
+cascade-deleted through the AgentSession tree.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/agent_decommission.py`](../../../../python/apps/azents/src/azents/services/agent_decommission.py)
+- [`python/apps/azents/src/azents/services/agent_runtime_removal`](../../../../python/apps/azents/src/azents/services/agent_runtime_removal)
+- [`python/apps/azents/src/azents/rdb/models/agent.py`](../../../../python/apps/azents/src/azents/rdb/models/agent.py)

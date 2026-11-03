@@ -1,57 +1,23 @@
 ---
-title: "Chat Session Resync"
+title: "Chat resynchronization"
 created: 2026-06-09
 tags: [frontend, backend, chat]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [conversation, agent, external-channel]
-code_paths:
-  - python/apps/azents/src/azents/services/chat/team_session_test.py
-  - python/apps/azents/src/azents/services/active_model_capabilities.py
-  - typescript/apps/azents-web/src/shared/lib/model-capability-support.ts
-  - typescript/apps/azents-web/src/shared/lib/reasoning-effort.ts
-  - python/apps/azents/src/azents/core/agent_session_input_data.py
-  - python/apps/azents/src/azents/core/chat_data.py
-  - python/apps/azents/src/azents/core/chat_operation_data.py
-  - python/apps/azents/src/azents/core/chat_projection.py
-  - python/apps/azents/src/azents/core/exchange_file_errors.py
-  - python/apps/azents/src/azents/core/mailbox_errors.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/core/session_workspace_paths.py
-  - python/apps/azents/src/azents/repos/chat_operations.py
-  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
-  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
-  - python/apps/azents/src/azents/repos/skill_state_store.py
-  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
-  - python/apps/azents/src/azents/api/public/chat/v1/**
-  - python/apps/azents/src/azents/services/chat/**
-  - python/apps/azents/src/azents/services/mailbox.py
-  - python/apps/azents/src/azents/rdb/models/mailbox_item.py
-  - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/repos/message/**
-  - python/apps/azents/src/azents/broker/broadcast.py
-  - python/apps/azents/src/azents/broker/websocket_deps.py
-  - python/apps/azents/src/azents/core/config.py
-  - python/apps/azents/src/azents/transport/chat.py
-  - python/apps/azents/src/azents/engine/tools/skill.py
-  - python/apps/azents/src/azents/worker/deps.py
-  - python/apps/azents/src/azents/worker/events/publisher.py
-  - python/apps/azents/src/azents/worker/live/**
-  - typescript/apps/azents-web/src/features/agents/**
-  - typescript/apps/azents-web/src/features/chat/**
-  - typescript/apps/azents-web/src/shared/chat-presentation/**
-  - typescript/apps/azents-web/src/app/composition/AgentSettingsSectionPage.tsx
-  - typescript/packages/azents-session-core/**
-  - typescript/apps/azents-web/src/shared/agent-session/**
-  - typescript/apps/azents-web/src/shared/subagent-tree/**
-  - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-10-26
-spec_version: 59
 ---
 
-# Chat Session Resync
+# Chat resynchronization
 
-## 1. Overview
+WebSocket subscription and REST history/live reconciliation without timeline gaps.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Conversations and events](../domain/conversation.md)
+- [Run recovery](run-resume.md)
+- [Session Context Inspector](session-context-inspector.md)
+- [Web theme and contrast](../domain/web-theme.md)
+
+## Overview
 
 Chat session resync binds WebSocket session subscription and REST history/live baseline into one recovery flow. WebSocket open is not completion of session event delivery registration. Initial entry starts only after `subscribed`, and every baseline query starts after the resync transaction receives its matching `subscription_health_check_ack`.
 
@@ -66,7 +32,7 @@ that implementation while retaining socket authentication, health barriers,
 REST request ownership, browser lifecycle, and resync orchestration. The shared
 package does not establish a second live state store or a new transport.
 
-## 2. Preconditions
+## Preconditions
 
 | Item | Requirement |
 | --- | --- |
@@ -97,7 +63,7 @@ history or execution authority. Redis errors do not trigger implicit memory
 fallback. Focused memory fixtures verify local behavior and do not certify a live
 multi-process or deployment topology.
 
-## 3. Initial Entry Sequence
+## Initial Entry Sequence
 
 ```mermaid
 sequenceDiagram
@@ -118,7 +84,7 @@ sequenceDiagram
     UI->>UI: enter LATEST_FOLLOWING
 ```
 
-## 4. WebSocket Contract
+## WebSocket Contract
 
 | Type | Direction | Fields | Meaning |
 | --- | --- | --- | --- |
@@ -171,7 +137,7 @@ available in desktop and mobile panel navigation when the Agent has managed Runt
 capability, and current Agent-scoped service polling runs only while the panel is
 open on Services. Every Session of one Agent observes the same service list.
 
-## 5. REST History Contract
+## REST History Contract
 
 `GET /chat/v1/sessions/{session_id}/history` returns only persisted events.
 
@@ -203,7 +169,7 @@ reasoning uses native identity or its projection root, client tool call/result p
 each provider tool call uses its own `call_id`. Client call/result pairs may merge across raw page
 boundaries; provider calls require no result counterpart.
 
-## 5.1 REST Live Contract
+## REST Live Contract
 
 Live event storage contains an ephemeral writer-generation sentinel derived only
 after PostgreSQL validates the Session owner generation. Advancing to a newer
@@ -293,7 +259,7 @@ fallback. Durable provider calls preserve canonical status, semantic text/refere
 `agent_message` uses the same collapsed, source-labeled internal-agent row as the durable event.
 Durable action execution results take precedence over any competing live projection.
 
-## 5.2 REST Subagent Tree Contract
+## REST Subagent Tree Contract
 
 `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree` returns the durable
 Subagent Tree projection for the root tree containing the selected root or child session. It is a
@@ -333,7 +299,7 @@ than creating a separate result-card family. Expanding a row reveals the deliver
 it does not use the direct human user-message bubble treatment. Subagent navigation, tree, tab, and
 internal-message surfaces use a robot icon as their representative symbol.
 
-## 5.3 Composer Profile State
+## Composer Profile State
 
 Model controls consume the Agent response's active same-identity metadata
 projection. Final boolean/list fields are the support authority; configuration
@@ -376,7 +342,7 @@ reports Primary use. The Web resync path does not query or render Session model 
 cooldown, countdown, reservation, or Primary recovery controls; the existing backend availability
 and reservation contracts remain available to non-Web consumers.
 
-## 6. Timeline State Rules
+## Timeline State Rules
 
 ### LATEST_FOLLOWING
 
@@ -416,7 +382,7 @@ and reservation contracts remain available to non-Web consumers.
 - When reaching a page with `has_newer=false`, perform a fresh latest reset.
 - Clicking or keyboard-activating the “new message” button performs a fresh latest reset.
 
-## 7. Browser Idle Resume and Periodic Reconcile
+## Browser Idle Resume and Periodic Reconcile
 
 Chat client does not judge session subscription healthy only by WebSocket `readyState`. After mobile browser app background, other tab, PC sleep, page cache restore, or network recovery, WebSocket object may temporarily appear `OPEN` even when live event delivery is stale.
 
@@ -454,7 +420,7 @@ frame or one reducer failure does not prevent later buffered valid frames from r
 Even when the screen stays visible for a long time, the client performs the same health-check-based
 finite transaction periodically.
 
-## 8. Error Cases
+## Error Cases
 
 | Condition | Behavior |
 | --- | --- |
@@ -470,7 +436,7 @@ finite transaction periodically.
 | `before` and `after` both specified | REST 400. |
 | Session absent | REST 404. |
 
-## 9. Test Scenarios
+## Test Scenarios
 
 **TC-1: Subscribe ack barrier**
 
@@ -564,7 +530,7 @@ finite transaction periodically.
 - When: the running projection is received, `/live` is queried, the projection becomes completed, and the matching durable provider-tool event is appended.
 - Then: one semantic card keeps the same `call_id` and live Event identity through resync and status updates, durable history is observed before live removal, and no provider-tool live projection remains after handover.
 
-## 10. Invariants
+## Invariants
 
 - WebSocket open is not subscribe completion; `subscribed` and health-check ack require the current backend-confirmed send-loop generation.
 - Public WebSocket delivery uses canonical action envelopes plus the listed control frames; the server does not emit raw top-level durable Events or internal runtime telemetry.
@@ -599,7 +565,7 @@ finite transaction periodically.
 - Full Subagent Tree navigation is exposed through the Subagents tab without a duplicate chat top-bar drawer.
 - Child subagent detail views are human read-only for input but retain stop controls for running child sessions.
 
-## 11. External Channel Timeline Projection
+## External Channel Timeline Projection
 
 `external_channel_message` is a dedicated compact, left-aligned source item
 rather than a normal human message bubble. Its collapsed state identifies the
@@ -615,75 +581,11 @@ matching live item without duplication or disappearance. Expansion state is
 presentation-only and does not change canonical content or model lowering.
 Session Channels management state is queried separately from timeline resync.
 
-## 12. Changelog
+## References
 
-- **2026-10-15** (spec_version 58) — Recorded shared Session projection and
-  mailbox reducer ownership while retaining the existing web resync lifecycle.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
 
-- **2026-10-05** — v56. Reconciled code-path discovery with current defining
-  modules; system behavior is unchanged.
-
-- **2026-10-05** — v56. Decode durable and live action execution projections
-  against the complete wire shape, preserving omitted/nullable fields and
-  skipping malformed projections before timeline admission.
-- **2026-10-05** — v55. Kept stale applied-label fallback in detached REST
-  projections without hidden profile writes or fabricated generations, and
-  removed inherited ownership/tree gates from baseline descriptions.
-- **2026-09-15** — v52. Replaced Runtime Web approval cards and Session-keyed
-  projections with known-tool summaries plus managed-Runtime-gated Agent service
-  management.
-- **2026-09-13** — v51. Replaced persistent Web Composer availability and Primary recovery
-  presentation with the active live Run `using_fallback` badge while retaining live REST/WS resync.
-- **2026-09-13** — v50. Restored Services as a URL-addressable desktop/mobile
-  Session supporting-panel destination with visible-only current-projection polling.
-- **2026-09-13** — v49. Added semantic-label-only Composer availability, desktop/mobile
-  fallback and Primary-next controls, terminal Run query convergence, and a server-time-anchored
-  cooldown countdown.
-- **2026-09-12** — v48. Added an explicit generation-reset frame for
-  takeover-safe browser convergence and unconditional eligible terminal cleanup
-  of process-local live projection state.
-- **2026-09-12** — v47. Added PostgreSQL-derived generation fencing for live
-  projection storage, buffered flushes, clears, and WebSocket projection frames,
-  including empty-Valkey reseeding by the current owner.
-
-- **2026-09-05** — v44. Removed transcript copy and pending-delete controls
-  from pending External Channel message projections.
-- **2026-09-04** — v43. Mapped the shared Agent-session header/navigation and
-  Subagent Tree query-state modules that retain current resync and refetch
-  behavior.
-- **2026-07-22** — v41. Added External Channel source-item rendering, safe permalink behavior, and stable live/durable resync identity.
-
-- **2026-07-19** — v36. Defined terminal `agent_result` timeline reuse, promotion-time unread clearing, and tree invalidation after observation cursor advancement.
-- **2026-07-19** — v35. Removed the duplicate chat top-bar Subagent Tree drawer and kept full tree navigation in the Subagents tab.
-- **2026-07-19** — v34. Replaced provider call/result merging with live-to-durable provider-call replacement and one-card canonical attachment projection.
-
-- **2026-07-18** — v32. Added reconnect-safe context-preparation operation replacement and provider/runtime retry presentation discrimination.
-- **2026-07-16** — v31. Added deterministic provider-tool live identity, canonical lifecycle status
-  resync, and durable-before-live-removal handoff without duplicate cards.
-- **2026-07-16** — v30. Limited live retry recovery to the active model turn and required successful output admission to remove durable retry state before later resync.
-- **2026-07-14** — v29. Added current model-call start time to REST and WebSocket live Run replacement snapshots for elapsed-duration recovery.
-- **2026-07-14** — v28. Defined active operation tail placement, explicit removal transport, stable-ID durable handover deduplication, cancelled terminal history, and detached durable-result rendering.
-- **2026-07-13** — v27. Promoted confirmed-generation WebSocket barriers, finite fresh-baseline resync, detached observation isolation, raw-page projection identity, durable output promotion, and exact follow/accessibility behavior.
-- **2026-07-12** — v26. Added resilient live snapshot ordering, exact terminal correlation, opaque effort handling, Composer last-selected persistence, and durable token provenance.
-- **2026-07-12** — v25. Promoted buffer-keyed unanchored action progress, terminal success/failure history recovery, and removal of action retry/discard mutations.
-- **2026-07-11** — v24. Kept resolved inference provenance run-owned, removed event-level summaries, and made duplicate history append delivery position-preserving.
-- **2026-07-10** — v23. Added Composer profile restoration, requested/resolved provenance rendering, safe unresolved/failure behavior, and exact run-scoped usage attribution.
-- **2026-07-10** — v22. Treated both sent and received agent messages as recent tree activity so the most recently contacted sibling appears first.
-- **2026-07-10** — v21. Prioritized recent agent message senders within each sibling group and added periodic, focus, and lifecycle-event tree refresh.
-- **2026-07-09** — v20. Rendered internal agent messages as collapsed source-labeled rows and standardized subagent surfaces on the robot icon.
-- **2026-07-09** — v19. Documented Subagent Tree status propagation/sorting and disabled child detail input with retained stop control.
-- **2026-07-09** — v18. Clarified child detail read-only behavior, compact back/menu navigation, and parent-agent task bubble rendering.
-- **2026-07-09** — v17. Clarified non-root unread result semantics, child parent/root navigation, and `agent_message` timeline rendering.
-- **2026-07-08** — v16. Added Subagent Tree resync contract, `subagent_tree_changed` invalidation semantics, and frontend tree cache convergence behavior.
-- **2026-07-06** — v15. Removed session-initialization resync state and documented durable `action_execution_result` recovery.
-- **2026-07-06** — v14. Added action-execution retry/discard mutation response reconciliation semantics.
-- **2026-07-05** — v13. Added action execution WebSocket projection updates and anchored operation-progress rendering semantics.
-- **2026-07-05** — v12. Added action execution projections to REST live/write snapshot resync behavior.
-- **2026-07-05** — v11. Added failed-run retry live card, terminal recovery card, and live-run update/clear resync behavior.
-- **2026-07-04** — v10. Removed existing-session Git worktree attachment from initialization resync behavior.
-- **2026-07-04** — v8. Added initialization live/detail recovery and WebSocket setup projection actions.
-- **2026-06-13** — v5. Added session todo state to REST live/write snapshot and WebSocket contract, and reflected UI rule that treats todo preview as live state.
-- **2026-06-10** — v4. Removed aggregate live event list from `/live` and REST write snapshot, and reflected live state taxonomy contract separating partial history and input buffer.
-- **2026-06-10** — v3. Limited follow to bottom/bottom bounce area and separated follow stop from detached/buffering. Narrowed resume resync buffering timing to immediately before REST baseline reload and made failure path replay buffered events.
-- **2026-06-10** — v2. Added browser idle resume signal, timer drift-based resume resync, and “new message” chip display conditions in detached state.
-- **2026-06-09** — v1. Documented subscribe ack, health check, bidirectional history cursor, and timeline ADT behavior based on [chat-260609/ADR](../../adr/chat-260609-chat-resync-scroll.md).
+- [`python/apps/azents/src/azents/services/chat`](../../../../python/apps/azents/src/azents/services/chat)
+- [`typescript/apps/azents-web/src/features/chat`](../../../../typescript/apps/azents-web/src/features/chat)
+- [`typescript/packages/azents-session-core`](../../../../typescript/packages/azents-session-core)

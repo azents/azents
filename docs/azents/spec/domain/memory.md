@@ -2,99 +2,21 @@
 title: "Memory"
 created: 2026-05-10
 tags: [backend, engine, api, frontend]
-spec_type: domain
-domain: memory
-owner: "@Hardtack"
-code_paths:
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/repos/active_model_capabilities.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/engine/events/model_support_contract.py
-  - python/apps/azents/src/azents/core/agent_automatic_project.py
-  - python/apps/azents/src/azents/core/agent_errors.py
-  - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/historical_memory_system_setting.py
-  - python/apps/azents/src/azents/core/memory_scope.py
-  - python/apps/azents/src/azents/core/session_resource_authority.py
-  - python/apps/azents/src/azents/core/session_workspace_paths.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
-  - python/apps/azents/src/azents/repos/vfs_read_authority.py
-  - python/apps/azents/src/azents/core/historical_memory.py
-  - python/apps/azents/src/azents/core/historical_memory_output.py
-  - python/apps/azents/src/azents/core/historical_memory_snapshot.py
-  - python/apps/azents/src/azents/core/historical_memory_consolidation.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/459a4285993c_create_historical_memory_sources.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/95521a5a1bbc_replace_historical_consolidation_with_.py
-  - python/apps/azents/src/azents/core/historical_memory_budget.py
-  - python/apps/azents/src/azents/core/session_execution_file.py
-  - python/apps/azents/src/azents/core/historical_memory_context.py
-  - python/apps/azents/src/azents/core/historical_memory_publication.py
-  - python/apps/azents/src/azents/core/tools.py
-  - python/apps/azents/src/azents/rdb/models/memory.py
-  - python/apps/azents/src/azents/rdb/models/historical_memory.py
-  - python/apps/azents/src/azents/rdb/models/historical_memory_execution.py
-  - python/apps/azents/src/azents/rdb/models/session_execution_file.py
-  - python/apps/azents/src/azents/repos/session_execution_file.py
-  - python/apps/azents/src/azents/repos/memory_execution_events.py
-  - python/apps/azents/src/azents/services/session_execution_files.py
-  - python/apps/azents/src/azents/services/vfs_text.py
-  - python/apps/azents/src/azents/worker/run/memory_execution.py
-  - python/apps/azents/src/azents/worker/session/runner.py
-  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
-  - python/apps/azents/src/azents/repos/memory/**
-  - python/apps/azents/src/azents/repos/historical_memory/**
-  - python/apps/azents/src/azents/repos/historical_memory_consolidation/**
-  - python/apps/azents/src/azents/repos/memory_context_snapshot.py
-  - python/apps/azents/src/azents/repos/memory_vfs/**
-  - python/apps/azents/src/azents/repos/message/__init__.py
-  - python/apps/azents/src/azents/repos/toolkit_state/**
-  - python/apps/azents/src/azents/services/memory/**
-  - python/apps/azents/src/azents/services/historical_memory/**
-  - python/apps/azents/src/azents/services/memory_vfs.py
-  - python/apps/azents/src/azents/services/vfs_read.py
-  - python/apps/azents/src/azents/engine/events/conversational_tool_projection.py
-  - python/apps/azents/src/azents/engine/events/historical_memory_projection.py
-  - python/apps/azents/src/azents/engine/events/sensitive_text.py
-  - python/apps/azents/src/azents/engine/tools/memory.py
-  - python/apps/azents/src/azents/engine/tools/session_history.py
-  - python/apps/azents/src/azents/repos/session_history/**
-  - python/apps/azents/src/azents/engine/tools/builtin.py
-  - python/apps/azents/src/azents/engine/tools/readable_storage.py
-  - python/apps/azents/src/azents/engine/run/resolve.py
-  - python/apps/azents/src/azents/engine/provider_model_operation.py
-  - python/apps/azents/src/azents/engine/events/iteration.py
-  - python/apps/azents/src/azents/engine/events/native_replay.py
-  - python/apps/azents/src/azents/engine/events/tools.py
-  - python/apps/azents/src/azents/engine/events/responses_lowering.py
-  - python/apps/azents/src/azents/engine/events/responses_output.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
-  - python/apps/azents/src/azents/engine/events/openai_responses.py
-  - python/apps/azents/src/azents/scheduler/registry.py
-  - python/apps/azents/src/azents/job_runtime/registry.py
-  - python/apps/azents/src/azents/job_runtime/local.py
-  - python/apps/azents/src/azents/api/public/agent/v1/__init__.py
-  - python/apps/azents/src/azents/api/public/agent/v1/data.py
-  - python/apps/azents/src/azents/repos/memory/ui_paging.py
-  - python/apps/azents/src/azents/repos/memory/ui_operations.py
-  - python/apps/azents/src/azents/services/historical_memory/settings.py
-  - typescript/apps/azents-web/src/features/agents/AgentMemorySettingsPage.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentMemorySettingsContainer.ts
-  - typescript/apps/azents-web/src/trpc/routers/agent.ts
-api_routes:
-  - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
-  - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
-  - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
-  - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
-  - /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory
-last_verified_at: 2026-10-22
-spec_version: 26
 ---
 
 # Memory
+
+Independent Saved knowledge and Historical conversation synthesis with explicit source and visibility boundaries.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Context compaction](../flow/context-compaction.md)
+- [Conversations and events](conversation.md)
+- [Periodic execution](../flow/periodic-execution.md)
+- [System Settings](system-settings.md)
+- [Agent](agent.md)
 
 ## Overview
 
@@ -566,33 +488,42 @@ the same durable lifecycle/resource phases as Conversations. Detached original
 acceptance scalars and current unit result remain available after that cleanup.
 Old-code rollback after destructive removal of obsolete schema is not promised.
 
-## Change History
-
-| Date | Version | Change |
-|---|---:|---|
-| 2026-10-22 | 26 | Replace personal-information write restrictions with explicit individual and Team Session Memory scope guidance |
-| 2026-10-22 | 25 | Search and read tool-mediated conversation, Scheduled reports and Routine notifications; add ordinary-tool exclusion and aggregate multipart reply delivery |
-| 2026-10-07 | 23 | Replace integration drafts/manifests and Scheduler-local hosts with summary-only common Worker executions, explicit file submission, retained audit and scope-only current results |
-| 2026-10-06 | 22 | Added Saved cursor paging and integrated Historical overview, one-level session details, automatic scroll pagination and full-width header description |
-| 2026-10-06 | 19 | Replace nonwaiting producer/source/handover fences with exact waiting admission, renewable-lease-safe participant planning and whole-operation/page recovery |
-| 2026-10-05 | 16 | Make uncertain publication inspection read-only and unfenced; condition revision GC on exact current/reference exclusions without candidate locks |
-| 2026-10-04 | 14 | Make consumer/foreground descriptions read-only and unfenced while retaining exact own-manifest denial and producer mutation authority |
-| 2026-10-04 | 13 | Keep concurrent consumer authority locks FK-compatible and preserve writer exclusion |
-| 2026-10-04 | 12 | Promoted isolated agentic consolidation, fenced exact coverage/manifests, independent 10k documents/20k composition, latest-live aliases, denial continuity and coordinated handover |
-| 2026-10-02 | 11 | Refresh Memory during root Run preparation and hook-driven post-compaction context reconstruction, reuse unchanged content, and preserve read-only per-turn filtering and child inheritance |
-| 2026-10-02 | 10 | Promoted Historical preparation, boundary snapshots, live Memory VFS, generic-read cutover, Saved-only mutation, and retained read-only Historical settings |
-| 2026-10-01 | 9 | Moved runtime Memory, prompt-scope, and Session-history transactions into completed repository operations |
-| 2026-09-26 | 8 | Added Memory-gated authorized Session discovery, visible paging, and selected tool-result text lookup |
-| 2026-08-06 | 7 | Documented User Session Agent+User Memory projection while Team Sessions remain Agent-scope only |
-| 2026-07-24 | 6 | Restricted Team runtime projection to shared Agent Memory |
-| 2026-07-17 | 5 | Added exact-to-partial lexical search and duplicate prevention guidance |
-| 2026-07-09 | 3 | Clarified keyword Memory search guidance |
-| 2026-07-02 | 2 | Added public Agent Memory settings API/UI and permissions |
-| 2026-05-10 | 1 | Initial Memory domain spec |
-
 ## Related specs
 
 - Toolkit composition follows [`toolkit.md`](toolkit.md).
 - Context/tool execution follows [`../flow/agent-execution-loop.md`](../flow/agent-execution-loop.md).
 - Same-Session compaction follows [`../flow/context-compaction.md`](../flow/context-compaction.md).
 - Background discovery follows [`../flow/periodic-execution.md`](../flow/periodic-execution.md).
+
+## Agent memory management
+
+```http
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/memories?scope={agent|user}
+POST /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+PATCH /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories?scope={team|user}
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
+```
+
+These routes are Agent-scoped because Memory belongs to Agent. Saved routes
+retain CRUD; Historical routes expose only authorized source-linked inspection,
+with cursor pagination and no human edit/delete. The settings page separates
+Saved and Historical kinds and retains the existing `memory_enabled` toggle
+through the normal Agent update endpoint. Inspection remains available while
+Memory is disabled. Detailed visibility, source lifecycle, conflict, scope, and
+pagination semantics are defined in [`memory.md`](memory.md).
+
+Public integration model listing uses stored model catalog projections. The picker reads catalog entries for the selected integration, falling back to provider system catalog entries where applicable. Submit normalization resolves direct transition inputs and selectable model option entries through stored catalog projection and must not refetch dynamic provider listing as a fallback.
+
+Deterministic fixture in local/test environment is development/QA support path activated only by integration name marker. It can sync deterministic catalog entries for product tests.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/memory`](../../../../python/apps/azents/src/azents/services/memory)
+- [`python/apps/azents/src/azents/services/historical_memory`](../../../../python/apps/azents/src/azents/services/historical_memory)
+- [`python/apps/azents/src/azents/resources/vfs`](../../../../python/apps/azents/src/azents/resources/vfs)

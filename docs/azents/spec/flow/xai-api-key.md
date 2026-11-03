@@ -1,41 +1,20 @@
 ---
-title: "xAI API Key Provider Flow"
+title: "xAI API keys"
 created: 2026-07-10
 tags: [backend, frontend, engine, security, api]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, workspace, model-catalog]
-code_paths:
-  - python/apps/azents/src/azents/core/route_capability_constraints.py
-  - python/apps/azents/src/azents/core/active_model_capabilities.py
-  - python/apps/azents/src/azents/core/model_provider_declarations.py
-  - python/apps/azents/src/azents/engine/events/effective_model_request.py
-  - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
-  - python/apps/azents/src/azents/core/credentials.py
-  - python/apps/azents/src/azents/core/enums.py
-  - python/apps/azents/src/azents/core/llm_mapping.py
-  - python/apps/azents/src/azents/core/xai.py
-  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
-  - python/apps/azents/src/azents/api/admin/model_catalog/v1/**
-  - python/apps/azents/src/azents/repos/llm_provider_integration/**
-  - python/apps/azents/src/azents/services/llm_provider_integration/**
-  - python/apps/azents/src/azents/services/llm_catalog/**
-  - python/apps/azents/src/azents/services/model_listing/providers.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
-  - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
-  - python/apps/azents/src/azents/engine/providers/**
-  - python/apps/azents/src/azents/engine/responses.py
-  - python/apps/azents/src/azents/engine/run/resolve.py
-  - typescript/apps/azents-web/src/features/llm-settings/**
-  - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-10-21
-spec_version: 7
 ---
 
-# xAI API Key Provider Flow
+# xAI API keys
+
+Stable developer-key model discovery and inference, independent from subscription OAuth.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [xAI OAuth](xai-oauth.md)
+- [Model catalog](../domain/model-catalog.md)
+- [OpenRouter API keys](openrouter-api-key.md)
 
 ## Overview
 
@@ -141,13 +120,11 @@ of common model assembly; SDK/model recovery cannot issue a hidden second genera
 - Runtime lowering tests mock the provider transport.
 - Live xAI verification is optional and requires an operator-supplied credential; it is not a deterministic CI prerequisite.
 
-## Changelog
+## References
 
-| Date | Version | Change | Rationale |
-|---|---:|---|---|
-| 2026-10-03 | 6 | Adopted current catalog/latest sync state and exact saved pricing | Preserve API-key discovery and separate native/OAuth source namespaces |
-| 2026-09-30 | 5 | Documented public Pydantic AI/official SDK HTTP Responses execution with raw model IDs | Preserve developer API-key identity and account discovery while removing executable package routing |
-| 2026-08-18 | 4 | Moved API-key model visibility to credential-specific integration catalogs with provider-authoritative discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |
-| 2026-07-18 | 3 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
-| 2026-07-18 | 2 | Applied the bounded common provider-failure contract and complete Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |
-| 2026-07-10 | 1 | Documented the stable xAI API-key integration, catalog, runtime, UI, and security behavior | `docs/azents/design/xai-260710-xai-api-key.md` |
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/core/model_provider_declarations.py`](../../../../python/apps/azents/src/azents/core/model_provider_declarations.py)
+- [`python/apps/azents/src/azents/services/llm_catalog`](../../../../python/apps/azents/src/azents/services/llm_catalog)
+- [`python/apps/azents/src/azents/engine/events`](../../../../python/apps/azents/src/azents/engine/events)

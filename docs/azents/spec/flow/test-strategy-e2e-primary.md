@@ -1,73 +1,21 @@
 ---
-title: "E2E Primary Test Strategy"
+title: "Testing and CI"
 created: 2026-05-13
 tags: [testenv, qa, e2e, process]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: []
-code_paths:
-  - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
-  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.ts
-  - typescript/apps/azents-web/src/shared/toolkits/toolkit-config-projection.ts
-  - python/apps/azents/src/azents/api/public/chat/v1/validation_audit_test.py
-  - python/apps/azents/src/azents/api/public/toolkit/v1/validation_audit_test.py
-  - python/apps/azents/src/azents/repos/toolkit/validation_audit_test.py
-  - testenv/azents/fixtures/mock_mcp_server.py
-  - typescript/apps/azents-web/src/features/agents/components/AgentForm.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentToolkitManagementSection.stories.tsx
-  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.stories.tsx
-  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.stories.tsx
-  - typescript/apps/azents-web/src/features/llm-settings/components/WorkspaceModelSettingsCard.stories.tsx
-  - typescript/apps/azents-web/src/shared/toolkits/components/ToolkitForm.stories.tsx
-  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.test.mts
-  - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
-  - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
-  - typescript/apps/azents-web/src/shared/toolkits/github-creation-completion.test.mts
-  - typescript/apps/azents-web/src/features/agents/google-management-integration.test.mts
-  - python/apps/azents/src/azents/api/public/toolkit/v1/github_user_creation_cancel_integration_test.py
-  - typescript/apps/azents-web/src/features/toolkits/github-user-creation-state.test.mts
-  - typescript/apps/azents-web/src/shared/toolkits/components/GitHubWizard.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.stories.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.stories.tsx
-  - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.stories.tsx
-  - typescript/apps/azents-web/.storybook/**
-  - .claude/skills/ci-optimization/**
-  - scripts/ci/**
-  - python/apps/azents/src/azents/conftest.py
-  - python/apps/azents/src/azents/testing/transaction_fixture.py
-  - .github/actions/ci-test-observability/**
-  - .claude/skills/technical-feature-design/SKILL.md
-  - .claude/skills/ship-feature/SKILL.md
-  - .github/actions/expose-github-runtime/**
-  - .github/workflows/ci.yaml
-  - .github/workflows/ios.yaml
-  - swift/scripts/ios.sh
-  - swift/scripts/simulator-diagnostics.sh
-  - typescript/packages/azents-session-core/**
-  - .github/workflows/e2e-duration-recheck.yaml
-  - .github/workflows/snapshot.yaml
-  - azents.Dockerfile
-  - azents-e2e-server-overlay.Dockerfile
-  - docs/azents/AGENTS.md
-  - testenv/azents/AGENTS.md
-  - testenv/azents/README.md
-  - testenv/azents/contracts/**
-  - testenv/azents/e2e/**
-  - testenv/azents/testenv/bootstrap_runner.py
-  - testenv/azents/testenv/prerequisite_*.py
-  - testenv/azents/testenv/checks/**
-  - testenv/azents/testenv/live/**
-  - python/apps/azents/src/azents/api/testenv/**
-  - python/apps/azents/src/azents/runtime/**
-  - python/apps/azents-runtime-provider-docker/**
-  - python/apps/azents-runtime-provider-kubernetes/**
-  - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-11-02
-spec_version: 87
 ---
 
-# E2E Primary Test Strategy
+# Testing and CI
+
+Minimal core product journeys, lower-layer contract coverage and deterministic verification boundaries.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Agent execution](agent-execution-loop.md)
+- [File exchange and storage](file-exchange-storage.md)
+- [iOS builds](ios-build.md)
+- [Public releases](public-release.md)
 
 ## Typed Runtime Hook and Live Observations
 
@@ -1000,223 +948,15 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
-## Changelog
-
-- **2026-10-15** (spec_version 87) — Added required TypeScript execution of
-  the shared Session core's behavior and package-consumer contracts.
-
-- **2026-10-09** (spec_version 86) — Remove stale-document login readiness
-  races with an atomic current-document visibility/enabled observation.
-
-- **2026-10-04** (spec_version 82) — Added isolated multi-turn consolidation
-  product verification and production-service sampling with ordinary leases and
-  deadlines; retained narrow backend ownership of exhaustive races/capacity.
-
-- **2026-10-02** (spec_version 81) — Excluded cancelled candidate workflow
-  artifacts from duration reevaluation without filtering genuine failed runs
-  or changing validation thresholds and head/base publication guards.
-
-- **2026-10-02** (spec_version 80) — Added credential-free Historical
-  product-path evidence and explicit-time service sampling, distinguishing
-  preparation/publication from separately tested Scheduler/Job Runtime dispatch.
-- **2026-10-02** (spec_version 79) — Selected all same-repository PRs whose head
-  or base matches a completed CI SHA, including dependents of non-main stacked bases.
-- **2026-10-02** (spec_version 78) — Made missing base duration evidence
-  non-failing, reserved pending for active exact-base CI, and synchronized guarded
-  status plus sticky-comment reevaluation when either base or candidate CI completes.
-- **2026-10-01** (spec_version 77) — Kept representative desktop quota-fallback and
-  shared-cookie Runtime Web browser journeys, moved mobile presentation to a Storybook
-  interaction, and assigned alternate authentication plus capacity edge cases to
-  focused lower-layer tests.
-- **2026-10-01** (spec_version 75) — Added base-relative duration gating,
-  evidence-only base-change reevaluation, and compact collapsible comments.
-
-- **2026-09-30** (spec_version 74) — Moved stack-added heavy file-transfer matrices
-  and native-browser journeys out of required E2E into fast unit/component ownership,
-  preserving pre-stack real-storage and product smoke boundaries.
-
-- **2026-09-30** (spec_version 73) — Replaced recurring heavyweight file journeys
-  with lowered, injected limits and small protocol bodies; retained one-time
-  large-file evidence separately and fenced fixture-only download TLS handling.
-
-- **2026-09-30** (spec_version 72) — Added real-storage/native-browser direct-file
-  evidence boundaries, capability-safe artifacts, and strict-network proof limitations.
-
-- **2026-09-29 (spec_version 71)** — Isolated explicit inference-profile response
-  barriers from the fast-watchdog fixture without changing default timeout tests.
-- **2026-09-24 (spec_version 70)** — Documented preservation of the
-  exact-current snapshot SHA when parallel setup observability is appended.
-- **2026-09-21 (spec_version 67)** — Preferred compatible exact-current-SHA
-  snapshots for unchanged E2E image inputs before predecessor and ancestor
-  candidates, preserving immediate fallback when the current publication is absent.
-- **2026-09-20 (spec_version 66)** — Moved per-image BuildKit GitHub Actions
-  cache exports from gated E2E lanes to the Snapshot workflow build matrix while
-  retaining cache imports in gated lanes and avoiding an additional runner.
-- **2026-09-18 (spec_version 65)** — Added the public-API Workspace Upload
-  matrix and its HTTPS S3 gateway trust boundary: exact PUT/commit bytes,
-  conflict-overwrite retry, cancellation without publication, Runtime Control
-  internal storage access, and Docker Provider/Runner CA propagation. Browser
-  lifecycle states are covered by component interactions and deterministic polling
-  tests rather than duplicate browser E2E journeys.
-- **2026-09-15** (spec_version 64) — Replaced Runtime Web approval-cycle E2E with
-  Off-service URL activation, Agent-scoped service projection, reset revision
-  fencing, and direct Off control.
-- **2026-09-15** (spec_version 63) — Extended immutable snapshot reuse and
-  prerequisite pre-pulls to every Web E2E image, reused the session Chromium across
-  isolated Runtime Web scenarios, launched Chromium through a Web-suite-only session
-  dependency before other Web fixtures, refreshed authoritative Runtime metrics
-  instead of waiting for a stale UI polling cycle, reduced browser-wait polling only
-  for selected non-Runtime browser journeys while retaining the same timeout bounds,
-  started independent Runtime Web topology containers concurrently,
-  and defined the full gated E2E critical path across every enabled suite lane.
-- **2026-09-14** (spec_version 61) — Made recurring Runtime Web verification a
-  four-test lightweight 1 MiB/eight-asset matrix with relay, hard-limit,
-  maintenance, protocol, and optional Redis recovery coverage; added bounded
-  environment overrides on the same journey; and made heavy-load runs disposable
-  dated report evidence without a separate pytest node or heavy CI profile.
-- **2026-09-13** (spec_version 60) — Defined E2E-first layered verification for model quota
-  fallback: product-visible and representative cross-boundary E2E plus production
-  repository/Worker integration tests for exact concurrency, fencing, recovery, and rollback
-  interleavings.
-- **2026-09-12** (spec_version 59) — Made manual CI dispatch classify required
-  image changes against the checked-out commit's first parent, preventing stale
-  predecessor snapshots from running newer E2E tests.
-- **2026-09-12** (spec_version 58) — Made successful `main` push timing-history
-- **2026-09-13** (spec_version 59) — Defined E2E-first layered verification: product-visible and
-  representative cross-boundary E2E plus required production repository/Worker integration tests
-  for exact concurrency, fencing, recovery, and rollback interleavings.
-- **2026-09-12** (spec_version 58) — Made successful `main` push timing-history
-  cache saves unique per workflow attempt while retaining SHA-scoped pull request
-  history and rolling `main` restore fallback.
-- **2026-09-11** (spec_version 57) — Overlapped exact-SHA snapshot preparation
-  with lane dependency setup through a durable fail-closed handoff, used
-  zstd-compressed registry output for isolated non-main snapshot publications,
-  and started already-migrated E2E services through their direct process
-  entrypoints.
-- **2026-09-11** (spec_version 56) — Allowed same-repository pull requests to
-  consume already-published exact-current-SHA image snapshots with immediate
-  current-worktree fallback, and prevented non-main manual Snapshot runs from
-  moving the shared `dev-main` package tag.
-- **2026-09-11** (spec_version 55) — Split the remaining External Channel management
-  collector into connection, workspace, and provider-progress files, projected both
-  legacy and immediately prior timing paths, and overlapped best-effort prerequisite
-  image pulls with immutable snapshot preparation while preserving fixture fallback.
-- **2026-09-11** (spec_version 54) — Split Subagent lifecycle and capacity collectors,
-  projected historical per-test timings, and added finite explicit source fallback
-  weights for indirectly collected scenarios.
-- **2026-09-10** (spec_version 53) — Removed eager Runtime startup from shared
-  deterministic External Channel Agent setup. Runtime-bearing journeys retain
-  product-owned on-demand startup and observable completion boundaries, while
-  management-only journeys no longer prepare unrelated Runtimes.
-- **2026-09-10** (spec_version 52) — Replaced single-sample E2E lane weights with
-  per-file high-watermarks from each suite's latest three successful timing samples
-  while preserving deterministic fallback, same-SHA cache precedence, suite
-  ownership, lane count, and file coverage.
-- **2026-09-10** (spec_version 51) — Added dependency-compatible Server snapshot
-  source overlays for application-source-only pull request changes, with complete
-  application replacement, exact-current-snapshot precedence, deterministic
-  full-build fallback, and explicit build-mode observability.
-- **2026-09-10** (spec_version 50) — Added protocol-observable Discord automatic-title
-  synchronization and the complete testenv-only Gateway timing override while
-  preserving production defaults and journey assertions.
-- **2026-09-08** (spec_version 48) — Split the Discord provisioning collector into
-  independently planned Gateway binding, configured provisioning, and unmentioned
-  activity journeys while preserving historical timing projection and coverage.
-- **2026-09-02** (spec_version 43) — Added two focused real-Docker Runtime
-  Terminal journeys for protocol behavior and Runtime lifecycle authority while
-  retaining policy and Web presentation coverage in deterministic lower layers.
-- **2026-09-01** (spec_version 42) — Reused compatible Subagent E2E Workspace and
-  Agent Runtime setup across isolated journey Sessions, and replaced the interrupted
-  child wall-clock sleep with the existing explicit Runtime-hook barrier.
-- **2026-08-30** (spec_version 40) — Added bounded compatible-ancestor fallback
-  for unchanged required E2E images when an exact predecessor snapshot is
-  unavailable, while preserving direct successes, immutable Git-tree validation,
-  artifact evidence, and current-worktree builds for changed or unresolved images.
-- **2026-08-28** (spec_version 39) — Made sanitized Discord failure evidence
-  authoritative before callers can observe controlled failure boundaries.
-- **2026-08-27** (spec_version 38) — Made configured Discord REST failure
-  delivery and operation evidence atomic and authoritative before HTTP, connection,
-  or timeout outcomes become observable.
-- **2026-08-27** (spec_version 37) — Required recurring E2E optimization to treat
-  test and fixture code as first-class implementation surfaces, combine compatible
-  and separately explainable coverage-preserving changes when needed, and continue
-  new-SHA same-SHA measurement cycles until acceptance or feasible-candidate
-  exhaustion.
-- **2026-08-25** (spec_version 36) — Increased the required E2E suite from three
-  parallel lanes to four while preserving one execution profile, deterministic
-  file coverage, timeout policy, and single-lane cache-write ownership.
-- **2026-08-22** (spec_version 34) — Split deterministic External Channel
-  collection into natural scenario files for file-level required-lane balancing
-  and added historical per-test timing projection for the first post-split plan.
-- **2026-08-20** (spec_version 32) — Added one migration owner followed by concurrent
-  Public API, Admin API, and Engine Worker startup in each E2E lane, and linked the
-  recurring E2E CI optimization skill to the current test strategy.
-- **2026-08-17** (spec_version 30) — Added focused Scheduled Task
-  generated-client creation/readback and due-now execution journeys, moved
-  provider, lifecycle, recurrence, Web, and compaction combinations to focused
-  contract tests, and retained deterministic dispatch on the existing E2E server.
-
-- **2026-08-13** — v29. Replaced marker-selected deterministic, focused Runtime
-  Provider, Web Surface, and unused live groupings with folder-owned `required` and
-  `web` suites, timing-balanced planner lanes, and one dynamic E2E runner matrix.
-- **2026-08-13** — v28. Added deterministic API-created hierarchical network-restriction
-  control-plane coverage, explicitly separated from Kubernetes Provider/proxy unit, manifest,
-  protocol, lifecycle, trust, and forwarding validation and from any packet-enforcement claim.
-- **2026-08-10** — v26. Added Optional Managed Runtime deterministic, focused Docker Provider, and
-  Web Surface E2E policy, including Runtime-free model execution and UI guidance, explicit add,
-  lazy start, Provider-outage removal, privacy-safe progress, exact reconnect acknowledgement,
-  higher-generation re-add, destructive browser confirmation, and nullable Session binding
-  migration/invalidation evidence.
-
-- **2026-08-10** — v25. Added deterministic active-ingress barriers, ordered
-  `Retry-After` controls, durable acknowledgement-before-history evidence,
-  batching/cursor/mailbox/retry/wake diagnostics, and local prerequisite-failure
-  handling for the batched External Channel ingress matrix.
-- **2026-08-11** — v27. Removed AppArmor/bwrap containment prerequisites and the dedicated
-  Kubernetes containment lane; retained direct Runtime Provider product journeys and contract
-  rejection coverage.
-- **2026-08-09** — v24. Added enforcing-AppArmor Docker Runtime Provider coverage and the required
-  disposable kind Kubernetes containment lane with bounded evidence, fail-closed prerequisites,
-  qualification, security boundaries, persistence, ephemeral clearing, and direct rollback.
-- **2026-08-04** — v21. Added deterministic Session working-folder public and
-  Docker Runtime E2E coverage plus PostgreSQL expand/backfill/contract migration
-  evidence, including archive symlink-boundary and restore behavior.
-- **2026-08-05** — v22. Moved server-free testenv support verification into a
-  Docker-free unit job while retaining server, container, image, and product journeys
-  in the existing E2E lanes.
-- **2026-08-03** — v20. Added required-lane JUnit, pytest output, slow-test,
-  Docker diagnostic, and browser failure artifacts plus the same-repository sticky PR
-  observability summary.
-- **2026-08-03** — v19. Updated Runtime Provider live evidence to verify the
-  current Runner-reported Agent Workspace path rather than Provider metadata.
-- **2026-08-02** — v18. Added deterministic public-boundary verification for
-  first-mention setup absence, original-trigger continuation, parent/thread behavior,
-  provider-native settings, selected-Agent lifecycle transitions, provider command
-  contracts, versioned existing-Binding controls, and bounded secret-free fake
-  evidence.
-- **2026-08-01** — v17. Added public-API and Web Surface verification for Agent and
-  binding response modes, including Slack mention gating/context preservation,
-  all-messages continuation, Discord creation-time copy, and disconnected mutation
-  rejection.
-- **2026-07-31** — v16. Allowed fake-provider evidence to retain only the canonical
-  relative Azents Session route needed to verify provider links against public
-  Session list/detail projections.
-- **2026-07-31** — v15. Replaced the Discord-only gateway fixture and Worker-owned
-  Slack Socket lifecycle with one provider-neutral External Channel gateway fixture.
-- **2026-07-31** — v14. Added deterministic Slack Socket endpoint-replacement and
-  Discord Gateway Resume verification through provider fakes and public product paths.
-- **2026-07-30** — v13. Added the post-contraction Slack HTTP, Slack Socket,
-  Discord Gateway, Redis/memory coordination, provider-history, sanitized evidence,
-  and Runtime file-transfer validation matrix.
-- **2026-07-26** — v11. Added Runtime Execution Profile API-managed E2E, safe policy-evidence redaction, explicit Apply/convergence coverage, and qualified Kubernetes fail/skip requirements.
-- **2026-07-26** — v10. Added the credential-free Discord REST/Gateway fake,
-  signed interaction relay, provider-evidence redaction contract, and public-API
-  Single/Multi deterministic E2E boundary.
-- **2026-07-23** — v9. Added the credential-free focused Runtime Provider lane and its bootstrap/enrollment boundary to required E2E CI.
-- **2026-07-17** — v8. Split real-browser journeys into the parallel Web Surface E2E lane while preserving the stable required E2E gate.
-- **2026-07-13** — v7. Added deterministic containerized Chromium journeys and worktree-built web images to the always-on E2E policy.
-- **2026-07-08** — v6. Added the no-direct-DB-write E2E scenario boundary used by subagent validation.
-
 ## Related Records
 
 - testenv operational guide: [`../../../testenv/azents/AGENTS.md`](../../../../testenv/azents/AGENTS.md)
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`testenv/azents/AGENTS.md`](../../../../testenv/azents/AGENTS.md)
+- [`.github/workflows/ci.yaml`](../../../../.github/workflows/ci.yaml)
+- [`testenv/azents/e2e`](../../../../testenv/azents/e2e)

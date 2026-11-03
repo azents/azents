@@ -1,107 +1,21 @@
 ---
-title: "Session Browser Execution"
+title: "Session Browser"
 created: 2026-10-15
 tags: [browser, session, runtime, engine, security]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: [agent, session, toolkit, runtime]
-code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/f79f6654c302_add_agent_browser_enabled_setting.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/0701fb42b5ce_add_agent_browser_implementation_and_.py
-  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_configuration.py
-  - python/apps/azents/src/azents/core/browser_configuration.py
-  - python/apps/azents/src/azents/repos/browser_configuration.py
-  - python/apps/azents/src/azents/services/browser_configuration.py
-  - python/apps/azents/src/azents/api/public/agent/v1/browser_configuration.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_controller.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_camoufox.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_mobile.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_geometry.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_install.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_sdk.py
-  - typescript/apps/azents-web/src/features/agents/AgentBrowserChoiceSection.tsx
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentBrowserChoice.ts
-  - typescript/apps/azents-web/src/features/agents/components/AgentBrowserChoice.tsx
-  - testenv/azents/e2e/src/tests/required/public/test_browser_configuration.py
-  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_contract.py
-  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_runner_wire.py
-  - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_runner_client.py
-  - proto/azents/runtime_control/v1/runtime_runner_control.proto
-  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_viewer_contract.py
-  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_source_contract.py
-  - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_browser_source_client.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_viewer.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_editables.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_input.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_display.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/operations.py
-  - python/apps/azents-runtime-runner/src/azents_runtime_runner/main.py
-  - python/apps/azents-runtime-runner/pyproject.toml
-  - python/apps/azents-runtime-runner/Dockerfile
-  - python/apps/azents/src/azents/engine/tools/browser.py
-  - python/apps/azents/src/azents/engine/tools/builtin.py
-  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/SKILL.md
-  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/scripts/encrypt.py
-  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/confidential-input.md
-  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/open-and-observe.md
-  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/actions-and-help.md
-  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/captures-and-files.md
-  - python/apps/azents/src/azents/engine/tools/runtime_io.py
-  - python/apps/azents/src/azents/runtime/control_protocol/runner_operations.py
-  - python/apps/azents/src/azents/runtime/control_protocol/grpc/runner_server.py
-  - python/apps/azents/src/azents/runtime/runner_operation_adapter.py
-  - python/apps/azents/src/azents/api/public/browser/v1/__init__.py
-  - python/apps/azents/src/azents/api/public/browser/v1/data.py
-  - python/apps/azents/src/azents/api/public/browser/v1/websocket.py
-  - python/apps/azents/src/azents/core/runtime_browser_source_credential.py
-  - python/apps/azents/src/azents/runtime/control_protocol/grpc/browser_source_server.py
-  - python/apps/azents/src/azents/runtime/control_protocol/grpc/runtime_stream_session_server.py
-  - python/apps/azents/src/azents/runtime/control_protocol/grpc/browser_source_owner_test.py
-  - python/apps/azents/src/azents/services/runtime_browser/authority.py
-  - python/apps/azents/src/azents/services/runtime_browser/data.py
-  - python/apps/azents/src/azents/services/runtime_browser/service.py
-  - python/apps/azents/src/azents/services/runtime_browser/socket.py
-  - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py
-  - typescript/apps/azents-web/src/features/session-browser/SessionBrowserPage.tsx
-  - typescript/apps/azents-web/src/features/session-browser/input.ts
-  - typescript/apps/azents-web/src/features/session-browser/connection.ts
-  - typescript/apps/azents-web/src/features/session-browser/wire.ts
-  - typescript/apps/azents-web/src/features/session-browser/projection.ts
-  - typescript/apps/azents-web/src/features/session-browser/popup.ts
-  - typescript/apps/azents-web/src/features/session-browser/socketUrl.ts
-  - typescript/apps/azents-web/src/features/session-browser/types.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserAddressSelection.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserToolbarTouch.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserEditorViewport.ts
-  - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
-  - typescript/apps/azents-web/src/features/chat/containers/useAgentChatContainer.ts
-  - typescript/apps/azents-web/src/features/chat/session-panel/useSessionPanelState.ts
-  - typescript/apps/azents-web/src/shared/session-browser/**
-  - typescript/apps/azents-web/src/features/session-browser/containers/useSessionBrowserContainer.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserPaste.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserManualKeyboard.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldEditor.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldEditorTransition.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldEditorView.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserKeyboardToolbar.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldVisibility.ts
-  - typescript/apps/azents-web/src/features/session-browser/components/BrowserFieldEditor.tsx
-  - typescript/apps/azents-web/src/features/session-browser/components/BrowserKeyboardToolbar.tsx
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserConnection.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserInteraction.ts
-  - typescript/apps/azents-web/src/features/session-browser/native-text.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserTouchView.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserDirectTouch.ts
-  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserTouchView.ts
-  - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
-  - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
-  - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-30
-spec_version: 1
 ---
 
-# Session Browser Execution
+# Session Browser
+
+Runner-owned browser resources, authenticated live attachment, human help and no-uncertain-replay rules.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [Runtime control](agent-runtime-control.md)
+- [Runtime persistence](agent-runtime-persistence.md)
+- [File exchange and storage](file-exchange-storage.md)
+- [Toolkits](../domain/toolkit.md)
 
 ## Reachable Scope
 
@@ -535,3 +449,12 @@ production deployment acceptance.
 Shared strict DTO/codec, current generations/targets, native Session state, dialog/event/file combinations, observations/capture bounds and transient conflict behavior have focused unit/real-SDK coverage. Engine tests cover full catalog/provider schema lowering, access revocation, current working-folder binding, mandatory action-state/result scope and image failure propagation.
 
 Focused tests and static component stories do not establish assembled-product acceptance. The representative Browser E2E uses normal user creation/login, an Engine-created task, real Runner images and API/Control source admission, a read-only child and unrelated-user denial, native pointer/dialog/composition input, fresh reconnect and the real Web panel. A separate normal-authentication Engine journey verifies actual model imagery, original Runtime PNG identity and authorized Exchange publication/download. The [delivery verification report](../../design/session-browser-verification-report-2026-10-15.md) records completed checks, historical failures and evidence limits. Real iPhone Safari, OS-mobile IME, production deployment and real-site acceptance are not established by these synthetic journeys.
+
+## References
+
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`python/apps/azents/src/azents/services/runtime_browser`](../../../../python/apps/azents/src/azents/services/runtime_browser)
+- [`python/apps/azents/src/azents/services/browser_configuration.py`](../../../../python/apps/azents/src/azents/services/browser_configuration.py)
+- [`python/libs/azents-runtime-control`](../../../../python/libs/azents-runtime-control)

@@ -1,19 +1,20 @@
 ---
-title: "Public Release Publication"
+title: "Public releases"
 created: 2026-09-15
 tags: [release, github-actions, helm, open-source]
-spec_type: flow
-owner: "@Hardtack"
-touches_domains: []
-code_paths:
-  - .github/workflows/release.yaml
-  - infra/charts/azents/Chart.yaml
-  - testenv/azents/e2e/src/support_tests/test_release_workflow.py
-last_verified_at: 2026-10-29
-spec_version: 3
 ---
 
-# Public Release Publication
+# Public releases
+
+Protected image, chart, Git tag and GitHub Release publication with downstream handoff.
+
+[Wiki index](../index.md) · [Maintenance](../AGENTS.md)
+
+## Connections
+
+- [iOS builds](ios-build.md)
+- [Testing and CI](test-strategy-e2e-primary.md)
+- [Inference Proxy](../domain/inference-proxy.md)
 
 ## Overview
 
@@ -138,11 +139,10 @@ The first protected release invocation is the live end-to-end verification. Its
 evidence is the workflow run, image digest artifacts, OCI chart metadata, Git tag,
 and GitHub Release.
 
-## Changelog
+## References
 
-- **2026-09-18** (spec_version 3) — Named the GitHub Release job precisely after
-  downstream dispatch became the post-publication final job.
-- **2026-09-16** (spec_version 2) — Added the optional generic downstream release
-  handoff after successful public publication.
-- **2026-09-15** (spec_version 1) — Added the current protected one-invocation
-  image, Helm chart, Git tag, and GitHub Release publication flow.
+Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
+claim through current callers, models and tests.
+
+- [`.github/workflows/release.yaml`](../../../../.github/workflows/release.yaml)
+- [`infra/charts/azents/Chart.yaml`](../../../../infra/charts/azents/Chart.yaml)
