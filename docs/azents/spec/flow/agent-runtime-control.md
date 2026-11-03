@@ -633,7 +633,17 @@ only for the current dispatch and cannot be replaced by a late result.
 Verified objects are claimed by trusted consumers through short leases. A consumer
 receives an opaque handle and bounded async stream, acknowledges only after its
 product/provider publication succeeds, and abandons or settles a failed claim. The
-Workspace browser-download consumer verifies object metadata and hands off a presigned
+Runtime-to-server preparation path retries a rejected consumer claim, verified-object
+lookup, or initial lease renewal only when an authoritative status read confirms a
+newer revision in the expected phase without cancellation. Each operation has at most
+three attempts using the same transfer and consumer claim; uncertain transport outcomes
+do not replay preparation mutations or product publication. Foreground failure cleanup
+has at most three cancellation attempts and a separate three-second timeout, rather
+than waiting for the full transfer deadline on an irreversible upload. Unconfirmed
+cleanup is logged with bounded identity fields; Control retains cleanup ownership.
+Coordinator RPC preparation errors become classified Runtime-upload failures at the
+image-tool boundary instead of an opaque internal error.
+The Workspace browser-download consumer verifies object metadata and hands off a presigned
 GET valid for at most one minute. API and Next return empty authorized `302` responses;
 neither observes browser EOF. Successful settlement means ticket handoff, and the
 immutable source remains protected through capability/deadline expiry plus read grace.

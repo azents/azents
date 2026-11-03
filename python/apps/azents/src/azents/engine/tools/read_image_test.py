@@ -168,6 +168,21 @@ class TestReadImageFromSessionData:
 class TestReadImageErrors:
     """Error case tests."""
 
+    async def test_coordinator_failure_is_actionable_tool_error(self) -> None:
+        """A classified coordinator rejection keeps its reason at the tool boundary."""
+        fixture = _make_tool(files={"/workspace/agent/photo.png": b"image"})
+        fixture.service.result = RuntimeImageReadError(
+            "Runtime upload preparation failed (FAILED_PRECONDITION)"
+        )
+
+        with pytest.raises(
+            FunctionToolError,
+            match=r"Failed to read image: .*FAILED_PRECONDITION",
+        ):
+            await fixture.tool.handler(
+                json.dumps({"path": "/workspace/agent/photo.png"})
+            )
+
     async def test_unsupported_path(self) -> None:
         """Disallowed path raises FunctionToolError."""
         tool = _make_tool().tool
