@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal, Protocol
@@ -33,11 +33,16 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorUploadTransport,
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
+from grpc import StatusCode
+from grpc.aio import AioRpcError
 
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.utils.logging import sanitized_exception_info
 
 _LOGGER = logging.getLogger(__name__)
+_CONSUMER_REVISION_ATTEMPTS = 3
+_CLEANUP_ATTEMPTS = 3
+_CLEANUP_TIMEOUT_SECONDS = 3.0
 
 
 class RuntimeToServerTransferError(RuntimeError):
@@ -460,29 +465,48 @@ class RuntimeToServerTransferService:
             revision = dispatched.revision
             available = await self._wait_available(identity, request.deadline_at)
             revision = available.revision
-            claim_id = uuid7().hex
-            claimed = await self.coordinator.claim_consumer(
-                CoordinatorConsumerRequest(
-                    identity=identity,
-                    expected_revision=revision,
-                    consumer_claim_id=claim_id,
-                )
+            consumer_claim_id = uuid7().hex
+            claim_id = consumer_claim_id
+            claimed = await self._consumer_operation(
+                identity=identity,
+                revision=revision,
+                phase=CoordinatorTransferPhase.AVAILABLE,
+                deadline_at=request.deadline_at,
+                operation=lambda current: self.coordinator.claim_consumer(
+                    CoordinatorConsumerRequest(
+                        identity=identity,
+                        expected_revision=current,
+                        consumer_claim_id=consumer_claim_id,
+                    )
+                ),
             )
             revision = claimed.revision
-            verified = await self.coordinator.get_verified_object(
-                CoordinatorGetVerifiedObjectRequest(
-                    identity=identity,
-                    expected_revision=revision,
-                    consumer_claim_id=claim_id,
-                )
+            verified = await self._consumer_operation(
+                identity=identity,
+                revision=revision,
+                phase=CoordinatorTransferPhase.CONSUMING,
+                deadline_at=request.deadline_at,
+                operation=lambda current: self.coordinator.get_verified_object(
+                    CoordinatorGetVerifiedObjectRequest(
+                        identity=identity,
+                        expected_revision=current,
+                        consumer_claim_id=consumer_claim_id,
+                    )
+                ),
             )
             revision = verified.status.revision
-            renewed = await self.coordinator.renew_consumer_lease(
-                CoordinatorConsumerRequest(
-                    identity=identity,
-                    expected_revision=revision,
-                    consumer_claim_id=claim_id,
-                )
+            renewed = await self._consumer_operation(
+                identity=identity,
+                revision=revision,
+                phase=CoordinatorTransferPhase.CONSUMING,
+                deadline_at=request.deadline_at,
+                operation=lambda current: self.coordinator.renew_consumer_lease(
+                    CoordinatorConsumerRequest(
+                        identity=identity,
+                        expected_revision=current,
+                        consumer_claim_id=consumer_claim_id,
+                    )
+                ),
             )
             revision = renewed.revision
             manifest = verified.actual_manifest
@@ -511,6 +535,16 @@ class RuntimeToServerTransferService:
                 request.deadline_at,
             )
             raise
+        except AioRpcError as exc:
+            await self._abandon_and_cancel(
+                identity,
+                claim_id,
+                revision,
+                request.deadline_at,
+            )
+            raise RuntimeToServerTransferError(
+                f"Runtime upload preparation failed ({exc.code().name})"
+            ) from exc
         except Exception:
             await self._abandon_and_cancel(
                 identity,
@@ -519,6 +553,44 @@ class RuntimeToServerTransferService:
                 request.deadline_at,
             )
             raise
+
+    async def _consumer_operation[T](
+        self,
+        *,
+        identity: CoordinatorTransferIdentity,
+        revision: int,
+        phase: CoordinatorTransferPhase,
+        deadline_at: datetime,
+        operation: Callable[[int], Awaitable[T]],
+    ) -> T:
+        """Retry rejected revisions with the same exact consumer claim.
+
+        Transport failures have uncertain outcomes and are never replayed here.
+        """
+        for attempt in range(_CONSUMER_REVISION_ATTEMPTS):
+            try:
+                return await operation(revision)
+            except asyncio.CancelledError:
+                raise
+            except AioRpcError as exc:
+                if (
+                    exc.code() is not StatusCode.FAILED_PRECONDITION
+                    or attempt == _CONSUMER_REVISION_ATTEMPTS - 1
+                    or self.clock() >= deadline_at
+                ):
+                    raise
+                current = await self.coordinator.get_transfer_status(
+                    CoordinatorGetTransferStatusRequest(identity=identity)
+                )
+                if (
+                    current.identity != identity
+                    or current.phase is not phase
+                    or current.revision <= revision
+                    or current.cancellation_requested
+                ):
+                    raise
+                revision = current.revision
+        raise AssertionError("Consumer revision attempts exhausted")
 
     async def _wait_available(
         self,
@@ -724,6 +796,32 @@ class RuntimeToServerTransferService:
         revision: int | None,
         deadline_at: datetime,
     ) -> None:
+        """Bound foreground cleanup independently from the transfer deadline."""
+        try:
+            async with asyncio.timeout(_CLEANUP_TIMEOUT_SECONDS):
+                await self._cleanup_transfer(identity, claim_id, revision, deadline_at)
+        except TimeoutError as exc:
+            _LOGGER.warning(
+                "Runtime upload cleanup could not be confirmed",
+                exc_info=sanitized_exception_info(
+                    exc,
+                    message="Runtime upload cleanup timed out",
+                ),
+                extra={
+                    "transfer_id": identity.transfer_id,
+                    "attempt_id": identity.attempt_id,
+                    "runtime_id": identity.runtime_id,
+                    "cleanup_stage": "cleanup_timeout",
+                },
+            )
+
+    async def _cleanup_transfer(
+        self,
+        identity: CoordinatorTransferIdentity,
+        claim_id: str | None,
+        revision: int | None,
+        deadline_at: datetime,
+    ) -> None:
         if revision is None:
             return
         last_cleanup_error: Exception | None = None
@@ -769,7 +867,9 @@ class RuntimeToServerTransferService:
                 except Exception as exc:
                     last_cleanup_error = exc
                     cleanup_stage = "abandon_status_lookup"
-        while self.clock() < deadline_at:
+        for _ in range(_CLEANUP_ATTEMPTS):
+            if self.clock() >= deadline_at:
+                break
             try:
                 status = await self.coordinator.cancel_transfer(
                     CoordinatorCancelTransferRequest(
@@ -797,20 +897,23 @@ class RuntimeToServerTransferService:
                 return
             revision = status.revision
             await asyncio.sleep(self.status_poll_interval.total_seconds())
-        if last_cleanup_error is not None and cleanup_stage is not None:
-            _LOGGER.warning(
-                "Runtime upload cleanup could not be confirmed",
-                exc_info=sanitized_exception_info(
+        _LOGGER.warning(
+            "Runtime upload cleanup could not be confirmed",
+            exc_info=(
+                sanitized_exception_info(
                     last_cleanup_error,
                     message="Runtime upload cleanup failed",
-                ),
-                extra={
-                    "transfer_id": identity.transfer_id,
-                    "attempt_id": identity.attempt_id,
-                    "runtime_id": identity.runtime_id,
-                    "cleanup_stage": cleanup_stage,
-                },
-            )
+                )
+                if last_cleanup_error is not None
+                else None
+            ),
+            extra={
+                "transfer_id": identity.transfer_id,
+                "attempt_id": identity.attempt_id,
+                "runtime_id": identity.runtime_id,
+                "cleanup_stage": cleanup_stage or "cancel_attempts_exhausted",
+            },
+        )
 
     def _validate(self, request: RuntimeToServerConsumerRequest) -> None:
         if not request.runtime_path.startswith("/"):

@@ -30,10 +30,14 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorUploadTransport,
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
+from grpc import StatusCode
+from grpc.aio import AioRpcError
 
+from azents.runtime.transfer import runtime_to_server
 from azents.runtime.transfer.runtime_to_server import (
     RuntimeToServerConsumerRequest,
     RuntimeToServerPublicationCallback,
+    RuntimeToServerTransferError,
     RuntimeToServerTransferRequest,
     RuntimeToServerTransferService,
     VerifiedRuntimeUpload,
@@ -1002,3 +1006,279 @@ async def test_lease_loss_cancels_publication_before_its_commit_boundary() -> No
 
     assert callback.cancelled is True
     assert callback.uploads == []
+
+
+def _rpc_error(code: StatusCode) -> AioRpcError:
+    return AioRpcError(
+        code,
+        initial_metadata=None,
+        trailing_metadata=None,
+        details="Transfer transition is unavailable",
+    )
+
+
+class _RevisionRaceCoordinator(_Coordinator):
+    """Confirm the Runner result between a consumer observation and its RPC."""
+
+    def __init__(self, race_at: str) -> None:
+        super().__init__()
+        self.race_at = race_at
+        self.raced = False
+        self.revision = 4
+        self.phase = CoordinatorTransferPhase.AVAILABLE
+        self.claim_ids: list[str] = []
+
+    def _check(self, stage: str, revision: int) -> None:
+        self.calls.append(stage)
+        if stage == self.race_at and not self.raced:
+            self.raced = True
+            self.revision += 1
+        if revision != self.revision:
+            raise _rpc_error(StatusCode.FAILED_PRECONDITION)
+
+    async def get_transfer_status(
+        self, request: CoordinatorGetTransferStatusRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("status")
+        return _status(self.revision, request.identity, self.phase)
+
+    async def claim_consumer(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        self.claim_ids.append(request.consumer_claim_id)
+        self._check("claim", request.expected_revision)
+        self.revision += 1
+        self.phase = CoordinatorTransferPhase.CONSUMING
+        return _status(self.revision, request.identity, self.phase)
+
+    async def get_verified_object(
+        self, request: CoordinatorGetVerifiedObjectRequest
+    ) -> CoordinatorGetVerifiedObjectResult:
+        self._check("verified", request.expected_revision)
+        assert request.consumer_claim_id == self.claim_ids[-1]
+        return CoordinatorGetVerifiedObjectResult(
+            status=_status(self.revision, request.identity, self.phase),
+            verified_object_handle=_HANDLE,
+            actual_manifest=CoordinatorObjectManifest(size=9, sha256="a" * 64),
+        )
+
+    async def renew_consumer_lease(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        self._check("renew", request.expected_revision)
+        assert request.consumer_claim_id == self.claim_ids[-1]
+        self.revision += 1
+        return _status(self.revision, request.identity, self.phase)
+
+
+@pytest.mark.parametrize("race_at", ["claim", "verified", "renew"])
+async def test_upload_confirmation_revision_race_retries_only_rejected_operation(
+    race_at: str,
+) -> None:
+    """Completion evidence cannot break preparation or replay publication."""
+    coordinator = _RevisionRaceCoordinator(race_at)
+    callback = _Callback([])
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    await service.transfer(_request(callback))
+
+    assert coordinator.raced
+    assert coordinator.calls.count(race_at) == 2
+    assert len(set(coordinator.claim_ids)) == 1
+    assert len(coordinator.admissions) == 1
+    assert len(callback.uploads) == 1
+    assert "cancel" not in coordinator.calls
+
+
+class _RejectedClaimCoordinator(_Coordinator):
+    """Reject a claim without permitting a safe optimistic-revision recovery."""
+
+    def __init__(
+        self, code: StatusCode, phase: CoordinatorTransferPhase, revision: int
+    ) -> None:
+        super().__init__()
+        self.code = code
+        self.phase = phase
+        self.revision = revision
+
+    async def claim_consumer(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("claim")
+        raise _rpc_error(self.code)
+
+    async def get_transfer_status(
+        self, request: CoordinatorGetTransferStatusRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("status")
+        if "claim" not in self.calls:
+            return _status(4, request.identity, CoordinatorTransferPhase.AVAILABLE)
+        return _status(self.revision, request.identity, self.phase)
+
+
+@pytest.mark.parametrize(
+    ("code", "phase", "revision"),
+    [
+        (StatusCode.FAILED_PRECONDITION, CoordinatorTransferPhase.AVAILABLE, 4),
+        (StatusCode.FAILED_PRECONDITION, CoordinatorTransferPhase.CONSUMING, 5),
+        (StatusCode.FAILED_PRECONDITION, CoordinatorTransferPhase.TERMINAL, 5),
+        (StatusCode.UNAVAILABLE, CoordinatorTransferPhase.AVAILABLE, 5),
+        (StatusCode.PERMISSION_DENIED, CoordinatorTransferPhase.AVAILABLE, 5),
+    ],
+)
+async def test_rejected_or_uncertain_claim_is_not_replayed(
+    code: StatusCode, phase: CoordinatorTransferPhase, revision: int
+) -> None:
+    """No progress, other ownership, terminal state, and transport loss fail closed."""
+    coordinator = _RejectedClaimCoordinator(code, phase, revision)
+    callback = _Callback([])
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    with pytest.raises(RuntimeToServerTransferError, match=code.name):
+        await service.transfer(_request(callback))
+
+    assert coordinator.calls.count("claim") == 1
+    assert callback.uploads == []
+
+
+async def test_continuously_advancing_revision_has_bounded_claim_attempts() -> None:
+    """Even authoritative revision progress cannot create an unbounded retry loop."""
+
+    class _AdvancingCoordinator(_RejectedClaimCoordinator):
+        async def claim_consumer(
+            self, request: CoordinatorConsumerRequest
+        ) -> CoordinatorTransferStatus:
+            self.calls.append("claim")
+            self.revision = request.expected_revision + 1
+            raise _rpc_error(StatusCode.FAILED_PRECONDITION)
+
+    coordinator = _AdvancingCoordinator(
+        StatusCode.FAILED_PRECONDITION, CoordinatorTransferPhase.AVAILABLE, 4
+    )
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+    callback = _Callback([])
+
+    with pytest.raises(RuntimeToServerTransferError, match="FAILED_PRECONDITION"):
+        await service.transfer(_request(callback))
+
+    assert coordinator.calls.count("claim") == 3
+    assert callback.uploads == []
+
+
+class _UncancellableUploadCoordinator(_Coordinator):
+    """An upload response is committed, so cancellation cannot change it."""
+
+    async def cancel_transfer(
+        self, request: CoordinatorCancelTransferRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("cancel")
+        raise _rpc_error(StatusCode.FAILED_PRECONDITION)
+
+
+async def test_irreversible_upload_cleanup_does_not_wait_for_transfer_deadline(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A permanent cancellation rejection has bounded attempts, even at fixed time."""
+    coordinator = _UncancellableUploadCoordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    with pytest.raises(RuntimeError, match="publication failed"):
+        await asyncio.wait_for(
+            service.transfer(_request(_Callback([], fail=True))), timeout=1
+        )
+
+    assert coordinator.calls.count("cancel") == 3
+    assert [
+        record.__dict__["cleanup_stage"]
+        for record in caplog.records
+        if record.message == "Runtime upload cleanup could not be confirmed"
+    ] == ["cancel_transfer"]
+
+
+async def test_blocked_cleanup_rpc_has_independent_timeout(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A non-returning cleanup RPC cannot hide the primary foreground error."""
+    entered = asyncio.Event()
+
+    class _BlockedCleanupCoordinator(_Coordinator):
+        async def cancel_transfer(
+            self, request: CoordinatorCancelTransferRequest
+        ) -> CoordinatorTransferStatus:
+            entered.set()
+            await asyncio.Event().wait()
+            raise AssertionError("Unreachable")
+
+    coordinator = _BlockedCleanupCoordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+    monkeypatch.setattr(runtime_to_server, "_CLEANUP_TIMEOUT_SECONDS", 0)
+
+    with pytest.raises(RuntimeError, match="publication failed"):
+        await service.transfer(_request(_Callback([], fail=True)))
+
+    assert entered.is_set()
+    assert [
+        record.__dict__["cleanup_stage"]
+        for record in caplog.records
+        if record.message == "Runtime upload cleanup could not be confirmed"
+    ] == ["cleanup_timeout"]
+
+
+async def test_pending_runner_cancellation_logs_unconfirmed_cleanup(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nonterminal successful RPC responses are not terminal cleanup evidence."""
+
+    class _PendingCoordinator(_Coordinator):
+        async def cancel_transfer(
+            self, request: CoordinatorCancelTransferRequest
+        ) -> CoordinatorTransferStatus:
+            self.calls.append("cancel")
+            return _status(
+                request.expected_revision + 1,
+                request.identity,
+                CoordinatorTransferPhase.STREAMING,
+            )
+
+    coordinator = _PendingCoordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    with pytest.raises(RuntimeError, match="publication failed"):
+        await service.transfer(_request(_Callback([], fail=True)))
+
+    assert coordinator.calls.count("cancel") == 3
+    assert [
+        record.__dict__["cleanup_stage"]
+        for record in caplog.records
+        if record.message == "Runtime upload cleanup could not be confirmed"
+    ] == ["cancel_attempts_exhausted"]
