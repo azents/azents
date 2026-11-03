@@ -4,7 +4,36 @@ import json
 import logging
 import sys
 
-from azents_runtime_control.structured_logging import StructuredLogFormatter
+import pytest
+
+from azents_runtime_control.structured_logging import StructuredLogFormatter, bind_extra
+
+
+def test_bound_context_merges_call_fields_and_preserves_exception(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Keep shared fields, call overrides, and the original traceback."""
+    context: dict[str, object] = {"provider_id": "provider-1", "stage": "connect"}
+    logger = bind_extra(logging.getLogger("runtime.bound-context"), context)
+    context["provider_id"] = "later-mutation"
+    with caplog.at_level(logging.INFO, logger="runtime.bound-context"):
+        logger.info("Runtime connecting", extra={"connection_id": "connection-1"})
+        try:
+            raise ValueError("connection rejected")
+        except ValueError:
+            logger.warning(
+                "Runtime reconnecting", extra={"stage": "reconnect"}, exc_info=True
+            )
+
+    first, second = caplog.records
+    assert first.__dict__["provider_id"] == "provider-1"
+    assert first.__dict__["connection_id"] == "connection-1"
+    assert second.__dict__["provider_id"] == "provider-1"
+    assert second.__dict__["stage"] == "reconnect"
+    assert second.exc_info is not None
+    assert isinstance(second.exc_info[1], ValueError)
+    payload = json.loads(StructuredLogFormatter().format(second))
+    assert "ValueError: connection rejected" in payload["exception"]
 
 
 def test_structured_log_formatter_keeps_extra_fields() -> None:

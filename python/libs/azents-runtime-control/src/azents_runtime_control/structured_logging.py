@@ -2,12 +2,20 @@
 
 import json
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 _STANDARD_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
     "asctime",
     "message",
 }
+
+
+def bind_extra(
+    logger: logging.Logger, extra: Mapping[str, object]
+) -> logging.LoggerAdapter[logging.Logger]:
+    """Bind shared context while preserving per-call structured fields."""
+    return logging.LoggerAdapter(logger, dict(extra), merge_extra=True)
 
 
 class StructuredLogFormatter(logging.Formatter):

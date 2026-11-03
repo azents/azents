@@ -20,7 +20,7 @@ from azents_runtime_control.provider import (
     ProviderRegistration,
     ProviderRunLoop,
 )
-from azents_runtime_control.structured_logging import StructuredLogFormatter
+from azents_runtime_control.structured_logging import StructuredLogFormatter, bind_extra
 
 from azents_runtime_provider_docker.aiodocker_api import AioDockerApi
 from azents_runtime_provider_docker.provider import (
@@ -88,13 +88,13 @@ async def _run_control_loop(
         ),
     )
     registration = _provider_registration(settings)
+    logger = bind_extra(_LOGGER, {"provider_id": settings.provider_id})
     while not stop.is_set():
         control_client = create_provider_control_client(settings)
         connection_id = _control_connection_id(settings.connection_id)
-        _LOGGER.info(
+        logger.info(
             "Runtime Provider connecting to Control",
             extra={
-                "provider_id": settings.provider_id,
                 "connection_id": connection_id,
                 "control_endpoint": settings.control_endpoint,
             },
@@ -122,10 +122,9 @@ async def _run_control_loop(
         ):
             if stop.is_set():
                 return
-            _LOGGER.warning(
+            logger.warning(
                 "Runtime Provider Control stream disconnected; reconnecting",
                 exc_info=True,
-                extra={"provider_id": settings.provider_id},
             )
             await _wait_for_reconnect(stop)
         finally:
