@@ -307,8 +307,6 @@ Exposed tools are `get_goal`, `create_goal`, `update_goal`. `create_goal` fails 
 
 Goal Toolkit registers `on_session_idle` runtime hook. If active Goal exists, it returns continuation input containing Goal objective. Dispatcher merges continuations from multiple providers in provider order and attaches provider slug/index metadata.
 
-- **2026-06-22 (spec_version=33)** — Removed Team-scoped Toolkit visibility. ToolkitScope is workspace-only.
-
 ## References
 
 Selected source entrypoints, not an exhaustive dependency map. Verify the relevant

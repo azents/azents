@@ -285,7 +285,9 @@ committed invitation or membership.
 
 Acceptance (`accept`) validates email ownership (included in user's `user_emails`) and allows only PENDING. If not PENDING, fail with `AlreadyProcessed`. If ownership validation fails, mask existence with `InvitationNotFound` to prevent existence leakage. Decline (`decline`) follows same validation/status rules.
 
-> ⚠️ **Drift:** Issue description says "7-day expiration", but code does not confirm it. `RDBWorkspaceInvitation` has no `expires_at` field and no expiration validation logic. See Changelog.
+Workspace membership invitations have no expiration field or expiration validation.
+They remain subject to the explicit pending-status and email-ownership checks
+above; do not infer a seven-day expiry from historical issue descriptions.
 
 ### JoinRequest Flow
 

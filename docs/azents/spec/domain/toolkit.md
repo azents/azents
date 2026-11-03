@@ -77,6 +77,10 @@ upstream authorization/quota failures produce safe failures without revealing ke
 
 ### Enum / Type
 
+Toolkit connection visibility is Workspace-scoped, not Team-scoped. Owner kinds
+and personal-connection execution restrictions remain distinct from that visibility
+boundary; see [Personal connections](../tools/personal-connections.md).
+
 - `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `google`, `kubernetes`, `brave_search`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. `shell` remains the internal built-in Provider slug; Public API creation of a persisted Shell ToolkitConfig is rejected. Google publication uses its reviewed candidate flow instead of plain Toolkit CRUD. ([`core/tools.py`](../../../../python/apps/azents/src/azents/core/tools.py))
 
   General-purpose environment variables are configured through Agent Runtime
