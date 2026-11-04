@@ -429,7 +429,8 @@ Always-on required CI does not depend on external credentials.
   build, and hits retain the exact checkout, Dockerfile, load, smoke and immutable
   image export; a cache never selects an old image tag or bypasses artifact checks.
   Each selected producer saves its inspected immutable Docker image ID, compresses
-  once with zstd level 3 and one compression worker, hashes the archive and uploads
+  once with zstd level 3, using four bounded compression workers for the large
+  Runtime Runner archive and one for other images, hashes the archive and uploads
   an image-specific artifact bound to repository,
   tested SHA, run ID and attempt. Consumers validate the entire exact portfolio,
   receipt fields, non-symlink files, archive sizes and SHA256 hashes before loading

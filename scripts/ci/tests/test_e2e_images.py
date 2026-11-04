@@ -1,5 +1,6 @@
 """Image handoff requires the exact portfolio and bytes before Docker admission."""
 
+import io
 import json
 import os
 import signal
@@ -12,7 +13,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts.ci.e2e_images import (
     CORE,
@@ -26,6 +27,7 @@ from scripts.ci.e2e_images import (
     _download,
     decode_receipt,
     digest,
+    export,
     identity,
     load,
     prepare,
@@ -82,6 +84,108 @@ class ImageHandoffTest(unittest.TestCase):
         checkout = patch("scripts.ci.e2e_images.verify_checkout")
         checkout.start()
         self.addCleanup(checkout.stop)
+
+    def test_export_uses_bounded_runner_compression_and_exact_receipt(self):
+        for image in IMAGES:
+            with self.subTest(image=image), tempfile.TemporaryDirectory() as tmp:
+                stream = io.BytesIO(b"synthetic immutable Docker archive")
+                save = Mock(stdout=stream)
+                save.wait.return_value = 0
+                directory = Path(tmp) / "export"
+
+                def compress(
+                    command, *, stdin, stdout, check, stream=stream, directory=directory
+                ):
+                    self.assertIs(stdin, stream)
+                    self.assertFalse(check)
+                    self.assertFalse((directory / "receipt.json").exists())
+                    stdout.write(b"synthetic compressed bytes")
+                    return subprocess.CompletedProcess(command, 0)
+
+                with (
+                    patch.dict("os.environ", ENV),
+                    patch("scripts.ci.e2e_images.inspect", return_value=IMAGE_ID),
+                    patch(
+                        "scripts.ci.e2e_images.subprocess.Popen", return_value=save
+                    ) as start,
+                    patch(
+                        "scripts.ci.e2e_images.subprocess.run", side_effect=compress
+                    ) as compressor,
+                ):
+                    receipt = export(image, directory)
+                start.assert_called_once_with(
+                    ["docker", "image", "save", IMAGE_ID], stdout=subprocess.PIPE
+                )
+                self.assertEqual(
+                    compressor.call_args.args[0],
+                    [
+                        "zstd",
+                        "-3",
+                        "-T4" if image == "azents-runtime-runner" else "-T1",
+                        "--stdout",
+                    ],
+                )
+                save.wait.assert_called_once_with()
+                self.assertTrue(stream.closed)
+                self.assertEqual(receipt.image_id, IMAGE_ID)
+                self.assertEqual(receipt.identity, OWNER)
+                self.assertEqual(
+                    receipt.archive_sha256, digest(directory / "image.tar.zst")
+                )
+                self.assertEqual(
+                    receipt.archive_bytes, len(b"synthetic compressed bytes")
+                )
+                self.assertEqual(
+                    json.loads((directory / "receipt.json").read_text()),
+                    asdict(receipt),
+                )
+
+    def test_export_joins_save_and_never_publishes_failed_pipeline(self):
+        for save_status, compression_status in ((1, 0), (0, 1), (1, 1)):
+            with (
+                self.subTest(save=save_status, compression=compression_status),
+                tempfile.TemporaryDirectory() as tmp,
+                patch.dict("os.environ", ENV),
+                patch("scripts.ci.e2e_images.inspect", return_value=IMAGE_ID),
+            ):
+                save = Mock(stdout=io.BytesIO(b"synthetic archive"))
+                save.wait.return_value = save_status
+                directory = Path(tmp) / "export"
+                with (
+                    patch("scripts.ci.e2e_images.subprocess.Popen", return_value=save),
+                    patch(
+                        "scripts.ci.e2e_images.subprocess.run",
+                        return_value=subprocess.CompletedProcess(
+                            "zstd", compression_status
+                        ),
+                    ),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "export failed"):
+                        export("azents-runtime-runner", directory)
+                save.wait.assert_called_once_with()
+                self.assertTrue(save.stdout.closed)
+                self.assertFalse((directory / "receipt.json").exists())
+
+    def test_export_reaps_save_when_compressor_cannot_start(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", ENV),
+            patch("scripts.ci.e2e_images.inspect", return_value=IMAGE_ID),
+        ):
+            save = Mock(stdout=io.BytesIO(b"synthetic archive"))
+            directory = Path(tmp) / "export"
+            with (
+                patch("scripts.ci.e2e_images.subprocess.Popen", return_value=save),
+                patch(
+                    "scripts.ci.e2e_images.subprocess.run",
+                    side_effect=FileNotFoundError("synthetic missing compressor"),
+                ),
+            ):
+                with self.assertRaisesRegex(FileNotFoundError, "missing compressor"):
+                    export("azents-runtime-runner", directory)
+            save.wait.assert_called_once_with()
+            self.assertTrue(save.stdout.closed)
+            self.assertFalse((directory / "receipt.json").exists())
 
     def test_real_checkout_validation_rejects_merge_or_other_source(self):
         for source in ("a" * 40, "b" * 40):

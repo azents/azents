@@ -327,7 +327,12 @@ def export(image: str, directory: Path) -> ImageReceipt:
         assert save.stdout is not None
         try:
             compressed = subprocess.run(
-                ["zstd", "-3", "-T1", "--stdout"],
+                [
+                    "zstd",
+                    "-3",
+                    "-T4" if image == "azents-runtime-runner" else "-T1",
+                    "--stdout",
+                ],
                 stdin=save.stdout,
                 stdout=output,
                 check=False,
