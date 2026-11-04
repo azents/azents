@@ -94,8 +94,11 @@ protocol serialization, reasoning dialect and streaming otherwise remain LiteLLM
 
 The private typed binding contains only credentials needed for the approved call.
 Subscription refresh/management tokens and issuer credentials never enter Proxy.
-Auth/request data are private attributes, excluded from normal serialization and
-released during outer request cleanup. No Python secure-erasure claim is made.
+Auth/request data use one request-owned private carrier, excluded from normal
+serialization. The original auth and the SDK's shallow auth copies share that
+carrier, so outer request cleanup revokes inference and selector access through all
+of them. Separate admissions have separate carriers. No Python secure-erasure claim
+is made.
 
 - API-key routes receive their exact request key and fixed trusted provider origin.
 - ChatGPT receives its request access token and matching account header; its token
@@ -157,11 +160,13 @@ No built-in limit is represented as a cluster-wide guarantee without shared coor
 
 ## Packaging and deployment
 
-The exact published PyPI wheel is `litellm==1.109.0.dev1`, locked with registry
-artifact hashes. This is the requester's one-time exception for upstream ChatGPT
-forwarding PR41522. The dependency comment records replacing it with a stable that
-contains the fix after equivalent auth/isolation/stream tests. It is not permission
-to use arbitrary future prereleases, Git source builds or a maintained vendor patch.
+The exact published PyPI wheel is `litellm==1.109.0rc1`, locked with registry
+artifact hashes. This exact prerelease retains upstream ChatGPT forwarding PR41522
+and permits patched filelock through PR49137. The new one-time packaging exception
+requires maintainer review; the earlier dev-wheel approval does not authorize it
+automatically. The dependency comment records replacing it with a stable containing
+both fixes after equivalent auth/isolation/stream tests. This does not authorize
+arbitrary future prereleases, Git source builds or a maintained vendor patch.
 
 The MIT-covered core is installed without the Enterprise-pulling `proxy` extra.
 The runtime audit checks exact release identity, original MIT notice, absent
