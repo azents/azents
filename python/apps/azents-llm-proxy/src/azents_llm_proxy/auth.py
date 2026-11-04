@@ -17,36 +17,45 @@ from azents_llm_proxy.context import RequestContext
 from azents_llm_proxy.request import InferenceRequest, RequestRejected, decode_request
 
 
+@dataclass(repr=False)
+class InferenceApproval:
+    """One revocable request-owned carrier shared by SDK auth copies."""
+
+    binding: TargetBinding | None
+    request: InferenceRequest | None
+
+
 class BoundAuth(UserAPIKeyAuth):
     """Secrets and prompt data never become ordinary auth/logging fields."""
 
-    _binding: TargetBinding | None = PrivateAttr(default=None)
-    _request: InferenceRequest | None = PrivateAttr(default=None)
+    _approval: InferenceApproval = PrivateAttr(
+        default_factory=lambda: InferenceApproval(binding=None, request=None)
+    )
 
     def inference(self) -> TargetBinding:
-        if self._binding is None or self._request is None:
+        if self._approval.binding is None or self._approval.request is None:
             raise ProxyException(
                 message="Approved inference context is missing.",
                 type="permission_error",
                 param="azents_authority",
                 code=403,
             )
-        return self._binding
+        return self._approval.binding
 
     def selectors(self) -> InferenceRequest:
-        if self._request is None:
+        if self._approval.request is None:
             raise ProxyException(
                 message="Approved request context is missing.",
                 type="permission_error",
                 param="azents_authority",
                 code=403,
             )
-        return self._request
+        return self._approval.request
 
     def release(self) -> None:
         """Release request-owned references without claiming secure memory erasure."""
-        self._binding = None
-        self._request = None
+        self._approval.binding = None
+        self._approval.request = None
 
 
 def _bearer(request: Request) -> SecretStr:
@@ -146,8 +155,8 @@ class AgentAuthentication:
                 token, model=selected.model, target_id=selected.target_id
             )
             auth = _auth(binding.identity, [binding.public_model])
-            auth._binding = binding
-            auth._request = selected
+            auth._approval.binding = binding
+            auth._approval.request = selected
             self.context.bind(auth)
             self.context.observe(binding)
             return auth

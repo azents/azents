@@ -23,10 +23,12 @@ acceptance require separate operational authorization and eligible accounts.
 
 ## Composition and startup
 
-- Published LiteLLM wheel: `1.109.0.dev1`, with registry artifacts hashed in `uv.lock`.
-  The requester approved this one-time dev-release exception on 2026-10-29 for
-  ChatGPT request-credential forwarding (upstream PR #41522). Replace it with the
-  first stable containing that fix after equivalent auth/isolation/stream checks.
+- Published LiteLLM wheel: `1.109.0rc1`, with registry artifacts hashed in `uv.lock`.
+  This exact prerelease pin retains ChatGPT request-credential forwarding
+  (upstream PR #41522) and permits patched filelock through upstream PR #49137.
+  It requires maintainer review as a new one-time exception, not an automatic
+  extension of the prior dev-wheel approval. Replace it with a stable containing
+  both fixes after equivalent auth/isolation/stream checks.
 - Original Proxy application/config loader and lifespan, no model deployment
   registry, no Router dispatch or credential DB.
 - The `proxy` extra is deliberately not installed: its Enterprise dependency is

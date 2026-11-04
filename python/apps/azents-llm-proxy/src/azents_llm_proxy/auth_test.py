@@ -8,8 +8,9 @@ import pytest
 from azents_llm_contract.authority import ModelListResponse
 from fastapi import Request
 from litellm.proxy._types import ProxyException
+from litellm.proxy.auth.user_api_key_auth import _custom_auth_token_for_this_request
 
-from azents_llm_proxy.auth import AgentAuthentication
+from azents_llm_proxy.auth import AgentAuthentication, BoundAuth
 from azents_llm_proxy.authority import (
     AuthorityClient,
     AuthorityDenied,
@@ -71,6 +72,78 @@ async def test_binding_is_private_and_raw_bearer_never_enters_auth_fields(
     assert "private-prompt" not in serialized
     assert "provider-sentinel" not in repr(auth)
     assert auth.api_key == "token"
+
+
+async def test_request_cleanup_revokes_original_and_upstream_auth_copies() -> None:
+    context = RequestContext(clients=None)
+    authority = AsyncMock(spec=AuthorityClient)
+    authority.resolve.return_value = binding()
+    with context.scope():
+        auth = await AgentAuthentication(authority, context).authenticate(
+            incoming(
+                method="POST",
+                path="/v1/responses",
+                headers=[(b"authorization", f"Bearer {AGENT}".encode())],
+                payload=body(),
+            ),
+            api_key=AGENT,
+        )
+        copied = _custom_auth_token_for_this_request(auth)
+        assert isinstance(copied, BoundAuth)
+        assert copied is not auth
+        assert copied.inference() is auth.inference()
+        assert copied.selectors() is auth.selectors()
+        serialized = copied.model_dump_json()
+        assert AGENT not in serialized and "provider-sentinel" not in serialized
+        assert "private-prompt" not in serialized
+        assert "provider-sentinel" not in repr(copied)
+    for ended in (auth, copied):
+        with pytest.raises(
+            ProxyException, match="Approved inference context is missing"
+        ):
+            ended.inference()
+        with pytest.raises(ProxyException, match="Approved request context is missing"):
+            ended.selectors()
+
+
+async def test_nested_scope_cleanup_does_not_revoke_other_request_copy() -> None:
+    context = RequestContext(clients=None)
+    authority = AsyncMock(spec=AuthorityClient)
+    authority.resolve.return_value = binding()
+    authentication = AgentAuthentication(authority, context)
+
+    async def authenticate() -> BoundAuth:
+        return await authentication.authenticate(
+            incoming(
+                method="POST",
+                path="/v1/responses",
+                headers=[(b"authorization", f"Bearer {AGENT}".encode())],
+                payload=body(),
+            ),
+            api_key=AGENT,
+        )
+
+    with context.scope():
+        first = await authenticate()
+        first_copy = _custom_auth_token_for_this_request(first)
+        assert isinstance(first_copy, BoundAuth)
+        with context.scope():
+            second = await authenticate()
+            second_copy = _custom_auth_token_for_this_request(second)
+            assert isinstance(second_copy, BoundAuth)
+            assert second_copy.inference() is second.inference()
+        for ended in (second, second_copy):
+            with pytest.raises(ProxyException):
+                ended.inference()
+            with pytest.raises(ProxyException):
+                ended.selectors()
+        assert first_copy.inference() is first.inference()
+        assert first_copy.selectors() is first.selectors()
+    for ended in (first, first_copy):
+        with pytest.raises(ProxyException):
+            ended.inference()
+        with pytest.raises(ProxyException):
+            ended.selectors()
 
 
 @pytest.mark.parametrize(
