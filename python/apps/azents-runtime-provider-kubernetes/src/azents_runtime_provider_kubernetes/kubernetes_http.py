@@ -242,6 +242,8 @@ class KubernetesHttpApi(KubernetesApi):
         """Translate SDK outcomes only at the typed Provider ingress boundary."""
         try:
             result = await operation
+        except asyncio.CancelledError:
+            raise
         except ApiException as error:
             if error.status == 404 and allow_not_found:
                 return None
@@ -419,6 +421,8 @@ class KubernetesHttpApi(KubernetesApi):
                         resource=metadata.name,
                     )
                 return
+            except asyncio.CancelledError:
+                raise
             except KubernetesApiRequestError as error:
                 if not replace or error.status != 409 or attempt == 1:
                     raise
@@ -658,6 +662,8 @@ class KubernetesHttpApi(KubernetesApi):
                     method="PUT",
                     resource=lease.metadata.name,
                 )
+        except asyncio.CancelledError:
+            raise
         except KubernetesApiRequestError as error:
             if error.status == 409:
                 raise LeaseConflictError() from error

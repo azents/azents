@@ -749,6 +749,12 @@ HTTP client failures. Cancellation, Control stream failures and unexpected error
 propagate instead of being treated as watch retries; malformed watch Status
 responses are errors, not valid lifecycle observations.
 
+Each Kubernetes Provider Control connection owns its Pod watch, command loop,
+credential watch, and diagnostics refresh tasks. Normal completion, child failure,
+and owner cancellation all cancel and join the remaining tasks before closing the
+Control client or starting another connection attempt. Cancellation and the selected
+child failure propagate through this cleanup boundary.
+
 After an explicit lifecycle or configuration command, Kubernetes Provider v3 may attach one
 structured aggregate `network_enforcement` reconciliation observation. `in_sync` confirms every
 mode-required resource and readiness fence; `drifted` reports bounded mismatch evidence without

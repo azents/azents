@@ -25,7 +25,7 @@ from azents_runtime_control.provider import (
     ProviderRegistration,
     ProviderRunLoop,
 )
-from azents_runtime_control.structured_logging import StructuredLogFormatter
+from azents_runtime_control.structured_logging import StructuredLogFormatter, bind_extra
 
 from azents_runtime_provider_kubernetes.deployment_diagnostics import (
     DeploymentDiagnosticSettings,
@@ -134,6 +134,7 @@ async def _run_control_loop(
     diagnostics = OperationalDiagnosticsState(
         await collect_operational_diagnostics(api, diagnostic_settings)
     )
+    logger = bind_extra(_LOGGER, {"provider_id": settings.provider_id})
     while not stop.is_set():
         _set_readiness(settings.readiness_file, ready=False)
         provider_credential = read_service_account_token(
@@ -144,10 +145,9 @@ async def _run_control_loop(
             provider_credential=provider_credential,
         )
         control_connection_id = _control_connection_id(settings.connection_id)
-        _LOGGER.info(
+        logger.info(
             "Runtime Provider connecting to Control",
             extra={
-                "provider_id": settings.provider_id,
                 "connection_id": control_connection_id,
                 "control_endpoint": settings.control_endpoint,
             },
@@ -196,18 +196,19 @@ async def _run_control_loop(
                 ),
                 name="runtime-provider-deployment-diagnostics",
             )
-            done, pending = await asyncio.wait(
-                {watch_task, command_task, credential_task, diagnostics_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-                try:
+            tasks = {watch_task, command_task, credential_task, diagnostics_task}
+            try:
+                done, _ = await asyncio.wait(
+                    tasks,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done:
                     await task
-                except asyncio.CancelledError:
-                    pass
-            for task in done:
-                await task
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
         except asyncio.CancelledError:
             raise
         except (
@@ -218,10 +219,9 @@ async def _run_control_loop(
         ):
             if stop.is_set():
                 return
-            _LOGGER.warning(
+            logger.warning(
                 "Runtime Provider Control stream disconnected; reconnecting",
                 exc_info=True,
-                extra={"provider_id": settings.provider_id},
             )
             await _wait_for_reconnect(stop)
         finally:
@@ -334,30 +334,29 @@ async def wait_for_leadership(
     _set_readiness(settings.readiness_file, ready=False)
     elector = _elector(settings, api)
     next_waiting_log_at = 0.0
+    logger = bind_extra(
+        _LOGGER,
+        {
+            "provider_id": settings.provider_id,
+            "holder_identity": settings.connection_id,
+            "lease_name": settings.lease_name,
+            "lease_namespace": settings.namespace,
+        },
+    )
     while not stop.is_set():
         result = await elector.try_acquire(now=datetime.now(UTC))
         if result.acquired:
             _set_readiness(settings.readiness_file, ready=False)
-            _LOGGER.info(
+            logger.info(
                 "Runtime Provider leadership acquired",
-                extra={
-                    "provider_id": settings.provider_id,
-                    "holder_identity": settings.connection_id,
-                    "lease_name": settings.lease_name,
-                    "lease_namespace": settings.namespace,
-                },
             )
             return
         _set_readiness(settings.readiness_file, ready=True)
         now = asyncio.get_running_loop().time()
         if now >= next_waiting_log_at:
-            _LOGGER.info(
+            logger.info(
                 "Runtime Provider waiting for leadership",
                 extra={
-                    "provider_id": settings.provider_id,
-                    "holder_identity": settings.connection_id,
-                    "lease_name": settings.lease_name,
-                    "lease_namespace": settings.namespace,
                     "current_holder": result.lease.spec.holder_identity,
                 },
             )

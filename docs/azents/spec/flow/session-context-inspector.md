@@ -160,6 +160,8 @@ the raw event JSON accordion. Both retain the same Chat mount and session.
 
 ## Verification
 
+### Historical verification
+
 As of 2026-07-21, verified through model-output admission, Context snapshot projection, and turn-marker
 serialization checks. Version 18 retains one replaceable prompt diagnostic snapshot per session instead of
 repeated prompt bodies in transcript turn markers, while preserving turn usage provenance and provider-tool
@@ -170,6 +172,14 @@ cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py
 cd python/apps/azents && uv run pyright src/azents/services/chat/context.py src/azents/api/public/chat/v1/data.py src/azents/api/public/chat/v1/__init__.py src/azents/repos/agent_execution/__init__.py
 cd typescript && corepack pnpm --filter @azents/web format:check
 cd typescript && corepack pnpm --filter @azents/web typecheck
+```
+
+### Current checks
+
+Use the configured type checker for current validation:
+
+```bash
+cd python/apps/azents && uv run ty check --error-on-warning src/azents/services/chat/context.py src/azents/api/public/chat/v1/data.py src/azents/api/public/chat/v1/__init__.py src/azents/repos/agent_execution/__init__.py
 ```
 
 ## Routine Observations
