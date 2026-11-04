@@ -289,7 +289,7 @@ convention/interface corrections.
 ### Required quality matrix
 
 - Python formatting and Ruff
-- Pyright
+- Configured Python type checker: `uv run ty check --error-on-warning`
 - Focused external-channel service, repository, mailbox, engine, API, and migration
   suites
 - Complete `python/apps/azents` pytest

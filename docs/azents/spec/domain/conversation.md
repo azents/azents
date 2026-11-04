@@ -708,10 +708,10 @@ Current verification:
 - `cd testenv/azents/e2e && uv run pytest ./src/tests/required/public/test_subagents.py ./src/tests/required/public/test_subagent_capacity.py -q` in Docker-enabled deterministic E2E environments
 
 - `cd python/apps/azents && uv run pytest src/azents/runtime -q`
-- `cd python/apps/azents && uv run pyright`
+- `cd python/apps/azents && uv run ty check --error-on-warning`
 - `cd testenv/azents && uv run pytest testenv/tests -q`
 - deterministic azents E2E CI for public chat/tool behavior
-- `cd testenv/azents/e2e && uv run pyright src/tests/required/public/test_chat_input_buffer.py`
+- `cd testenv/azents/e2e && uv run ty check --error-on-warning src/tests/required/public/test_chat_input_buffer.py`
 - REST chat write verification evidence is recorded in `docs/azents/design/rest-chat-write-boundary.md`; preemptive stop audit and E2E coverage evidence is recorded in `docs/azents/design/preemptive-user-stop-phase6-audit.md` and `docs/azents/design/preemptive-user-stop-phase7-verification.md`. Docker/testcontainers blocker #4468 and browser-runner blocker #4469 track scenarios that could not run in the current agent runtime.
 
 ## References

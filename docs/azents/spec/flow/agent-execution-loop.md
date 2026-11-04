@@ -1176,9 +1176,9 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/engine/run/tool_budget_test.py src/azents/engine/tooling/tool_search_test.py src/azents/engine/events/tools_test.py src/azents/engine/events/engine_adapter_test.py src/azents/engine/events/pydantic_ai_lowering_test.py src/azents/engine/events/pydantic_ai_output_test.py src/azents/engine/events/openai_responses_test.py src/azents/engine/tools/mcp_base_test.py src/azents/engine/tooling/toolkit_state_test.py`
 - `cd testenv/azents/e2e && uv run pytest -q src/tests/required/public/test_runtime_hooks.py -k tool_search`
-- `cd python/apps/azents && uv run pyright`
+- `cd python/apps/azents && uv run ty check --error-on-warning`
 - deterministic azents E2E CI for text/tool/UI projection behavior
-- `cd testenv/azents/e2e && uv run pyright src/tests/required/public/test_chat_input_buffer.py`
+- `cd testenv/azents/e2e && uv run ty check --error-on-warning src/tests/required/public/test_chat_input_buffer.py`
 - Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/required/public/test_agent_execution_persistence.py -q -k failed_run`
 - Per-prompt target, effort, provenance, and resolution-failure E2E: `cd testenv/azents/e2e && uv run pytest src/tests/required/public/test_per_prompt_inference_profile.py -q`
 - Model quota fallback E2E: `cd testenv/azents/e2e && uv run pytest -q src/tests/required/public/test_model_quota_fallback.py`

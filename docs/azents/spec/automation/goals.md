@@ -271,7 +271,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/services/mailbox_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/worker/session/idle_continuation_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/api/public/chat/v1/chat_api_test.py`
-- `cd python/apps/azents && uv run pyright`
+- `cd python/apps/azents && uv run ty check --error-on-warning`
 - `cd typescript && pnpm run lint --filter=@azents/web`
 - `cd typescript && pnpm run typecheck --filter=@azents/web`
 
