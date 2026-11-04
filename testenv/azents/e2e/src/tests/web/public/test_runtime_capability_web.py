@@ -303,10 +303,11 @@ def _start_runtime(
     )
     assert before.lifecycle is not None
     prior_generation = before.lifecycle.desired_generation
-    if wait_for_existing_metrics:
-        # Independently resolving metrics above controls must not move the
-        # single native click after navigation to a previously used Runtime.
-        _wait_for_settings_metrics_layout(driver, deadline=deadline)
+    # Both empty and previously measured metrics replace the upper loading
+    # panel. Observe that resolved layout before targeting the single click.
+    _wait_for_settings_metrics_layout(
+        driver, deadline=deadline, has_samples=wait_for_existing_metrics
+    )
     remaining = deadline - time.monotonic()
     assert remaining > 0, "Runtime Start exhausted the original readiness budget"
     WebDriverWait(
@@ -357,12 +358,38 @@ def _start_runtime(
     return remaining
 
 
-def _wait_for_settings_metrics_layout(driver: WebDriver, *, deadline: float) -> None:
+def _wait_for_settings_metrics_layout(
+    driver: WebDriver, *, deadline: float, has_samples: bool
+) -> None:
     """Observe the real upper content before targeting lifecycle controls."""
     remaining = deadline - time.monotonic()
     assert remaining > 0, "Runtime Start exhausted the original readiness budget"
 
     def ready(current: WebDriver) -> bool:
+        if not has_samples:
+            surfaces = current.find_elements(
+                By.XPATH, "//p[normalize-space()='System metrics']/../../.."
+            )
+            if len(surfaces) != 1:
+                return False
+            surface = surfaces[0]
+            stopped = surface.find_elements(
+                By.XPATH, ".//span[normalize-space()='Runtime stopped']"
+            )
+            measurements = surface.find_elements(
+                By.XPATH, ".//p[normalize-space()='No measurement yet']"
+            )
+            trends = surface.find_elements(
+                By.XPATH, ".//p[normalize-space()='No retained samples']"
+            )
+            return bool(
+                len(stopped) == 1
+                and len(measurements) == 3
+                and len(trends) == 3
+                and all(
+                    item.is_displayed() for item in [*stopped, *measurements, *trends]
+                )
+            )
         return bool(
             ec.visibility_of_element_located(
                 (By.XPATH, "//*[normalize-space()='Scope: Container']")

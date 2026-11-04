@@ -72,13 +72,15 @@ and persisted retention-policy updates remain browser E2E responsibilities.
 
 ## Runtime Settings Browser Readiness
 
-The Runtime lifecycle browser journey waits for the previously collected metrics
-scope and one-hour trend to become visible after settings navigation before its
-single native stop-to-start activation. Initial startup does not wait for metrics
-that do not yet exist. Layout readiness, click readiness, authoritative
-newer-generation admission and subsequent Runtime readiness share the original
-120-second budget; no click is replayed and lifecycle or sentinel checks are
-unchanged.
+The Runtime lifecycle browser journey observes the resolved metrics layout above
+its controls before each single native Start activation. A previously measured
+Runtime requires the collected scope and one-hour trend. A fresh stopped Runtime
+requires its actual stopped summary and all three visible empty metric panels,
+scoped to the metrics surface; it does not wait for samples that cannot exist
+before startup. Loading, error and partial empty layouts do not qualify. Layout
+readiness, click readiness, authoritative newer-generation admission and subsequent
+Runtime readiness share the original 120-second budget; no click is replayed and
+lifecycle or sentinel checks are unchanged.
 
 ## Login Browser Readiness
 

@@ -64,11 +64,10 @@ def test_start_observes_existing_layout_before_one_click(
             agent_id="agent",
             wait_for_existing_metrics=existing_metrics,
         )
-        if existing_metrics:
-            layout.assert_called_once_with(driver, deadline=220)
-        else:
-            layout.assert_not_called()
-    assert order == (["layout"] if existing_metrics else []) + ["click", "admitted"]
+        layout.assert_called_once_with(
+            driver, deadline=220, has_samples=existing_metrics
+        )
+    assert order == ["layout", "click", "admitted"]
     button.click.assert_called_once_with()
     assert remaining_waits == expected_waits
     assert remaining == expected_remaining
@@ -119,5 +118,7 @@ def test_layout_requires_scope_and_chart_inside_remaining_budget() -> None:
             side_effect=[visible_scope, chart, visible_scope, chart],
         ),
     ):
-        subject._wait_for_settings_metrics_layout(driver, deadline=220)
+        subject._wait_for_settings_metrics_layout(
+            driver, deadline=220, has_samples=True
+        )
     assert checks == [False, True]

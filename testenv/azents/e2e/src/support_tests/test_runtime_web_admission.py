@@ -47,10 +47,13 @@ def test_start_observes_new_running_generation_before_metrics_with_remaining_bud
     monkeypatch.setattr(web, "WebDriverWait", Mock(side_effect=[click_wait, wait]))
     monkeypatch.setattr(web, "_wait_for_runtime_metrics", metrics)
     monkeypatch.setattr(web.time, "monotonic", clock)
+    layout = Mock(side_effect=lambda *args, **kwargs: trace.append("layout"))
+    monkeypatch.setattr(web, "_wait_for_settings_metrics_layout", layout)
     web._start_runtime_and_wait_for_metrics(
         driver, runtime_api=api, token="token", handle="workspace", agent_id="agent"
     )
-    assert trace == ["click", "admission", "metrics"]
+    assert trace == ["layout", "click", "admission", "metrics"]
+    layout.assert_called_once_with(driver, deadline=220.0, has_samples=False)
     click.assert_called_once_with()
     metrics.assert_called_once_with(
         driver,
@@ -83,6 +86,7 @@ def test_unadmitted_start_fails_with_bounded_state_without_second_click_or_metri
     click_wait.until.return_value = Mock(click=click)
     monkeypatch.setattr(web, "WebDriverWait", Mock(side_effect=[click_wait, wait]))
     monkeypatch.setattr(web, "_wait_for_runtime_metrics", metrics)
+    monkeypatch.setattr(web, "_wait_for_settings_metrics_layout", Mock())
     with pytest.raises(
         AssertionError, match="did not advance authoritative admission"
     ) as error:
@@ -164,8 +168,82 @@ def test_second_start_shares_one_budget_with_full_readiness(
     assert remaining == 111.0
     wait_factory.assert_called_once_with(driver, 111.0, poll_frequency=1)
     click.assert_called_once_with()
-    layout.assert_called_once_with(driver, deadline=220.0)
+    layout.assert_called_once_with(driver, deadline=220.0, has_samples=True)
     ready_wait.until.assert_called_once()
+
+
+@pytest.mark.parametrize("has_samples", [False, True])
+def test_unresolved_metrics_layout_prevents_any_start_action(
+    monkeypatch: pytest.MonkeyPatch, has_samples: bool
+) -> None:
+    driver = Mock(current_window_handle="window")
+    api = Mock(spec=AgentRuntimeV1Api)
+    api.agent_runtime_v1_get_agent_runtime.return_value = _runtime(0, "stopped")
+    wait_factory = Mock()
+    layout = Mock(side_effect=TimeoutException("unresolved layout"))
+    monkeypatch.setattr(web, "WebDriverWait", wait_factory)
+    monkeypatch.setattr(web, "_wait_for_settings_metrics_layout", layout)
+    monkeypatch.setattr(web.time, "monotonic", Mock(return_value=100.0))
+    with pytest.raises(TimeoutException, match="unresolved layout"):
+        web._start_runtime(
+            driver,
+            runtime_api=api,
+            token="token",
+            handle="workspace",
+            agent_id="agent",
+            wait_for_existing_metrics=has_samples,
+        )
+    layout.assert_called_once_with(driver, deadline=220.0, has_samples=has_samples)
+    wait_factory.assert_not_called()
+    api.agent_runtime_v1_get_agent_runtime.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "surfaces,stopped,measurements,trends,visible,expected",
+    [
+        (1, 1, 3, 3, True, True),
+        (0, 0, 0, 0, True, False),
+        (1, 0, 3, 3, True, False),
+        (1, 1, 2, 3, True, False),
+        (1, 1, 3, 2, True, False),
+        (1, 1, 3, 3, False, False),
+    ],
+)
+def test_initial_metrics_layout_requires_complete_visible_stopped_panels(
+    monkeypatch: pytest.MonkeyPatch,
+    surfaces: int,
+    stopped: int,
+    measurements: int,
+    trends: int,
+    visible: bool,
+    expected: bool,
+) -> None:
+    element = Mock()
+    element.is_displayed.return_value = visible
+    surface = Mock()
+    surface.find_elements.side_effect = [
+        [element] * stopped,
+        [element] * measurements,
+        [element] * trends,
+    ]
+    driver = Mock()
+    driver.find_elements.return_value = [surface] * surfaces
+    wait = Mock()
+
+    def until(predicate):
+        assert predicate(driver) is expected
+
+    wait.until.side_effect = until
+    wait_factory = Mock(return_value=wait)
+    monkeypatch.setattr(web, "WebDriverWait", wait_factory)
+    monkeypatch.setattr(web.time, "monotonic", Mock(return_value=100.0))
+    web._wait_for_settings_metrics_layout(driver, deadline=120.0, has_samples=False)
+    wait_factory.assert_called_once_with(
+        driver,
+        20.0,
+        poll_frequency=0.1,
+        ignored_exceptions=(web.StaleElementReferenceException,),
+    )
 
 
 @pytest.mark.parametrize(
