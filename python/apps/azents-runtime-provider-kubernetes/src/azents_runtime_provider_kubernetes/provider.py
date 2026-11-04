@@ -1,5 +1,6 @@
 """Kubernetes implementation of the Agent Runtime Provider lifecycle."""
 
+import asyncio
 import dataclasses
 import ipaddress
 import logging
@@ -808,6 +809,8 @@ class KubernetesRuntimeProvider:
         )
         try:
             bundle = await self._v3_bundle(command, policy, prepare_proxy=False)
+        except asyncio.CancelledError:
+            raise
         except (InvalidMandatoryService, InvalidRuntimeCa) as error:
             observed_state, reason = (
                 (RuntimeProviderObservedState.STOPPED, "resources_absent")

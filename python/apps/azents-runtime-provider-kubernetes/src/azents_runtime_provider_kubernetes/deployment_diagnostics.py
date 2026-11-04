@@ -254,6 +254,8 @@ async def _check_api_resources(
     for api_version, expected_resources in _EXPECTED_API_RESOURCES.items():
         try:
             resources = await api.discover_api_resources(api_version)
+        except asyncio.CancelledError:
+            raise
         except _EXPECTED_API_FAILURES:
             _add_warning(
                 warnings,
@@ -285,6 +287,8 @@ async def _check_rbac(
                     verb=verb,
                     resource_name=None,
                 )
+            except asyncio.CancelledError:
+                raise
             except _EXPECTED_API_FAILURES:
                 allowed = False
             if not allowed:
@@ -302,6 +306,8 @@ async def _check_rbac(
                 verb="get",
                 resource_name=reference.name,
             )
+        except asyncio.CancelledError:
+            raise
         except _EXPECTED_API_FAILURES:
             allowed = False
         if not allowed:
@@ -319,6 +325,8 @@ async def _check_namespace_and_policies(
 ) -> None:
     try:
         namespace = await api.get_namespace(settings.workload_namespace)
+    except asyncio.CancelledError:
+        raise
     except _EXPECTED_API_FAILURES:
         namespace = None
     if settings.provider_namespace == settings.workload_namespace:
@@ -349,6 +357,8 @@ async def _check_namespace_and_policies(
             _DEFAULT_DENY_NAME,
             settings.workload_namespace,
         )
+    except asyncio.CancelledError:
+        raise
     except _EXPECTED_API_FAILURES:
         default_deny = None
     if default_deny is None:
@@ -381,6 +391,8 @@ async def _check_namespace_and_policies(
 
     try:
         policies = await api.list_network_policies({}, settings.workload_namespace)
+    except asyncio.CancelledError:
+        raise
     except _EXPECTED_API_FAILURES:
         return
     unexpected_count = sum(1 for policy in policies if _policy_is_unexpected(policy))
@@ -400,6 +412,8 @@ async def _check_mandatory_services(
     for reference in settings.mandatory_services:
         try:
             service = await api.get_service(reference.name, reference.namespace)
+        except asyncio.CancelledError:
+            raise
         except _EXPECTED_API_FAILURES:
             service = None
         if service is None:
@@ -457,6 +471,8 @@ async def _check_network_policy_api(
     """Check API availability; data-plane enforcement requires operator attestation."""
     try:
         network_resources = await api.discover_api_resources("networking.k8s.io/v1")
+    except asyncio.CancelledError:
+        raise
     except _EXPECTED_API_FAILURES:
         _add_warning(
             warnings,
