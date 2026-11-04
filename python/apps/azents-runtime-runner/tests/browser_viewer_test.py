@@ -1106,7 +1106,17 @@ async def test_popup_selection_belongs_only_to_plain_click_initiator(
                 # Exercise native popup delivery while that background intent
                 # is active, without depending on the host's shortcut mapping.
                 await native.evaluate("window.open('about:blank')")
-        await (await opened.value).wait_for_load_state()
+        popup = await opened.value
+        # Observe this document, not the SDK's historical load-event cache.
+        async with asyncio.timeout(30):
+            await popup.wait_for_function(
+                """({url, allowBlank}) => document.readyState === "complete" &&
+                (location.href === url ||
+                  (allowBlank && location.href === "about:blank"))""",
+                arg={"url": f"{site}/popup", "allowBlank": intent == "meta"},
+            )
+            if popup.url != "about:blank":
+                await popup.locator("#text").wait_for(state="visible")
         if modifier is not None:
             await active.input(
                 sequence, {"kind": "key", "phase": "up", "key": modifier}

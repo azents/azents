@@ -102,6 +102,19 @@ coverage opens the first dialog without preparation, answers its exact identity
 and observes loaded content, then closes the manager with a distinct second
 navigation pending. Native startup, both engines, original dialog assertions and
 shutdown drain remain covered without changing product or dialog deadlines.
+Native popup-selection tests retain the pre-armed real page event and all input,
+attachment ownership and hint-exclusion assertions. Their existing 30-second
+readiness budget observes the expected fixture URL, current complete document
+and visible input rather than historical SDK load-event bookkeeping. Only the
+meta intent may admit its explicitly generated blank document.
+
+The Google browser connection journey resolves each exact service/group label to
+its associated input within the selection section. It performs at most one native
+selection when needed and observes both selected state and dependent service-group
+rendering before continuing. Calendar must remain selected after adding Gmail
+and applying the preset. Observational polling never repeats a click or mutates
+React state; OAuth review, publication and metadata checks remain assembled-product
+browser obligations.
 
 The native Browser journey finishes real GUI input before opening its fresh raw
 reconnection/revocation observer. The GUI consumes and acknowledges its own

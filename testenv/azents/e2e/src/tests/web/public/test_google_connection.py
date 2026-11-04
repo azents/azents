@@ -43,10 +43,35 @@ from tests.web.public.test_agent_toolkits import (
 E2E_PLANNER_FALLBACK_WEIGHT = 35.0
 
 
-def check(driver: WebDriver, label: str) -> None:
-    _wait(driver).until(
-        ec.element_to_be_clickable((By.XPATH, f"//label[normalize-space()={label!r}]"))
-    ).click()
+def check(driver: WebDriver, label: str, *, group_label: str | None) -> None:
+    section = '//section[@aria-labelledby="google-select-heading"]'
+    labelled = _wait(driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, f"{section}//label[normalize-space()={label!r}]")
+        )
+    )
+    control_id = labelled.get_attribute("for")
+    assert control_id is not None
+    if not driver.find_element(By.ID, control_id).is_selected():
+        labelled.click()
+    _wait(driver).until(ec.element_located_to_be_selected((By.ID, control_id)))
+    if group_label is not None:
+        _wait(driver).until(
+            ec.visibility_of_element_located(
+                (By.XPATH, f"{section}//label[normalize-space()={group_label!r}]")
+            )
+        )
+
+
+def assert_selected(driver: WebDriver, label: str) -> None:
+    labelled = driver.find_element(
+        By.XPATH,
+        '//section[@aria-labelledby="google-select-heading"]'
+        f"//label[normalize-space()={label!r}]",
+    )
+    control_id = labelled.get_attribute("for")
+    assert control_id is not None
+    assert driver.find_element(By.ID, control_id).is_selected(), label
 
 
 @pytest.mark.parametrize("agent_owned", [False, True])
@@ -119,10 +144,17 @@ def test_google_same_context_partial_review_and_metadata_preservation(
             'section[aria-labelledby="google-select-heading"] input[role="switch"]',
         )
     )
-    check(browser_driver, "Calendar")
-    check(browser_driver, "Gmail")
+    check(
+        browser_driver,
+        "Calendar",
+        group_label="Create, edit and respond to events",
+    )
+    check(browser_driver, "Gmail", group_label="Read mail and attachments")
+    assert_selected(browser_driver, "Calendar")
     _click_button(browser_driver, "Read only")
-    check(browser_driver, "Create, edit and respond to events")
+    assert_selected(browser_driver, "Calendar")
+    assert_selected(browser_driver, "Gmail")
+    check(browser_driver, "Create, edit and respond to events", group_label=None)
     original_window = browser_driver.current_window_handle
     _click_button(browser_driver, "Continue to Google")
     _assert_visible_text(browser_driver, "2. Review account and permissions")
