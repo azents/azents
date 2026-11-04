@@ -6,7 +6,9 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
+import sys
 import time
 from collections import deque
 from collections.abc import Sequence
@@ -356,9 +358,64 @@ def export(image: str, directory: Path) -> ImageReceipt:
     return receipt
 
 
+def _import_archive(archive: Path, receipt: ImageReceipt) -> None:
+    """Release the owned compressed input independently of Docker's response."""
+    started = time.monotonic()
+    with os.fdopen(os.open(archive, os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
+        metadata = os.fstat(source.fileno())
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_size != receipt.archive_bytes
+            or hashlib.file_digest(source, "sha256").hexdigest()
+            != receipt.archive_sha256
+        ):
+            raise ValueError("Opened CI image archive integrity mismatch")
+        source.seek(0)
+        decoder = subprocess.Popen(
+            ["zstd", "-dc"], stdin=source, stdout=subprocess.PIPE
+        )
+    assert decoder.stdout is not None
+    loader: subprocess.Popen[bytes] | None = None
+    try:
+        current = archive.lstat()
+        if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise ValueError("CI image archive changed before disposal")
+        archive.unlink()
+        loader = subprocess.Popen(["docker", "image", "load"], stdin=decoder.stdout)
+    finally:
+        # Docker owns its read endpoint. On spawn/disposal failure this close
+        # also lets an otherwise blocked decoder terminate with broken pipe.
+        decoder.stdout.close()
+        decoded = decoder.wait()
+        try:
+            capacity = os.statvfs(archive.parent)
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "event": "ci_image_source_consumed",
+                        "image": receipt.image,
+                        "decoder_status": decoded,
+                        "seconds": time.monotonic() - started,
+                        "source_allocated_bytes": metadata.st_blocks * 512,
+                        "source_unlinked": not archive.exists(),
+                        "docker_running": loader is not None and loader.poll() is None,
+                        "filesystem_free_bytes": capacity.f_bavail * capacity.f_frsize,
+                    }
+                )
+                + "\n"
+            )
+            sys.stdout.flush()
+        finally:
+            if loader is not None:
+                loaded = loader.wait()
+    if decoded != 0 or loaded != 0:
+        raise RuntimeError("CI Docker image import failed")
+
+
 def _load_image(archive: Path, receipt: ImageReceipt) -> ImageLoad:
     started = time.monotonic()
-    subprocess.run(["docker", "image", "load", "--input", str(archive)], check=True)
+    _import_archive(archive, receipt)
     tag = f"{receipt.image}:ci"
     if inspect(receipt.image_id) != receipt.image_id:
         raise ValueError("Loaded CI Docker image identity mismatch")

@@ -496,6 +496,13 @@ jobs:
           } > "$report_dir/runner-disk-before-load.txt" 2>&1; then
             printf '::warning::Pre-load filesystem observation unavailable\n'
           fi
+          if ! {
+            docker version
+            docker info
+            zstd --version
+          } > "$report_dir/docker-loader-info.txt" 2>&1; then
+            printf '::warning::Docker loader observation unavailable\n'
+          fi
           python -m scripts.ci.e2e_images load \
             --root "${RUNNER_TEMP}/e2e-images" \
             --suite "${{ matrix.suite }}" \

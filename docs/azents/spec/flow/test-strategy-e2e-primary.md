@@ -443,7 +443,16 @@ Always-on required CI does not depend on external credentials.
   tested SHA, run ID and attempt. Consumers validate the entire exact portfolio,
   receipt fields, non-symlink files, archive sizes and SHA256 hashes before loading
   any image. Two bounded import slots overlap independent archive loads on the same
-  runner, without changing pytest workers or runner allocation. Every started import
+  runner, without changing pytest workers or runner allocation. Each import reopens
+  its single-link regular compressed input without following symlinks and rechecks
+  descriptor size and hash before handing it to an owned zstd decoder. The parent
+  closes its source descriptor and unlinks only that disposable archive; Docker
+  consumes decoded stdin without an intermediate tar. Decoder exit releases source
+  storage independently of Docker's final response, without promising a strict
+  layer-registration ordering or sufficient free-space margin. Both children are
+  reaped and must succeed before image checks; spawn/disposal failures close the
+  read pipe before joining the decoder. Receipts and source-consumption diagnostics
+  remain after archive disposal. Every started import
   is drained even on another import's failure. Loaded IDs and the assigned local
   tags must match all receipts before environment variables are published.
   Missing, stale, duplicate, partial, corrupt
