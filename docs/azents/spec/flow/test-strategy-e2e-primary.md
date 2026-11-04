@@ -95,6 +95,14 @@ observation boundary; actual browser E2E remains the product evidence.
 
 ## Browser Consumer and Navigation Lifetimes
 
+The native initial-navigation dialog test establishes the exact Session context
+before its five-second dialog-handoff sentinel. The command still creates a
+fresh task/page and navigates to the real dialog once. Separate cold lifecycle
+coverage opens the first dialog without preparation, answers its exact identity
+and observes loaded content, then closes the manager with a distinct second
+navigation pending. Native startup, both engines, original dialog assertions and
+shutdown drain remain covered without changing product or dialog deadlines.
+
 The native Browser journey finishes real GUI input before opening its fresh raw
 reconnection/revocation observer. The GUI consumes and acknowledges its own
 frames during those interactions; an unrelated raw receiver is not left idle

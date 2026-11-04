@@ -547,7 +547,27 @@ async def test_closing_manager_drains_outstanding_dialog_task(
     pending = await manager.execute(
         BrowserOpenCommand(a, None, site + "/initial-dialog", None)
     )
-    assert pending.dialog is not None
+    assert pending.page is not None and pending.dialog is not None
+    assert pending.action_state == "dialog_pending"
+    assert pending.dialog.message == "Initial question"
+    first_page = pending.page.id
+    first_dialog = pending.dialog.id
+    answered = await manager.execute(
+        BrowserActCommand(
+            a,
+            target(pending),
+            _action("dialog", dialog_id=first_dialog, accept=True),
+        )
+    )
+    assert answered.dialog is None and answered.action_state == "dispatched"
+    read = await observe(manager, a, target(pending), "glance")
+    assert read.content is not None and "Loaded" in read.content
+    pending = await manager.execute(
+        BrowserOpenCommand(a, None, site + "/initial-dialog", None)
+    )
+    assert pending.page is not None and pending.page.id != first_page
+    assert pending.dialog is not None and pending.dialog.id != first_dialog
+    assert pending.action_state == "dialog_pending"
     current = target(pending)
     _, resource, _ = manager.target(a, current)
     outstanding = resource.pending
@@ -821,6 +841,9 @@ async def test_open_navigation_dialog_returns_current_resources_without_deadlock
     tmp_path: Path,
 ) -> None:
     a = authority(tmp_path)
+    # Bound the fresh page's dialog handoff, not native engine/profile startup.
+    # The cold-open response and shutdown path remain covered together above.
+    await manager._context(a)
     opened = await asyncio.wait_for(
         manager.execute(BrowserOpenCommand(a, None, site + "/initial-dialog", None)), 5
     )
