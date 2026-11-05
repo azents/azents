@@ -1,14 +1,13 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-11-04T22:43:05Z",
+    "checked_at": "2026-11-05T22:39:02Z",
     "checked_ruleset_revisions": [
       "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
       "6d3a3bafea19886f6349ad8fbc162b1a37f3fd7dafa6118e96852f0f7fd800e1",
-      "a17cf7d88595dc5ac405abbff7fd713dd139c90ec09c0e87131f53bec14f7f8c",
-      "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
+      "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "27d8f80adeb9967208f67761164994fe31aaf0b3"
+    "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -397,39 +396,39 @@
       "checked_through_commit": "27d8f80adeb9967208f67761164994fe31aaf0b3"
     },
     "python/apps/azents-runtime-provider-kubernetes/**::bucket-8-of-8": {
-      "checked_at": "2026-10-01T00:35:20Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "4f338c476e60308fb10b6286cb6b155a86c65438"
+      "checked_at": "2026-11-05T22:39:02Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
     },
     "python/apps/azents-runtime-proxy/**::bucket-1-of-8": {
-      "checked_at": "2026-10-01T00:35:20Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "4f338c476e60308fb10b6286cb6b155a86c65438"
+      "checked_at": "2026-11-05T22:39:02Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
     },
     "python/apps/azents-runtime-proxy/**::bucket-2-of-8": {
-      "checked_at": "2026-10-01T00:35:20Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "4f338c476e60308fb10b6286cb6b155a86c65438"
+      "checked_at": "2026-11-05T22:39:02Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
     },
     "python/apps/azents-runtime-proxy/**::bucket-3-of-8": {
-      "checked_at": "2026-10-01T00:35:20Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "4f338c476e60308fb10b6286cb6b155a86c65438"
+      "checked_at": "2026-11-05T22:39:02Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
     },
     "python/apps/azents-runtime-proxy/**::bucket-4-of-8": {
-      "checked_at": "2026-10-01T22:30:04Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
+      "checked_at": "2026-11-05T22:39:02Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
     },
     "python/apps/azents-runtime-proxy/**::bucket-5-of-8": {
-      "checked_at": "2026-10-01T22:30:04Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
+      "checked_at": "2026-11-05T22:39:02Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
     },
     "python/apps/azents-runtime-proxy/**::bucket-7-of-8": {
-      "checked_at": "2026-10-01T22:30:04Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "1622d02e1eff14ecc18514e2416ba740956a67fd"
+      "checked_at": "2026-11-05T22:39:02Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "a71bd8e41f75d3b909759da604de6087a29dc0c0"
     },
     "python/apps/azents-runtime-proxy/**::bucket-8-of-8": {
       "checked_at": "2026-10-01T22:30:04Z",
