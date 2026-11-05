@@ -44,8 +44,14 @@ Required environment:
 
 ```text
 AZ_LLM_PROXY_AUTHORITY_URL=https://private-authority.example/internal/llm
-AZ_LLM_PROXY_RESOLVER_KEY=<resolver-only service credential>
 ```
+
+Choose exactly one resolver identity source: Kubernetes deployments mount a
+projected token and set `AZ_LLM_PROXY_RESOLVER_TOKEN_FILE`; explicit shared-key
+deployments set `AZ_LLM_PROXY_RESOLVER_KEY`. The Kubernetes chart configures the
+token file automatically, with no manually prepared resolver Secret. The file is
+reread on every authority request so rotation needs no restart. Failed identity
+preparation or verification never falls back to another credential source.
 
 Optional deployment-only settings are `AZ_LLM_PROXY_AUTHORITY_CA_FILE`,
 `AZ_LLM_PROXY_AUTHORITY_TIMEOUT_SECONDS` (15), and `AZ_LLM_PROXY_PORT` (4000).
@@ -146,6 +152,7 @@ From the repository root, build with:
 docker build -f python/apps/azents-llm-proxy/Dockerfile -t azents-llm-proxy:local .
 ```
 
-The independent, default-off chart profile and required resolver/CA Secret inputs
+The independent, default-off chart profile, automatic Kubernetes identity and
+optional private CA / explicit shared-key Secret inputs
 are described in `infra/charts/azents/README.md`. CI runs package checks and image
 composition smoke tests; image success and all-provider acceptance are distinct.

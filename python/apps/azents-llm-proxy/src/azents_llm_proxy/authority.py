@@ -2,6 +2,7 @@
 
 import ssl
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TypeVar
 
 import httpx
@@ -34,7 +35,7 @@ class AuthorityUnavailable(Exception):
 @dataclass(frozen=True, repr=False)
 class AuthorityClient:
     client: httpx.AsyncClient
-    resolver_key: SecretStr = field(repr=False)
+    resolver_key: SecretStr | Path = field(repr=False)
 
     async def list_models(self, agent_token: SecretStr) -> ModelListResponse:
         return await self._post(
@@ -62,12 +63,23 @@ class AuthorityClient:
     async def _post(
         self, operation: str, payload: AuthorityPayload, response_type: type[Payload]
     ) -> Payload:
+        if isinstance(self.resolver_key, Path):
+            try:
+                credential = self.resolver_key.read_text().strip()
+            except OSError, UnicodeError:
+                raise AuthorityUnavailable(
+                    "Resolver identity is unavailable."
+                ) from None
+            if not credential or len(credential) > 16384:
+                raise AuthorityUnavailable("Resolver identity is unavailable.")
+        else:
+            credential = self.resolver_key.get_secret_value()
         try:
             response = await self.client.post(
                 operation,
                 content=payload.protected_json(),
                 headers={
-                    "X-Azents-LLM-Resolver": self.resolver_key.get_secret_value(),
+                    "X-Azents-LLM-Resolver": credential,
                     "Content-Type": "application/json",
                 },
                 follow_redirects=False,

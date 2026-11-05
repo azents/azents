@@ -48,26 +48,38 @@ llmProxy:
     digest: sha256:<verified-image-digest>
   authority:
     url: https://private-authority.example/internal/llm
-    resolver:
-      existingSecret: inference-resolver
-      key: resolver-key
+    authentication: kubernetes_service_account
     ca:
       existingSecret: authority-ca
       key: ca.crt
 ```
 
-Only the resolver credential is injected; no `envFrom`, server credential bundle,
-issuer/Admin token, cloud account environment, or Kubernetes ServiceAccount token
-is supplied. The optional CA Secret is mounted read-only and used only to verify
+The default Kubernetes authentication uses a dedicated Proxy ServiceAccount and
+an explicitly projected `azents-llm-resolver` audience token. Kubernetes renews the
+token and the Proxy reads the mounted file on every authority call. No manual
+resolver key or shared Secret is required. The Proxy has no Kubernetes API RBAC.
+No `envFrom`, server credential bundle, issuer/Admin token or cloud account
+environment is supplied. The optional CA Secret is mounted read-only to verify
 the authority HTTPS channel. An absent CA uses the image's standard trust roots;
 TLS verification cannot be disabled. Consumers must protect the private authority
 route with their network/ingress policy as well as its dedicated authentication.
 
-For an authority server in the same chart, configure
-`server.llmAuthority.resolver.existingSecret` and its `key` to the corresponding
-resolver credential. That reference is injected into `apiserver` only, not the
-Worker, scheduler, Admin server or Runtime. It grants list/resolve access, never
-token issuance. The Proxy and authority may also be separate chart releases.
+For an authority server in the same chart, the chart configures the exact Proxy
+namespace/ServiceAccount subject automatically. The configured server
+ServiceAccount receives TokenReview-create permission, preserving its existing
+cloud identity and externally managed lifecycle. Other server workloads sharing
+that account inherit the review grant, which cannot issue or modify tokens.
+Each request verifies the
+token online for the resolver audience and exact subject; failure never falls
+back to another authentication method. `global.rbac.create` must be enabled.
+
+Explicit non-Kubernetes/shared-key deployments select
+`llmProxy.authority.authentication: shared_key` and provide
+`llmProxy.authority.resolver.existingSecret`/`key`. The server's corresponding
+`server.llmAuthority.resolver` reference is injected into `apiserver` only. For
+separate Kubernetes releases, configure the authority's
+`AZ_LLM_RESOLVER_KUBERNETES_SERVICE_ACCOUNT` to the exact Proxy subject and provide
+TokenReview RBAC to that API server. Neither method grants issuance/Admin access.
 Do not expose `/internal/llm` on an unrestricted public ingress: its verified
 private HTTPS endpoint and network restriction remain operator prerequisites.
 

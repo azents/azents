@@ -88,7 +88,10 @@ def create_application(
             provider_clients.open(bootstrap.context) as clients,
         ):
             bootstrap.context.clients = clients
-            bootstrap.configure(AuthorityClient(client, settings.resolver_key))
+            credential = settings.resolver_token_file or settings.resolver_key
+            if credential is None:
+                raise RuntimeError("Resolver identity is not configured.")
+            bootstrap.configure(AuthorityClient(client, credential))
             try:
                 async with original_lifespan(app):
                     select_direct_dispatch()

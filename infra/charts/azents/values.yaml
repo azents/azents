@@ -266,6 +266,7 @@ llmProxy:
   authority:
     url: ""
     timeoutSeconds: 15
+    authentication: kubernetes_service_account
     resolver:
       existingSecret: ""
       key: resolver-key

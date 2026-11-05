@@ -1,6 +1,15 @@
 {{- $proxy := .Values.llmProxy }}
 {{- if $proxy.enabled }}
 {{- $name := printf "%s-llm-proxy" (include "azents.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $workloadIdentity := eq $proxy.authority.authentication "kubernetes_service_account" }}
+{{- if $workloadIdentity }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+automountServiceAccountToken: false
+---
+{{- end }}
 {{- $repository := required "llmProxy.image.repository is required" $proxy.image.repository }}
 {{- $tag := required "llmProxy.image.tag is required" $proxy.image.tag }}
 {{- $image := printf "%s:%s" $repository $tag }}
@@ -24,6 +33,9 @@ spec:
         {{- include "azents.selectorLabels" (dict "root" . "component" "llm-proxy") | nindent 8 }}
     spec:
       automountServiceAccountToken: false
+      {{- if $workloadIdentity }}
+      serviceAccountName: {{ $name }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ $proxy.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: true
@@ -52,11 +64,16 @@ spec:
               value: {{ required "llmProxy.authority.url is required" $proxy.authority.url | quote }}
             - name: AZ_LLM_PROXY_AUTHORITY_TIMEOUT_SECONDS
               value: {{ $proxy.authority.timeoutSeconds | quote }}
+            {{- if $workloadIdentity }}
+            - name: AZ_LLM_PROXY_RESOLVER_TOKEN_FILE
+              value: /var/run/azents/resolver/token
+            {{- else }}
             - name: AZ_LLM_PROXY_RESOLVER_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ required "llmProxy.authority.resolver.existingSecret is required" $proxy.authority.resolver.existingSecret | quote }}
                   key: {{ $proxy.authority.resolver.key | quote }}
+            {{- end }}
             {{- if $proxy.authority.ca.existingSecret }}
             - name: AZ_LLM_PROXY_AUTHORITY_CA_FILE
               value: /var/run/azents/authority/ca.crt
@@ -73,20 +90,39 @@ spec:
             initialDelaySeconds: 30
           resources:
             {{- toYaml $proxy.resources | nindent 12 }}
-          {{- if $proxy.authority.ca.existingSecret }}
+          {{- if or $workloadIdentity $proxy.authority.ca.existingSecret }}
           volumeMounts:
+            {{- if $workloadIdentity }}
+            - name: resolver-identity
+              mountPath: /var/run/azents/resolver
+              readOnly: true
+            {{- end }}
+            {{- if $proxy.authority.ca.existingSecret }}
             - name: authority-ca
               mountPath: /var/run/azents/authority
               readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if $proxy.authority.ca.existingSecret }}
+      {{- if or $workloadIdentity $proxy.authority.ca.existingSecret }}
       volumes:
+        {{- if $workloadIdentity }}
+        - name: resolver-identity
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  audience: azents-llm-resolver
+                  expirationSeconds: 3600
+                  path: token
+        {{- end }}
+        {{- if $proxy.authority.ca.existingSecret }}
         - name: authority-ca
           secret:
             secretName: {{ $proxy.authority.ca.existingSecret | quote }}
             items:
               - key: {{ $proxy.authority.ca.key | quote }}
                 path: ca.crt
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1

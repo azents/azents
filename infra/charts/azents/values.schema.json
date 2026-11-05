@@ -479,6 +479,13 @@
               "type": "number",
               "exclusiveMinimum": 0
             },
+            "authentication": {
+              "type": "string",
+              "enum": [
+                "kubernetes_service_account",
+                "shared_key"
+              ]
+            },
             "resolver": {
               "$ref": "#/definitions/llmProxySecret"
             },

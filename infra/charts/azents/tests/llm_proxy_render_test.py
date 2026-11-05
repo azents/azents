@@ -23,6 +23,7 @@ def render(*values: str, enabled: bool = True) -> subprocess.CompletedProcess[st
         "llmProxy.image.repository=repo/llm-proxy",
         "llmProxy.image.tag=test-sha",
         "llmProxy.authority.url=https://authority.internal/internal/llm",
+        "llmProxy.authority.authentication=shared_key",
         "llmProxy.authority.resolver.existingSecret=proxy-resolver",
     ]
     if enabled:
@@ -142,3 +143,70 @@ def test_authority_resolver_secret_is_only_in_the_api_server() -> None:
                         "key": "resolver-key",
                     }
     assert recipients == ["apiserver"]
+
+
+@pytest.mark.parametrize("managed", [True, False])
+def test_kubernetes_identity_preserves_configured_server_identity(
+    managed: bool,
+) -> None:
+    result = render(
+        "server.enabled=true",
+        "server.image.repository=repo/server",
+        "server.image.tag=test-sha",
+        "llmProxy.authority.authentication=kubernetes_service_account",
+        "llmProxy.authority.resolver.existingSecret=",
+        "server.serviceAccount.name=consumer-cloud-identity",
+        f"server.serviceAccount.create={str(managed).lower()}",
+    )
+    assert result.returncode == 0, result.stderr
+    documents = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+    deployments = {
+        doc["metadata"]["name"]: doc["spec"]["template"]["spec"]
+        for doc in documents
+        if doc["kind"] == "Deployment"
+    }
+    proxy = deployments["azents-llm-proxy"]
+    assert proxy["serviceAccountName"] == "azents-llm-proxy"
+    assert proxy["automountServiceAccountToken"] is False
+    identity = next(v for v in proxy["volumes"] if v["name"] == "resolver-identity")
+    assert identity["projected"]["sources"] == [
+        {
+            "serviceAccountToken": {
+                "audience": "azents-llm-resolver",
+                "expirationSeconds": 3600,
+                "path": "token",
+            }
+        }
+    ]
+    api = deployments["apiserver"]
+    assert api["serviceAccountName"] == "consumer-cloud-identity"
+    env = {e["name"]: e for e in api["containers"][0]["env"]}
+    assert env["AZ_LLM_RESOLVER_KUBERNETES_SERVICE_ACCOUNT"]["value"] == (
+        "system:serviceaccount:default:azents-llm-proxy"
+    )
+    assert "AZ_LLM_RESOLVER_SERVICE_KEY" not in env
+    role = next(
+        d
+        for d in documents
+        if d["kind"] == "ClusterRole" and "resolver-review" in d["metadata"]["name"]
+    )
+    assert role["rules"] == [
+        {
+            "apiGroups": ["authentication.k8s.io"],
+            "resources": ["tokenreviews"],
+            "verbs": ["create"],
+        }
+    ]
+    binding = next(
+        d
+        for d in documents
+        if d["kind"] == "ClusterRoleBinding"
+        and d["roleRef"]["name"] == role["metadata"]["name"]
+    )
+    assert binding["subjects"] == [
+        {
+            "kind": "ServiceAccount",
+            "name": "consumer-cloud-identity",
+            "namespace": "default",
+        }
+    ]
