@@ -116,8 +116,11 @@ def _login_main_web(
     base_url: str,
     email: str,
 ) -> None:
-    """Authenticate through the deployed Main Web login flow."""
+    """Authenticate from a fresh document through the deployed Main Web flow."""
     driver.delete_all_cookies()
+    # End the revoked document's outstanding unauthorized-query redirects.
+    driver.get("about:blank")
+    _wait(driver).until(ec.url_to_be("about:blank"))
     driver.get(f"{base_url}/login")
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
     email_input.send_keys(email)
@@ -128,7 +131,18 @@ def _login_main_web(
         ec.element_to_be_clickable((By.NAME, "password"))
     )
     password_input.send_keys(_SIGNUP_PASSWORD, Keys.ENTER)
-    _wait(driver).until(ec.url_contains("/workspaces"))
+    _wait(driver).until(ec.url_to_be(f"{base_url}/workspaces"))
+    _wait(driver).until(
+        lambda current: all(
+            current.get_cookie(name) is not None
+            for name in ("az-token", "az-refresh", "az-token-expires-at")
+        )
+    )
+    _wait(driver).until(
+        ec.visibility_of_element_located(
+            (By.XPATH, "//h2[normalize-space(.)='Choose a workspace']")
+        )
+    )
 
 
 def _select_reasoning_effort(driver: WebDriver, effort: str) -> None:

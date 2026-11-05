@@ -117,6 +117,15 @@ the same native target and must receive the actual logout authorization close.
 Keepalive failure is not revocation evidence. Default ping/queue limits, the
 revocation deadline, fresh-login preservation and stale-target rejection remain.
 
+The shared plain-login helper clears origin-scoped cookies before replacing the
+old application with an observed inert document. This ends competing redirects
+from outstanding unauthorized queries before a new login starts. It submits the
+password once, then requires the exact same-origin `/workspaces` destination,
+new authentication cookies and the rendered workspace chooser. It does not accept
+an arbitrary return target or replace real login, logout or revocation evidence.
+The product's valid `next` behavior remains owned by
+[Users and authentication](../domain/user-auth.md).
+
 Runtime Web authentication/history journeys observe the current final document
 with one synchronous script: exact destination, complete document, expected
 visible ready marker. Only the specific WebDriver navigation-abort observation
