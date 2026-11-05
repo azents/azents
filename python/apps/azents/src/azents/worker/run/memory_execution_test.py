@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import datetime
 from collections.abc import Awaitable, Callable
+from types import SimpleNamespace
 from typing import Annotated, NamedTuple
 from unittest.mock import AsyncMock, Mock
 
@@ -373,11 +374,41 @@ async def test_executor_quota_handoff_uses_clean_session_and_inherited_lifetime(
     assert not executor.script
 
 
+@pytest.mark.parametrize("remaining_seconds", [0.25, 2.0])
 async def test_executor_absolute_deadline_cancels_blocked_model_without_acceptance(
     rdb_session_manager: SessionManager[WriteSession],
+    monkeypatch: pytest.MonkeyPatch,
+    remaining_seconds: float,
 ) -> None:
+    """Control the executor timer; PostgreSQL expiry has separate authority tests."""
     executor, principal = await _executor(
-        rdb_session_manager, quotas=False, deadline_seconds=2, block_after_turns=0
+        rdb_session_manager, quotas=False, deadline_seconds=None, block_after_turns=0
+    )
+    executor = dataclasses.replace(
+        executor, entered=asyncio.Event(), release=asyncio.Event()
+    )
+    deadline = principal.binding.deadline_at
+    now = deadline - datetime.timedelta(seconds=remaining_seconds)
+    clock = Mock(wraps=datetime.datetime)
+    clock.now.return_value = now
+    timers: list[asyncio.Timeout] = []
+
+    def capture_timeout(seconds: float | None) -> asyncio.Timeout:
+        assert seconds == remaining_seconds
+        assert not timers
+        timer = asyncio.Timeout(None)
+        timers.append(timer)
+        return timer
+
+    # Isolate these two observations to the executor module. Repository UTC and
+    # PostgreSQL clock_timestamp retain their actual admission/expiry authority.
+    monkeypatch.setattr(
+        "azents.worker.run.memory_execution.datetime",
+        SimpleNamespace(**{**vars(datetime), "datetime": clock}),
+    )
+    monkeypatch.setattr(
+        "azents.worker.run.memory_execution.asyncio",
+        SimpleNamespace(**{**vars(asyncio), "timeout": capture_timeout}),
     )
     task = asyncio.create_task(
         executor.execute(
@@ -390,12 +421,30 @@ async def test_executor_absolute_deadline_cancels_blocked_model_without_acceptan
         )
     )
     assert executor.entered is not None
-    async with asyncio.timeout(6):
-        await executor.entered.wait()
-        with pytest.raises(TimeoutError):
-            await task
+    entered = asyncio.create_task(executor.entered.wait())
+    try:
+        async with asyncio.timeout(6):
+            done, _ = await asyncio.wait(
+                {entered, task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if task in done:
+                await task
+                pytest.fail("Executor completed before the blocked model was entered")
+            assert entered in done and entered.result()
+            assert len(timers) == 1 and timers[0].when() is None
+            clock.now.assert_called_once_with(datetime.UTC)
+            timers[0].reschedule(asyncio.get_running_loop().time())
+            with pytest.raises(TimeoutError):
+                await task
+        assert timers[0].expired()
+    finally:
+        for owned in (entered, task):
+            if not owned.done():
+                owned.cancel()
+        await asyncio.gather(entered, task, return_exceptions=True)
     final = await executor.executions.load_binding(principal.owner.session_id)
     assert final is not None and final.accepted is None and final.started_turns == 1
+    assert final.deadline_at == deadline
     assert executor.host_models[0].closed
     assert await executor.executions.current_result(final.unit) is None
     assert len(executor.script) == 1

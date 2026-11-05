@@ -44,6 +44,20 @@ azents product behavior verification uses E2E as primary layer. `testenv/azents`
 
 This spec defines boundaries connecting azents feature design, E2E location, fixture/prerequisite support, credential/prerequisite snapshot, and CI execution policy in current implementation.
 
+## Memory Executor Deadline Evidence
+
+Memory executor tests separate application timeout calculation/cancellation from
+PostgreSQL expiry authority. The cancellation integration retains real repositories
+and a real blocked model under the ordinary admitted fixture lifetime. Module-local
+application time verifies two exact absolute-deadline-derived timeout values; an
+entered real asyncio timeout is rescheduled only after model entry, proving actual
+cancellation, host close, one charged turn, unchanged persisted deadline and no
+accepted/current result. The six-second hang sentinel and owned-task drain remain.
+Repository integration independently sets an expired deadline and proves terminal
+recovery rejection with retained pending work. The cancellation test does not impose
+a two-second wall-clock budget on unrelated pre-model database setup or replace the
+repository's PostgreSQL clock and authorization checks.
+
 ## Layer Boundaries
 
 | Layer                       | Responsibility                                                                                               | Prohibited                                                                                          |
