@@ -103,3 +103,52 @@ void test("disabled Browser cannot reopen a pending or closed Browser selection"
   assert.equal(replaced.at(-1), `${path}?other=kept&page=files`);
   hook.unmount();
 });
+
+void test("mobile Services and Context selection survives close and URL acknowledgement", () => {
+  const { hook, replaced, navigate } = fixture("other=kept");
+  let output = hook.render({ mobile: true, browserEnabled: false });
+  hook.flushEffects();
+  assert.equal(output.opened, false);
+  invoke(output.onOpen);
+  output = hook.render();
+  assert.equal(output.opened, true);
+  assert.equal(replaced.at(-1), `${path}?other=kept&page=files`);
+  navigate("other=kept&page=files");
+  hook.render();
+  hook.flushEffects();
+  for (const view of ["services", "context"]) {
+    output = hook.render();
+    invoke(output.onSelect, view);
+    output = hook.render();
+    assert.equal(output.opened, true);
+    assert.equal(output.activeView, view);
+    assert.equal(replaced.at(-1), `${path}?other=kept&page=${view}`);
+    // The old URL remains visible until the router acknowledges the action.
+    hook.flushEffects();
+    assert.equal(hook.render().activeView, view);
+    navigate(`other=kept&page=${view}`);
+    hook.render();
+    hook.flushEffects();
+  }
+  output = hook.render();
+  invoke(output.onClose);
+  assert.equal(hook.render().opened, false);
+  assert.equal(replaced.at(-1), `${path}?other=kept`);
+  navigate("other=kept");
+  hook.render();
+  hook.flushEffects();
+  output = hook.render();
+  invoke(output.onOpen);
+  output = hook.render();
+  assert.equal(output.opened, true);
+  assert.equal(output.activeView, "context");
+  assert.equal(replaced.at(-1), `${path}?other=kept&page=context`);
+  navigate("other=kept&page=context");
+  hook.render();
+  hook.flushEffects();
+  output = hook.render({ mobile: false, browserEnabled: false });
+  hook.flushEffects();
+  assert.equal(output.opened, true);
+  assert.equal(output.activeView, "context");
+  hook.unmount();
+});

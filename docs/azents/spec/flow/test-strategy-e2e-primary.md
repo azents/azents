@@ -72,13 +72,30 @@ and persisted retention-policy updates remain browser E2E responsibilities.
 
 ## Runtime Settings Browser Readiness
 
-The Runtime lifecycle browser journey waits for the previously collected metrics
-scope and one-hour trend to become visible after settings navigation before its
-single native stop-to-start activation. Initial startup does not wait for metrics
-that do not yet exist. Layout readiness, click readiness, authoritative
-newer-generation admission and subsequent Runtime readiness share the original
-120-second budget; no click is replayed and lifecycle or sentinel checks are
-unchanged.
+The representative Runtime browser journey retains Runtime-free configuration,
+UI add and Start admission, full current-generation readiness, real settings and
+Session metrics, the Session panel's Stop mutation and removal progress. Initial
+startup does not wait for nonexistent metrics: one native click, newer-generation
+admission, full readiness and usable metrics share the original 120-second budget.
+After returning to settings, existing metrics scope and charts settle before the
+single removal confirmation. Actions are not replayed.
+Readiness polling observes the live browser Session. Timeout diagnostics distinguish
+missing admission from full readiness and retain bounded generation, target,
+convergence, availability, Provider resource and Runner state without credentials.
+
+Credential-free Required E2E owns the real SDK/Provider/Runner storage sequence:
+restart and stop/start retain a product-created workspace sentinel; reset reaches
+a newer fully ready generation and the sentinel read returns 404. Stopped metrics
+retain scoped history. This complements, rather than substitutes for, abrupt
+recovery and Terminal authority journeys. The
+[Runtime persistence](agent-runtime-persistence.md) contract remains unchanged.
+
+Required component plays and production-hook tests own confirmation copy and
+callbacks, Settings mutation payloads and post-success invalidation, mobile
+Services/Context selection, close/reopen, URL acknowledgement and unrelated-query
+preservation. Fresh/stopped metric charts and empty Services are explicit component
+portfolio entries. These static presentations do not replace deployed metric
+transport or actual workspace retention/deletion evidence.
 
 ## Login Browser Readiness
 
@@ -423,10 +440,12 @@ Always-on required CI does not depend on external credentials.
   Agent inference Proxy; Web instead adds Main Web and Admin Web.
   Both producer and consumer check out the tested head SHA rather than the synthetic
   pull-request merge commit.
-  The Runtime Runner producer imports content-addressed BuildKit layers from the
-  existing Snapshot-owned `azents-e2e-v1-azents-runtime-runner` GHA scope. CI does
-  not export this cache or add a cache writer. A cache miss uses the same ordinary
-  build, and hits retain the exact checkout, Dockerfile, load, smoke and immutable
+  Runtime Runner, Main Web and Admin Web producers import content-addressed BuildKit
+  layers from their existing Snapshot-owned `azents-e2e-v1-<image>` GHA scopes.
+  Other producers do not import these caches. CI does not export them or add a cache
+  writer; the Snapshot workflow retains ownership. A miss uses the same ordinary
+  build, and hits retain the exact checkout, full source context, Dockerfile, load,
+  required smoke and immutable
   image export; a cache never selects an old image tag or bypasses artifact checks.
   Each selected producer saves its inspected immutable Docker image ID, compresses
   once with zstd level 3 and one compression worker, hashes the archive and uploads
@@ -701,12 +720,9 @@ Always-on required CI does not depend on external credentials.
   attachment bytes, vision continuation, credential failures, and text-only fallback
   assertions remain unchanged. Credential mutation and failure journeys remain serial.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
-- Runtime lifecycle Web checks observe the browser session during full-readiness
-  polling. Start and Stop-to-Start each activate once, require a newer authoritative
-  running generation, and share the original 120-second budget between admission
-  and readiness or metrics. Timeout diagnostics distinguish missing admission from
-  missing full readiness and retain bounded generation, target, convergence,
-  availability, Provider resource and Runner state without credentials.
+- Runtime Web retains one initial Start and the Session panel's Stop connection.
+  [Runtime settings browser readiness](#runtime-settings-browser-readiness) owns
+  their budgets and the Required lifecycle/storage handoff.
 - Workspace Upload API E2E collects three public-API journeys against the real
   Docker Runtime Provider, Runtime Control, and HTTPS S3-compatible gateway:
   direct PUT followed by exact-byte download, destination conflict with explicit

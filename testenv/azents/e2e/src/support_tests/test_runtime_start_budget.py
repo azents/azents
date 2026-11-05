@@ -9,13 +9,11 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from tests.web.public import test_runtime_capability_web as subject
 
 
-@pytest.mark.parametrize("existing_metrics", [False, True])
 @pytest.mark.parametrize(
     "clock,expected_waits,expected_remaining",
     [([100, 110, 115, 125], [20, 20], 95), ([100, 215, 217, 219], [5, 3], 1)],
 )
-def test_start_observes_existing_layout_before_one_click(
-    existing_metrics: bool,
+def test_initial_start_keeps_one_click_and_one_original_budget(
     clock: list[float],
     expected_waits: list[float],
     expected_remaining: float,
@@ -52,34 +50,26 @@ def test_start_observes_existing_layout_before_one_click(
 
     with (
         patch.object(subject.time, "monotonic", side_effect=clock),
-        patch.object(subject, "_wait_for_settings_metrics_layout") as layout,
         patch.object(subject, "WebDriverWait", side_effect=wait),
     ):
-        layout.side_effect = lambda *_args, **_kwargs: order.append("layout")
         remaining = subject._start_runtime(
             driver,
             runtime_api=api,
             token="synthetic",
             handle="workspace",
             agent_id="agent",
-            wait_for_existing_metrics=existing_metrics,
         )
-        if existing_metrics:
-            layout.assert_called_once_with(driver, deadline=220)
-        else:
-            layout.assert_not_called()
-    assert order == (["layout"] if existing_metrics else []) + ["click", "admitted"]
+    assert order == ["click", "admitted"]
     button.click.assert_called_once_with()
     assert remaining_waits == expected_waits
     assert remaining == expected_remaining
 
 
-def test_exhausted_layout_budget_never_clicks() -> None:
+def test_exhausted_start_budget_never_clicks() -> None:
     driver = MagicMock(spec=WebDriver)
     api = MagicMock(spec=subject.AgentRuntimeV1Api)
     with (
         patch.object(subject.time, "monotonic", side_effect=[100, 221]),
-        patch.object(subject, "_wait_for_settings_metrics_layout"),
         patch.object(subject, "WebDriverWait") as wait,
         pytest.raises(AssertionError, match="original readiness budget"),
     ):
@@ -89,7 +79,6 @@ def test_exhausted_layout_budget_never_clicks() -> None:
             token="synthetic",
             handle="workspace",
             agent_id="agent",
-            wait_for_existing_metrics=True,
         )
     wait.assert_not_called()
 

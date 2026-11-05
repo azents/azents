@@ -2,32 +2,22 @@
 
 import time
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlsplit
 
 import azentsadminclient
 import azentspublicclient
-import pytest
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
-from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
-from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_type import AgentType
-from azentspublicclient.models.agent_workspace_directory_response import (
-    AgentWorkspaceDirectoryResponse,
-)
-from azentspublicclient.models.agent_workspace_mkdir_request import (
-    AgentWorkspaceMkdirRequest,
-)
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
@@ -42,7 +32,6 @@ from azentspublicclient.models.runtime_system_metrics_summary import (
 )
 from azentspublicclient.models.secrets import Secrets
 from selenium.common.exceptions import (
-    ElementNotInteractableException,
     StaleElementReferenceException,
     TimeoutException,
 )
@@ -131,29 +120,6 @@ def _click_button(driver: WebDriver, text: str) -> None:
     ).click()
 
 
-def _has_visible_css_element(
-    driver: WebDriver,
-    selector: str,
-) -> bool:
-    """Return whether the current DOM has one visible matching element."""
-    return (
-        driver.execute_script(
-            """
-            return Array.from(document.querySelectorAll(arguments[0])).some(
-              element => {
-                const style = getComputedStyle(element);
-                return style.visibility !== 'hidden'
-                  && style.display !== 'none'
-                  && element.getClientRects().length > 0;
-              },
-            );
-            """,
-            selector,
-        )
-        is True
-    )
-
-
 def _open_metrics_tab(driver: WebDriver) -> None:
     """Open the Runtime system metrics tab."""
     _wait(driver).until(
@@ -161,94 +127,6 @@ def _open_metrics_tab(driver: WebDriver) -> None:
             (By.XPATH, "//*[@role='tab' and @aria-label='Metrics']")
         )
     ).click()
-
-
-def _open_services_tab(driver: WebDriver) -> None:
-    """Open the Runtime Web Services tab."""
-    _wait(driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='tab' and @aria-label='Services']")
-        )
-    ).click()
-    _wait(driver).until(ec.url_contains("page=services"))
-    _assert_visible_text(driver, "Web services")
-    _assert_visible_text(driver, "Add service")
-
-
-def _close_mobile_session_panel(driver: WebDriver) -> bool:
-    """Observe the current closed state or close the still-open responsive panel."""
-    toggle = next(
-        (
-            item
-            for item in driver.find_elements(
-                By.CSS_SELECTOR, "button[aria-label='Toggle session panel']"
-            )
-            if item.is_displayed()
-        ),
-        None,
-    )
-    if toggle is None:
-        return False
-    if toggle.get_attribute("aria-expanded") == "false":
-        return True
-    close = ec.element_to_be_clickable(
-        (By.CSS_SELECTOR, "button[aria-label='Close session panel']")
-    )(driver)
-    if close:
-        try:
-            close.click()
-        except ElementNotInteractableException:
-            # Resizing can close the panel between its observation and the click.
-            return False
-    return False
-
-
-def _navigate_mobile_session_panel(driver: WebDriver) -> None:
-    """Retain the deployed mobile panel-to-route bridge during Runtime lifecycle."""
-    driver.set_window_size(390, 844)
-    toggle = (By.CSS_SELECTOR, "button[aria-label='Toggle session panel']")
-    close = (By.CSS_SELECTOR, "button[aria-label='Close session panel']")
-    _wait(driver).until(_close_mobile_session_panel)
-    _wait(driver).until(
-        lambda current: next(
-            (item for item in current.find_elements(*toggle) if item.is_displayed()),
-            False,
-        )
-    ).click()
-    services_tab = driver.find_element(
-        By.CSS_SELECTOR, "[role='tab'][aria-label='Services']"
-    )
-    driver.execute_script(
-        "arguments[0].scrollIntoView({block:'nearest',inline:'center'})",
-        services_tab,
-    )
-    services_tab.click()
-    _wait(driver).until(ec.url_contains("page=services"))
-    _assert_visible_text(driver, "Web services")
-    _assert_visible_text(driver, "Add service")
-    context_tab = driver.find_element(
-        By.CSS_SELECTOR, "[role='tab'][aria-label='Context']"
-    )
-    driver.execute_script(
-        "arguments[0].scrollIntoView({block:'nearest',inline:'center'})",
-        context_tab,
-    )
-    context_tab.click()
-    _wait(driver).until(ec.url_contains("page=context"))
-    _wait(driver).until(ec.element_to_be_clickable(close)).click()
-    # Closing hides the panel before its asynchronous route update completes.
-    # Settle that navigation before changing the responsive layout.
-    _wait(driver).until(
-        lambda current: "page" not in parse_qs(urlsplit(current.current_url).query)
-    )
-    driver.set_window_size(1440, 1000)
-    # Desktop layout opens the panel automatically after the responsive state
-    # settles. Toggling during that transition can close the newly opened panel.
-    _wait(driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='tab' and @aria-label='Metrics']")
-        )
-    )
 
 
 def _wait_for_runtime_metrics(
@@ -261,6 +139,23 @@ def _wait_for_runtime_metrics(
     timeout_seconds: float,
 ) -> None:
     """Wait for the current Runner generation to publish usable metrics."""
+    deadline = time.monotonic() + timeout_seconds
+    assert driver.current_window_handle, "Runtime Web browser session is unavailable"
+    admitted = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent_id, handle=handle, _headers=_headers(token)
+    )
+    assert admitted.lifecycle is not None
+    remaining = deadline - time.monotonic()
+    assert remaining > 0, "Runtime metrics exhausted the original readiness budget"
+    _wait_for_runtime_ready(
+        driver,
+        runtime_api=runtime_api,
+        token=token,
+        handle=handle,
+        agent_id=agent_id,
+        minimum_generation=admitted.lifecycle.desired_generation,
+        timeout_seconds=remaining,
+    )
 
     def metrics_are_ready(current: WebDriver) -> bool:
         # Keep browser ownership observable during API polling, not only at teardown.
@@ -284,7 +179,9 @@ def _wait_for_runtime_metrics(
             and metrics.disk.used is not None
         )
 
-    WebDriverWait(driver, timeout_seconds, poll_frequency=1).until(metrics_are_ready)
+    remaining = deadline - time.monotonic()
+    assert remaining > 0, "Runtime metrics exhausted the original readiness budget"
+    WebDriverWait(driver, remaining, poll_frequency=1).until(metrics_are_ready)
 
 
 def _start_runtime(
@@ -294,7 +191,6 @@ def _start_runtime(
     token: str,
     handle: str,
     agent_id: str,
-    wait_for_existing_metrics: bool,
 ) -> float:
     """Admit one UI activation and return the remaining 120-second budget."""
     deadline = time.monotonic() + 120
@@ -303,10 +199,6 @@ def _start_runtime(
     )
     assert before.lifecycle is not None
     prior_generation = before.lifecycle.desired_generation
-    if wait_for_existing_metrics:
-        # Independently resolving metrics above controls must not move the
-        # single native click after navigation to a previously used Runtime.
-        _wait_for_settings_metrics_layout(driver, deadline=deadline)
     remaining = deadline - time.monotonic()
     assert remaining > 0, "Runtime Start exhausted the original readiness budget"
     WebDriverWait(
@@ -398,7 +290,6 @@ def _start_runtime_and_wait_for_metrics(
         token=token,
         handle=handle,
         agent_id=agent_id,
-        wait_for_existing_metrics=False,
     )
     _wait_for_runtime_metrics(
         driver,
@@ -469,31 +360,22 @@ def _wait_for_runtime_stopped(
     token: str,
     handle: str,
     agent_id: str,
-) -> int:
-    """Wait for the authoritative Runtime lifecycle to converge to stopped."""
-    stopped_generation: int | None = None
+) -> None:
+    """Keep the Session panel's actual Stop mutation and settled backend outcome."""
 
-    def runtime_is_stopped(_: WebDriver) -> bool:
-        nonlocal stopped_generation
+    def stopped(_: WebDriver) -> bool:
         runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
-            agent_id=agent_id,
-            handle=handle,
-            _headers=_headers(token),
+            agent_id=agent_id, handle=handle, _headers=_headers(token)
         )
         lifecycle = runtime.lifecycle
-        if (
+        return (
             lifecycle is not None
             and lifecycle.target == "stopped"
             and lifecycle.convergence == "stable"
             and lifecycle.availability == "stopped"
-        ):
-            stopped_generation = lifecycle.desired_generation
-            return True
-        return False
+        )
 
-    WebDriverWait(driver, 120, poll_frequency=1).until(runtime_is_stopped)
-    assert stopped_generation is not None
-    return stopped_generation
+    WebDriverWait(driver, 120, poll_frequency=1).until(stopped)
 
 
 def _wait_for_runtime_start_authorized(
@@ -593,7 +475,7 @@ def test_runtime_free_add_and_remove_progress(
     admin_api_client: azentsadminclient.ApiClient,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
-    """Exercise Runtime-free, add, destructive confirmation, and progress states."""
+    """Retain one assembled add/start/metrics/remove journey."""
     del azents_runtime_provider_docker_container
     workspace = _create_workspace(
         public_api_client=public_api_client,
@@ -705,72 +587,6 @@ def test_runtime_free_add_and_remove_progress(
         )
     )
 
-    runtime_before_restart = runtime_api.agent_runtime_v1_get_agent_runtime(
-        agent_id=agent.id,
-        handle=workspace.handle,
-        _headers=_headers(workspace.token),
-    )
-    assert runtime_before_restart.lifecycle is not None
-    assert runtime_before_restart.lifecycle.availability == "ready"
-    assert runtime_before_restart.runtime is not None
-    assert runtime_before_restart.runtime.workspace_path
-    prior_generation = runtime_before_restart.lifecycle.desired_generation
-    sentinel_path = (
-        f"{runtime_before_restart.runtime.workspace_path}/"
-        f".runtime-restart-sentinel-{unique()}"
-    )
-    workspace_api = ChatV1Api(public_api_client)
-    workspace_api.chat_v1_create_agent_workspace_directory(
-        agent_id=agent.id,
-        agent_workspace_mkdir_request=AgentWorkspaceMkdirRequest(
-            path=sentinel_path,
-            parents=False,
-        ),
-        _headers=_headers(workspace.token),
-    )
-    sentinel_before_restart = workspace_api.chat_v1_read_agent_workspace_path(
-        agent_id=agent.id,
-        path=sentinel_path,
-        _headers=_headers(workspace.token),
-    )
-    assert isinstance(
-        sentinel_before_restart.actual_instance,
-        AgentWorkspaceDirectoryResponse,
-    )
-
-    _assert_visible_text(browser_driver, "Runtime status")
-    _assert_visible_text(browser_driver, "Execution environment")
-    _assert_visible_text(browser_driver, "Runtime connection")
-    _assert_visible_text(browser_driver, "Host controls")
-    _click_button(browser_driver, "Restart")
-    _assert_visible_text(browser_driver, "Restart Runtime?")
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//button[normalize-space()='Restart Runtime']",
-            )
-        )
-    ).click()
-    _wait_for_runtime_ready(
-        browser_driver,
-        runtime_api=runtime_api,
-        token=workspace.token,
-        handle=workspace.handle,
-        agent_id=agent.id,
-        minimum_generation=prior_generation + 1,
-        timeout_seconds=120,
-    )
-    sentinel_after_restart = workspace_api.chat_v1_read_agent_workspace_path(
-        agent_id=agent.id,
-        path=sentinel_path,
-        _headers=_headers(workspace.token),
-    )
-    assert isinstance(
-        sentinel_after_restart.actual_instance,
-        AgentWorkspaceDirectoryResponse,
-    )
-
     browser_driver.set_window_size(1440, 1000)
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/sessions/new"
@@ -785,9 +601,6 @@ def test_runtime_free_add_and_remove_progress(
             and not driver.current_url.endswith("/sessions/new")
         )
     )
-    session_url = browser_driver.current_url
-    _navigate_mobile_session_panel(browser_driver)
-    _open_services_tab(browser_driver)
     _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "System metrics", timeout_seconds=120)
     _assert_visible_text(browser_driver, "Scope: Container")
@@ -805,110 +618,18 @@ def test_runtime_free_add_and_remove_progress(
             (By.XPATH, "//*[@role='tab' and normalize-space()='Runtime']")
         )
     ).click()
-    _assert_visible_text(browser_driver, "Runtime status")
-    _assert_visible_text(browser_driver, "Execution environment")
-    _assert_visible_text(browser_driver, "Runtime connection")
-    _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Stop runtime")
-    _open_metrics_tab(browser_driver)
-    _wait(browser_driver).until(
-        ec.visibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[role='img'][aria-label='Recent one-hour usage trend']",
-            )
-        )
-    )
-
-    stopped_generation = _wait_for_runtime_stopped(
+    _wait_for_runtime_stopped(
         browser_driver,
         runtime_api=runtime_api,
         token=workspace.token,
         handle=workspace.handle,
         agent_id=agent.id,
     )
-    browser_driver.set_window_size(1440, 1000)
-    browser_driver.get(session_url)
-    _navigate_mobile_session_panel(browser_driver)
-    browser_driver.set_window_size(1440, 1000)
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
     )
-    remaining = _start_runtime(
-        browser_driver,
-        runtime_api=runtime_api,
-        token=workspace.token,
-        handle=workspace.handle,
-        agent_id=agent.id,
-        wait_for_existing_metrics=True,
-    )
-    _wait_for_runtime_ready(
-        browser_driver,
-        runtime_api=runtime_api,
-        token=workspace.token,
-        handle=workspace.handle,
-        agent_id=agent.id,
-        minimum_generation=stopped_generation + 1,
-        timeout_seconds=remaining,
-    )
-    sentinel_after_stop_start = workspace_api.chat_v1_read_agent_workspace_path(
-        agent_id=agent.id,
-        path=sentinel_path,
-        _headers=_headers(workspace.token),
-    )
-    assert isinstance(
-        sentinel_after_stop_start.actual_instance,
-        AgentWorkspaceDirectoryResponse,
-    )
-
-    browser_driver.get(
-        f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
-    )
-    runtime_before_reset = runtime_api.agent_runtime_v1_get_agent_runtime(
-        agent_id=agent.id,
-        handle=workspace.handle,
-        _headers=_headers(workspace.token),
-    )
-    assert runtime_before_reset.lifecycle is not None
-    reset_generation = runtime_before_reset.lifecycle.desired_generation
-    # Metrics resolve independently above the lifecycle controls. Wait for their
-    # real ready state before targeting a destructive-action button after
-    # navigation; the loading-to-ready layout must not move the click target.
-    _assert_visible_text(browser_driver, "Scope: Container", timeout_seconds=120)
-    _wait(browser_driver).until(
-        ec.visibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[role='img'][aria-label='Recent one-hour usage trend']",
-            )
-        )
-    )
-    _click_button(browser_driver, "Reset")
-    _assert_visible_text(browser_driver, "Reset Runtime state?")
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='dialog']//button[normalize-space()='Reset Runtime']",
-            )
-        )
-    ).click()
-    _wait_for_runtime_ready(
-        browser_driver,
-        runtime_api=runtime_api,
-        token=workspace.token,
-        handle=workspace.handle,
-        agent_id=agent.id,
-        minimum_generation=reset_generation + 1,
-        timeout_seconds=120,
-    )
-    with pytest.raises(ApiException) as reset_read_error:
-        workspace_api.chat_v1_read_agent_workspace_path(
-            agent_id=agent.id,
-            path=sentinel_path,
-            _headers=_headers(workspace.token),
-        )
-    assert reset_read_error.value.status == 404
+    _wait_for_settings_metrics_layout(browser_driver, deadline=time.monotonic() + 120)
 
     _assert_visible_text(browser_driver, "Permanently remove managed Runtime")
     _click_button(browser_driver, "Remove Runtime")

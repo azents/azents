@@ -250,6 +250,19 @@ export const Managed = {
     },
     state: { type: "READY", runtime: managed, profiles: [profile] },
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const name of [
+      "Runtime status",
+      "Execution environment",
+      "Runtime connection",
+      "Host controls",
+      "Temporary Runtime controls",
+      "Permanently remove managed Runtime",
+    ]) {
+      await expect(canvas.getByText(name, { exact: true })).toBeVisible();
+    }
+  },
 } satisfies Story;
 
 export const BrowserOptIn = {

@@ -233,8 +233,21 @@ def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -
     assert "continue-on-error:" not in publish
 
 
-@pytest.mark.parametrize("image", ["azents-runtime-runner", "azents-server"])
-def test_ci_build_reads_only_existing_snapshot_runner_cache(
+@pytest.mark.parametrize(
+    "image",
+    [
+        "azents-runtime-runner",
+        "azents-web",
+        "azents-admin-web",
+        "azents-server",
+        "azents-llm-proxy",
+        "azents-runtime-proxy",
+        "azents-runtime-engine",
+        "azents-runtime-provider-kubernetes",
+        "azents-runtime-provider-docker",
+    ],
+)
+def test_ci_build_reads_only_selected_existing_snapshot_caches(
     tmp_path: Path, image: str
 ) -> None:
     """Use matching content-addressed layers without publishing a new cache."""
@@ -242,8 +255,13 @@ def test_ci_build_reads_only_existing_snapshot_runner_cache(
     producer = workflow.split("  ci_docker_build_run:\n", 1)[1].split(
         "\n  ci-docker-build:\n", 1
     )[0]
-    expose = _step_block(producer, "Expose existing Runtime Runner build cache")
-    assert "if: matrix.name == 'azents-runtime-runner'" in expose
+    expose = _step_block(producer, "Expose existing image build caches")
+    guard = (
+        "contains(fromJSON('"
+        '["azents-runtime-runner","azents-web","azents-admin-web"]'
+        "'), matrix.name)"
+    )
+    assert guard in expose
     assert "uses: ./.github/actions/expose-github-runtime" in expose
     script = textwrap.dedent(
         _step_block(producer, "Build ${{ matrix.name }}").split("        run: |\n", 1)[
@@ -273,8 +291,8 @@ def test_ci_build_reads_only_existing_snapshot_runner_cache(
         check=True,
     )
     cache = (
-        ["--cache-from", "type=gha,scope=azents-e2e-v1-azents-runtime-runner"]
-        if image == "azents-runtime-runner"
+        ["--cache-from", f"type=gha,scope=azents-e2e-v1-{image}"]
+        if image in {"azents-runtime-runner", "azents-web", "azents-admin-web"}
         else []
     )
     assert arguments.read_text().splitlines() == [
@@ -289,7 +307,8 @@ def test_ci_build_reads_only_existing_snapshot_runner_cache(
         ".",
     ]
     snapshot = (REPOSITORY_ROOT / ".github/workflows/snapshot.yaml").read_text()
-    assert "e2e_cache_repository: azents-runtime-runner" in snapshot
+    for cached in ("azents-runtime-runner", "azents-web", "azents-admin-web"):
+        assert f"e2e_cache_repository: {cached}" in snapshot
     assert 'cache_scope="azents-e2e-v1-$cache_repository"' in snapshot
     assert (
         producer.index("Build ${{ matrix.name }}")

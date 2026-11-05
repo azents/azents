@@ -122,7 +122,7 @@ def test_dead_browser_is_not_classified_as_metrics_timeout(
     api.agent_runtime_v1_get_agent_runtime_system_metrics.assert_not_called()
 
 
-def test_second_start_shares_one_budget_with_full_readiness(
+def test_start_shares_one_budget_with_full_readiness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     driver = Mock(current_window_handle="window")
@@ -136,8 +136,6 @@ def test_second_start_shares_one_budget_with_full_readiness(
     click_wait = Mock()
     click_wait.until.return_value = Mock(click=click)
     monkeypatch.setattr(web, "WebDriverWait", Mock(side_effect=[click_wait, wait]))
-    layout = Mock()
-    monkeypatch.setattr(web, "_wait_for_settings_metrics_layout", layout)
     monkeypatch.setattr(
         web.time, "monotonic", Mock(side_effect=[100.0, 101.0, 102.0, 109.0])
     )
@@ -147,7 +145,6 @@ def test_second_start_shares_one_budget_with_full_readiness(
         token="token",
         handle="workspace",
         agent_id="agent",
-        wait_for_existing_metrics=True,
     )
     ready_wait = Mock()
     wait_factory = Mock(return_value=ready_wait)
@@ -164,7 +161,6 @@ def test_second_start_shares_one_budget_with_full_readiness(
     assert remaining == 111.0
     wait_factory.assert_called_once_with(driver, 111.0, poll_frequency=1)
     click.assert_called_once_with()
-    layout.assert_called_once_with(driver, deadline=220.0)
     ready_wait.until.assert_called_once()
 
 
@@ -273,3 +269,44 @@ def test_dead_browser_is_not_classified_as_runtime_readiness_timeout(
             timeout_seconds=111,
         )
     api.agent_runtime_v1_get_agent_runtime.assert_not_called()
+
+
+def test_initial_full_readiness_and_metrics_share_the_remaining_start_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = Mock(current_window_handle="window")
+    api = Mock(spec=AgentRuntimeV1Api)
+    api.agent_runtime_v1_get_agent_runtime.return_value = _runtime(8, "running")
+    metrics = Mock(
+        summary=web.RuntimeSystemMetricsSummary.FRESH,
+        scope="container",
+        samples=[Mock()],
+    )
+    metrics.memory.used = 1
+    metrics.disk.used = 1
+    api.agent_runtime_v1_get_agent_runtime_system_metrics.return_value = metrics
+    ready = Mock()
+    wait = Mock()
+    wait.until.side_effect = lambda predicate: predicate(driver)
+    factory = Mock(return_value=wait)
+    monkeypatch.setattr(web, "_wait_for_runtime_ready", ready)
+    monkeypatch.setattr(web, "WebDriverWait", factory)
+    monkeypatch.setattr(web.time, "monotonic", Mock(side_effect=[100.0, 104.0, 115.0]))
+    web._wait_for_runtime_metrics(
+        driver,
+        runtime_api=api,
+        token="token",
+        handle="workspace",
+        agent_id="agent",
+        timeout_seconds=120,
+    )
+    ready.assert_called_once_with(
+        driver,
+        runtime_api=api,
+        token="token",
+        handle="workspace",
+        agent_id="agent",
+        minimum_generation=8,
+        timeout_seconds=116.0,
+    )
+    factory.assert_called_once_with(driver, 105.0, poll_frequency=1)

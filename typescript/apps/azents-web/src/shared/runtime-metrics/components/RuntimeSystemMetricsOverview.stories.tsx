@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { RuntimeSystemMetricsOverview } from "./RuntimeSystemMetricsOverview";
 import type { AgentRuntimeSystemMetricsResponse } from "@azents/public-client";
@@ -168,7 +169,28 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Fresh = {} satisfies Story;
+export const Fresh = {
+  tags: ["ci-contract"],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const name of [
+      "System metrics",
+      "CPU",
+      "Memory",
+      "Disk",
+      "Scope: Container",
+    ]) {
+      await expect(canvas.getByText(name, { exact: true })).toBeVisible();
+    }
+    const charts = canvas.getAllByRole("img", {
+      name: "Recent one-hour usage trend",
+    });
+    await expect(charts).toHaveLength(3);
+    for (const chart of charts) {
+      await expect(chart).toBeVisible();
+    }
+  },
+} satisfies Story;
 
 export const ReadableTrends = {
   args: {
@@ -212,6 +234,7 @@ export const Stale = {
 } satisfies Story;
 
 export const RuntimeStopped = {
+  tags: ["ci-contract"],
   args: {
     state: {
       type: "READY",
@@ -223,6 +246,17 @@ export const RuntimeStopped = {
         disk: { ...freshMetrics.disk, state: "stopped" },
       },
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Scope: Container")).toBeVisible();
+    const charts = canvas.getAllByRole("img", {
+      name: "Recent one-hour usage trend",
+    });
+    await expect(charts).toHaveLength(3);
+    for (const chart of charts) {
+      await expect(chart).toBeVisible();
+    }
   },
 } satisfies Story;
 

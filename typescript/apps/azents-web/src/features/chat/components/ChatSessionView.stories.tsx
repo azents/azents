@@ -522,6 +522,19 @@ export const MobileChat = {
     );
     await expect(composer).toBeVisible();
     await expect(composer).toHaveValue(draft);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Toggle session panel" }),
+    );
+    await expect(canvas.getByRole("tab", { name: "Context" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(
+      canvas.getByRole("button", { name: "Close session panel" }),
+    ).toBeVisible();
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+      window.innerWidth,
+    );
   },
 } satisfies Story;
 

@@ -96,8 +96,16 @@ export const Populated = {
 } satisfies Story;
 
 export const Empty = {
+  tags: ["ci-contract"],
   args: {
     state: { type: "READY", services: [], runtimeAvailable: true },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Web services")).toBeVisible();
+    await expect(
+      canvas.getByRole("button", { name: "Add service" }),
+    ).toBeEnabled();
   },
 } satisfies Story;
 

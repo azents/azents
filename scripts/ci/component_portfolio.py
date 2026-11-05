@@ -3,6 +3,14 @@
 from scripts.ci.observability import JUnitSummary
 
 STORIES = {
+    "src/shared/runtime-web/components/RuntimeWebServices.stories.tsx": (
+        "Empty",
+        "Deleting Read Only",
+    ),
+    "src/shared/runtime-metrics/components/RuntimeSystemMetricsOverview.stories.tsx": (
+        "Fresh",
+        "Runtime Stopped",
+    ),
     "src/features/chat/components/ChatView.stories.tsx": (
         "Standard Presentation Transcript",
         "Multi Turn Tool Activity",
