@@ -56,6 +56,8 @@ from azents_runtime_runner.workspace import Workspace
 
 _BUFFER_BYTES = MAX_TRANSFER_CHUNK_BYTES
 _DEFAULT_MAX_ACTIVE_TRANSFERS = 4
+_MAX_WAITING_TRANSFERS = 32
+_CAPACITY_WAIT_SECONDS = 30.0
 _DEFAULT_MAX_TOMBSTONES = 256
 _MAX_CONFLICT_PRECONDITIONS = 256
 _MAX_DIRECT_TICKET_REACQUISITIONS = 1
@@ -186,6 +188,7 @@ class _ActiveTransfer:
     intent: RunnerTransferIntent
     cancelled: asyncio.Event
     task: asyncio.Task[None]
+    started: bool = False
 
 
 @dataclass(frozen=True)
@@ -228,6 +231,7 @@ class RunnerTransferManager:
         self._http_ssl_context = http_ssl_context
         self._max_active_transfers = max_active_transfers
         self._max_tombstones = max_tombstones
+        self._data_slots = asyncio.Semaphore(max_active_transfers)
         self._active: dict[_TransferKey, _ActiveTransfer] = {}
         self._active_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
         self._tombstones: dict[_TransferKey, _TransferTombstone] = {}
@@ -274,17 +278,23 @@ class RunnerTransferManager:
                 result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
                 failure_reason = invalid_reason
                 self._remember(intent, result)
-            elif self._closed or len(self._active) >= self._max_active_transfers:
+            elif self._closed or len(self._active) >= (
+                self._max_active_transfers + _MAX_WAITING_TRANSFERS
+            ):
                 result = _failed(intent, RunnerTransferFailure.RESOURCE_EXHAUSTED)
                 failure_reason = (
                     "transfer_manager_closed"
                     if self._closed
-                    else "active_transfer_capacity_exhausted"
+                    else "transfer_wait_queue_full"
                 )
                 self._remember(intent, result)
             else:
                 cancelled = asyncio.Event()
-                task = asyncio.create_task(self._run(intent, cancelled))
+                wait_deadline = asyncio.get_running_loop().time() + min(
+                    _CAPACITY_WAIT_SECONDS,
+                    max(0.0, (intent.deadline_at - datetime.now(UTC)).total_seconds()),
+                )
+                task = asyncio.create_task(self._run(intent, cancelled, wait_deadline))
                 self._active[key] = _ActiveTransfer(intent, cancelled, task)
                 self._active_by_identity[identity_key] = key
                 task.add_done_callback(lambda _: asyncio.create_task(self._reap(key)))
@@ -310,7 +320,8 @@ class RunnerTransferManager:
                     and active.intent.identity == cancel.identity
                 ):
                     active.cancelled.set()
-                    active.task.cancel()
+                    if active.started:
+                        active.task.cancel()
                     return
 
     async def close(self) -> None:
@@ -339,22 +350,22 @@ class RunnerTransferManager:
                 self._active_by_identity.pop(_identity_key(active.intent), None)
 
     async def _run(
-        self, intent: RunnerTransferIntent, cancelled: asyncio.Event
+        self,
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+        wait_deadline: float,
     ) -> None:
+        self._active[_key(intent)].started = True
         result: RunnerTransferResult | None = None
         direct_claim_lease: list[_DirectClaimLease | None] = [None]
         try:
             try:
-                if intent.direction is RunnerTransferDirection.DOWNLOAD:
-                    result = await self._download(
-                        intent,
-                        cancelled,
-                        direct_claim_lease=direct_claim_lease,
-                    )
-                else:
-                    result = await self._upload(
-                        intent, cancelled, direct_claim_lease=direct_claim_lease
-                    )
+                result = await self._execute_with_capacity(
+                    intent,
+                    cancelled,
+                    wait_deadline=wait_deadline,
+                    direct_claim_lease=direct_claim_lease,
+                )
             except grpc.aio.AioRpcError as exc:
                 result = _failed(intent, runner_transfer_failure_from_grpc(exc))
                 _log_failure(
@@ -479,6 +490,49 @@ class RunnerTransferManager:
             lease = direct_claim_lease[0]
             if lease is not None:
                 await lease.close()
+
+    async def _execute_with_capacity(
+        self,
+        intent: RunnerTransferIntent,
+        cancelled: asyncio.Event,
+        *,
+        wait_deadline: float,
+        direct_claim_lease: list[_DirectClaimLease | None],
+    ) -> RunnerTransferResult:
+        """Wait for a Runtime-wide data slot without blocking control reception."""
+        if cancelled.is_set():
+            raise asyncio.CancelledError
+        try:
+            async with asyncio.timeout_at(wait_deadline):
+                await self._data_slots.acquire()
+        except TimeoutError:
+            raise _TransferFailure(
+                (
+                    RunnerTransferFailure.DEADLINE_EXCEEDED
+                    if datetime.now(UTC) >= intent.deadline_at
+                    else RunnerTransferFailure.RESOURCE_EXHAUSTED
+                ),
+                reason="transfer_capacity_wait_timeout",
+            ) from None
+        try:
+            if cancelled.is_set():
+                raise asyncio.CancelledError
+            _remaining_timeout(intent)
+            invalid_reason = _validate_intent_reason(intent, self.accepted_generation())
+            if invalid_reason is not None:
+                raise _TransferFailure(
+                    RunnerTransferFailure.PROTOCOL_VIOLATION,
+                    reason=invalid_reason,
+                )
+            if intent.direction is RunnerTransferDirection.DOWNLOAD:
+                return await self._download(
+                    intent, cancelled, direct_claim_lease=direct_claim_lease
+                )
+            return await self._upload(
+                intent, cancelled, direct_claim_lease=direct_claim_lease
+            )
+        finally:
+            self._data_slots.release()
 
     async def _download(
         self,
