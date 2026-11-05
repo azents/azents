@@ -12,7 +12,12 @@ from mitmproxy.proxy.context import Context
 from mitmproxy.proxy.layers.http import GetHttpConnection, HttpStream
 from mitmproxy.proxy.server_hooks import ServerConnectionHookData
 
-from azents_runtime_proxy.addon import AzentsProxyAddon
+from azents_runtime_proxy.addon import (
+    AzentsProxyAddon,
+    ProxyDecision,
+    ProxyDecisionFormatter,
+    configure_decision_logging,
+)
 from azents_runtime_proxy.policy import ProxyPolicy, parse_proxy_policy
 
 
@@ -37,6 +42,76 @@ def _policy() -> ProxyPolicy:
         },
         digest="d" * 64,
     )
+
+
+def test_configured_handler_preserves_exact_redacted_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    logger = logging.getLogger("azents_runtime_proxy.addon")
+    monkeypatch.setattr(logger, "handlers", list(logger.handlers))
+    monkeypatch.setattr(logger, "level", logger.level)
+    monkeypatch.setattr(logger, "propagate", logger.propagate)
+    root = logging.getLogger()
+    root_handlers, root_level = list(root.handlers), root.level
+    configure_decision_logging()
+    addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
+    addon._record(
+        ProxyDecision(
+            decision="deny",
+            host="api.example.com",
+            port=443,
+            selected_ip_class=None,
+            protocol_class="https",
+            reason="policy_denied",
+        )
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert len(captured.err.splitlines()) == 1
+    payload = json.loads(captured.err)
+    assert set(payload) == {
+        "timestamp",
+        "runtime_id",
+        "decision",
+        "host",
+        "port",
+        "selected_ip_class",
+        "protocol_class",
+        "policy_digest",
+        "reason",
+    }
+    assert payload["runtime_id"] == "runtime-1"
+    assert payload["reason"] == "policy_denied"
+    assert root.handlers == root_handlers and root.level == root_level
+    record = logging.makeLogRecord({**payload, "private": "credential-sentinel"})
+    assert "credential-sentinel" not in ProxyDecisionFormatter().format(record)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("redirect", [False, True])
+async def test_resolver_cancellation_does_not_become_denial(
+    caplog: pytest.LogCaptureFixture, redirect: bool
+) -> None:
+    async def cancelled_resolver(host: str, port: int) -> tuple[str, ...]:
+        raise asyncio.CancelledError
+
+    addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=cancelled_resolver)
+    flow = _flow("https://api.example.com/")
+    caplog.set_level(logging.INFO)
+    if redirect:
+        flow.response = http.Response.make(
+            302, b"", {"location": "https://api.example.com/next"}
+        )
+    with pytest.raises(asyncio.CancelledError):
+        if redirect:
+            await addon.responseheaders(flow)
+        else:
+            await addon.requestheaders(flow)
+    if redirect:
+        assert flow.response is not None and flow.response.status_code == 302
+    else:
+        assert flow.response is None
+    assert not caplog.records
 
 
 async def _resolver(host: str, port: int) -> tuple[str, ...]:
@@ -76,12 +151,16 @@ async def test_request_authorization_pins_forwarding_host_and_preserves_authorit
     assert flow.server_conn.address == ("203.0.113.10", 443)
     assert flow.server_conn.sni == "api.example.com"
     assert flow.request.stream is True
-    record = json.loads(caplog.records[-1].message)
+    log_record = caplog.records[-1]
+    assert log_record.message == "Runtime proxy policy decision"
+    record = json.loads(ProxyDecisionFormatter().format(log_record))
     assert record["decision"] == "allow"
     assert record["host"] == "api.example.com"
-    assert "token" not in caplog.records[-1].message
-    assert "Bearer" not in caplog.records[-1].message
-    assert "private request body" not in caplog.records[-1].message
+    assert log_record.__dict__["runtime_id"] == "runtime-1"
+    serialized = ProxyDecisionFormatter().format(log_record)
+    assert "token" not in serialized
+    assert "Bearer" not in serialized
+    assert "private request body" not in serialized
 
 
 @pytest.mark.asyncio

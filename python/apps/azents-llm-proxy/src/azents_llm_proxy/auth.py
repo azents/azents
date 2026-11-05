@@ -1,5 +1,6 @@
 """Official custom-auth callable with request-private approved authority."""
 
+import asyncio
 import json
 from dataclasses import dataclass
 
@@ -148,6 +149,8 @@ class AgentAuthentication:
                 return auth
             try:
                 body = await request.json()
+            except asyncio.CancelledError:
+                raise
             except json.JSONDecodeError, UnicodeDecodeError:
                 raise RequestRejected("Invalid Responses request.") from None
             selected = decode_request(body)
@@ -160,6 +163,8 @@ class AgentAuthentication:
             self.context.bind(auth)
             self.context.observe(binding)
             return auth
+        except asyncio.CancelledError:
+            raise
         except RequestRejected:
             raise ProxyException(
                 message="Invalid or unsupported Responses request.",

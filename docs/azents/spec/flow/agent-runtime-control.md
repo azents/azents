@@ -832,6 +832,14 @@ uses resourceVersion-fenced replacement where exact semantics are required. Pods
 delete-and-recreate lifecycle semantics, PVCs retain data-preserving updates, and the leader Lease
 retains concurrency-sensitive merge updates.
 
+The proxy decodes its canonical policy before use; `schema_version` must be the
+integer `1`, not a boolean, float, or string with an equivalent value. Policy
+decisions enter logging as structured fields. A dedicated proxy decision handler
+emits the redacted timestamp, Runtime identity, decision, canonical host, port,
+selected IP class, protocol class, policy digest, and bounded reason as one JSON
+stderr record. It does not change mitmproxy's root logging or include request
+headers, query strings, bodies, or CA private material.
+
 Control periodically dispatches idempotent Provider `start` commands for running Runtimes and
 read-only Provider `observe` commands where current lifecycle state needs re-observation. Periodic
 `start` revalidates the desired Runner image and Provider-managed workload configuration, reuses an

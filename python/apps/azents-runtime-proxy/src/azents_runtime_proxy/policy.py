@@ -142,7 +142,10 @@ def load_proxy_policy(
 def parse_proxy_policy(document: Mapping[str, Any], *, digest: str) -> ProxyPolicy:
     """Decode already-parsed canonical JSON into the typed policy."""
     _require_exact_keys(document, _TOP_LEVEL_KEYS, "proxy policy")
-    if document["schema_version"] != PROXY_POLICY_SCHEMA_VERSION:
+    if (
+        _required_int(document["schema_version"], "schema_version")
+        != PROXY_POLICY_SCHEMA_VERSION
+    ):
         raise InvalidProxyPolicy("unsupported proxy policy schema version")
     runtime_id = _required_string(document["runtime_id"], "runtime_id")
     if _RUNTIME_ID_RE.fullmatch(runtime_id) is None:

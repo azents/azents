@@ -41,6 +41,7 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
+    _runtime_failure,
 )
 from azents.testing.runtime_coordination import (
     publish_next_test_connection,
@@ -48,6 +49,31 @@ from azents.testing.runtime_coordination import (
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _DIGEST = "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (None, StateTransferFailure.STREAM),
+        (RunnerTransferFailure.UNAVAILABLE, StateTransferFailure.STREAM),
+        (RunnerTransferFailure.ALREADY_CLAIMED, StateTransferFailure.STREAM),
+        (RunnerTransferFailure.RESOURCE_EXHAUSTED, StateTransferFailure.ADMISSION),
+        (RunnerTransferFailure.DEADLINE_EXCEEDED, StateTransferFailure.EXPIRED),
+        (RunnerTransferFailure.CANCELLED, StateTransferFailure.CANCELLED),
+        (RunnerTransferFailure.INTEGRITY_FAILED, StateTransferFailure.INTEGRITY),
+        (RunnerTransferFailure.PROTOCOL_VIOLATION, StateTransferFailure.FENCED),
+        (RunnerTransferFailure.STREAM_FAILED, StateTransferFailure.STREAM),
+        (RunnerTransferFailure.DESTINATION_FAILED, StateTransferFailure.STREAM),
+        (
+            RunnerTransferFailure.DESTINATION_CONFLICT,
+            StateTransferFailure.DESTINATION_CONFLICT,
+        ),
+    ],
+)
+def test_runner_failure_mapping_preserves_every_known_variant(
+    failure: RunnerTransferFailure | None, expected: StateTransferFailure
+) -> None:
+    assert _runtime_failure(failure) is expected
 
 
 async def test_admission_failure_survives_dispatch_enqueue_revision_race(

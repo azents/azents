@@ -1,5 +1,6 @@
 """Online, audience-bound Kubernetes resolver identity verification."""
 
+import asyncio
 from dataclasses import dataclass
 
 from aiohttp import ClientError
@@ -26,6 +27,8 @@ class KubernetesResolverAuth:
                 ),
                 _request_timeout=10,
             )
+        except asyncio.CancelledError:
+            raise
         except ApiException, ClientError, TimeoutError:
             raise RuntimeError(
                 "Resolver identity verification is unavailable."

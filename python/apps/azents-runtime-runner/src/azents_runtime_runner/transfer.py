@@ -40,6 +40,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferSourceTransport,
     RunnerTransferUploadTransport,
 )
+from azents_runtime_control.structured_logging import bind_extra
 from azents_runtime_control.transfer import (
     MAX_TRANSFER_CHUNK_BYTES,
     RUNNER_TRANSFER_CAPABILITY,
@@ -356,6 +357,17 @@ class RunnerTransferManager:
         wait_deadline: float,
     ) -> None:
         self._active[_key(intent)].started = True
+        logger = bind_extra(
+            _LOGGER,
+            {
+                "transfer_id": intent.identity.transfer_id,
+                "attempt_id": intent.identity.attempt_id,
+                "runtime_id": intent.identity.runtime_id,
+                "runner_generation": intent.identity.runner_generation,
+                "operation_id": intent.operation_id,
+                "dispatch_id": intent.dispatch_id,
+            },
+        )
         result: RunnerTransferResult | None = None
         direct_claim_lease: list[_DirectClaimLease | None] = [None]
         try:
@@ -366,6 +378,8 @@ class RunnerTransferManager:
                     wait_deadline=wait_deadline,
                     direct_claim_lease=direct_claim_lease,
                 )
+            except asyncio.CancelledError:
+                raise
             except grpc.aio.AioRpcError as exc:
                 result = _failed(intent, runner_transfer_failure_from_grpc(exc))
                 _log_failure(
@@ -456,16 +470,8 @@ class RunnerTransferManager:
                 )
             self._remember(intent, result)
             if not await self._enqueue_terminal_result(result):
-                _LOGGER.warning(
+                logger.warning(
                     "Runtime Runner transfer result was not delivered",
-                    extra={
-                        "transfer_id": result.identity.transfer_id,
-                        "attempt_id": result.identity.attempt_id,
-                        "runtime_id": result.identity.runtime_id,
-                        "runner_generation": result.identity.runner_generation,
-                        "operation_id": result.operation_id,
-                        "dispatch_id": result.dispatch_id,
-                    },
                 )
         except asyncio.CancelledError:
             if result is None:
@@ -473,16 +479,8 @@ class RunnerTransferManager:
                 self._remember(intent, result)
                 if not self._closed:
                     if not await self._enqueue_terminal_result(result):
-                        _LOGGER.warning(
+                        logger.warning(
                             "Runtime Runner cancellation result was not delivered",
-                            extra={
-                                "transfer_id": result.identity.transfer_id,
-                                "attempt_id": result.identity.attempt_id,
-                                "runtime_id": result.identity.runtime_id,
-                                "runner_generation": result.identity.runner_generation,
-                                "operation_id": result.operation_id,
-                                "dispatch_id": result.dispatch_id,
-                            },
                             exc_info=True,
                         )
             raise
@@ -505,6 +503,8 @@ class RunnerTransferManager:
         try:
             async with asyncio.timeout_at(wait_deadline):
                 await self._data_slots.acquire()
+        except asyncio.CancelledError:
+            raise
         except TimeoutError:
             raise _TransferFailure(
                 (
@@ -844,6 +844,8 @@ class RunnerTransferManager:
                             digest.update(chunk)
                             offset += len(chunk)
                         lease.check()
+                    except asyncio.CancelledError:
+                        raise
                     except aiohttp.ClientError, TimeoutError:
                         if not body_started:
                             retry_ticket = True

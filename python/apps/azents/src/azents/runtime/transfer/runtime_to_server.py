@@ -308,6 +308,8 @@ class RuntimeToServerConsumer:
                 identity=self.upload.identity,
                 deadline_at=self.deadline_at,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeToServerTransferError as error:
             self._renewal_failure = error
             return
@@ -806,6 +808,8 @@ class RuntimeToServerTransferService:
         try:
             async with asyncio.timeout(_CLEANUP_TIMEOUT_SECONDS):
                 await self._cleanup_transfer(identity, claim_id, revision, deadline_at)
+        except asyncio.CancelledError:
+            raise
         except TimeoutError as exc:
             _LOGGER.warning(
                 "Runtime upload cleanup could not be confirmed",

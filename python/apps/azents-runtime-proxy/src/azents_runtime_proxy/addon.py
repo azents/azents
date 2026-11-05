@@ -22,6 +22,38 @@ from azents_runtime_proxy.policy import (
 _LOGGER = logging.getLogger(__name__)
 type AddressResolver = Callable[[str, int], Awaitable[Sequence[str]]]
 _READINESS_REQUEST_LIMIT = 8_192
+_DECISION_FIELDS = (
+    "timestamp",
+    "runtime_id",
+    "decision",
+    "host",
+    "port",
+    "selected_ip_class",
+    "protocol_class",
+    "policy_digest",
+    "reason",
+)
+
+
+class ProxyDecisionFormatter(logging.Formatter):
+    """Serialize only the redacted decision fields from structured records."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Keep the existing JSON Pod-log contract at the output boundary."""
+        return json.dumps(
+            {field: record.__dict__[field] for field in _DECISION_FIELDS},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+
+def configure_decision_logging() -> None:
+    """Own one decision-only stderr handler without modifying mitmproxy logging."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(ProxyDecisionFormatter())
+    _LOGGER.handlers = [handler]
+    _LOGGER.setLevel(logging.INFO)
+    _LOGGER.propagate = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -117,6 +149,8 @@ class AzentsProxyAddon:
                     reason="policy_match",
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except (InvalidProxyPolicy, ValueError) as error:
             self._deny_http(flow, reason=str(error))
 
@@ -135,6 +169,8 @@ class AzentsProxyAddon:
             host = self.policy.authorize_host(target.hostname)
             port = target.port or (443 if target.scheme == "https" else 80)
             self.policy.authorize_addresses(await self._addresses(host, port))
+        except asyncio.CancelledError:
+            raise
         except (InvalidProxyPolicy, ValueError) as error:
             self._deny_http(flow, reason=f"redirect_denied:{error}")
 
@@ -276,7 +312,7 @@ class AzentsProxyAddon:
             "policy_digest": self.policy.digest,
             "reason": decision.reason,
         }
-        _LOGGER.info(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        _LOGGER.info("Runtime proxy policy decision", extra=payload)
 
 
 async def resolve_addresses(host: str, port: int) -> tuple[str, ...]:

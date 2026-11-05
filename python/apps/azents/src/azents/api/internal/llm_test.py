@@ -1,5 +1,6 @@
 """Real route mounting, resolver/issuer separation and secret-safe responses."""
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -92,6 +93,14 @@ def test_kubernetes_identity_before_agent_lookup(
         service.list_models.assert_not_called()
     else:
         service.list_models.assert_awaited_once()
+
+
+async def test_kubernetes_review_cancellation_propagates_without_replay() -> None:
+    api = AsyncMock(spec=AuthenticationV1Api)
+    api.create_token_review = AsyncMock(side_effect=asyncio.CancelledError)
+    with pytest.raises(asyncio.CancelledError):
+        await KubernetesResolverAuth(api, SUBJECT).accepts(KEY)
+    api.create_token_review.assert_awaited_once()
 
 
 async def test_kubernetes_review_failure_is_sanitized_and_never_falls_back() -> None:
