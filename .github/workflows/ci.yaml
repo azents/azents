@@ -442,7 +442,7 @@ jobs:
           retention-days: 14
 
   ci_e2e_run:
-    name: ci-e2e-${{ matrix.lane }}
+    name: ci-e2e-${{ matrix.lane || 'required-skipped' }}
     needs:
       - changes
       - ci_testenv_support_run
@@ -602,7 +602,7 @@ jobs:
           retention-days: 14
 
   ci_e2e_web_run:
-    name: ci-e2e-${{ matrix.lane }}
+    name: ci-e2e-${{ matrix.lane || 'web-skipped' }}
     needs:
       - changes
       - ci_testenv_support_run
@@ -1072,7 +1072,7 @@ jobs:
           exit 1
 
   ci_docker_build_run:
-    name: ci-docker-build-run
+    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-core-skipped' }}
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'
@@ -1101,6 +1101,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Expose existing Runtime Runner build cache
         if: matrix.name == 'azents-runtime-runner'
@@ -1157,6 +1158,48 @@ jobs:
               ;;
           esac
 
+      - name: Release completed Runner build workspace
+        if: matrix.name == 'azents-runtime-runner'
+        env:
+          OWNED_BUILDER: ${{ steps.buildx.outputs.name }}
+          OWNED_DRIVER: ${{ steps.buildx.outputs.driver }}
+          BUILT_IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$OWNED_BUILDER" =~ ^builder-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+            || [ "$OWNED_DRIVER" != 'docker-container' ]; then
+            echo 'Refusing to remove an unrecognized CI builder.' >&2
+            exit 1
+          fi
+          image_before="$(docker image inspect --format '{{.Id}}' "$BUILT_IMAGE")"
+          container_name="buildx_buildkit_${OWNED_BUILDER}0"
+          container_id="$(docker container inspect --format '{{.Id}}' "$container_name")"
+          state_volume="$(docker container inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' "$container_name")"
+          if [[ ! "$image_before" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || [[ ! "$container_id" =~ ^[0-9a-f]{64}$ ]] \
+            || [ "$state_volume" != "${container_name}_state" ]; then
+            echo 'Runner builder resources do not match the owned default node.' >&2
+            exit 1
+          fi
+          printf 'Completed builder owner: %s container=%s volume=%s\n' "$OWNED_BUILDER" "$container_id" "$state_volume"
+          printf 'Loaded Runner image before builder cleanup: %s\n' "$image_before"
+          df --block-size=1 "$RUNNER_TEMP" /var/lib/docker
+          docker buildx du --builder "$OWNED_BUILDER"
+          docker buildx rm "$OWNED_BUILDER"
+          remaining_container="$(docker container ls --all --quiet --filter "id=$container_id")"
+          remaining_volume="$(docker volume ls --quiet --filter "name=^${state_volume}$")"
+          if [ -n "$remaining_container" ] || [ -n "$remaining_volume" ]; then
+            echo 'Owned Runner builder resources remain after removal.' >&2
+            exit 1
+          fi
+          image_after="$(docker image inspect --format '{{.Id}}' "$BUILT_IMAGE")"
+          if [ "$image_before" != "$image_after" ]; then
+            echo 'Loaded Runner image changed during builder cleanup.' >&2
+            exit 1
+          fi
+          printf 'Loaded Runner image after builder cleanup: %s\n' "$image_after"
+          df --block-size=1 "$RUNNER_TEMP" /var/lib/docker
+
       - name: Export exact E2E image
         if: >-
           (needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true')
@@ -1178,7 +1221,7 @@ jobs:
           if-no-files-found: error
 
   ci_docker_required_run:
-    name: ci-docker-build-run
+    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-required-skipped' }}
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'
@@ -1196,7 +1239,7 @@ jobs:
     steps: *docker_build_steps
 
   ci_docker_web_run:
-    name: ci-docker-build-run
+    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-web-skipped' }}
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'
@@ -1218,7 +1261,7 @@ jobs:
     steps: *docker_build_steps
 
   ci_docker_other_run:
-    name: ci-docker-build-run
+    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-other-skipped' }}
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'

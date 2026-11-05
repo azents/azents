@@ -451,6 +451,17 @@ Always-on required CI does not depend on external credentials.
   not export this cache or add a cache writer. A cache miss uses the same ordinary
   build, and hits retain the exact checkout, Dockerfile, load, smoke and immutable
   image export; a cache never selects an old image tag or bypasses artifact checks.
+  After successful Runner load and smoke, CI disposes only that job's generated
+  docker-container builder before exporting the loaded image. The setup step's
+  exact builder name and driver are checked; its default node/container and single
+  state volume must match the owned generated resource. Removal is scoped to that
+  builder, with container/volume absence and unchanged loaded image ID checked
+  before export. Any removal or identity failure stops the producer without rebuild.
+  BuildKit usage and filesystem observations precede cleanup, and free space is
+  observed afterward. The pinned setup action's post cleanup remains enabled for
+  failure paths and skips its already-removed builder. This advances completed
+  intermediate cleanup, not host-wide pruning or deletion of SDKs, product images,
+  unrelated Docker resources or the source GHA cache.
   Each selected producer saves its inspected immutable Docker image ID, compresses
   once with zstd level 3 and one compression worker, hashes the archive and uploads
   an image-specific artifact bound to repository,

@@ -1,5 +1,6 @@
 """Contract tests for E2E CI workflow configuration."""
 
+import json
 import os
 import re
 import subprocess
@@ -65,6 +66,12 @@ def test_suite_dependencies_use_only_the_exact_portfolio_and_shared_steps() -> N
         assert "steps: *docker_build_steps" in _job_block(workflow, job)
     assert workflow.count("      - name: Build ${{ matrix.name }}\n") == 1
     assert workflow.count("      - name: Run E2E lane\n") == 1
+    names = [
+        _job_block(workflow, job).splitlines()[0].strip()
+        for job in (*_PRODUCER_JOBS, "ci_e2e_run", "ci_e2e_web_run")
+    ]
+    assert len(names) == len(set(names))
+    assert all("-skipped" in name for name in names)
     for gate in ("ci_e2e_aggregate", "ci-python-e2e", "ci_observability"):
         needs = (
             _job_block(workflow, gate)
@@ -73,6 +80,114 @@ def test_suite_dependencies_use_only_the_exact_portfolio_and_shared_steps() -> N
         )
         assert "      - ci_e2e_run\n" in needs
         assert "      - ci_e2e_web_run\n" in needs
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "passed",
+        "empty",
+        "default",
+        "foreign",
+        "driver",
+        "inspect_failure",
+        "remove_failure",
+        "changed_image",
+        "wrong_volume",
+        "container_remains",
+        "volume_remains",
+    ],
+)
+def test_runner_releases_only_completed_owned_builder_before_export(
+    tmp_path: Path, scenario: str
+) -> None:
+    workflow = _WORKFLOW_PATH.read_text()
+    producer = _job_block(workflow, "ci_docker_build_run")
+    step = _step_block(producer, "Release completed Runner build workspace")
+    assert "if: matrix.name == 'azents-runtime-runner'" in step
+    assert "OWNED_BUILDER: ${{ steps.buildx.outputs.name }}" in step
+    assert "OWNED_DRIVER: ${{ steps.buildx.outputs.driver }}" in step
+    assert "BUILT_IMAGE: ${{ matrix.image }}" in step
+    assert (
+        producer.index("Build ${{ matrix.name }}")
+        < producer.index("Smoke ${{ matrix.name }}")
+        < producer.index("Release completed Runner build workspace")
+        < producer.index("Export exact E2E image")
+    )
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    calls = tmp_path / "calls"
+    docker = tools / "docker"
+    docker.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json,os,sys\n"
+        "from pathlib import Path\n"
+        "a=sys.argv[1:]; p=Path(os.environ['CALLS']); "
+        "old=p.read_text().splitlines() if p.exists() else []\n"
+        "with p.open('a') as f: f.write(json.dumps(a)+'\\n')\n"
+        "s=os.environ['SCENARIO']; b=os.environ['OWNED_BUILDER']\n"
+        "if a[:2]==['image','inspect']:\n"
+        " if s=='inspect_failure': sys.exit(7)\n"
+        " n=sum(json.loads(x)[:2]==['image','inspect'] for x in old)\n"
+        " print('sha256:'+('c' if s=='changed_image' and n else 'b')*64)\n"
+        "elif a[:2]==['container','inspect']:\n"
+        " print(('a'*64) if a[3]=='{{.Id}}' else "
+        "('unexpected' if s=='wrong_volume' else 'buildx_buildkit_'+b+'0_state'))\n"
+        "elif a[:2]==['buildx','rm']:\n"
+        " assert a==['buildx','rm',b]\n"
+        " if s=='remove_failure': sys.exit(9)\n"
+        "elif a[:2]==['buildx','du']: assert a==['buildx','du','--builder',b]\n"
+        "elif a[:2]==['container','ls']:\n"
+        " if s=='container_remains': print('a'*64)\n"
+        "elif a[:2]==['volume','ls']:\n"
+        " if s=='volume_remains': print('buildx_buildkit_'+b+'0_state')\n"
+        "else: raise AssertionError(a)\n"
+    )
+    docker.chmod(0o755)
+    (tools / "df").write_text("#!/bin/sh\nprintf 'owned filesystem observation\\n'\n")
+    (tools / "df").chmod(0o755)
+    builder = {
+        "empty": "",
+        "default": "default",
+        "foreign": "production-builder",
+    }.get(scenario, "builder-11111111-2222-3333-4444-555555555555")
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],
+        env={
+            **os.environ,
+            "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+            "OWNED_BUILDER": builder,
+            "OWNED_DRIVER": "docker" if scenario == "driver" else "docker-container",
+            "BUILT_IMAGE": "azents-runtime-runner:ci",
+            "RUNNER_TEMP": str(tmp_path),
+            "SCENARIO": scenario,
+            "CALLS": str(calls),
+        },
+        check=False,
+    )
+    commands = (
+        [json.loads(line) for line in calls.read_text().splitlines()]
+        if calls.exists()
+        else []
+    )
+    assert (result.returncode == 0) is (scenario == "passed")
+    removed = [call for call in commands if call[:2] == ["buildx", "rm"]]
+    if scenario in (
+        "passed",
+        "remove_failure",
+        "changed_image",
+        "container_remains",
+        "volume_remains",
+    ):
+        assert removed == [["buildx", "rm", builder]]
+    else:
+        assert not removed
+    if scenario in ("empty", "default", "foreign", "driver"):
+        assert not commands
+    assert all(
+        call[:2] not in (["image", "rm"], ["system", "prune"]) for call in commands
+    )
 
 
 @pytest.mark.parametrize("failing_group", [None, *_PRODUCER_JOBS])
