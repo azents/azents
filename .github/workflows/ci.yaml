@@ -393,6 +393,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      required_matrix: ${{ steps.plan.outputs.required_matrix }}
+      web_matrix: ${{ steps.plan.outputs.web_matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -446,18 +448,21 @@ jobs:
       - ci_testenv_support_run
       - ci_e2e_plan
       - ci_docker_build_run
+      - ci_docker_required_run
     if: >-
-      needs.ci_e2e_plan.result == 'success'
+      needs.changes.outputs.python_e2e == 'true'
+      && needs.ci_e2e_plan.result == 'success'
       && needs.ci_docker_build_run.result == 'success'
+      && needs.ci_docker_required_run.result == 'success'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.ci_e2e_plan.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.ci_e2e_plan.outputs.required_matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
     permissions:
       actions: read
       contents: read
-    steps:
+    steps: &e2e_steps
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -596,12 +601,36 @@ jobs:
           overwrite: true
           retention-days: 14
 
+  ci_e2e_web_run:
+    name: ci-e2e-${{ matrix.lane }}
+    needs:
+      - changes
+      - ci_testenv_support_run
+      - ci_e2e_plan
+      - ci_docker_build_run
+      - ci_docker_web_run
+    if: >-
+      needs.changes.outputs.web_e2e == 'true'
+      && needs.ci_e2e_plan.result == 'success'
+      && needs.ci_docker_build_run.result == 'success'
+      && needs.ci_docker_web_run.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.ci_e2e_plan.outputs.web_matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    permissions:
+      actions: read
+      contents: read
+    steps: *e2e_steps
+
   ci_e2e_aggregate:
     name: ci-e2e-aggregate
     needs:
       - changes
       - ci_e2e_plan
       - ci_e2e_run
+      - ci_e2e_web_run
     if: always() && needs.ci_e2e_plan.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
@@ -690,7 +719,8 @@ jobs:
         if: >-
           github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.full_name == github.repository
-          && needs.ci_e2e_run.result == 'success'
+          && (needs.changes.outputs.python_e2e != 'true' || needs.ci_e2e_run.result == 'success')
+          && (needs.changes.outputs.web_e2e != 'true' || needs.ci_e2e_web_run.result == 'success')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/e2e-timing-baseline
@@ -700,7 +730,8 @@ jobs:
         if: >-
           github.event_name == 'push'
           && github.ref == 'refs/heads/main'
-          && needs.ci_e2e_run.result == 'success'
+          && (needs.changes.outputs.python_e2e != 'true' || needs.ci_e2e_run.result == 'success')
+          && (needs.changes.outputs.web_e2e != 'true' || needs.ci_e2e_web_run.result == 'success')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/e2e-timing-baseline
@@ -739,13 +770,20 @@ jobs:
           PLAN_RESULT: ${{ needs.ci_e2e_plan.result }}
           RUN_RESULT: ${{ needs.ci_e2e_run.result }}
           DURATION_RESULT: ${{ steps.duration.outcome }}
+          WEB_RUN_RESULT: ${{ needs.ci_e2e_web_run.result }}
+          REQUIRED_ENABLED: ${{ needs.changes.outputs.python_e2e }}
+          WEB_ENABLED: ${{ needs.changes.outputs.web_e2e }}
         run: |
           if [ "$PLAN_RESULT" != 'success' ]; then
             echo "E2E planner result was: $PLAN_RESULT"
             exit 1
           fi
-          if [ "$RUN_RESULT" != 'success' ]; then
-            echo "E2E runner result was: $RUN_RESULT"
+          if [ "$REQUIRED_ENABLED" = 'true' ] && [ "$RUN_RESULT" != 'success' ]; then
+            echo "Required suite result was: $RUN_RESULT"
+            exit 1
+          fi
+          if [ "$WEB_ENABLED" = 'true' ] && [ "$WEB_RUN_RESULT" != 'success' ]; then
+            echo "Web suite result was: $WEB_RUN_RESULT"
             exit 1
           fi
           if [ "$DURATION_RESULT" != 'success' ]; then
@@ -760,6 +798,7 @@ jobs:
       - ci_testenv_support_run
       - ci_e2e_plan
       - ci_e2e_run
+      - ci_e2e_web_run
       - ci_e2e_aggregate
     if: always()
     runs-on: ubuntu-latest
@@ -771,6 +810,9 @@ jobs:
           SUPPORT_RESULT: ${{ needs.ci_testenv_support_run.result }}
           PLAN_RESULT: ${{ needs.ci_e2e_plan.result }}
           RUN_RESULT: ${{ needs.ci_e2e_run.result }}
+          WEB_RUN_RESULT: ${{ needs.ci_e2e_web_run.result }}
+          REQUIRED_ENABLED: ${{ needs.changes.outputs.python_e2e }}
+          WEB_ENABLED: ${{ needs.changes.outputs.web_e2e }}
           AGGREGATE_RESULT: ${{ needs.ci_e2e_aggregate.result }}
         run: |
           if [ "$CHANGES_RESULT" != 'success' ]; then
@@ -781,12 +823,20 @@ jobs:
             echo 'No E2E scope changed.'
             exit 0
           fi
-          for result in "$SUPPORT_RESULT" "$PLAN_RESULT" "$RUN_RESULT" "$AGGREGATE_RESULT"; do
+          for result in "$SUPPORT_RESULT" "$PLAN_RESULT" "$AGGREGATE_RESULT"; do
             if [ "$result" != 'success' ]; then
               echo "Required E2E result was: $result"
               exit 1
             fi
           done
+          if [ "$REQUIRED_ENABLED" = 'true' ] && [ "$RUN_RESULT" != 'success' ]; then
+            echo "Required suite result was: $RUN_RESULT"
+            exit 1
+          fi
+          if [ "$WEB_ENABLED" = 'true' ] && [ "$WEB_RUN_RESULT" != 'success' ]; then
+            echo "Web suite result was: $WEB_RUN_RESULT"
+            exit 1
+          fi
           echo 'All enabled E2E suites passed.'
 
   ci_observability:
@@ -800,6 +850,7 @@ jobs:
       - ci-helm
       - ci-docker-build
       - ci_e2e_run
+      - ci_e2e_web_run
       - ci_e2e_aggregate
     if: always()
     runs-on: ubuntu-latest
@@ -1036,39 +1087,15 @@ jobs:
             dockerfile: azents.Dockerfile
             image: azents-server:ci
             extra_context: ""
-          - name: azents-llm-proxy
-            dockerfile: python/apps/azents-llm-proxy/Dockerfile
-            image: azents-llm-proxy:ci
-            extra_context: ""
-          - name: azents-web
-            dockerfile: azents-web.Dockerfile
-            image: azents-web:ci
-            extra_context: "--build-context next-cache=/tmp/next-cache"
-          - name: azents-admin-web
-            dockerfile: azents-admin-web.Dockerfile
-            image: azents-admin-web:ci
-            extra_context: "--build-context next-cache=/tmp/next-cache"
           - name: azents-runtime-runner
             dockerfile: python/apps/azents-runtime-runner/Dockerfile
             image: azents-runtime-runner:ci
-            extra_context: ""
-          - name: azents-runtime-proxy
-            dockerfile: python/apps/azents-runtime-proxy/Dockerfile
-            image: azents-runtime-proxy:ci
-            extra_context: ""
-          - name: azents-runtime-engine
-            dockerfile: images/azents-runtime-engine/Dockerfile
-            image: azents-runtime-engine:ci
-            extra_context: ""
-          - name: azents-runtime-provider-kubernetes
-            dockerfile: python/apps/azents-runtime-provider-kubernetes/Dockerfile
-            image: azents-runtime-provider-kubernetes:ci
             extra_context: ""
           - name: azents-runtime-provider-docker
             dockerfile: python/apps/azents-runtime-provider-docker/Dockerfile
             image: azents-runtime-provider-docker:ci
             extra_context: ""
-    steps:
+    steps: &docker_build_steps
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1150,11 +1177,80 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  ci_docker_required_run:
+    name: ci-docker-build-run
+    needs: changes
+    if: >-
+      needs.changes.outputs.docker == 'true'
+      || needs.changes.outputs.python_e2e == 'true'
+      || needs.changes.outputs.web_e2e == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: azents-llm-proxy
+            dockerfile: python/apps/azents-llm-proxy/Dockerfile
+            image: azents-llm-proxy:ci
+            extra_context: ""
+    steps: *docker_build_steps
+
+  ci_docker_web_run:
+    name: ci-docker-build-run
+    needs: changes
+    if: >-
+      needs.changes.outputs.docker == 'true'
+      || needs.changes.outputs.python_e2e == 'true'
+      || needs.changes.outputs.web_e2e == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: azents-web
+            dockerfile: azents-web.Dockerfile
+            image: azents-web:ci
+            extra_context: "--build-context next-cache=/tmp/next-cache"
+          - name: azents-admin-web
+            dockerfile: azents-admin-web.Dockerfile
+            image: azents-admin-web:ci
+            extra_context: "--build-context next-cache=/tmp/next-cache"
+    steps: *docker_build_steps
+
+  ci_docker_other_run:
+    name: ci-docker-build-run
+    needs: changes
+    if: >-
+      needs.changes.outputs.docker == 'true'
+      || needs.changes.outputs.python_e2e == 'true'
+      || needs.changes.outputs.web_e2e == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: azents-runtime-proxy
+            dockerfile: python/apps/azents-runtime-proxy/Dockerfile
+            image: azents-runtime-proxy:ci
+            extra_context: ""
+          - name: azents-runtime-engine
+            dockerfile: images/azents-runtime-engine/Dockerfile
+            image: azents-runtime-engine:ci
+            extra_context: ""
+          - name: azents-runtime-provider-kubernetes
+            dockerfile: python/apps/azents-runtime-provider-kubernetes/Dockerfile
+            image: azents-runtime-provider-kubernetes:ci
+            extra_context: ""
+    steps: *docker_build_steps
+
   ci-docker-build:
     name: ci-docker-build
     needs:
       - changes
       - ci_docker_build_run
+      - ci_docker_required_run
+      - ci_docker_web_run
+      - ci_docker_other_run
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -1162,7 +1258,12 @@ jobs:
         run: |
           changes_result='${{ needs.changes.result }}'
           changed='${{ needs.changes.outputs.docker == 'true' || needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true' }}'
-          result='${{ needs.ci_docker_build_run.result }}'
+          results=(
+            '${{ needs.ci_docker_build_run.result }}'
+            '${{ needs.ci_docker_required_run.result }}'
+            '${{ needs.ci_docker_web_run.result }}'
+            '${{ needs.ci_docker_other_run.result }}'
+          )
           if [ "$changes_result" != 'success' ]; then
             echo "changes job failed or was skipped: $changes_result"
             exit 1
@@ -1171,8 +1272,9 @@ jobs:
             echo 'Docker scope unchanged; passing.'
             exit 0
           fi
-          if [ "$result" = 'success' ]; then
-            exit 0
-          fi
-          echo "Docker scope changed but ci-docker-build-run result was: $result"
-          exit 1
+          for result in "${results[@]}"; do
+            if [ "$result" != 'success' ]; then
+              echo "Docker scope changed but a producer result was: $result"
+              exit 1
+            fi
+          done

@@ -347,6 +347,14 @@ def main() -> None:
     if args.github_output is not None:
         with args.github_output.open("a", encoding="utf-8") as output:
             output.write(f"matrix={matrix_json}\n")
+            for suite in ("required", "web"):
+                selected = {
+                    "include": [
+                        lane for lane in matrix["include"] if lane["suite"] == suite
+                    ]
+                }
+                encoded = json.dumps(selected, separators=(",", ":"), sort_keys=True)
+                output.write(f"{suite}_matrix={encoded}\n")
     sys.stdout.write(f"{matrix_json}\n")
 
 

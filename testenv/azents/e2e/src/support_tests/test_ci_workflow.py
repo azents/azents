@@ -1,15 +1,27 @@
 """Contract tests for E2E CI workflow configuration."""
 
 import os
+import re
 import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
+from scripts.ci.e2e_images import REQUIRED, WEB
 
 from support.consts import REPOSITORY_ROOT
 
 _WORKFLOW_PATH = REPOSITORY_ROOT / ".github/workflows/ci.yaml"
+_PRODUCER_JOBS = (
+    "ci_docker_build_run",
+    "ci_docker_required_run",
+    "ci_docker_web_run",
+    "ci_docker_other_run",
+)
+
+
+def _job_block(workflow: str, job: str) -> str:
+    return re.split(r"\n  [A-Za-z0-9_-]+:\n", workflow.split(f"  {job}:\n", 1)[1])[0]
 
 
 def _step_block(workflow: str, name: str) -> str:
@@ -17,6 +29,162 @@ def _step_block(workflow: str, name: str) -> str:
     start = workflow.index(marker)
     end = workflow.find("\n      - name:", start + len(marker))
     return workflow[start:] if end == -1 else workflow[start:end]
+
+
+def test_suite_dependencies_use_only_the_exact_portfolio_and_shared_steps() -> None:
+    workflow = _WORKFLOW_PATH.read_text()
+    portfolios = {
+        job: {
+            line.removeprefix("          - name: ")
+            for line in _job_block(workflow, job).split("    steps:", 1)[0].splitlines()
+            if line.startswith("          - name: ")
+        }
+        for job in _PRODUCER_JOBS
+    }
+    for job, extra, expected, output, changed in (
+        ("ci_e2e_run", "ci_docker_required_run", REQUIRED, "required", "python_e2e"),
+        ("ci_e2e_web_run", "ci_docker_web_run", WEB, "web", "web_e2e"),
+    ):
+        block = _job_block(workflow, job)
+        needs = block.split("    needs:\n", 1)[1].split("    if:", 1)[0]
+        producers = {
+            line.strip().removeprefix("- ")
+            for line in needs.splitlines()
+            if "ci_docker_" in line
+        }
+        assert producers == {"ci_docker_build_run", extra}
+        assert set.union(*(portfolios[name] for name in producers)) == set(expected)
+        assert f"needs.changes.outputs.{changed} == 'true'" in block
+        assert f"outputs.{output}_matrix" in block
+        assert "runs-on: ubuntu-latest" in block
+        assert "timeout-minutes: ${{ matrix.timeout_minutes }}" in block
+        assert "fail-fast: false" in block
+    assert "steps: &e2e_steps" in _job_block(workflow, "ci_e2e_run")
+    assert "steps: *e2e_steps" in _job_block(workflow, "ci_e2e_web_run")
+    for job in _PRODUCER_JOBS[1:]:
+        assert "steps: *docker_build_steps" in _job_block(workflow, job)
+    assert workflow.count("      - name: Build ${{ matrix.name }}\n") == 1
+    assert workflow.count("      - name: Run E2E lane\n") == 1
+    for gate in ("ci_e2e_aggregate", "ci-python-e2e", "ci_observability"):
+        needs = (
+            _job_block(workflow, gate)
+            .split("    needs:\n", 1)[1]
+            .split("    if:", 1)[0]
+        )
+        assert "      - ci_e2e_run\n" in needs
+        assert "      - ci_e2e_web_run\n" in needs
+
+
+@pytest.mark.parametrize("failing_group", [None, *_PRODUCER_JOBS])
+@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped"])
+def test_docker_gate_still_requires_every_producer_group(
+    failing_group: str | None, result: str
+) -> None:
+    workflow = _WORKFLOW_PATH.read_text()
+    block = _job_block(workflow, "ci-docker-build")
+    script = textwrap.dedent(block.split("        run: |\n", 1)[1])
+    script = script.replace("${{ needs.changes.result }}", "success")
+    script = re.sub(r"\$\{\{ needs.changes.outputs.*?}}", "true", script)
+    for job in _PRODUCER_JOBS:
+        assert f"      - {job}\n" in block
+        script = script.replace(
+            "${{ needs." + job + ".result }}",
+            result if job == failing_group else "success",
+        )
+    completed = subprocess.run(["bash", "-e", "-c", script], check=False)
+    assert completed.returncode == (0 if failing_group is None else 1)
+
+
+@pytest.mark.parametrize("required,web", [(True, True), (True, False), (False, True)])
+@pytest.mark.parametrize(
+    "failure", [None, "required", "web", "support", "plan", "aggregate"]
+)
+def test_e2e_gate_requires_all_and_only_enabled_suites(
+    required: bool, web: bool, failure: str | None
+) -> None:
+    workflow = _WORKFLOW_PATH.read_text()
+    block = _job_block(workflow, "ci-python-e2e")
+    script = textwrap.dedent(block.split("        run: |\n", 1)[1])
+    environment = {
+        **os.environ,
+        "CHANGES_RESULT": "success",
+        "E2E_CHANGED": "true",
+        "REQUIRED_ENABLED": str(required).lower(),
+        "WEB_ENABLED": str(web).lower(),
+        "RUN_RESULT": "failure"
+        if failure == "required"
+        else "success"
+        if required
+        else "skipped",
+        "WEB_RUN_RESULT": "failure"
+        if failure == "web"
+        else "success"
+        if web
+        else "skipped",
+        "SUPPORT_RESULT": "failure" if failure == "support" else "success",
+        "PLAN_RESULT": "failure" if failure == "plan" else "success",
+        "AGGREGATE_RESULT": "failure" if failure == "aggregate" else "success",
+    }
+    completed = subprocess.run(
+        ["bash", "-e", "-c", script], env=environment, check=False
+    )
+    failed = (
+        failure in ("support", "plan", "aggregate")
+        or failure == "required"
+        and required
+        or failure == "web"
+        and web
+    )
+    assert completed.returncode == int(failed)
+
+
+@pytest.mark.parametrize("required,web", [(True, True), (True, False), (False, True)])
+@pytest.mark.parametrize("failure", [None, "required", "web", "plan", "duration"])
+def test_aggregate_gate_requires_enabled_suites_and_duration(
+    required: bool, web: bool, failure: str | None
+) -> None:
+    block = _job_block(_WORKFLOW_PATH.read_text(), "ci_e2e_aggregate")
+    gate = _step_block(block, "Gate E2E lanes")
+    script = textwrap.dedent(gate.split("        run: |\n", 1)[1])
+    completed = subprocess.run(
+        ["bash", "-e", "-c", script],
+        env={
+            **os.environ,
+            "REQUIRED_ENABLED": str(required).lower(),
+            "WEB_ENABLED": str(web).lower(),
+            "RUN_RESULT": (
+                "failure"
+                if failure == "required"
+                else "success"
+                if required
+                else "skipped"
+            ),
+            "WEB_RUN_RESULT": (
+                "failure" if failure == "web" else "success" if web else "skipped"
+            ),
+            "PLAN_RESULT": "failure" if failure == "plan" else "success",
+            "DURATION_RESULT": "failure" if failure == "duration" else "success",
+        },
+        check=False,
+    )
+    failed = (
+        failure in ("plan", "duration")
+        or failure == "required"
+        and required
+        or failure == "web"
+        and web
+    )
+    assert completed.returncode == int(failed)
+    for name in ("Save same-SHA PR E2E timing baseline", "Save E2E timing baseline"):
+        condition = _step_block(block, name).split("        uses:", 1)[0]
+        assert (
+            "(needs.changes.outputs.python_e2e != 'true' || "
+            "needs.ci_e2e_run.result == 'success')" in condition
+        )
+        assert (
+            "(needs.changes.outputs.web_e2e != 'true' || "
+            "needs.ci_e2e_web_run.result == 'success')" in condition
+        )
 
 
 def test_runner_browser_install_preserves_commands_and_uses_official_apt_mirror() -> (
@@ -174,7 +342,10 @@ def test_e2e_lanes_require_exact_current_run_producer_images_without_rebuild() -
     preparation = _step_block(lane, "Prepare exact images and existing prerequisites")
     assert "scripts.ci.e2e_images prepare" in preparation
     assert "GH_TOKEN: ${{ github.token }}" in preparation
-    assert "actions: read" in lane.split("    steps:\n", 1)[0]
+    assert "actions: read" in lane.split("    steps:", 1)[0]
+    assert "      - ci_docker_required_run\n" in lane
+    assert "needs.ci_docker_required_run.result == 'success'" in lane
+    assert "needs.ci_docker_web_run.result" not in _job_block(workflow, "ci_e2e_run")
     assert "--root" in preparation and "--evidence" in preparation
     assert "continue-on-error:" not in preparation
     assert lane.index("Prepare exact images") < lane.index("Verify and load")
@@ -193,23 +364,28 @@ def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -
     producer = workflow.split("  ci_docker_build_run:\n", 1)[1].split(
         "\n  ci-docker-build:\n", 1
     )[0]
-    matrix = producer.split("    steps:\n", 1)[0]
+    matrix = "\n".join(
+        _job_block(workflow, job).split("    steps:", 1)[0] for job in _PRODUCER_JOBS
+    )
     images = [
         line.removeprefix("          - name: ")
         for line in matrix.splitlines()
         if line.startswith("          - name: ")
     ]
-    assert images == [
-        "azents-server",
-        "azents-llm-proxy",
-        "azents-web",
-        "azents-admin-web",
-        "azents-runtime-runner",
-        "azents-runtime-proxy",
-        "azents-runtime-engine",
-        "azents-runtime-provider-kubernetes",
-        "azents-runtime-provider-docker",
-    ]
+    assert sorted(images) == sorted(
+        [
+            "azents-server",
+            "azents-llm-proxy",
+            "azents-web",
+            "azents-admin-web",
+            "azents-runtime-runner",
+            "azents-runtime-proxy",
+            "azents-runtime-engine",
+            "azents-runtime-provider-kubernetes",
+            "azents-runtime-provider-docker",
+        ]
+    )
+    assert len(images) == len(set(images)) == 9
     assert "runs-on: ubuntu-latest" in producer
     assert "needs.changes.outputs.python_e2e == 'true'" in producer
     assert "needs.changes.outputs.web_e2e == 'true'" in producer

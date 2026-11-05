@@ -1,11 +1,55 @@
 """Unit tests for folder-owned E2E suite planning."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from support.e2e_planner import load_file_timings, load_suites, plan_suites
+from support.e2e_planner import load_file_timings, load_suites, main, plan_suites
+
+
+@pytest.mark.parametrize("enabled", [(), ("required",), ("web",), ("required", "web")])
+def test_cli_suite_projections_preserve_the_exact_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: tuple[str, ...]
+) -> None:
+    tests = tmp_path / "tests"
+    for suite in ("required", "web"):
+        directory = _write_suite(tests, suite)
+        for name in ("first", "second"):
+            (directory / f"test_{name}.py").write_text(
+                f"def test_{name}(): pass\n", encoding="utf-8"
+            )
+    output = tmp_path / "github-output"
+    plans = tmp_path / "plans"
+    args = [
+        "e2e_planner",
+        "--tests-root",
+        str(tests),
+        "--output-dir",
+        str(plans),
+        "--github-output",
+        str(output),
+    ]
+    for suite in enabled:
+        args.extend(["--enabled-suite", suite])
+    monkeypatch.setattr(sys, "argv", args)
+    main()
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    full = json.loads(values["matrix"])["include"]
+    projected = []
+    for suite in ("required", "web"):
+        lanes = json.loads(values[f"{suite}_matrix"])["include"]
+        assert lanes == [lane for lane in full if lane["suite"] == suite]
+        assert bool(lanes) is (suite in enabled)
+        for lane in lanes:
+            files = (plans / lane["plan_file"]).read_text().splitlines()
+            assert files
+            assert all(str(tests / suite) in name for name in files)
+        projected.extend(lanes)
+    assert sorted(projected, key=lambda lane: lane["lane"]) == sorted(
+        full, key=lambda lane: lane["lane"]
+    )
 
 
 def _write_suite(root: Path, name: str, *, lanes: int = 2) -> Path:

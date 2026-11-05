@@ -414,13 +414,22 @@ Always-on required CI does not depend on external credentials.
   and unknown worktrees remain protected, and actual cleanup blockers are reported.
   Draft status, future candidates, noisy evidence and approval blockers do not
   justify retaining a terminally unsuccessful experiment PR.
-- Enabled E2E lanes consume the exact images built and smoke-tested by the existing
-  Docker build matrix in the same workflow attempt. The Docker matrix is enabled
-  whenever either E2E suite is enabled, including test-only changes. Consumers wait
-  for its success; no extra job, matrix entry, registry publication, snapshot wait,
-  or fallback rebuild is introduced. Both profiles consume Server, Runtime Runner
-  and Docker Runtime Provider. Required additionally consumes the independent
-  Agent inference Proxy; Web instead adds Main Web and Admin Web.
+- Enabled E2E lanes consume exact images built and smoke-tested in the same
+  workflow attempt. The existing nine Docker producer executions are partitioned
+  into shared core (Server, Runtime Runner and Docker Runtime Provider), Required
+  (Agent inference Proxy), Web (Main Web and Admin Web) and other smoke-only images.
+  Producers remain enabled whenever either E2E suite is enabled, including test-only
+  changes. Required waits only for shared core and its Proxy producer; Web waits
+  only for shared core and its Web producers. Neither suite waits for unrelated
+  smoke-only builds. Shared core is built once, and the required Docker gate still
+  checks every producer group, including images not consumed by E2E.
+  One planner retains the full lane matrix and plan-file artifact and publishes
+  exact per-suite projections for the two consumer jobs. Disabled suites skip before
+  matrix expansion; enabled suites must succeed at the final E2E gate. Aggregation
+  and observability join both consumer groups. Shared YAML step anchors keep the
+  same build/smoke/export and lane bodies, nine image builds, planned lane count,
+  runner class, workers, timeouts and artifact identities. No registry publication,
+  extra runner execution, snapshot wait or fallback rebuild is introduced.
   Both producer and consumer check out the tested head SHA rather than the synthetic
   pull-request merge commit.
   The Runtime Runner producer imports content-addressed BuildKit layers from the
