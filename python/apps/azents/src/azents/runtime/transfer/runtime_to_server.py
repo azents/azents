@@ -27,6 +27,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorSettleTransferRequest,
     CoordinatorSourceTransport,
     CoordinatorTransferDirection,
+    CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
@@ -606,6 +607,11 @@ class RuntimeToServerTransferService:
             if status.phase is CoordinatorTransferPhase.AVAILABLE:
                 return status
             if status.phase is CoordinatorTransferPhase.TERMINAL:
+                if status.failure is CoordinatorTransferFailure.ADMISSION:
+                    raise RuntimeToServerTransferError(
+                        "Runtime upload admission failed: transfer capacity wait "
+                        "timed out, the wait queue is full, or the Runner is closing"
+                    )
                 raise RuntimeToServerTransferError("Runtime upload terminated")
             await asyncio.sleep(self.status_poll_interval.total_seconds())
 

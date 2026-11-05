@@ -24,6 +24,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorPreparationCleanupState,
     CoordinatorSettleTransferRequest,
     CoordinatorSourceTransport,
+    CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
@@ -196,6 +197,37 @@ class _Coordinator:
             CoordinatorTransferPhase.TERMINAL,
             CoordinatorTransferOutcome.CANCELLED,
         )
+
+
+async def test_capacity_admission_failure_returns_actionable_transfer_error() -> None:
+    """Capacity rejection remains a typed tool-visible error without a deadline wait."""
+
+    class _CapacityCoordinator(_Coordinator):
+        async def get_transfer_status(
+            self, request: CoordinatorGetTransferStatusRequest
+        ) -> CoordinatorTransferStatus:
+            return replace(
+                _status(
+                    6,
+                    request.identity,
+                    CoordinatorTransferPhase.TERMINAL,
+                    CoordinatorTransferOutcome.FAILED,
+                ),
+                failure=CoordinatorTransferFailure.ADMISSION,
+            )
+
+    coordinator = _CapacityCoordinator()
+    callback = _Callback([])
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+    with pytest.raises(RuntimeToServerTransferError, match="capacity wait"):
+        await service.transfer(_request(callback))
+    assert callback.uploads == []
+    assert "claim" not in coordinator.calls
 
 
 class _StrictCleanupCoordinator(_Coordinator):

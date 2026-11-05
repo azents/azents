@@ -456,6 +456,36 @@ generation, claim identity, and owner; repeated claims renew the bounded stream 
 while the HTTP body is active. Ordinary Runner control operations remain independently
 available while a transfer stream is active.
 
+### Transfer capacity and failure delivery
+
+The Runner shares four executing data-transfer slots across all Sessions in its
+Runtime. Excess valid intents wait in FIFO order before file access or byte movement,
+for at most 30 seconds or the remaining original transfer deadline, whichever is
+shorter. Waiting never resets the overall deadline and does not block the control
+receiver. Pending tasks keep the exact intent/dispatch identity, accept cancellation,
+and revalidate deadline and Runner generation before execution. Cancellation, shutdown,
+and failed admission do not consume a data slot or replay a transfer.
+
+Outstanding transfer tasks are bounded by the executing limit plus 32 additional
+tasks, including waiters and tasks awaiting result delivery. Beyond that budget,
+admission returns `RESOURCE_EXHAUSTED`. Slot-wait timeout uses the same failure
+classification; expiry of the original deadline remains `DEADLINE_EXCEEDED`.
+Data slots are released before result acknowledgement so a delayed result sink
+does not hold data capacity. The separate outstanding-task budget still bounds
+retained results and waiting work. These limits belong to
+[Runner transfer admission](../../../../python/apps/azents-runtime-runner/src/azents_runtime_runner/transfer.py).
+
+Control correlates Runner rejection results with the exact attempt, dispatch and
+accepted generation. If dispatch-enqueue bookkeeping advances the revision during
+failure settlement, it re-observes and retries settlement at most three times.
+It does not overwrite a committed upload response, confirmed Runner success, or
+another attempt/dispatch/generation. Unconfirmed failure settlement is logged,
+and capacity failures retain an admission classification rather than becoming
+generic stream failures. Runtime image-read callers receive a typed capacity
+admission error instead of waiting for the entire transfer deadline after a
+recorded rejection. See
+[Runner result settlement](../../../../python/apps/azents/src/azents/runtime/transfer/result_coordinator.py).
+
 For inbound downloads, the Runner writes to a randomly
 named temporary file in the destination directory and commits the requested destination
 only after complete verification. An admitted overwrite atomically replaces the

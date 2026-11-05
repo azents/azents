@@ -28,6 +28,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
+    RuntimeTransferDestinationConflictEvidence,
     RuntimeTransferDirection,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
@@ -47,6 +48,192 @@ from azents.testing.runtime_coordination import (
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _DIGEST = "a" * 64
+
+
+async def test_admission_failure_survives_dispatch_enqueue_revision_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Runner can reject capacity before Control marks the intent enqueued."""
+    harness = await _harness(RuntimeTransferDirection.UPLOAD)
+    state = harness.state
+    admitted = await state.admit(
+        _admission(RuntimeTransferDirection.UPLOAD), lease_id="lease-1"
+    )
+    assert admitted is not None
+    ready = await state.mark_ready(
+        "transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("object-1", 3, _DIGEST),
+    )
+    assert ready is not None
+    bound = await state.bind_dispatch(
+        "transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        accepted_runner_generation=1,
+        expected_revision=ready.revision,
+        dispatch_id="dispatch-1",
+        dispatch_request_id="request-1",
+    )
+    assert bound is not None
+    deliverable = await state.mark_dispatch_deliverable(
+        "transfer-1",
+        attempt_id="attempt-1",
+        expected_revision=bound.revision,
+        dispatch_id="dispatch-1",
+        dispatch_request_id="request-1",
+    )
+    assert deliverable is not None
+    settle = state.settle
+    settle_calls = 0
+
+    async def raced_settle(
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        outcome: RuntimeTransferOutcome,
+        failure: StateTransferFailure | None,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
+    ) -> RuntimeTransferRecord | None:
+        nonlocal settle_calls
+        settle_calls += 1
+        if settle_calls == 1:
+            enqueued = await state.mark_dispatch_enqueued(
+                transfer_id,
+                attempt_id=attempt_id,
+                operation_id="operation-1",
+                expected_revision=expected_revision,
+                dispatch_id="dispatch-1",
+            )
+            assert enqueued is not None
+        return await settle(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            outcome=outcome,
+            failure=failure,
+            destination_conflict=destination_conflict,
+        )
+
+    monkeypatch.setattr(state, "settle", raced_settle)
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.UPLOAD,
+            outcome=RunnerTransferOutcome.FAILED,
+            committed=False,
+            failure=RunnerTransferFailure.RESOURCE_EXHAUSTED,
+            size=None,
+            sha256=None,
+        ),
+        request_id="runner-result-1",
+    )
+
+    record = await state.get("transfer-1")
+    assert record is not None
+    assert record.terminal_outcome is RuntimeTransferOutcome.FAILED
+    assert record.failure is StateTransferFailure.ADMISSION
+    assert settle_calls == 2
+    operation = await harness.coordination.get_operation("operation-1")
+    assert operation is not None and operation.status is RuntimeOperationStatus.FINAL
+
+
+@pytest.mark.parametrize("conflict", ["advancing", "unchanged", "new_attempt"])
+async def test_failure_settlement_recovery_is_bounded_and_attempt_fenced(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    conflict: str,
+) -> None:
+    """Conflicts cannot cause indefinite retries or settle a replacement attempt."""
+    harness = await _harness(RuntimeTransferDirection.UPLOAD)
+    await harness.claim_stream()
+    state = harness.state
+    calls = 0
+    original_settle = state.settle
+
+    async def conflicting_settle(
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        outcome: RuntimeTransferOutcome,
+        failure: StateTransferFailure | None,
+        destination_conflict: RuntimeTransferDestinationConflictEvidence | None,
+    ) -> RuntimeTransferRecord | None:
+        nonlocal calls
+        calls += 1
+        if conflict == "new_attempt":
+            assert (
+                await original_settle(
+                    transfer_id,
+                    attempt_id=attempt_id,
+                    expected_revision=expected_revision,
+                    outcome=RuntimeTransferOutcome.FAILED,
+                    failure=StateTransferFailure.STREAM,
+                    destination_conflict=None,
+                )
+                is not None
+            )
+            assert (
+                await state.admit(
+                    replace(
+                        _admission(RuntimeTransferDirection.UPLOAD), attempt_id="newer"
+                    ),
+                    lease_id="new-lease",
+                )
+                is not None
+            )
+        elif conflict == "advancing":
+            status = (
+                RuntimeTransferCleanupStatus.PENDING
+                if calls % 2
+                else RuntimeTransferCleanupStatus.COMPLETE
+            )
+            assert (
+                await state.record_cleanup(
+                    transfer_id,
+                    attempt_id=attempt_id,
+                    expected_revision=expected_revision,
+                    status=status,
+                    cleanup_failure=None,
+                )
+                is not None
+            )
+        return None
+
+    monkeypatch.setattr(state, "settle", conflicting_settle)
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.UPLOAD,
+            outcome=RunnerTransferOutcome.FAILED,
+            committed=False,
+            failure=RunnerTransferFailure.RESOURCE_EXHAUSTED,
+            size=None,
+            sha256=None,
+        ),
+        request_id="runner-result-1",
+    )
+
+    assert calls == (3 if conflict == "advancing" else 1)
+    record = await state.get("transfer-1")
+    assert record is not None and record.terminal_outcome is None
+    if conflict == "new_attempt":
+        assert record.admission.attempt_id == "newer"
+    assert (
+        len(
+            [
+                record
+                for record in caplog.records
+                if record.message
+                == "Runtime transfer Runner failure settlement was not confirmed"
+            ]
+        )
+        == 1
+    )
 
 
 class _Clock:

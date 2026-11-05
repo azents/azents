@@ -11,6 +11,7 @@ import threading
 from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 import grpc
 import pytest
@@ -53,6 +54,272 @@ from azents_runtime_runner.transfer import (
 from azents_runtime_runner.workspace import Workspace
 
 _UNRESTRICTED_WORKSPACE = Workspace("/tmp")
+
+
+class _CapacitySemaphore(asyncio.Semaphore):
+    """Expose admission to the slot wait without a scheduler delay."""
+
+    def __init__(self, value: int) -> None:
+        super().__init__(value)
+        self.waiting: asyncio.Queue[None] = asyncio.Queue()
+
+    async def acquire(self) -> Literal[True]:
+        if self.locked():
+            self.waiting.put_nowait(None)
+        return await super().acquire()
+
+
+class _CapacityControl:
+    def __init__(self) -> None:
+        self.results: asyncio.Queue[RunnerTransferResult] = asyncio.Queue()
+
+    async def append_runner_transfer_result(self, result: RunnerTransferResult) -> None:
+        await self.results.put(result)
+
+
+def _capacity_intent(
+    tmp_path: Path, index: int, *, deadline_at: datetime | None = None
+) -> RunnerTransferIntent:
+    return dataclasses.replace(
+        _intent(
+            tmp_path / f"capacity-{index}",
+            transfer_id=f"transfer-{index}",
+            attempt_id=f"attempt-{index}",
+            operation_id=f"operation-{index}",
+            dispatch_id=f"dispatch-{index}",
+            deadline_at=deadline_at,
+        ),
+        owner_session_id=f"session-{index % 2}",
+    )
+
+
+async def test_capacity_waits_across_sessions_and_preserves_fifo(
+    tmp_path: Path,
+) -> None:
+    """Six intents share four Runtime slots and execute each data transfer once."""
+    control = _CapacityControl()
+    transfer = _CapacityTransfer()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=transfer,
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+    )
+    slots = _CapacitySemaphore(4)
+    manager._data_slots = slots
+    try:
+        intents = [_capacity_intent(tmp_path, index) for index in range(6)]
+        for intent in intents:
+            await manager.handle_intent(intent)
+        started = [await asyncio.wait_for(transfer.started.get(), 1) for _ in range(4)]
+        assert started == [f"transfer-{i}" for i in range(4)]
+        await asyncio.wait_for(slots.waiting.get(), 1)
+        await asyncio.wait_for(slots.waiting.get(), 1)
+        assert control.results.empty()
+        assert not (tmp_path / "capacity-4").exists()
+        await manager.handle_intent(intents[4])
+        transfer.gates["transfer-0"].set()
+        assert await asyncio.wait_for(transfer.started.get(), 1) == "transfer-4"
+        transfer.gates["transfer-1"].set()
+        assert await asyncio.wait_for(transfer.started.get(), 1) == "transfer-5"
+        for gate in transfer.gates.values():
+            gate.set()
+        results = [await asyncio.wait_for(control.results.get(), 1) for _ in range(6)]
+        assert len({r.identity.transfer_id for r in results}) == 6
+        assert all(r.outcome is RunnerTransferOutcome.SUCCEEDED for r in results)
+        assert transfer.started.empty()
+    finally:
+        await manager.close()
+
+
+@pytest.mark.parametrize("deadline_first", [False, True])
+async def test_capacity_wait_timeout_preserves_original_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deadline_first: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Waiting expires independently, or earlier at the original intent deadline."""
+    control = _CapacityControl()
+    transfer = _CapacityTransfer()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=transfer,
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+        max_active_transfers=1,
+    )
+    try:
+        await manager.handle_intent(_capacity_intent(tmp_path, 0))
+        assert await asyncio.wait_for(transfer.started.get(), 1) == "transfer-0"
+        if not deadline_first:
+            monkeypatch.setattr(transfer_module, "_CAPACITY_WAIT_SECONDS", 0)
+        intent = _capacity_intent(
+            tmp_path,
+            1,
+            deadline_at=(datetime.now(UTC) + timedelta(milliseconds=20))
+            if deadline_first
+            else None,
+        )
+        await manager.handle_intent(intent)
+        result = await asyncio.wait_for(control.results.get(), 1)
+        assert result.identity == intent.identity
+        assert result.failure is (
+            RunnerTransferFailure.DEADLINE_EXCEEDED
+            if deadline_first
+            else RunnerTransferFailure.RESOURCE_EXHAUSTED
+        )
+        assert transfer.started.empty()
+        assert not (tmp_path / "capacity-1").exists()
+        assert any(
+            record.__dict__.get("failure_reason") == "transfer_capacity_wait_timeout"
+            for record in caplog.records
+        )
+    finally:
+        await manager.close()
+
+
+async def test_wait_queue_is_bounded_without_blocking_control(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control = _CapacityControl()
+    transfer = _CapacityTransfer()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=transfer,
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+        max_active_transfers=1,
+    )
+    slots = _CapacitySemaphore(1)
+    manager._data_slots = slots
+    monkeypatch.setattr(transfer_module, "_MAX_WAITING_TRANSFERS", 1)
+    try:
+        await manager.handle_intent(_capacity_intent(tmp_path, 0))
+        await asyncio.wait_for(transfer.started.get(), 1)
+        await manager.handle_intent(_capacity_intent(tmp_path, 1))
+        await asyncio.wait_for(slots.waiting.get(), 1)
+        await asyncio.wait_for(manager.handle_intent(_capacity_intent(tmp_path, 2)), 1)
+        result = await asyncio.wait_for(control.results.get(), 1)
+        assert result.identity.transfer_id == "transfer-2"
+        assert result.failure is RunnerTransferFailure.RESOURCE_EXHAUSTED
+        assert transfer.started.empty()
+    finally:
+        await manager.close()
+
+
+@pytest.mark.parametrize("before_start", [False, True])
+async def test_queued_transfer_cancel_never_executes_or_leaks_slot(
+    tmp_path: Path,
+    before_start: bool,
+) -> None:
+    control = _CapacityControl()
+    transfer = _CapacityTransfer()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=transfer,
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+        max_active_transfers=1,
+    )
+    slots = _CapacitySemaphore(1)
+    manager._data_slots = slots
+    try:
+        await manager.handle_intent(_capacity_intent(tmp_path, 0))
+        await asyncio.wait_for(transfer.started.get(), 1)
+        queued = _capacity_intent(tmp_path, 1)
+        await manager.handle_intent(queued)
+        if not before_start:
+            await asyncio.wait_for(slots.waiting.get(), 1)
+        await manager.handle_cancel(
+            RunnerTransferCancel(
+                identity=queued.identity,
+                operation_id=queued.operation_id,
+                dispatch_id=queued.dispatch_id,
+                reason=RunnerTransferCancelReason.CALLER,
+            )
+        )
+        result = await asyncio.wait_for(control.results.get(), 1)
+        assert result.identity == queued.identity
+        assert result.outcome is RunnerTransferOutcome.CANCELLED
+        await manager.handle_intent(_capacity_intent(tmp_path, 2))
+        await asyncio.wait_for(slots.waiting.get(), 1)
+        transfer.gates["transfer-0"].set()
+        assert await asyncio.wait_for(transfer.started.get(), 1) == "transfer-2"
+        assert not (tmp_path / "capacity-1").exists()
+    finally:
+        await manager.close()
+
+
+async def test_generation_change_while_waiting_rejects_before_file_io(
+    tmp_path: Path,
+) -> None:
+    generation = 1
+    control = _CapacityControl()
+    transfer = _CapacityTransfer()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=transfer,
+        accepted_generation=lambda: generation,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+        max_active_transfers=1,
+    )
+    slots = _CapacitySemaphore(1)
+    manager._data_slots = slots
+    try:
+        await manager.handle_intent(_capacity_intent(tmp_path, 0))
+        await asyncio.wait_for(transfer.started.get(), 1)
+        await manager.handle_intent(_capacity_intent(tmp_path, 1))
+        await asyncio.wait_for(slots.waiting.get(), 1)
+        generation = 2
+        transfer.gates["transfer-0"].set()
+        results = [await asyncio.wait_for(control.results.get(), 1) for _ in range(2)]
+        waiting_result = next(
+            r for r in results if r.identity.transfer_id == "transfer-1"
+        )
+        assert waiting_result.failure is RunnerTransferFailure.PROTOCOL_VIOLATION
+        assert transfer.started.empty()
+    finally:
+        await manager.close()
+
+
+async def test_result_ack_does_not_hold_data_slot_and_close_cancels_waiters(
+    tmp_path: Path,
+) -> None:
+    control = _BlockingControl()
+    transfer = _CapacityTransfer()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=transfer,
+        accepted_generation=lambda: 1,
+        workspace=_UNRESTRICTED_WORKSPACE,
+        http_proxy=None,
+        max_active_transfers=1,
+    )
+    slots = _CapacitySemaphore(1)
+    manager._data_slots = slots
+    try:
+        await manager.handle_intent(_capacity_intent(tmp_path, 0))
+        await asyncio.wait_for(transfer.started.get(), 1)
+        await manager.handle_intent(_capacity_intent(tmp_path, 1))
+        await asyncio.wait_for(slots.waiting.get(), 1)
+        transfer.gates["transfer-0"].set()
+        await asyncio.wait_for(control.entered.wait(), 1)
+        assert await asyncio.wait_for(transfer.started.get(), 1) == "transfer-1"
+        await manager.handle_intent(_capacity_intent(tmp_path, 2))
+        await asyncio.wait_for(slots.waiting.get(), 1)
+        await asyncio.wait_for(manager.close(), 1)
+        assert not (tmp_path / "capacity-2").exists()
+        assert transfer.started.empty()
+    finally:
+        control.release.set()
+        await manager.close()
 
 
 @pytest.fixture
@@ -190,6 +457,31 @@ class _Transfer:
                 actual_size += len(frame.data)
                 digest.update(frame.data)
         return RunnerUploadResult(actual_size=actual_size, sha256=digest.hexdigest())
+
+
+class _CapacityTransfer(_Transfer):
+    """Gate data execution while allowing independent control messages."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started: asyncio.Queue[str] = asyncio.Queue()
+        self.gates: dict[str, asyncio.Event] = {}
+
+    async def download(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        timeout: float,
+    ) -> AsyncIterator[RunnerDownloadChunk | RunnerDownloadComplete]:
+        del timeout
+        gate = self.gates.setdefault(identity.transfer_id, asyncio.Event())
+        await self.started.put(identity.transfer_id)
+        await gate.wait()
+        data = b"transfer bytes"
+        yield RunnerDownloadChunk(offset=0, data=data)
+        yield RunnerDownloadComplete(
+            actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
+        )
 
 
 class _DirectTransfer(_Transfer):

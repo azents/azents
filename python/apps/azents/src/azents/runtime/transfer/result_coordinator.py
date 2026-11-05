@@ -34,6 +34,7 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.store import RuntimeTransferStateStore
 
 _LOGGER = logging.getLogger(__name__)
+_FAILURE_SETTLEMENT_ATTEMPTS = 3
 
 
 class RuntimeRunnerTransferResultSink(Protocol):
@@ -267,15 +268,37 @@ class RuntimeRunnerTransferResultCoordinator:
                 outcome = RuntimeTransferOutcome.CANCELLED
             else:
                 outcome = RuntimeTransferOutcome.FAILED
-        settled = await self._terminal_coordinator.settle_terminal(
-            current,
-            outcome=outcome,
-            failure=failure,
-            cleanup_completed=False,
-            destination_conflict=_destination_conflict(result),
-        )
-        if settled is None:
-            return
+        for attempt in range(_FAILURE_SETTLEMENT_ATTEMPTS):
+            settled = await self._terminal_coordinator.settle_terminal(
+                current,
+                outcome=outcome,
+                failure=failure,
+                cleanup_completed=False,
+                destination_conflict=_destination_conflict(result),
+            )
+            if settled is not None:
+                break
+            latest = await self._state_store.get(result.identity.transfer_id)
+            if (
+                latest is None
+                or not _matches_record(latest, result)
+                or latest.runner_result_confirmed_at is not None
+                or latest.upload_response_committed_at is not None
+                or latest.revision <= current.revision
+                or attempt == _FAILURE_SETTLEMENT_ATTEMPTS - 1
+            ):
+                _LOGGER.warning(
+                    "Runtime transfer Runner failure settlement was not confirmed",
+                    extra={
+                        "transfer_id": result.identity.transfer_id,
+                        "attempt_id": result.identity.attempt_id,
+                        "runtime_id": result.identity.runtime_id,
+                        "dispatch_id": result.dispatch_id,
+                    },
+                )
+                return
+            current = latest
+        assert settled is not None
         _LOGGER.warning(
             "Runtime transfer Runner failure settled",
             extra={
@@ -449,6 +472,8 @@ def _runtime_failure(
     failure: RunnerTransferFailure | None,
 ) -> RuntimeTransferFailure:
     """Map bounded Runner failure evidence to a trusted terminal class."""
+    if failure is RunnerTransferFailure.RESOURCE_EXHAUSTED:
+        return RuntimeTransferFailure.ADMISSION
     if failure is RunnerTransferFailure.CANCELLED:
         return RuntimeTransferFailure.CANCELLED
     if failure is RunnerTransferFailure.INTEGRITY_FAILED:
