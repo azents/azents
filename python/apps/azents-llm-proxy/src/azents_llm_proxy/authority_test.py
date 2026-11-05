@@ -90,6 +90,51 @@ def test_settings_hide_secret_in_errors_and_repr() -> None:
     assert "short-sentinel" not in str(caught.value)
 
 
+def test_settings_require_exactly_one_credential_source(tmp_path: Path) -> None:
+    url = "https://authority/internal/llm"
+    with pytest.raises(ValidationError):
+        Settings(authority_url=url)
+    with pytest.raises(ValidationError):
+        Settings(
+            authority_url=url,
+            resolver_key=SecretStr(SERVICE),
+            resolver_token_file=tmp_path / "token",
+        )
+    Settings(authority_url=url, resolver_token_file=tmp_path / "token")
+
+
+async def test_projected_identity_rotation_is_read_on_every_call(
+    tmp_path: Path,
+) -> None:
+    token = tmp_path / "token"
+    seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["X-Azents-LLM-Resolver"])
+        return httpx.Response(
+            200,
+            content=ModelListResponse(
+                identity=IDENTITY, models=("model",)
+            ).protected_json(),
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handle),
+        base_url="https://authority/internal/llm/",
+    ) as http:
+        client = AuthorityClient(http, token)
+        token.write_text("first-projected-token\n")
+        await client.list_models(SecretStr(AGENT))
+        replacement = tmp_path / "rotated"
+        replacement.write_text("rotated-projected-token")
+        replacement.replace(token)
+        await client.list_models(SecretStr(AGENT))
+        token.unlink()
+        with pytest.raises(AuthorityUnavailable, match="identity is unavailable"):
+            await client.list_models(SecretStr(AGENT))
+    assert seen == ["first-projected-token", "rotated-projected-token"]
+
+
 async def test_only_agent_selectors_cross_authority_and_credentials_are_private() -> (
     None
 ):

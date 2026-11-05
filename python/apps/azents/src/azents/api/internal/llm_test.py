@@ -6,9 +6,16 @@ import pytest
 from azents_llm_contract.authority import IssuedToken, ModelListResponse, TargetBinding
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from kubernetes_asyncio.client import AuthenticationV1Api
+from kubernetes_asyncio.client.models.v1_token_review import V1TokenReview
+from kubernetes_asyncio.client.models.v1_token_review_spec import V1TokenReviewSpec
+from kubernetes_asyncio.client.models.v1_token_review_status import V1TokenReviewStatus
+from kubernetes_asyncio.client.models.v1_user_info import V1UserInfo
+from kubernetes_asyncio.client.rest import ApiException
 from pydantic import SecretStr
 
 from azents.api import admin, internal
+from azents.api.internal.llm import get_kubernetes_resolver_auth
 from azents.core.auth.deps import SystemAdmin, get_system_admin
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -19,9 +26,83 @@ from azents.services.llm_authority import (
     project_credential,
 )
 from azents.services.llm_authority_test import NOW, SENTINEL, prepared
+from azents.services.llm_resolver_auth import RESOLVER_AUDIENCE, KubernetesResolverAuth
 from azents.utils.fastapi.route import as_route_mounter
 
 KEY = "dedicated-resolver-service-secret-32-bytes"
+SUBJECT = "system:serviceaccount:azents:azents-llm-proxy"
+
+
+@pytest.mark.parametrize(
+    ("authenticated", "subject", "audiences", "expected"),
+    [
+        (True, SUBJECT, [RESOLVER_AUDIENCE], 200),
+        (False, SUBJECT, [RESOLVER_AUDIENCE], 403),
+        (
+            True,
+            "system:serviceaccount:other:azents-llm-proxy",
+            [RESOLVER_AUDIENCE],
+            403,
+        ),
+        (True, "system:serviceaccount:azents:other", [RESOLVER_AUDIENCE], 403),
+        (True, SUBJECT, ["azents-runtime-control"], 403),
+        (True, SUBJECT, [], 403),
+    ],
+)
+def test_kubernetes_identity_before_agent_lookup(
+    service: AsyncMock,
+    authenticated: bool,
+    subject: str,
+    audiences: list[str],
+    expected: int,
+) -> None:
+    api = AsyncMock(spec=AuthenticationV1Api)
+    api.create_token_review = AsyncMock(
+        return_value=V1TokenReview(
+            spec=V1TokenReviewSpec(token=KEY, audiences=[RESOLVER_AUDIENCE]),
+            status=V1TokenReviewStatus(
+                authenticated=authenticated,
+                audiences=audiences,
+                user=V1UserInfo(username=subject),
+            ),
+        )
+    )
+    app = FastAPI()
+    internal.mount(as_route_mounter(app))
+    app.dependency_overrides[get_config] = lambda: Config.model_construct(
+        llm_resolver_service_key=SecretStr(KEY),
+        llm_resolver_kubernetes_service_account=SUBJECT,
+    )
+    app.dependency_overrides[get_kubernetes_resolver_auth] = lambda: (
+        KubernetesResolverAuth(api, SUBJECT)
+    )
+    app.dependency_overrides[LLMAuthorityService] = lambda: service
+    client = TestClient(app)
+    response = client.post(
+        "/llm/models",
+        headers={"X-Azents-LLM-Resolver": KEY},
+        json={"agent_token": "agent-token"},
+    )
+    assert response.status_code == expected
+    review = api.create_token_review.call_args.args[0]
+    assert review.spec.audiences == [RESOLVER_AUDIENCE]
+    assert review.spec.token == KEY
+    assert api.create_token_review.call_args.kwargs["_request_timeout"] == 10
+    if expected == 403:
+        service.list_models.assert_not_called()
+    else:
+        service.list_models.assert_awaited_once()
+
+
+async def test_kubernetes_review_failure_is_sanitized_and_never_falls_back() -> None:
+    api = AsyncMock(spec=AuthenticationV1Api)
+    api.create_token_review = AsyncMock(
+        side_effect=ApiException(status=500, reason="credential-sentinel")
+    )
+    with pytest.raises(RuntimeError, match="verification is unavailable") as error:
+        await KubernetesResolverAuth(api, SUBJECT).accepts(KEY)
+    assert "credential-sentinel" not in str(error.value)
+    assert error.value.__suppress_context__
 
 
 @pytest.fixture

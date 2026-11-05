@@ -96,9 +96,16 @@ Inspection can also locate a supply using its Agent and subject after an uncerta
 issuance response, without returning a secret or silently creating another token.
 
 Private `/internal/llm/models` and `/internal/llm/resolve` require a dedicated
-`X-Azents-LLM-Resolver` key plus an Agent token in a protected request body.
-`AZ_LLM_RESOLVER_SERVICE_KEY` configures this key; absent/short (<32 character)
-configuration fails closed. The Proxy must not receive an issuer/Admin secret.
+`X-Azents-LLM-Resolver` service credential plus an Agent token in a protected body.
+Kubernetes defaults to a projected ServiceAccount token: the API server performs
+online TokenReview for the `azents-llm-resolver` audience and exact configured
+`AZ_LLM_RESOLVER_KUBERNETES_SERVICE_ACCOUNT` subject before Agent lookup. Kubernetes
+owns token issuance and rotation; no administrator-created resolver key is needed.
+Verification failure never falls back to shared-key authentication.
+Explicit non-Kubernetes deployments retain `AZ_LLM_RESOLVER_SERVICE_KEY`;
+absent/short (<32 character) key configuration fails closed. The Proxy must not
+receive an issuer/Admin secret. Internal service identity is deployment-owned,
+not a product Admin input. Existing product configuration ownership is unchanged.
 The channel must be protected with private network access and verified TLS at
 deployment; HTTP route tests are not proof of operational isolation.
 

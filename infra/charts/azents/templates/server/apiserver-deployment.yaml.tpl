@@ -27,7 +27,11 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      {{- if and .Values.llmProxy.enabled (eq .Values.llmProxy.authority.authentication "kubernetes_service_account") }}
+      serviceAccountName: {{ printf "%s-resolver-api" (include "azents.fullname" .) | trunc 63 | trimSuffix "-" | quote }}
+      {{- else }}
       serviceAccountName: {{ include "azents.serverServiceAccountName" . | quote }}
+      {{- end }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -46,12 +50,17 @@ spec:
           env:
             - name: AZ_PORT
               value: "8010"
+            {{- if and .Values.llmProxy.enabled (eq .Values.llmProxy.authority.authentication "kubernetes_service_account") }}
+            - name: AZ_LLM_RESOLVER_KUBERNETES_SERVICE_ACCOUNT
+              value: {{ printf "system:serviceaccount:%s:%s" .Release.Namespace (printf "%s-llm-proxy" (include "azents.fullname" .) | trunc 63 | trimSuffix "-") | quote }}
+            {{- else }}
             {{- with .Values.server.llmAuthority.resolver.existingSecret }}
             - name: AZ_LLM_RESOLVER_SERVICE_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ . | quote }}
                   key: {{ $.Values.server.llmAuthority.resolver.key | quote }}
+            {{- end }}
             {{- end }}
             - name: AZ_RUNTIME_WEB_GATEWAY_ENABLED
               value: {{ .Values.server.runtimeWebGateway.enabled | quote }}

@@ -3,7 +3,7 @@
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,10 +13,17 @@ class Settings(BaseSettings):
     )
 
     authority_url: str
-    resolver_key: SecretStr = Field(min_length=32, repr=False)
+    resolver_key: SecretStr | None = Field(default=None, min_length=32, repr=False)
+    resolver_token_file: Path | None = None
     authority_ca_file: Path | None = None
     authority_timeout_seconds: float = Field(default=15, gt=0, allow_inf_nan=False)
     port: int = Field(default=4000, ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def validate_resolver_identity(self) -> "Settings":
+        if (self.resolver_key is None) == (self.resolver_token_file is None):
+            raise ValueError("Configure exactly one resolver credential source.")
+        return self
 
     @field_validator("authority_url")
     @classmethod

@@ -73,6 +73,7 @@ class Settings(BaseSettings):
 
     # Dedicated resolver identity; grants no system-admin/issuer authority.
     llm_resolver_service_key: SecretStr | None = Field(default=None, repr=False)
+    llm_resolver_kubernetes_service_account: str | None = None
 
     # Trusted Runtime Provider bootstrap source
     runtime_provider_bootstrap_source_key: str | None = None
@@ -557,6 +558,7 @@ class Config(BaseModel):
 
     runtime_env: RuntimeEnvironment
     llm_resolver_service_key: SecretStr | None = Field(default=None, repr=False)
+    llm_resolver_kubernetes_service_account: str | None = None
     job_runtime_backend: JobRuntimeBackend = JobRuntimeBackend.LOCAL
     broadcast_backend: Literal["redis", "memory"] = "redis"
     sentry_dsn: str | None
@@ -622,6 +624,7 @@ class Config(BaseModel):
         return cls(
             runtime_env=settings.runtime_env,
             llm_resolver_service_key=settings.llm_resolver_service_key,
+            llm_resolver_kubernetes_service_account=settings.llm_resolver_kubernetes_service_account,
             job_runtime_backend=settings.job_runtime_backend,
             broadcast_backend=settings.broadcast_backend,
             session_broker_backend=settings.session_broker_backend,
