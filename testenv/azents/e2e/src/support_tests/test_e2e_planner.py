@@ -62,6 +62,196 @@ def _write_suite(root: Path, name: str, *, lanes: int = 2) -> Path:
     return suite_root
 
 
+def _phase(node: str, phase: str, duration: float) -> dict[str, object]:
+    return {
+        "record_type": "test_phase",
+        "node_id": node,
+        "phase": phase,
+        "duration_seconds": duration,
+    }
+
+
+def _fixture(
+    node: str, phase: str, duration: float, *, scope: str, outcome: str
+) -> dict[str, object]:
+    return {
+        **_phase(node, phase, duration),
+        "record_type": "fixture",
+        "scope": scope,
+        "outcome": outcome,
+    }
+
+
+def test_planning_counts_function_cost_once_with_actual_phase_caps(
+    tmp_path: Path,
+) -> None:
+    node = "src/tests/required/test_expensive.py::test_worker"
+    rows = [
+        _phase(node, "call", 10),
+        _phase(node, "setup", 20),
+        _phase(node, "teardown", 5),
+        _fixture(node, "setup", 12, scope="function", outcome="passed"),
+        _fixture(node, "setup", 8, scope="function", outcome="passed"),
+        _fixture(node, "setup", 12, scope="function", outcome="passed"),
+        _fixture(node, "teardown", 50, scope="function", outcome="completed"),
+        _fixture(node, "setup", 1000, scope="session", outcome="passed"),
+        _fixture(node, "setup", 1000, scope="module", outcome="passed"),
+        _fixture(node, "setup", 1000, scope="class", outcome="passed"),
+        _fixture(node, "setup", 1000, scope="function", outcome="failed"),
+        _fixture(node, "teardown", 1000, scope="function", outcome="failed"),
+    ]
+    path = tmp_path / "timings.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in rows))
+    assert load_file_timings(path) == {"src/tests/required/test_expensive.py": 27}
+    # Input order cannot double-count nested or duplicated fixture observations.
+    path.write_text("\n".join(json.dumps(row) for row in reversed(rows)))
+    assert load_file_timings(path) == {"src/tests/required/test_expensive.py": 27}
+
+
+@pytest.mark.parametrize("missing", ["call", "phase_wall"])
+def test_fixture_observation_alone_cannot_create_planning_cost(
+    tmp_path: Path, missing: str
+) -> None:
+    node = "src/tests/required/test_worker.py::test_worker"
+    rows = [_fixture(node, "setup", 30, scope="function", outcome="passed")]
+    if missing != "call":
+        rows.append(_phase(node, "call", 4))
+    if missing != "phase_wall":
+        rows.append(_phase(node, "setup", 40))
+    path = tmp_path / "timings.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in rows))
+    expected = {} if missing == "call" else {"src/tests/required/test_worker.py": 4}
+    assert load_file_timings(path) == expected
+
+
+def test_function_cost_high_watermark_is_computed_per_sample_not_by_field(
+    tmp_path: Path,
+) -> None:
+    node = "src/tests/required/test_worker.py::test_worker"
+    for name, call, fixture in (("first", 100, 1), ("second", 10, 20)):
+        rows = [
+            _phase(node, "call", call),
+            _phase(node, "setup", fixture),
+            _fixture(node, "setup", fixture, scope="function", outcome="passed"),
+        ]
+        (tmp_path / f"{name}.jsonl").write_text(
+            "\n".join(json.dumps(row) for row in rows)
+        )
+    assert load_file_timings(tmp_path) == {"src/tests/required/test_worker.py": 101}
+
+
+@pytest.mark.parametrize("duration", [-1, float("nan"), float("inf"), True, None])
+def test_planner_rejects_invalid_recognized_function_fixture_cost(
+    tmp_path: Path, duration: object
+) -> None:
+    row = {
+        **_fixture(
+            "src/tests/required/test_worker.py::test_worker",
+            "setup",
+            1,
+            scope="function",
+            outcome="passed",
+        ),
+        "duration_seconds": duration,
+    }
+    path = tmp_path / "timings.jsonl"
+    path.write_text(json.dumps(row))
+    with pytest.raises(ValueError, match="invalid test timing record"):
+        load_file_timings(path)
+
+
+def test_function_cost_changes_balance_without_shared_startup_or_coverage_loss(
+    tmp_path: Path,
+) -> None:
+    tests = tmp_path / "src/tests"
+    suite = _write_suite(tests, "required")
+    rows = []
+    for name, call, fixture in (("a", 10, 50), ("b", 20, 0), ("c", 20, 0)):
+        file = suite / f"test_{name}.py"
+        file.write_text("def test_worker(): pass\n")
+        node = f"{file}::test_worker"
+        rows.extend(
+            [
+                _phase(node, "call", call),
+                _phase(node, "setup", fixture),
+                _fixture(node, "setup", fixture, scope="function", outcome="passed"),
+                _fixture(node, "setup", 900, scope="session", outcome="passed"),
+            ]
+        )
+    timings = tmp_path / "timings.jsonl"
+    timings.write_text("\n".join(json.dumps(row) for row in rows))
+    output = tmp_path / "plan"
+    matrix = plan_suites(
+        tests_root=tests,
+        enabled_suites={"required"},
+        timings_path=timings,
+        output_dir=output,
+    )
+    assignments = [
+        (output / lane["plan_file"]).read_text().splitlines()
+        for lane in matrix["include"]
+    ]
+    assert assignments[0] == [str(suite / "test_a.py")]
+    assert assignments[1] == [str(suite / "test_b.py"), str(suite / "test_c.py")]
+    assert len({file for lane in assignments for file in lane}) == 3
+
+
+@pytest.mark.parametrize("outcome", ["failed", "skipped"])
+def test_nonpassing_calls_do_not_admit_fixture_overhead(
+    tmp_path: Path, outcome: str
+) -> None:
+    node = "src/tests/required/test_a.py::test_worker[param]"
+    rows = [
+        {**_phase(node, "call", 5), "outcome": outcome},
+        _phase(node, "setup", 20),
+        _fixture(node, "setup", 10, scope="function", outcome="passed"),
+    ]
+    path = tmp_path / "timings.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in rows))
+    assert load_file_timings(path) == {}
+
+
+@pytest.mark.parametrize("phase", ["call", "setup", "teardown"])
+def test_duplicate_authoritative_phase_is_rejected(tmp_path: Path, phase: str) -> None:
+    row = _phase("src/tests/required/test_a.py::test_a", phase, 2)
+    path = tmp_path / "timings.jsonl"
+    path.write_text(json.dumps(row) + "\n" + json.dumps(row))
+    with pytest.raises(ValueError, match="Duplicate authoritative test phase"):
+        load_file_timings(path)
+
+
+def test_fixture_costs_match_full_parametrized_nodes_before_file_aggregation(
+    tmp_path: Path,
+) -> None:
+    first = "src/tests/required/test_a.py::TestWorker::test_run[first]"
+    second = "src/tests/required/test_a.py::TestWorker::test_run[second]"
+    rows = [
+        _phase(first, "call", 3),
+        _phase(first, "setup", 1),
+        _phase(second, "call", 4),
+        _phase(second, "setup", 20),
+        _fixture(first, "setup", 10, scope="function", outcome="passed"),
+        _fixture(second, "setup", 15, scope="function", outcome="passed"),
+    ]
+    path = tmp_path / "timings.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in rows))
+    assert load_file_timings(path) == {"src/tests/required/test_a.py": 23}
+
+
+def test_late_fixture_cost_is_capped_but_not_proven_exclusive(tmp_path: Path) -> None:
+    node = "src/tests/required/test_a.py::test_dynamic_fixture"
+    rows = [
+        _phase(node, "call", 10),
+        _phase(node, "setup", 2),
+        _fixture(node, "setup", 7, scope="function", outcome="passed"),
+    ]
+    path = tmp_path / "timings.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in rows))
+    # Receipts do not locate an interval requested during call. The heuristic
+    # can charge at most the observed setup wall; it is not a billing metric.
+    assert load_file_timings(path) == {"src/tests/required/test_a.py": 12}
+
+
 def test_plan_suites_balances_files_without_cache_writer_ownership(
     tmp_path: Path,
 ) -> None:

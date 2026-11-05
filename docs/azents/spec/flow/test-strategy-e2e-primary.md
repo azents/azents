@@ -517,9 +517,23 @@ Always-on required CI does not depend on external credentials.
   `src/tests/web/` owns browser, TLS gateway, and Web image E2E. Each directory has
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
-  It balances files only within a suite using the per-file call-duration
+  It balances files only within a suite using a per-file planning-cost
   high-watermark from that suite's latest three successful timing samples, with a
-  deterministic source-based fallback. A collector that inherits reusable scenarios
+  deterministic source-based fallback. Each sample starts with successful test-call
+  durations and adds a phase-bounded function-fixture heuristic for the exact same
+  collected node: the maximum successful function fixture observation for setup or
+  completed teardown, capped by that node's corresponding pytest phase wall.
+  Missing call, phase or fixture evidence adds no overhead. Session, package,
+  module and class fixture startup is excluded; nested fixture intervals are never
+  summed. Full class/parameter identity is matched before file-path projection,
+  and duplicate authoritative node/phase records fail closed. Repeated fixture
+  receipts do not inflate cost. File totals are formed within each sample before
+  taking a cross-sample high-watermark, so maxima from different samples are not
+  added together. Historical call-only samples remain call-only.
+  This score is a bounded scheduling heuristic, not exclusive interval accounting
+  or a billing metric: late dynamic fixtures can overlap call, and existing duration
+  receipts cannot identify that containment. Raw phase/fixture observations remain
+  unchanged; actual whole-CI and runner costs decide performance acceptance. A collector that inherits reusable scenarios
   and therefore has no local test bodies may declare an explicit positive fallback
   weight in source; observed timing still takes precedence. The first pull request run starts from the
   latest accessible rolling `main` history. Each successful `main` push attempt saves

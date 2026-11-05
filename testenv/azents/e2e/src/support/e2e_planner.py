@@ -75,6 +75,8 @@ class _TestPhaseTiming:
 
     node_id: str
     duration_seconds: float
+    phase: str
+    fixture: bool
 
 
 def load_suites(tests_root: Path) -> tuple[Suite, ...]:
@@ -111,7 +113,7 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
 
 
 def load_file_timings(path: Path | None) -> dict[str, float]:
-    """Load high-watermark call timings from prior successful samples."""
+    """Load high-watermark intrinsic file costs from successful samples."""
     if path is None or not path.exists():
         return {}
     timing_paths = [path] if path.is_file() else sorted(path.rglob("*.jsonl"))
@@ -126,16 +128,45 @@ def load_file_timings(path: Path | None) -> dict[str, float]:
 
 
 def _load_file_timing_sample(path: Path) -> dict[str, float]:
-    """Aggregate one successful timing sample by test file."""
+    """Combine calls with bounded function-owned fixture costs, not shared startup."""
     totals: dict[str, float] = {}
+    calls: set[str] = set()
+    seen_phases: set[tuple[str, str]] = set()
+    phase_walls: dict[tuple[str, str], float] = {}
+    fixture_costs: dict[tuple[str, str], float] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line:
             continue
         timing = _decode_test_phase_timing(line)
         if timing is None:
             continue
-        file_path = _current_timing_path(timing.node_id)
-        totals[file_path] = totals.get(file_path, 0.0) + timing.duration_seconds
+        if timing.fixture:
+            key = (timing.node_id, timing.phase)
+            fixture_costs[key] = max(
+                fixture_costs.get(key, 0.0), timing.duration_seconds
+            )
+        else:
+            key = (timing.node_id, timing.phase)
+            if key in seen_phases:
+                raise ValueError("Duplicate authoritative test phase in timing sample")
+            seen_phases.add(key)
+        if timing.fixture:
+            continue
+        if timing.phase == "call":
+            calls.add(timing.node_id)
+            file_path = _current_timing_path(timing.node_id)
+            totals[file_path] = totals.get(file_path, 0.0) + timing.duration_seconds
+        else:
+            key = (timing.node_id, timing.phase)
+            phase_walls[key] = phase_walls.get(key, 0.0) + timing.duration_seconds
+    for key, duration in fixture_costs.items():
+        node_id, _ = key
+        if node_id not in calls:
+            continue
+        file_path = _current_timing_path(node_id)
+        # Nested fixture intervals are not additive. The maximum is a
+        # phase-bounded planning heuristic, not exclusive interval accounting.
+        totals[file_path] += min(duration, phase_walls.get(key, 0.0))
     return totals
 
 
@@ -144,19 +175,35 @@ def _decode_test_phase_timing(line: str) -> _TestPhaseTiming | None:
     payload = json.loads(line)
     if not isinstance(payload, dict):
         raise ValueError("invalid test timing record")
-    if payload.get("record_type") != "test_phase" or payload.get("phase") != "call":
+    record = payload.get("record_type")
+    phase = payload.get("phase")
+    fixture = record == "fixture"
+    if fixture:
+        if payload.get("scope") != "function" or (
+            phase,
+            payload.get("outcome"),
+        ) not in (("setup", "passed"), ("teardown", "completed")):
+            return None
+    elif record != "test_phase" or phase not in ("setup", "call", "teardown"):
+        return None
+    elif phase == "call" and payload.get("outcome") not in (None, "passed"):
         return None
     node_id = payload.get("node_id")
     duration = payload.get("duration_seconds")
     if (
         not isinstance(node_id, str)
+        or not node_id
         or isinstance(duration, bool)
         or not isinstance(duration, int | float)
+        or not math.isfinite(duration)
+        or duration < 0
     ):
         raise ValueError("invalid test timing record")
     return _TestPhaseTiming(
         node_id=node_id,
         duration_seconds=float(duration),
+        phase=str(phase),
+        fixture=fixture,
     )
 
 
