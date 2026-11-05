@@ -1,6 +1,7 @@
 ---
 title: "Kubernetes inference resolver authentication requirements"
 created: 2026-11-05
+implemented: 2026-11-05
 tags: [inference, security, infra]
 document_role: primary
 document_type: requirements

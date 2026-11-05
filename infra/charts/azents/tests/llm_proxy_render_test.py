@@ -145,13 +145,18 @@ def test_authority_resolver_secret_is_only_in_the_api_server() -> None:
     assert recipients == ["apiserver"]
 
 
-def test_kubernetes_identity_is_automatic_and_review_privilege_is_api_only() -> None:
+@pytest.mark.parametrize("managed", [True, False])
+def test_kubernetes_identity_preserves_configured_server_identity(
+    managed: bool,
+) -> None:
     result = render(
         "server.enabled=true",
         "server.image.repository=repo/server",
         "server.image.tag=test-sha",
         "llmProxy.authority.authentication=kubernetes_service_account",
         "llmProxy.authority.resolver.existingSecret=",
+        "server.serviceAccount.name=consumer-cloud-identity",
+        f"server.serviceAccount.create={str(managed).lower()}",
     )
     assert result.returncode == 0, result.stderr
     documents = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
@@ -174,7 +179,7 @@ def test_kubernetes_identity_is_automatic_and_review_privilege_is_api_only() -> 
         }
     ]
     api = deployments["apiserver"]
-    assert api["serviceAccountName"] == "azents-resolver-api"
+    assert api["serviceAccountName"] == "consumer-cloud-identity"
     env = {e["name"]: e for e in api["containers"][0]["env"]}
     assert env["AZ_LLM_RESOLVER_KUBERNETES_SERVICE_ACCOUNT"]["value"] == (
         "system:serviceaccount:default:azents-llm-proxy"
@@ -183,7 +188,7 @@ def test_kubernetes_identity_is_automatic_and_review_privilege_is_api_only() -> 
     role = next(
         d
         for d in documents
-        if d["kind"] == "ClusterRole" and "resolver-api" in d["metadata"]["name"]
+        if d["kind"] == "ClusterRole" and "resolver-review" in d["metadata"]["name"]
     )
     assert role["rules"] == [
         {
@@ -201,7 +206,7 @@ def test_kubernetes_identity_is_automatic_and_review_privilege_is_api_only() -> 
     assert binding["subjects"] == [
         {
             "kind": "ServiceAccount",
-            "name": "azents-resolver-api",
+            "name": "consumer-cloud-identity",
             "namespace": "default",
         }
     ]

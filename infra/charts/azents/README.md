@@ -65,8 +65,11 @@ TLS verification cannot be disabled. Consumers must protect the private authorit
 route with their network/ingress policy as well as its dedicated authentication.
 
 For an authority server in the same chart, the chart configures the exact Proxy
-namespace/ServiceAccount subject automatically. Only a dedicated API server
-ServiceAccount receives TokenReview-create permission. Each request verifies the
+namespace/ServiceAccount subject automatically. The configured server
+ServiceAccount receives TokenReview-create permission, preserving its existing
+cloud identity and externally managed lifecycle. Other server workloads sharing
+that account inherit the review grant, which cannot issue or modify tokens.
+Each request verifies the
 token online for the resolver audience and exact subject; failure never falls
 back to another authentication method. `global.rbac.create` must be enabled.
 

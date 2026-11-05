@@ -30,3 +30,16 @@ Non-Kubernetes explicit shared-key configuration remains supported and exclusive
 This choice requires a Kubernetes API roundtrip for each authority request and
 keeps private TLS authority routing as a deployment prerequisite. TokenReview
 availability is not a product Admin setting. No database state or migration is added.
+
+## D2 — Preserve the configured server workload identity
+
+Review identified that replacing the API server ServiceAccount would discard
+consumer cloud workload-identity associations and externally managed accounts.
+Keep `server.serviceAccount` unchanged and bind resolver TokenReview-create to
+that configured server identity instead. This supersedes D1's dedicated API
+ServiceAccount mechanism, not its projected Proxy identity or verification.
+The account may be shared with other server workloads, which consequently also
+have TokenReview-create permission. TokenReview cannot issue or modify tokens;
+the exact Proxy subject and audience checks remain mandatory and unchanged.
+The Proxy account still receives no Kubernetes API grants. Requiring new consumer
+cloud associations or silently copying only some account annotations was rejected.

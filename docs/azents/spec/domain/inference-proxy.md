@@ -182,8 +182,10 @@ Configuration includes image identity, port, verified private authority URL/time
 a resolver identity and optional CA Secret. Kubernetes defaults to a dedicated
 ServiceAccount with a projected `azents-llm-resolver` audience token; the Proxy
 reads its token file on every call so rotation needs no restart. The exact subject
-is configured automatically in a same-chart API server. Only that API server's
-dedicated ServiceAccount has TokenReview-create RBAC; the Proxy has no API RBAC.
+is configured automatically in a same-chart API server. TokenReview-create RBAC
+is bound to the existing configured server ServiceAccount without replacing cloud
+workload identity. Server workloads sharing that account inherit the review grant;
+it cannot issue or modify tokens. The Proxy has no API RBAC.
 Explicit shared-key deployments select `shared_key` and retain existing Secret
 references. The Proxy configuration requires exactly one of `resolver_token_file`
 or `resolver_key`; failed verification never switches authentication methods.

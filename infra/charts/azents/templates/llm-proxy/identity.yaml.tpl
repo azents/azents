@@ -2,15 +2,10 @@
 {{- if not .Values.global.rbac.create }}
 {{- fail "Kubernetes resolver identity requires global.rbac.create" }}
 {{- end }}
-{{- $apiName := printf "%s-resolver-api" (include "azents.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $apiName := include "azents.serverServiceAccountName" . }}
 {{- $scope := printf "%s/%s/%s" .Release.Namespace .Release.Name (include "azents.serverNamespace" .) | sha256sum | trunc 8 }}
-{{- $rbacName := printf "%s-%s" ($apiName | trunc 54 | trimSuffix "-") $scope }}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ $apiName }}
-  namespace: {{ include "azents.serverNamespace" . | quote }}
----
+{{- $rolePrefix := printf "%s-resolver-review" (include "azents.fullname" .) | trunc 54 | trimSuffix "-" }}
+{{- $rbacName := printf "%s-%s" $rolePrefix $scope }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

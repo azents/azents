@@ -27,11 +27,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      {{- if and .Values.llmProxy.enabled (eq .Values.llmProxy.authority.authentication "kubernetes_service_account") }}
-      serviceAccountName: {{ printf "%s-resolver-api" (include "azents.fullname" .) | trunc 63 | trimSuffix "-" | quote }}
-      {{- else }}
       serviceAccountName: {{ include "azents.serverServiceAccountName" . | quote }}
-      {{- end }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

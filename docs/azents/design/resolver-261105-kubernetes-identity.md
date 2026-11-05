@@ -1,6 +1,7 @@
 ---
 title: "Kubernetes inference resolver authentication design"
 created: 2026-11-05
+implemented: 2026-11-05
 tags: [inference, security, infra]
 document_role: primary
 document_type: design
@@ -11,7 +12,7 @@ snapshot_id: resolver-261105
 
 ## Design Authority
 
-Revision r1; authority: [Requirements](../requirements/resolver-261105-kubernetes-identity.md)
+Revision r2; authority: [Requirements](../requirements/resolver-261105-kubernetes-identity.md)
 and [ADR-D1](../adr/resolver-261105-kubernetes-identity.md).
 
 - M1 (decided, ADR-D1): projected Proxy token with audience `azents-llm-resolver`;
@@ -19,13 +20,15 @@ and [ADR-D1](../adr/resolver-261105-kubernetes-identity.md).
   namespace/ServiceAccount subject. Authentication precedes Agent lookup.
 - M2 (derived, REQ-2 and ADR-D1): fail closed with no method fallback, sanitized
   errors, no token/body logs, unchanged verified authority TLS and Agent checks.
-- M3 (decided, ADR-D1): chart defaults to workload identity, dedicated Proxy/API
-  ServiceAccounts, TokenReview-create-only API role, projected token file only in
-  Proxy; existing explicit shared-key mode for non-Kubernetes consumers remains.
+- M4 (decided, ADR-D2; replaces M3): chart defaults to workload identity, dedicated
+  Proxy ServiceAccount, TokenReview-create-only role bound to the configured
+  server ServiceAccount without changing its cloud identity or lifecycle.
+  Server workloads sharing that account inherit only the review grant. Projected
+  resolver token file remains Proxy-only; explicit shared-key mode remains.
 
 ## Removal and Replacement
 
-Replace resolver shared-key references in the default Kubernetes path with M1/M3.
+Replace resolver shared-key references in the default Kubernetes path with M1/M4.
 Remove the mandatory manual secret-preparation instructions for this path. Existing
 shared-key tests remain relevant to the explicitly selected non-Kubernetes mode.
 Home activation must use a chart/image containing this implementation; no live
@@ -59,5 +62,5 @@ schema is necessary. Chart owns workload manifests and can derive exact identity
 
 Mode: scoped implementation delegation; decision owner: implementing agent.
 The requester selected Kubernetes first and delegated implementation details on
-2026-11-05; approved scope r1, authority IDs M1, M2, M3, is the focused correction
+2026-11-05; approved scope r2, authority IDs M1, M2, M4, is the focused correction
 described above.
