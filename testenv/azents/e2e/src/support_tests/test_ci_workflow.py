@@ -72,6 +72,19 @@ def test_suite_dependencies_use_only_the_exact_portfolio_and_shared_steps() -> N
     ]
     assert len(names) == len(set(names))
     assert all("-skipped" in name for name in names)
+    executed_names = []
+    for job, fallback in zip(
+        _PRODUCER_JOBS,
+        ("core-skipped", "required-skipped", "web-skipped", "other-skipped"),
+        strict=True,
+    ):
+        template = _job_block(workflow, job).splitlines()[0].strip()
+        expression = "${{ matrix.name || '" + fallback + "' }}"
+        assert template == f"name: ci-docker-build-run ({expression})"
+        executed_names.extend(
+            template.replace(expression, image) for image in portfolios[job]
+        )
+    assert len(set(executed_names)) == 9
     for gate in ("ci_e2e_aggregate", "ci-python-e2e", "ci_observability"):
         needs = (
             _job_block(workflow, gate)

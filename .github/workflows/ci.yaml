@@ -1072,7 +1072,7 @@ jobs:
           exit 1
 
   ci_docker_build_run:
-    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-core-skipped' }}
+    name: ci-docker-build-run (${{ matrix.name || 'core-skipped' }})
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'
@@ -1221,7 +1221,7 @@ jobs:
           if-no-files-found: error
 
   ci_docker_required_run:
-    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-required-skipped' }}
+    name: ci-docker-build-run (${{ matrix.name || 'required-skipped' }})
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'
@@ -1239,7 +1239,7 @@ jobs:
     steps: *docker_build_steps
 
   ci_docker_web_run:
-    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-web-skipped' }}
+    name: ci-docker-build-run (${{ matrix.name || 'web-skipped' }})
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'
@@ -1261,7 +1261,7 @@ jobs:
     steps: *docker_build_steps
 
   ci_docker_other_run:
-    name: ${{ matrix.name && 'ci-docker-build-run' || 'ci-docker-other-skipped' }}
+    name: ci-docker-build-run (${{ matrix.name || 'other-skipped' }})
     needs: changes
     if: >-
       needs.changes.outputs.docker == 'true'
