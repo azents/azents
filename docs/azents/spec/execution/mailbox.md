@@ -22,7 +22,8 @@ Owns typed input, scheduling, FIFO promotion and source provenance before work e
 
 Chat route and collaboration inputs are prepared before model-call boundaries. The supported
 Mailbox kinds are `user_message`, `goal_continuation`, `turn_action_continuation`,
-`external_channel_continuation`, `routine_trigger`, `routine_continuation`,
+`external_channel_continuation`, `scheduled_task_trigger`, `scheduled_task_continuation`,
+`routine_trigger`, `routine_continuation`,
 `action_message`, `agent_message`, and `external_channel_message`. Every mailbox envelope carries explicit scheduling intent and an
 immutable typed payload whose ordered items use stable `(mailbox_item_id, item_key)` identity.
 Broker wake-ups are payload-free signals and never carry model input.
@@ -36,21 +37,32 @@ profile, then the Agent default when the Session has no snapshot.
 Mailbox repositories own durable reads, writes, and promotion transactions;
 `MailboxService` sequences completed operations with external preparation and delivery.
 INPUT and Chat writes compose attachment claims, admission, and Session transitions
-inside their repository-owned atomic operation. Enqueue commits only the pending row;
-producers own wake-up and run-state transitions. User, Goal, action, spawn, and follow-up inputs use
-`wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
+inside their repository-owned atomic operation. The low-level mailbox insert writes the pending row;
+admission compositions also persist the matching Session running transition for
+`wake_session` inputs, including idempotent replay. Producers deliver the routing-only broker
+notification after commit. User, Goal, action, spawn, and follow-up inputs use
+`wake_session`; ordinary `send_message` and terminal `agent_message` inputs with
+`message_kind = agent_result` use `queue_only` and do not
 mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later
 wake-producing input, but they do not count as follow-up work and do not prevent a session with no
 active Run from becoming idle. An External Channel message is ordinary FIFO input after its
 ingress finalization transaction commits the conversation-position advance, mailbox rows, and Session
 running transition. Preparation handles exactly one FIFO head per transaction. The worker
-first reads the head's identity and inference requirement, resolves the profile and attachment metadata outside any database session when needed, then locks the Session and
-the same FIFO head. Attachment resolution is metadata-only during promotion: it never downloads the
-Exchange file or creates a replacement ModelFile, and model rich input comes only from FileParts
-stored on the mailbox item at its creation boundary. If the identity changed while external preparation
-ran, the worker discards the stale result and starts again. Successful preparation atomically updates
-the complete Session inference snapshot, applies Goal/Skill state changes, appends canonical events,
-associates input events with the active run, and deletes the source mailbox item. After one row
+first reads the head's identity and inference requirement, performs detached preparation, then
+locks the Session and the same FIFO head. When an input already carries FileParts, attachment
+preflight resolves display metadata and reuses those parts without downloading again. When parts
+are absent, the admitted-attachment path validates current Session/Run authority and the original
+root claim, then may download eligible Exchange attachments and create ModelFiles outside the
+promotion transaction. Partial materialization is cleaned up on failure or cancellation.
+See [admitted attachment materialization](../../../../python/apps/azents/src/azents/engine/run/resolve.py)
+and [Mailbox preflight](../../../../python/apps/azents/src/azents/services/mailbox.py).
+If the identity changed while external preparation ran, the worker discards the stale result
+and starts again. The final promotion transaction applies Goal/Skill state changes, appends
+canonical events, associates input events with the active run, and deletes the source mailbox item.
+Fresh model-operation preparation separately resolves and commits the complete Session inference
+snapshot. See
+[model selection and operation snapshots](../models/selection.md).
+After one row
 commits, the same leased runner reads the next FIFO head without rebuilding canonical execution
 authority. Concurrent appends are consumed by a later loop iteration or wake-up.
 
@@ -61,6 +73,8 @@ Canonical outcomes are:
 | `user_message`            | Durable `user_message` event.                                                                                          |
 | `goal_continuation`       | Durable `goal_continuation` event.                                                                                     |
 | `external_channel_continuation` | Durable `external_channel_continuation` event.                                                                    |
+| `scheduled_task_trigger` / `scheduled_task_continuation` | Matching typed Scheduled Task event after exact cycle binding; see [Scheduled Tasks](../domain/scheduled-task.md). |
+| `routine_trigger` / `routine_continuation` | Matching typed Routine event after current occurrence binding; see [Routines](../domain/routine.md). |
 | `agent_message`           | Durable `agent_message` event.                                                                                         |
 | `external_channel_message` | One source-attributed `external_channel_message` event.                                                           |
 | `turn_action_continuation` | Invisible deterministic `system_reminder` after its predecessor Run is terminal; the turn becomes inference-eligible. |
@@ -72,6 +86,10 @@ A handled preparation failure consumes only the failing head, appends a determin
 preserves the previous Session inference snapshot, and is never retried. FIFO draining may continue
 when a later input makes the next turn eligible. Operation failure is likewise terminal and does not
 require a separate session-initialization gate or retry/discard action.
+An external preparation exception is different: it propagates before promotion, leaves the pending
+input durable, and may be retried by later execution. It is not converted into a consumed
+handled-failure event. This includes a transient attachment download exception; unavailable
+attachment results may instead be represented without a FilePart.
 
 Web chat message/edit/command writes use REST commit endpoints instead of WebSocket write payloads.
 `GET /chat/v1/agents/{agent_id}/team-primary-session` resolves or creates the agent's team
