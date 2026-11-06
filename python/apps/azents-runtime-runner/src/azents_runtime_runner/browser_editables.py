@@ -1,5 +1,6 @@
 """Content-free native geometry and explicit private, one-field editing."""
 
+import asyncio
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Literal
@@ -336,6 +337,8 @@ class BrowserEditableRegions:
             return ()
         try:
             geometry = await browser_visual_geometry(self.page)
+        except asyncio.CancelledError:
+            raise
         except BROWSER_SDK_ERRORS as error:
             if any(
                 signature in error.message.lower()
@@ -394,6 +397,8 @@ class BrowserEditableRegions:
                             region.input_mode,
                         )
                     )
+            except asyncio.CancelledError:
+                raise
             except BROWSER_SDK_ERRORS as error:
                 if not any(
                     signature in error.message.lower()
@@ -462,6 +467,8 @@ class BrowserEditableRegions:
                         return False
                     current = current.parent_frame
                 return True
+            except asyncio.CancelledError:
+                raise
             except BROWSER_SDK_ERRORS as error:
                 if any(
                     signature in error.message.lower()

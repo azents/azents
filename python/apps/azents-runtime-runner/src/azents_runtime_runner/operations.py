@@ -325,7 +325,7 @@ class RunnerOperations:
         )
         self._apply_patch_lock = asyncio.Lock()
         self._apply_patch_limits = apply_patch_limits or ApplyPatchLimits()
-        self._apply_patch_fault_injector = apply_patch_fault_injector
+        self.apply_patch_fault_injector = apply_patch_fault_injector
         self.execution_backend = execution_backend
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
@@ -664,6 +664,8 @@ class RunnerOperations:
                     managed=False,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             await self._final_error(operation, "INVALID_ENVIRONMENT", str(exc))
             return
@@ -795,6 +797,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except UnicodeDecodeError:
             await self._final_error(
                 operation,
@@ -919,6 +923,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except _FileOperationSemanticError as exc:
             await self._final_error(operation, exc.code, exc.message)
             return
@@ -947,7 +953,7 @@ class RunnerOperations:
                 cancellation=cancellation,
                 deadline_at=operation.deadline_at,
                 limits=self._apply_patch_limits,
-                fault_injector=self._apply_patch_fault_injector,
+                fault_injector=self.apply_patch_fault_injector,
             )
 
         future = asyncio.get_running_loop().run_in_executor(
@@ -1027,6 +1033,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except _FileOperationSemanticError as exc:
             await self._final_error(operation, exc.code, exc.message)
             return
@@ -1053,6 +1061,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except FileNotFoundError:
             await self._final_error(operation, "NOT_FOUND", f"No such file: {path}")
             return
@@ -1083,6 +1093,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except _FileOperationSemanticError as exc:
             await self._final_error(operation, exc.code, exc.message)
             return
@@ -1110,6 +1122,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except _FileOperationSemanticError as exc:
             await self._final_error(operation, exc.code, exc.message)
             return
@@ -1142,6 +1156,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except _FileOperationSemanticError as exc:
             await self._final_error(operation, exc.code, exc.message)
             return
@@ -1173,6 +1189,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except _FileOperationSemanticError as exc:
             await self._final_error(operation, exc.code, exc.message)
             return
@@ -1215,6 +1233,8 @@ class RunnerOperations:
                     cancellation=cancellation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except _FileOperationSemanticError as exc:
             await self._final_error(operation, exc.code, exc.message)
             return
@@ -1891,6 +1911,8 @@ class RunnerOperations:
                     managed=True,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             await self._final_error(operation, "INVALID_ENVIRONMENT", str(exc))
             return
@@ -2496,12 +2518,11 @@ class RunnerOperations:
                 asyncio.gather(*tasks),
                 timeout=timeout_seconds,
             )
-        except BaseException:
+        finally:
             for task in tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            raise
         return _ProcessCommunication(
             stdout=stdout_task.result(),
             stderr=stderr_task.result(),
@@ -2821,6 +2842,8 @@ class RunnerOperations:
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
             )
+        except asyncio.CancelledError:
+            raise
         except OSError as exc:
             await self._final_error(operation, "git_command_failed", str(exc))
             return None

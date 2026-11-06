@@ -208,6 +208,8 @@ class _LatestPage:
                 full_page=False,
                 timeout=2000,
             )
+        except asyncio.CancelledError:
+            raise
         except BROWSER_SDK_ERRORS as error:
             # Native documents can change before framenavigated is delivered.
             # Discard that capture; the next frame observes the current document.
@@ -582,6 +584,8 @@ class _Attachment:
                     )
             await self.dispatch(request)
             accepted, outcome = True, "dispatched"
+        except asyncio.CancelledError:
+            raise
         except BrowserFailure as error:
             try:
                 reason = ViewerInputReason(error.code)
@@ -948,6 +952,8 @@ class _Attachment:
                         self.field_edit = edit
                         try:
                             value = await snapshot.value()
+                        except asyncio.CancelledError:
+                            raise
                         except ValueError:
                             await self.discard_field_edit()
                             raise BrowserFailure(
@@ -1059,6 +1065,8 @@ class _Attachment:
                         await self.page.page.mouse.up(button=button)
                     for key in tuple(self.keys):
                         await self.page.page.keyboard.up(key)
+        except asyncio.CancelledError:
+            raise
         except (*BROWSER_SDK_ERRORS, TimeoutError) as error:
             self.manager.connection_cleanup_failed = True
             logging.getLogger(__name__).info(
