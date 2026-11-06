@@ -152,20 +152,20 @@ remains `pending` or `running` in those tables. Completed, failed, and cancelled
 the final durable snapshot. A terminal transaction locks the live row, appends the deterministic
 `action_execution_result:{execution_id}` event, and deletes the execution with its progress rows.
 
-A newly selected run begins as `pending`. For normal buffered input, the worker resolves the
-Agent-owned target label and optional effort before transactionally preparing the FIFO head. Successful
-preparation stores the complete Session inference snapshot and uses it to activate or continue the
-run. A canonical human `user_message` stores the immutable requested target label and raw nullable
+A newly selected run begins as `pending`. Normal buffered input follows the
+[Mailbox promotion boundary](mailbox.md#input-envelopes-admission-and-promotion), followed by
+[fresh model-operation preparation](../models/selection.md#runtime-resolve) before dispatch.
+A canonical human `user_message` stores the immutable requested target label and raw nullable
 requested effort accepted with that input. It does not copy the resolved physical selection or the
 applied model display name from the prepared Session snapshot. Exact applied public provenance belongs
 to the `turn_marker` for each provider call, so requested intent remains stable after reload while
 applied provenance can differ at later turn boundaries. If an accepted Session or pending/retry
 profile label is absent from the current Agent option list, the worker replaces it with the Agent
 main option, persists the fallback Session intent when it owns that intent, and clears
-fallback-incompatible effort and execution-option settings. Resolution failure remains a handled
-preparation failure for labels rejected at admission or other unresolved profile errors: it consumes
-that head, appends a user-safe `system_error`, preserves the previous Session snapshot, completes the
-active run, and is not retried.
+fallback-incompatible effort and execution-option settings. Rejection at input admission precedes
+mailbox creation. After admission, handled mailbox failure and transient external-preparation
+exceptions follow the linked promotion contract; later model-resolution failure belongs to fresh
+Run preparation and does not consume a second FIFO head.
 
 Requested profile selection precedence for implicit execution is the Session applied profile then
 Agent `main_model_label`; explicit human input wins over both. The applied profile contains only

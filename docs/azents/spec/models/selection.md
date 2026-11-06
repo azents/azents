@@ -237,7 +237,7 @@ roll-forward repair or an explicit operator-approved conversion that accepts can
 
 Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label`, nullable `reasoning_effort`, and an explicit `enabled_execution_options` list. Execution options are immediately switchable preferences, separate from static abilities and model-scoped built-in tool settings. Saved model selections advertise `supported_execution_options`; the public selectable-option response separately projects definition text, registry-owned exclusivity metadata, and provider-specific qualitative cost hints for the composer. Fast (`fast`) and Ultrafast (`ultrafast`) share the `processing_speed` group: support may include both, enabled intent includes at most one, and Normal is the empty selection. Saved support remains authoritative until the existing model refresh/reselection path updates it. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
 
-Before an inference-bearing FIFO head is atomically prepared, runtime resolution:
+After ordinary FIFO input promotion and before model dispatch, fresh model-operation preparation:
 
 1. Loads the Agent and rejects missing or disabled Agents.
 2. Resolves the requested label against the Agent's current `selectable_model_options`; a label that was accepted earlier but is now absent falls back to the current Agent main option and replaces the active Session intent, while a label rejected at input admission still fails with `model_target_not_found`.
@@ -245,7 +245,9 @@ Before an inference-bearing FIFO head is atomically prepared, runtime resolution
 4. Loads and validates the selected main integration plus the Agent's lightweight integration, including provider token refresh where required.
 5. Builds the foreground runtime model, output cap, and built-in tool list from the selected option while retaining the Agent's lightweight option for compaction.
 6. Computes the prepared turn's effective context window from the selected foreground option's capped input limit and the lightweight option's capped input limit, then derives the automatic compaction threshold.
-7. Validates remaining Agent model parameters, applies the requested effort, and materializes user attachments.
+7. Validates remaining Agent model parameters and applies the requested effort. Ordinary mailbox
+   attachments have already passed through [Mailbox preflight](../execution/mailbox.md#input-envelopes-admission-and-promotion);
+   model resolution consumes the resulting transcript/FileParts rather than rematerializing that input.
 
 Preparation also validates enabled execution-option IDs against the implemented registry and selected saved model support. Unknown, duplicate, unsupported, or group-conflicting explicit selections fail before provider invocation rather than silently dropping the preference. Composer draft model switching may intersect choices with the new model's support without selecting another premium member; that client normalization does not replace server validation. Implicit inherited choices on an explicitly changed subagent target retain only supported options, while same-target and full-history inheritance preserve the prepared choice. Auxiliary title and compaction calls do not inherit premium sampling options.
 

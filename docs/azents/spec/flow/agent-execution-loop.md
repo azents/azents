@@ -1279,10 +1279,12 @@ state transitions; execution itself owns no live database session. Model
 preparation callbacks, model streaming, runtime hooks, foreground tools, Toolkit provider resolution,
 OAuth token HTTP requests, broker calls, and live event publication run only after the preceding
 database session has closed. Boundary input polling also completes its external queue read before it
-opens the short session that appends promoted messages. Input-buffer attachment metadata resolution
-likewise runs after its snapshot session closes; promotion then locks and revalidates the FIFO head
-before applying any durable changes. Flush reuses only the FileParts stored at the input boundary and
-never downloads an attachment or creates a ModelFile while holding the Session/FIFO lock.
+opens the short session that appends promoted messages.
+[Mailbox attachment preflight](../execution/mailbox.md#input-envelopes-admission-and-promotion)
+likewise runs after its snapshot session closes. It reuses existing FileParts, or may download
+admitted attachments and create ModelFiles when those parts are absent. Promotion then locks and
+revalidates the FIFO head before its database effects; attachment byte transfer and materialization
+do not hold that Session/FIFO lock.
 
 Standalone Run phase updates, conditional STOPPING transitions, and active
 ModelFile pin admission complete inside repository-owned transactions. Phase
