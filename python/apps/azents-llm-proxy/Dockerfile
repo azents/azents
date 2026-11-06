@@ -7,8 +7,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable --no-install-project --no-build-package litellm
 COPY python/apps/azents-llm-proxy/src ./src
 # Refresh only the local app wheel; cached metadata must not hide source edits.
+# Build backends may need downloading when a cached layer outlives its uv cache.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable --offline --reinstall-package azents-llm-proxy
+    uv sync --locked --no-dev --no-editable --reinstall-package azents-llm-proxy
 
 FROM python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8
 ENV PYTHONUNBUFFERED=1 PYTHON_DOTENV_DISABLED=1 LITELLM_LOCAL_MODEL_COST_MAP=True
