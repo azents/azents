@@ -1,5 +1,6 @@
 """Custom auth route closure and request-private credential attribution."""
 
+import asyncio
 import json
 from collections.abc import Iterator
 from unittest.mock import AsyncMock
@@ -48,6 +49,33 @@ def context() -> Iterator[RequestContext]:
     value = RequestContext(clients=None)
     with value.scope():
         yield value
+
+
+@pytest.mark.parametrize("boundary", ["list", "resolve", "receive"])
+async def test_authentication_cancellation_is_not_an_auth_error(
+    context: RequestContext, boundary: str
+) -> None:
+    authority = AsyncMock(spec=AuthorityClient)
+    authority.list_models.side_effect = asyncio.CancelledError
+    authority.resolve.side_effect = asyncio.CancelledError
+    request = incoming(
+        method="GET" if boundary == "list" else "POST",
+        path="/v1/models" if boundary == "list" else "/v1/responses",
+        headers=[(b"authorization", f"Bearer {AGENT}".encode())],
+        payload=body(),
+    )
+    if boundary == "receive":
+
+        async def receive() -> dict[str, object]:
+            raise asyncio.CancelledError
+
+        request = Request(request.scope, receive)
+    with pytest.raises(asyncio.CancelledError):
+        await AgentAuthentication(authority, context).authenticate(
+            request, api_key="ignored"
+        )
+    if boundary == "receive":
+        authority.resolve.assert_not_called()
 
 
 async def test_binding_is_private_and_raw_bearer_never_enters_auth_fields(

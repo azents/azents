@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, assert_never
 
 from azents_runtime_control.runner_transfer import (
     RunnerTransferDirection,
@@ -11,6 +11,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
 )
+from azents_runtime_control.structured_logging import bind_extra
 
 from azents.runtime.control_protocol.service import RuntimeControlProtocolService
 from azents.runtime.coordination.data import (
@@ -99,11 +100,11 @@ class RuntimeRunnerTransferResultCoordinator:
         :param terminal_coordinator: terminal cleanup and correlation authority
         :param clock: timezone-aware result timestamp clock
         """
-        self._state_store = state_store
-        self._coordination_store = coordination_store
-        self._control_protocol = control_protocol
-        self._terminal_coordinator = terminal_coordinator
-        self._clock = clock
+        self.state_store = state_store
+        self.coordination_store = coordination_store
+        self.control_protocol = control_protocol
+        self.terminal_coordinator = terminal_coordinator
+        self.clock = clock
 
     async def handle(self, result: RunnerTransferResult, *, request_id: str) -> None:
         """Settle one result only after exact metadata and state correlation.
@@ -111,10 +112,10 @@ class RuntimeRunnerTransferResultCoordinator:
         :param result: structurally validated Runner result
         :param request_id: Runner control message request identity
         """
-        operation = await self._coordination_store.get_operation(result.operation_id)
+        operation = await self.coordination_store.get_operation(result.operation_id)
         if operation is None or not _matches_operation(operation, result):
             return
-        record = await self._state_store.get(result.identity.transfer_id)
+        record = await self.state_store.get(result.identity.transfer_id)
         if record is None or not _matches_record(record, result):
             return
         if result.outcome is RunnerTransferOutcome.SUCCEEDED:
@@ -161,7 +162,7 @@ class RuntimeRunnerTransferResultCoordinator:
                     or expected_sha256 != result.sha256
                 ):
                     return
-                verifying = await self._state_store.begin_verification(
+                verifying = await self.state_store.begin_verification(
                     record.admission.transfer_id,
                     attempt_id=record.admission.attempt_id,
                     runtime_id=record.admission.runtime_id,
@@ -180,7 +181,7 @@ class RuntimeRunnerTransferResultCoordinator:
                 or record.object.sha256 != result.sha256
             ):
                 return
-            committed = await self._state_store.confirm_download_commit(
+            committed = await self.state_store.confirm_download_commit(
                 record.admission.transfer_id,
                 attempt_id=record.admission.attempt_id,
                 runtime_id=record.admission.runtime_id,
@@ -193,7 +194,7 @@ class RuntimeRunnerTransferResultCoordinator:
             )
             if committed is None:
                 return
-            settled = await self._terminal_coordinator.settle_terminal(
+            settled = await self.terminal_coordinator.settle_terminal(
                 committed,
                 outcome=RuntimeTransferOutcome.SUCCEEDED,
                 failure=None,
@@ -212,7 +213,7 @@ class RuntimeRunnerTransferResultCoordinator:
                 or record.phase.value != "available"
             ):
                 return
-            confirmed = await self._state_store.confirm_upload_result(
+            confirmed = await self.state_store.confirm_upload_result(
                 record.admission.transfer_id,
                 attempt_id=record.admission.attempt_id,
                 expected_revision=record.revision,
@@ -238,13 +239,22 @@ class RuntimeRunnerTransferResultCoordinator:
             and record.upload_response_committed_at is not None
         ):
             return
+        logger = bind_extra(
+            _LOGGER,
+            {
+                "transfer_id": result.identity.transfer_id,
+                "attempt_id": result.identity.attempt_id,
+                "runtime_id": result.identity.runtime_id,
+                "dispatch_id": result.dispatch_id,
+            },
+        )
         current = record
         if (
             current.admission.direction is RuntimeTransferDirection.UPLOAD
             and current.phase.value in {"verifying", "available"}
             and current.object is not None
         ):
-            cleanup = await self._state_store.record_completed_object_cleanup(
+            cleanup = await self.state_store.record_completed_object_cleanup(
                 current.admission.transfer_id,
                 attempt_id=current.admission.attempt_id,
                 expected_revision=current.revision,
@@ -269,7 +279,7 @@ class RuntimeRunnerTransferResultCoordinator:
             else:
                 outcome = RuntimeTransferOutcome.FAILED
         for attempt in range(_FAILURE_SETTLEMENT_ATTEMPTS):
-            settled = await self._terminal_coordinator.settle_terminal(
+            settled = await self.terminal_coordinator.settle_terminal(
                 current,
                 outcome=outcome,
                 failure=failure,
@@ -278,7 +288,7 @@ class RuntimeRunnerTransferResultCoordinator:
             )
             if settled is not None:
                 break
-            latest = await self._state_store.get(result.identity.transfer_id)
+            latest = await self.state_store.get(result.identity.transfer_id)
             if (
                 latest is None
                 or not _matches_record(latest, result)
@@ -287,26 +297,16 @@ class RuntimeRunnerTransferResultCoordinator:
                 or latest.revision <= current.revision
                 or attempt == _FAILURE_SETTLEMENT_ATTEMPTS - 1
             ):
-                _LOGGER.warning(
+                logger.warning(
                     "Runtime transfer Runner failure settlement was not confirmed",
-                    extra={
-                        "transfer_id": result.identity.transfer_id,
-                        "attempt_id": result.identity.attempt_id,
-                        "runtime_id": result.identity.runtime_id,
-                        "dispatch_id": result.dispatch_id,
-                    },
                 )
                 return
             current = latest
         assert settled is not None
-        _LOGGER.warning(
+        logger.warning(
             "Runtime transfer Runner failure settled",
             extra={
-                "transfer_id": settled.admission.transfer_id,
-                "attempt_id": settled.admission.attempt_id,
-                "runtime_id": settled.admission.runtime_id,
                 "operation_id": settled.admission.operation_id,
-                "dispatch_id": settled.dispatch_id,
                 "direction": settled.admission.direction.value,
                 "runner_outcome": result.outcome.value,
                 "runner_failure": (
@@ -335,7 +335,7 @@ class RuntimeRunnerTransferResultCoordinator:
         """Settle one malformed identity-correlated Runner result."""
         if operation.transfer_id is None or operation.transfer_attempt_id is None:
             return
-        record = await self._state_store.get(operation.transfer_id)
+        record = await self.state_store.get(operation.transfer_id)
         if (
             record is None
             or record.admission.attempt_id != operation.transfer_attempt_id
@@ -356,7 +356,7 @@ class RuntimeRunnerTransferResultCoordinator:
             and current.phase.value in {"verifying", "available"}
             and current.object is not None
         ):
-            cleanup = await self._state_store.record_completed_object_cleanup(
+            cleanup = await self.state_store.record_completed_object_cleanup(
                 current.admission.transfer_id,
                 attempt_id=current.admission.attempt_id,
                 expected_revision=current.revision,
@@ -367,7 +367,7 @@ class RuntimeRunnerTransferResultCoordinator:
             )
             if cleanup is not None:
                 current = cleanup
-        settled = await self._terminal_coordinator.settle_terminal(
+        settled = await self.terminal_coordinator.settle_terminal(
             current,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=failure,
@@ -406,7 +406,7 @@ class RuntimeRunnerTransferResultCoordinator:
         *,
         success: bool,
     ) -> None:
-        await self._control_protocol.append_reply_event(
+        await self.control_protocol.append_reply_event(
             RuntimeReplyEvent(
                 request_id=(
                     record.dispatch_request_id or record.admission.operation_id
@@ -425,7 +425,7 @@ class RuntimeRunnerTransferResultCoordinator:
                     "outcome": result.outcome.value,
                     "success": success,
                 },
-                created_at=self._clock(),
+                created_at=self.clock(),
                 final=True,
             ),
             reply_stream_id=operation.reply_stream_id,
@@ -472,19 +472,29 @@ def _runtime_failure(
     failure: RunnerTransferFailure | None,
 ) -> RuntimeTransferFailure:
     """Map bounded Runner failure evidence to a trusted terminal class."""
-    if failure is RunnerTransferFailure.RESOURCE_EXHAUSTED:
-        return RuntimeTransferFailure.ADMISSION
-    if failure is RunnerTransferFailure.CANCELLED:
-        return RuntimeTransferFailure.CANCELLED
-    if failure is RunnerTransferFailure.INTEGRITY_FAILED:
-        return RuntimeTransferFailure.INTEGRITY
-    if failure is RunnerTransferFailure.DEADLINE_EXCEEDED:
-        return RuntimeTransferFailure.EXPIRED
-    if failure is RunnerTransferFailure.PROTOCOL_VIOLATION:
-        return RuntimeTransferFailure.FENCED
-    if failure is RunnerTransferFailure.DESTINATION_CONFLICT:
-        return RuntimeTransferFailure.DESTINATION_CONFLICT
-    return RuntimeTransferFailure.STREAM
+    match failure:
+        case RunnerTransferFailure.RESOURCE_EXHAUSTED:
+            return RuntimeTransferFailure.ADMISSION
+        case RunnerTransferFailure.CANCELLED:
+            return RuntimeTransferFailure.CANCELLED
+        case RunnerTransferFailure.INTEGRITY_FAILED:
+            return RuntimeTransferFailure.INTEGRITY
+        case RunnerTransferFailure.DEADLINE_EXCEEDED:
+            return RuntimeTransferFailure.EXPIRED
+        case RunnerTransferFailure.PROTOCOL_VIOLATION:
+            return RuntimeTransferFailure.FENCED
+        case RunnerTransferFailure.DESTINATION_CONFLICT:
+            return RuntimeTransferFailure.DESTINATION_CONFLICT
+        case (
+            None
+            | RunnerTransferFailure.UNAVAILABLE
+            | RunnerTransferFailure.ALREADY_CLAIMED
+            | RunnerTransferFailure.STREAM_FAILED
+            | RunnerTransferFailure.DESTINATION_FAILED
+        ):
+            return RuntimeTransferFailure.STREAM
+        case _:
+            assert_never(failure)
 
 
 def _destination_conflict(

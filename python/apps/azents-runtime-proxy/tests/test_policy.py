@@ -84,6 +84,14 @@ def test_empty_cidr_allowlist_is_unrestricted_before_denials() -> None:
     assert policy.authorize_address("198.51.100.10") == "198.51.100.10"
 
 
+@pytest.mark.parametrize("schema_version", [True, 1.0, "1", None])
+def test_policy_schema_requires_an_integer(schema_version: object) -> None:
+    document = _document()
+    document["schema_version"] = schema_version
+    with pytest.raises(InvalidProxyPolicy, match="schema_version must be an integer"):
+        parse_proxy_policy(document, digest="d" * 64)
+
+
 def test_policy_parser_rejects_unknown_and_noncanonical_fields() -> None:
     document = _document()
     document["unknown"] = True

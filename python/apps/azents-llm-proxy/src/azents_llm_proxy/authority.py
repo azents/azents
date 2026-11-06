@@ -1,5 +1,6 @@
 """Private, online authority client; never accepts or relays inference content."""
 
+import asyncio
 import ssl
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,6 +85,8 @@ class AuthorityClient:
                 },
                 follow_redirects=False,
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPError:
             raise AuthorityUnavailable("Inference authority is unavailable.") from None
         if response.status_code in (401, 403):
