@@ -54,9 +54,11 @@ Main steps:
    requires `AgentSession.run_state = running` before reading any mailbox or recoverable execution
    work. It then repeatedly reads the current FIFO InputBuffer head until the mailbox is empty or
    another execution boundary stops consumption. The canonical
-   execution snapshot does not pin a mailbox head. For each row, the Worker resolves the requested
-   profile and attachment metadata outside a database session and then locks the same head for atomic
-   preparation. Scheduled triggers and continuations use the same FIFO promotion path as other
+   execution snapshot does not pin a mailbox head. For each row, the Worker reads the requested
+   profile and performs detached attachment/action preparation, then locks the same head for atomic
+   [Mailbox promotion](../execution/mailbox.md#input-envelopes-admission-and-promotion).
+   Fresh physical model resolution and Session inference finalization have a separate transaction.
+   Scheduled triggers and continuations use the same FIFO promotion path as other
    inputs, binding their cycle to the consuming Run and appending their typed Event atomically
    with mailbox consumption. Reading Scheduled input does not complete or replace an active Run.
    After the Worker creates or claims the AgentRun, it ensures

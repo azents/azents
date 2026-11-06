@@ -366,14 +366,18 @@ previous captured operations remain historical evidence.
 Pending and running `AgentRun` rows are active recovery sources. Recovery claims
 the existing run and ordered input-event associations. A pending run retains its
 requested target and nullable effort independently of the resolved Session
-snapshot. Owner-generation-locked activation persists requested intent; successful
-NEW preparation atomically captures effective selection/limits with canonical
-events and buffer deletion. The existing removed-label fallback applies when
+snapshot. Owner-generation-locked activation persists requested intent.
+[Mailbox promotion](../execution/mailbox.md#input-envelopes-admission-and-promotion)
+commits canonical input events and buffer deletion independently of successful NEW
+model-operation finalization, which stores effective selection and limits under
+the current Run, owner-generation and exact-operation fence. The existing removed-label fallback applies when
 preparing a NEW operation, while user configuration drift retains its existing
 fence.
 
-Handled resolution failure preserves the previous snapshot, appends a user-safe
-error, consumes the failed head and completes the run. A later profile change
+Handled mailbox failures consume the failed head under the promotion contract;
+external preparation exceptions leave it pending. Fresh model-resolution failure
+occurs at the consuming Run's preparation boundary, not in the input-deletion
+transaction. A later profile change
 updates intent for the next ordinary turn. Automatic retry waits for durable
 backoff and rebuilds from the existing captured operation and cursor; it does not
 freshly recompile that operation from current catalog metadata.

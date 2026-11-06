@@ -84,12 +84,14 @@ before generic retry publication. An unclassified provider outcome does not crea
 state and instead follows the ordinary internal-error path.
 
 A run is precreated as `pending` and associated with its ordered durable input events through
-`agent_run_input_events`. Normal mailbox-item input resolves its requested profile before activation, then
-atomically writes the complete Session inference snapshot, canonical transcript events, run-input
-associations, Goal/Skill side effects, and mailbox-item deletion. A handled preparation failure consumes the
-mailbox item, appends a deterministic `system_error`, preserves the previous Session inference snapshot,
-and completes the active run without retry. Only one pending run may exist for a session. Pending and
-running runs are active recovery state.
+`agent_run_input_events`. [Mailbox promotion](mailbox.md#input-envelopes-admission-and-promotion)
+atomically commits canonical transcript events, run-input associations, Goal/Skill side effects,
+and mailbox-item deletion. Fresh model-operation finalization separately stores the complete Session
+inference snapshot under its Run, owner-generation and exact-operation fence; see
+[model selection](../models/selection.md#runtime-resolve). Handled mailbox preparation failures and
+external preparation exceptions follow the linked promotion contract rather than sharing one
+consumption or retry boundary. Only one pending run may exist for a session. Pending and running
+runs are active recovery state.
 
 The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary and automatic retry attempt. On first activation, `AgentRun` stores only that selected requested label and nullable effort alongside lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore the resolved physical model selection or effective limits. A profile change arriving during an active run is prepared for the next ordinary boundary. A model-call failure keeps the failed attempt's snapshot immutable, but after retry backoff the next attempt freshly resolves the current Session-applied profile and rebuilds the same run's physical request and effective limits. Manual retry creates a new pending run, preserves the original ordered input-event associations, copies the original run's requested intent, and re-resolves current Agent routing at activation. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving resolved model state from the parent or child run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
 
