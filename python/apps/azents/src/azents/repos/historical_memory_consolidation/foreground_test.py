@@ -11,9 +11,8 @@ from uuid6 import uuid7
 from azents.core.historical_memory_consolidation import ConsolidationScope
 from azents.core.historical_memory_snapshot import MemorySnapshotConsumer
 from azents.core.vfs import (
+    VFS_FILE_MAX_BYTES,
     parse_vfs_exact_uri,
-    parse_vfs_glob_pattern,
-    parse_vfs_search_uri,
 )
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
@@ -22,6 +21,11 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory_consolidation.foreground import read_current_result
+from azents.repos.memory_vfs.data import (
+    ConsolidatedMemoryVfsRecord,
+    MemoryVfsAuthority,
+    MemoryVfsUriQuery,
+)
 from azents.repos.memory_vfs.repository import MemoryVfsRepository
 from azents.services.memory_vfs import MemoryVfsReadBackend
 from azents.services.vfs_read import VfsReadContext, VfsReadError
@@ -162,7 +166,7 @@ async def test_public_consumer_archive_blocks_even_selected_scope_bytes(
         )
 
 
-async def test_independent_aliases_latest_live_read_glob_and_grep(
+async def test_independent_aliases_latest_live_read_and_authorized_inventory(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
@@ -174,7 +178,8 @@ async def test_independent_aliases_latest_live_read_glob_and_grep(
         await publish_context_overview(
             manager, key=key, markdown=_markdown(key.scope, source, text)
         )
-    backend = MemoryVfsReadBackend(MemoryVfsRepository(manager))
+    repository = MemoryVfsRepository(manager)
+    backend = MemoryVfsReadBackend(repository)
     team, user = _context(corpus, personal=False), _context(corpus, personal=True)
     team_uri = "azents://memory/consolidated/team/summary.md"
     user_uri = "azents://memory/consolidated/user/summary.md"
@@ -199,30 +204,50 @@ async def test_independent_aliases_latest_live_read_glob_and_grep(
         await backend.read_text(
             team, parse_vfs_exact_uri(user_uri), offset=0, limit=20000, encoding="utf-8"
         )
-    page = await backend.glob(
-        user,
-        parse_vfs_glob_pattern("azents://memory/consolidated/*/summary.md"),
-        exclude_patterns=(),
+    authority = MemoryVfsAuthority(
+        root_session_id=user.root_session_id,
+        agent_id=user.agent_id,
+        workspace_id=user.workspace_id,
+        associated_user_id=user.associated_user_id,
+        memory_enabled=True,
     )
+    query = MemoryVfsUriQuery(
+        namespace="consolidated",
+        saved_scopes=(),
+        source_scopes=("team", "user"),
+        session_id=None,
+        source_file_kinds=(),
+        include_readme=False,
+    )
+    # Database authorization is independent of the backend's elapsed-time budget.
+    # Backend tests cover glob/grep composition and deadline outcomes separately.
+    page = await repository.list_uris(authority, query=query, limit=10)
     assert set(page.uris) == {team_uri, user_uri}
-    page = await backend.glob(
-        team,
-        parse_vfs_glob_pattern("azents://memory/consolidated/*/summary.md"),
-        exclude_patterns=(),
+    assert not page.has_more
+    page = await repository.list_uris(
+        dataclasses.replace(
+            authority,
+            root_session_id=team.root_session_id,
+            associated_user_id=None,
+        ),
+        query=query,
+        limit=10,
     )
     assert page.uris == (team_uri,)
-    grep = await backend.grep(
-        user,
-        parse_vfs_search_uri("azents://memory/consolidated"),
-        pattern=re.compile("sentinel"),
-        recursive=True,
-        exclude_patterns=(),
-        max_matching_files=10,
-        max_lines_per_file=10,
-        max_searched_files=10,
-        max_scanned_bytes=30000,
+    assert not page.has_more
+    candidates = await repository.list_consolidated(
+        authority,
+        scopes=("team", "user"),
+        limit=10,
+        max_bytes=VFS_FILE_MAX_BYTES,
     )
-    assert {record.path for record in grep.files} == {team_uri, user_uri}
+    assert not candidates.has_more
+    assert {
+        record.entry.unit.scope
+        for record in candidates.records
+        if isinstance(record, ConsolidatedMemoryVfsRecord)
+        and re.search("sentinel", record.entry.rendered_block)
+    } == {ConsolidationScope.TEAM, ConsolidationScope.USER}
     for uri in [
         "azents://memory/consolidated/other/summary.md",
         "azents://memory/consolidated/user/private/summary.md",

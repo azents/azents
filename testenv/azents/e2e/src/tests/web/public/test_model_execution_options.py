@@ -117,6 +117,9 @@ def _login_main_web(
     email: str,
 ) -> None:
     """Authenticate through the deployed Main Web login flow."""
+    # Stop the authenticated document before resetting its cookies. Its pending
+    # auth responses can otherwise repopulate cookies during the next navigation.
+    driver.get(f"{base_url}/favicon.ico")
     driver.delete_all_cookies()
     driver.get(f"{base_url}/login")
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
