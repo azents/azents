@@ -50,7 +50,7 @@ ingress finalization transaction commits the conversation-position advance, mail
 running transition. Preparation handles exactly one FIFO head per transaction. The worker
 first reads the head's identity and inference requirement, performs detached preparation, then
 locks the Session and the same FIFO head. When an input already carries FileParts, attachment
-preflight resolves display metadata and reuses those parts without downloading again. When parts
+preflight reuses those parts without downloading again. When parts
 are absent, the admitted-attachment path validates current Session/Run authority and the original
 root claim, then may download eligible Exchange attachments and create ModelFiles outside the
 promotion transaction. Partial materialization is cleaned up on failure or cancellation.
