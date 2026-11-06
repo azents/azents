@@ -18,6 +18,11 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
 )
+from azents.core.historical_memory_consolidation import (
+    ConsolidationScope,
+    ConsolidationUnitKey,
+)
+from azents.core.historical_memory_snapshot import ConsolidatedMemorySnapshotEntry
 from azents.core.vfs import (
     VFS_FILE_MAX_BYTES,
     parse_vfs_exact_uri,
@@ -277,6 +282,45 @@ class _Repository(MemoryVfsRepository):
         del authority, limit
         self.uri_queries.append(query)
         return self.uri_pages_by_namespace.get(query.namespace, self.uri_page)
+
+
+class _ConsolidatedRepository(_Repository):
+    """Immediate scope records keep routing assertions independent of DB speed."""
+
+    async def get_consolidated(
+        self,
+        authority: MemoryVfsAuthority,
+        *,
+        scope: Literal["team", "user"],
+        max_bytes: int,
+    ) -> ConsolidatedMemoryVfsRecord | None:
+        del max_bytes
+        return ConsolidatedMemoryVfsRecord(
+            ConsolidatedMemorySnapshotEntry(
+                unit=ConsolidationUnitKey(
+                    workspace_id=authority.workspace_id,
+                    agent_id=authority.agent_id,
+                    scope=ConsolidationScope(scope),
+                    associated_user_id=authority.associated_user_id
+                    if scope == "user"
+                    else None,
+                ),
+                rendered_block=f"{scope} sentinel 한글 日本語",
+                published_at=_NOW,
+            )
+        )
+
+    async def list_uris(
+        self,
+        authority: MemoryVfsAuthority,
+        *,
+        query: MemoryVfsUriQuery,
+        limit: int,
+    ) -> MemoryVfsUriPage:
+        self.uri_queries.append(query)
+        return await MemoryVfsRepository.list_uris(
+            self, authority, query=query, limit=limit
+        )
 
 
 class _StalledRepository(_Repository):
@@ -766,6 +810,81 @@ async def test_glob_returns_only_matching_sorted_authorized_uris() -> None:
         f"azents://memory/sources/team/{_SESSION_ID}/session.md",
     )
     assert result.truncated is False
+
+
+async def test_consolidated_glob_and_grep_compose_scoped_repository_records() -> None:
+    """Both operations preserve aliases, matching, exclusions and text rendering."""
+    repository = _ConsolidatedRepository()
+    backend = _backend(repository)
+    context = dataclasses.replace(_context(), associated_user_id="u" * 32)
+    team_uri = "azents://memory/consolidated/team/summary.md"
+    user_uri = "azents://memory/consolidated/user/summary.md"
+    result = await backend.glob(
+        context,
+        parse_vfs_glob_pattern("azents://memory/consolidated/*/summary.md"),
+        exclude_patterns=(),
+    )
+    assert result.uris == (team_uri, user_uri)
+    assert not result.truncated
+    assert repository.uri_queries == [
+        MemoryVfsUriQuery(
+            namespace="consolidated",
+            saved_scopes=("agent", "user"),
+            source_scopes=("team", "user"),
+            session_id=None,
+            source_file_kinds=("session", "events", "tool-results"),
+            include_readme=False,
+        )
+    ]
+    grep = await backend.grep(
+        context,
+        parse_vfs_search_uri("azents://memory/consolidated"),
+        pattern=re.compile("sentinel"),
+        recursive=True,
+        exclude_patterns=(),
+        max_matching_files=10,
+        max_lines_per_file=10,
+        max_searched_files=10,
+        max_scanned_bytes=30_000,
+    )
+    assert {record.path for record in grep.files} == {team_uri, user_uri}
+    assert not grep.truncated
+    excluded = await backend.glob(
+        context,
+        parse_vfs_glob_pattern("azents://memory/consolidated/*/summary.md"),
+        exclude_patterns=("consolidated/user/*",),
+    )
+    assert excluded.uris == (team_uri,)
+
+
+async def test_glob_and_grep_report_deadline_when_authorization_stalls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deadline is explicit truncation, never a successful empty inventory."""
+    monkeypatch.setattr(memory_vfs_module, "_MEMORY_OPERATION_MAX_SECONDS", 0.01)
+    backend = _backend(_StalledRepository())
+    glob = await backend.glob(
+        _context(),
+        parse_vfs_glob_pattern("azents://memory/consolidated/*/summary.md"),
+        exclude_patterns=(),
+    )
+    assert glob.uris == ()
+    assert glob.truncated
+    assert glob.stopped_reason == "deadline"
+    grep = await backend.grep(
+        _context(),
+        parse_vfs_search_uri("azents://memory/consolidated"),
+        pattern=re.compile("sentinel"),
+        recursive=True,
+        exclude_patterns=(),
+        max_matching_files=10,
+        max_lines_per_file=10,
+        max_searched_files=10,
+        max_scanned_bytes=30_000,
+    )
+    assert grep.files == ()
+    assert grep.truncated
+    assert grep.stopped_reason == "deadline"
 
 
 async def test_glob_queries_only_literal_namespace_scope_and_session_prefix() -> None:
