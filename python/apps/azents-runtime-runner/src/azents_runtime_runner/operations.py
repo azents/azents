@@ -2491,7 +2491,7 @@ class RunnerOperations:
         records: tuple[_ManagedProcess, ...],
     ) -> None:
         del self
-        await asyncio.gather(
+        outcomes = await asyncio.gather(
             *(
                 record.process.terminate_descendants(
                     terminate_timeout_seconds=0,
@@ -2501,6 +2501,21 @@ class RunnerOperations:
             ),
             return_exceptions=True,
         )
+        for record, outcome in zip(records, outcomes, strict=True):
+            if isinstance(outcome, Exception):
+                diagnostic = runner_exception_diagnostic(
+                    outcome, RunnerDiagnosticReason.OPERATION_FAILED
+                )
+                logger.error(
+                    "Runtime Runner forced process cleanup failed",
+                    exc_info=diagnostic.exc_info,
+                    extra={
+                        "process_id": record.process_id,
+                        "runner_generation": record.generation,
+                        "owner_session_id": record.owner_session_id,
+                        **diagnostic.log_fields(),
+                    },
+                )
 
     async def _communicate_process(
         self,

@@ -1212,6 +1212,10 @@ Runner owns runtime exec process handles, stdin writers, stdout/stderr drains, u
 
 A Control stream disconnect fences the previous Runner generation, cancels its active operation tasks, and terminates its managed exec processes before reconnecting. Managed exec processes run in dedicated operating-system process groups. Cleanup signals the complete process group, escalates from termination to kill, drains or cancels process tasks within bounded deadlines, and must never wait indefinitely before the Runner opens its next Control stream. Cleanup emits structured process count, duration, timeout, process id, and process-group diagnostics without logging commands, credentials, or Runtime Control tokens.
 
+Forced cleanup attempts every managed process concurrently. Its best-effort boundary
+logs suppressed termination failures once with process, generation, owner and safe
+exception-frame context, while preserving the original shutdown outcome.
+
 Bounded process-exit waits also own their shielded wait task: completion, timeout,
 failure, and owner cancellation all join it before returning or propagating the
 original outcome. This wait-task cleanup does not change process-group signals or
