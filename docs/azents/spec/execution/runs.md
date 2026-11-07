@@ -66,7 +66,9 @@ freezes the selected semantic label's ordered candidates and compatible settings
 its current cursor, quota-attempted identities, transferred probe or Primary reservation claim, and
 one bounded outcome per candidate. Recovery and Worker handover resume this state rather than
 re-reading or restarting an in-flight chain. A fresh manual failed-run retry creates a new Run and
-resolves the current Agent chain.
+resolves the current Agent chain. Terminal Run transitions clear both operation slots with
+`retry_state`; bounded terminal operation diagnostics, when present, are copied into failed-run
+metadata before the live state is cleared.
 
 `retry_state` is the source of truth for the current physical candidate's non-quota failed-run retry
 progress. While present, the run remains `running` and live run state exposes the active retry cycle
@@ -93,7 +95,17 @@ external preparation exceptions follow the linked promotion contract rather than
 consumption or retry boundary. Only one pending run may exist for a session. Pending and running
 runs are active recovery state.
 
-The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary and automatic retry attempt. On first activation, `AgentRun` stores only that selected requested label and nullable effort alongside lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore the resolved physical model selection or effective limits. A profile change arriving during an active run is prepared for the next ordinary boundary. A model-call failure keeps the failed attempt's snapshot immutable, but after retry backoff the next attempt freshly resolves the current Session-applied profile and rebuilds the same run's physical request and effective limits. Manual retry creates a new pending run, preserves the original ordered input-event associations, copies the original run's requested intent, and re-resolves current Agent routing at activation. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving resolved model state from the parent or child run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
+The requested label is intent. The Session-owned inference snapshot supplies the physical request
+for an attempt, while `AgentRun.model_operation_state` preserves the captured candidate chain and
+progress used to prepare that snapshot. The Run's requested-profile fields alone do not contain the
+resolved selection or effective limits. A model-call failure leaves its prepared snapshot immutable;
+the next automatic attempt rebuilds under the operation-reuse rules below. Manual retry creates a
+new pending Run, preserves the original ordered input-event associations, copies requested intent,
+and resolves current Agent routing at activation. A subagent's first Run is precreated with
+`parent_agent_run_id`; child creation stores either the exact parent Session snapshot or a statically
+validated spawn override on the child Session. Recovery uses that Session state together with any
+captured child operation, rather than inferring a route from Run intent alone. Each child Run owns
+its VFS projection independently.
 
 Every current subagent Run that reaches `completed`, `failed`, `stopped`, `interrupted`, or
 `cancelled` is eligible for one queue-only terminal result to its direct parent. Terminal state,
@@ -222,11 +234,18 @@ durable `system_error`, without appending a failed `run_marker`, and without mar
 terminal. `RunExecutor` converts the propagated failure into `FailedRunAttempt`, persists
 `agent_runs.retry_state`, waits until `next_retry_at` while observing stop/shutdown, and retries the
 same model turn and `run_id`. The failed attempt retains its immutable prepared snapshot. After
-backoff and immediately before the next attempt, `RunExecutor` freshly resolves the current
-Session-applied profile against the current Agent option mapping, replaces the Session inference
-snapshot, rebuilds the model request, and publishes the refreshed live profile. Recovered persisted
-retry state follows the same refresh boundary after its remaining backoff. Commands keep their
-existing request because this refresh applies only to model execution. This keeps the run `running`
+backoff and immediately before the next attempt, `RunExecutor` prepares from current Session intent.
+When its label remains configured and its label, requested effort and execution options match an
+existing nonterminal foreground operation, preparation reuses that operation's frozen candidates,
+settings, capabilities and cursor. It does not recompile those candidates from current catalog
+metadata or replace them with the current Agent candidate mapping. Changed intent, removed-label
+fallback or an explicitly replaced/terminal operation instead requires NEW preparation. In either
+case, the selected candidate rebuilds the request and replaces the Session inference snapshot under
+the owner-generation and exact operation/cursor fence. The live profile is published if it changes.
+Recovered persisted retry state follows the same preparation boundary after its remaining backoff.
+See [operation preparation and finalization](../../../../python/apps/azents/src/azents/repos/worker_executor_model.py).
+Commands keep their existing request because this refresh applies only to model execution.
+This keeps the run `running`
 and prevents durable failed history until retry is finalized. `max_retries` counts retries after the
 initial attempt, so a budget of three permits four total attempts and terminal attempt numbers remain
 one-based within each model turn.
@@ -271,10 +290,13 @@ Other classified provider failures consume the standard backoff and complete con
 retry budget even when its diagnostic retryability is `non_retryable` or `user_action_required`.
 Unclassified provider outcomes follow internal-error handling rather than provider retry handling. When
 retry is exhausted, or when a non-provider non-retryable failure is observed, `FailedRunErrorFinalizer`
-promotes the latest attempt to durable failed-run output by delegating durable append and terminal run
-updates to the engine failed-run event store. That boundary appends the terminal `system_error` with
-failed-run metadata, appends the failed run marker, and marks the run `failed` while clearing retry
-state. The worker finalizer then emits `RunComplete` and clears live activity.
+promotes the latest attempt through
+[`FailedRunFinalizationOperationRepository`](../../../../python/apps/azents/src/azents/repos/failed_run_finalization_operation.py).
+Its owner- and Stop-fenced transaction appends the terminal `system_error` with failed-run metadata
+and deterministic failed Run marker, conditionally marks the Run `failed` while clearing retry
+state, and finalizes eligible direct-parent delivery and its marker atomically. A delivery failure
+rolls back the whole group. After commit, the Worker finalizer dispatches those events and
+`RunComplete`; the executor clears live activity. Publication is not terminal persistence authority.
 
 User Stop has priority before failed-attempt persistence, after retry-state publication, during
 backoff, and during a retry attempt. Stop uses the ordinary terminal interruption path, clears retry

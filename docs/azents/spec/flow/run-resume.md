@@ -377,10 +377,12 @@ fence.
 Handled mailbox failures consume the failed head under the promotion contract;
 external preparation exceptions leave it pending. Fresh model-resolution failure
 occurs at the consuming Run's preparation boundary, not in the input-deletion
-transaction. A later profile change
-updates intent for the next ordinary turn. Automatic retry waits for durable
-backoff and rebuilds from the existing captured operation and cursor; it does not
-freshly recompile that operation from current catalog metadata.
+transaction. A later profile change updates Session intent. Automatic retry waits for durable
+backoff, then prepares from that intent under the
+[Run retry contract](../execution/runs.md#execution-state-and-terminal-boundaries).
+Matching intent reuses the existing captured operation and cursor without recompiling its catalog
+metadata. Changed intent or removed-label fallback can instead require NEW preparation. Recovery
+does not reset the retry budget merely because the physical request is rebuilt.
 
 Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations before recovery can claim it, then resolves the current Agent routing once at activation. The first child subagent run is precreated with a parent run id and a complete Session inference snapshot. It uses exact inheritance or a statically resolved non-full-history override for its initial Session state. Later child runs resolve the stored session-last-used label normally.
 
