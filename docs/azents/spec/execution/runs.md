@@ -66,9 +66,11 @@ freezes the selected semantic label's ordered candidates and compatible settings
 its current cursor, quota-attempted identities, transferred probe or Primary reservation claim, and
 one bounded outcome per candidate. Recovery and Worker handover resume this state rather than
 re-reading or restarting an in-flight chain. A fresh manual failed-run retry creates a new Run and
-resolves the current Agent chain. Terminal Run transitions clear both operation slots with
-`retry_state`; bounded terminal operation diagnostics, when present, are copied into failed-run
-metadata before the live state is cleared.
+resolves the current Agent chain. The canonical `AgentRunRepository` terminal helpers clear both
+operation slots with `retry_state`; failed-run finalization copies bounded terminal operation
+diagnostics into failure metadata first. Terminal status alone is not a universal empty-slot
+invariant: [Historical Memory integration](../domain/memory.md) can retain captured operation state
+when its specialized takeover or quota-replacement path terminalizes an internal Run.
 
 `retry_state` is the source of truth for the current physical candidate's non-quota failed-run retry
 progress. While present, the run remains `running` and live run state exposes the active retry cycle
