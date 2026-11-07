@@ -6,10 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from azents_runtime_runner.execution import _wait_process
+from azents_runtime_runner.terminal import _wait_for_process
 
 
+@pytest.mark.parametrize("terminal", [False, True])
 @pytest.mark.parametrize("outcome", ["cancel", "timeout", "complete", "failure"])
-async def test_process_wait_drains_owned_child(outcome: str) -> None:
+async def test_process_wait_drains_owned_child(outcome: str, terminal: bool) -> None:
     started, stopped, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def wait() -> int:
@@ -24,9 +26,8 @@ async def test_process_wait_drains_owned_child(outcome: str) -> None:
 
     process = MagicMock(spec=asyncio.subprocess.Process)
     process.wait = AsyncMock(side_effect=wait)
-    owner = asyncio.create_task(
-        _wait_process(process, 0 if outcome == "timeout" else 1)
-    )
+    wait_process = _wait_for_process if terminal else _wait_process
+    owner = asyncio.create_task(wait_process(process, 0 if outcome == "timeout" else 1))
     try:
         await asyncio.wait_for(started.wait(), timeout=1)
         if outcome == "cancel":

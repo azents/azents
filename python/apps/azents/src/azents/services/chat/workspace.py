@@ -1,5 +1,6 @@
 """Agent Workspace file browser service."""
 
+import asyncio
 import dataclasses
 import mimetypes
 import posixpath
@@ -820,6 +821,8 @@ class AgentWorkspaceFileService:
                 wait_timeout_seconds=0.0,
                 start_if_stopped=False,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             if runtime_panel.type in {"STARTING", "RESETTING"}:
                 return AgentWorkspaceAccessConnecting(type="CONNECTING")
@@ -1046,6 +1049,8 @@ class AgentWorkspaceFileService:
                 admission_authority=None,
             )
             return Success(AgentWorkspaceMutationResult(path=result.path))
+        except asyncio.CancelledError as error:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1089,6 +1094,8 @@ class AgentWorkspaceFileService:
                 admission_authority=None,
             )
             return Success(AgentWorkspaceMutationResult(path=result.path))
+        except asyncio.CancelledError as error:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1154,6 +1161,8 @@ class AgentWorkspaceFileService:
                     destination_path=result.destination_path,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1213,6 +1222,8 @@ class AgentWorkspaceFileService:
                 admission_authority=None,
             )
             return Success(AgentWorkspaceBulkDeleteResult(paths=list(result.paths)))
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1285,6 +1296,8 @@ class AgentWorkspaceFileService:
                     ]
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1363,6 +1376,8 @@ class AgentWorkspaceFileService:
                     media_type=_guess_media_type(path),
                 )
             )
+        except asyncio.CancelledError as error:
+            raise
         except (RuntimeToServerTransferError, WorkspaceDownloadError) as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except FileNotFoundError:
@@ -1473,6 +1488,8 @@ class AgentWorkspaceFileService:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent.id
             )
+        except asyncio.CancelledError as error:
+            raise
         except RuntimeStorageError as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         return Success(runtime)
@@ -1578,6 +1595,8 @@ class AgentWorkspaceFileService:
                     admission_authority=None,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1604,6 +1623,8 @@ class AgentWorkspaceFileService:
                     admission_authority=None,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1635,6 +1656,8 @@ class AgentWorkspaceFileService:
                 admission_authority=None,
             )
             return Success(result)
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:

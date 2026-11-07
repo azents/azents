@@ -1147,6 +1147,11 @@ UI projection boundaries: they preserve `asyncio.CancelledError`, log other proj
 do not fail provider execution, durable event append, Run phase/terminal persistence, or subsequent
 cleanup.
 
+Redis live broadcast owns its PubSub handle from before the initial subscribe.
+Failed or cancelled acquisition, confirmation, consumption or unsubscribe still
+closes the handle; an interrupted unsubscribe cannot bypass connection release.
+Subscription confirmation remains the barrier before exposing the live iterator.
+
 `ContentDelta`, `ReasoningDelta`, and `ProviderToolActivityChanged` are live projection events only.
 The worker coalesces each Session's text and reasoning deltas for at most 75 milliseconds or 96
 characters before applying a batch to the Redis live projection and emitting

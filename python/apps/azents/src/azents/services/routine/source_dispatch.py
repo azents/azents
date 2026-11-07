@@ -1,5 +1,6 @@
 """Source-only Routine admission through the existing Scheduler and Session inbox."""
 
+import asyncio
 import datetime
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -74,6 +75,8 @@ class RoutineSourceDispatcher:
                     )
                 try:
                     admission = await self.inbox.admit_tick(scope=scope, now=now)
+                except asyncio.CancelledError:
+                    raise
                 except RoutineUnavailable:
                     # A root can archive or retire after the read-only scan.
                     unavailable += 1

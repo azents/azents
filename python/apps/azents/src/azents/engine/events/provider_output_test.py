@@ -516,6 +516,8 @@ async def _admit_metadata(
             authority=admission.authority,
             generated_images=admission.generated_images,
         )
+    except asyncio.CancelledError:
+        raise
     except ProviderOutputOperationError as exc:
         raise ModelCallError(str(exc)) from None
 

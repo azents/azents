@@ -1,5 +1,6 @@
 """Toolkit operation repository transaction tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -59,6 +60,8 @@ class _TrackedSessionManager:
         self.active = True
         try:
             yield self.session
+        except asyncio.CancelledError:
+            raise
         except Exception:
             self.rolled_back = True
             raise

@@ -1,5 +1,6 @@
 """Closed current-execution file catalog and path-only explicit submission."""
 
+import asyncio
 import dataclasses
 from collections.abc import Sequence
 from types import MappingProxyType
@@ -80,6 +81,8 @@ class MemoryFileAuthority:
     async def validate(self, context: MemoryExecutionPrincipal) -> None:
         try:
             await self.repository.authorize_execution(context)
+        except asyncio.CancelledError:
+            raise
         except MemoryExecutionAuthorityError:
             raise VfsReadError(
                 "not_found", "Execution files are unavailable."
@@ -122,6 +125,8 @@ class ConsolidationAdmittedTool:
                     tool_call_id=call_id,
                     authored_path=location.path.removeprefix("/"),
                 )
+            except asyncio.CancelledError:
+                raise
             except MemorySubmissionError as error:
                 raise FunctionToolError(
                     str(error),

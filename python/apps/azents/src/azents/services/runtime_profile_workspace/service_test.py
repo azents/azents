@@ -1,5 +1,6 @@
 """Workspace Runtime Profile deletion service tests."""
 
+import asyncio
 import datetime
 import logging
 from collections.abc import AsyncGenerator
@@ -91,6 +92,8 @@ def _service(
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
         try:
             yield AsyncMock(spec=AsyncSession)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             transaction["rolled_back"] = True
             raise

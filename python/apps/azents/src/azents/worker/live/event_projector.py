@@ -61,8 +61,8 @@ class LiveEventProjector:
             Depends(LiveProjectionAuthorityRepository),
         ],
     ) -> None:
-        self._live_event_store = live_event_store
-        self._broadcast = broadcast
+        self.live_event_store = live_event_store
+        self.broadcast = broadcast
         self.authority_repository = authority_repository
         self._partial_batchers: dict[tuple[str, int], LivePartialBatcher] = {}
         self._active_run_ids: dict[tuple[str, int], str] = {}
@@ -147,7 +147,7 @@ class LiveEventProjector:
             owner_generation=owner_generation,
         ):
             return None
-        advance = await self._live_event_store.advance_owner(
+        advance = await self.live_event_store.advance_owner(
             session_id,
             owner_generation,
         )
@@ -161,7 +161,7 @@ class LiveEventProjector:
             event.id for event in advance.removed_events
         } | removed_local_event_ids
         if advance.advanced:
-            await self._broadcast.publish_live_projection(
+            await self.broadcast.publish_live_projection(
                 session_id,
                 chat_live_projection_reset_dump(session_id),
                 owner_generation=owner_generation,
@@ -172,7 +172,7 @@ class LiveEventProjector:
                 event_id,
                 owner_generation=owner_generation,
             )
-        return self._live_event_store.for_owner(session_id, owner_generation)
+        return self.live_event_store.for_owner(session_id, owner_generation)
 
     async def flush_session(
         self,
@@ -528,7 +528,7 @@ class LiveEventProjector:
             self._active_run_ids[self._owner_key(session_id, owner_generation)] = (
                 run.run_id
             )
-            await self._broadcast.publish_live_projection(
+            await self.broadcast.publish_live_projection(
                 session_id,
                 chat_live_run_updated_dump(session_id, run),
                 owner_generation=owner_generation,
@@ -564,7 +564,7 @@ class LiveEventProjector:
                 self._owner_key(session_id, owner_generation),
                 None,
             )
-            await self._broadcast.publish_live_projection(
+            await self.broadcast.publish_live_projection(
                 session_id,
                 chat_live_run_cleared_dump(session_id, run_id),
                 owner_generation=owner_generation,
@@ -591,7 +591,7 @@ class LiveEventProjector:
         try:
             if await self._owned_store(session_id, owner_generation) is None:
                 return
-            await self._broadcast.publish_live_projection(
+            await self.broadcast.publish_live_projection(
                 session_id,
                 event_json,
                 owner_generation=owner_generation,
@@ -697,7 +697,7 @@ class LiveEventProjector:
         *,
         owner_generation: int,
     ) -> None:
-        await self._broadcast.publish_live_projection(
+        await self.broadcast.publish_live_projection(
             event.session_id,
             chat_live_event_upserted_dump(event),
             owner_generation=owner_generation,
@@ -710,7 +710,7 @@ class LiveEventProjector:
         *,
         owner_generation: int,
     ) -> None:
-        await self._broadcast.publish_live_projection(
+        await self.broadcast.publish_live_projection(
             session_id,
             chat_live_event_removed_dump(session_id, event_id),
             owner_generation=owner_generation,

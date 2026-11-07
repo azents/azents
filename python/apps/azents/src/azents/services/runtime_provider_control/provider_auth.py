@@ -1,5 +1,6 @@
 """Provider authentication verifier registry and method implementations."""
 
+import asyncio
 import base64
 import binascii
 import datetime
@@ -62,6 +63,8 @@ class KubernetesApiTokenReviewer:
             result = await self.api.create_token_review(
                 V1TokenReview(spec=V1TokenReviewSpec(token=token, audiences=[audience]))
             )
+        except asyncio.CancelledError:
+            raise
         except ApiException as exc:
             raise RuntimeProviderCredentialUnavailable(
                 "workload_identity_unavailable"
@@ -152,6 +155,8 @@ class IssuedTokenProviderAuthVerifier:
             record = await self.operations.verify_issued_token(
                 verifier=self.credential_verifier.verifier_for(secret), now=now
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeProviderAuthenticationRejected as error:
             raise RuntimeProviderCredentialUnavailable(error.code) from error
         return _authentication(record)
@@ -198,6 +203,8 @@ class KubernetesServiceAccountProviderAuthVerifier:
                 evidence_expires_at=review.evidence_expires_at,
                 now=now,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeProviderAuthenticationRejected as error:
             raise RuntimeProviderCredentialUnavailable(error.code) from error
         return _authentication(record)

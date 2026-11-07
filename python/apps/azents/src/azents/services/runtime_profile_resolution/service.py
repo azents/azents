@@ -1,5 +1,6 @@
 """Resolve exact Agent Runtime Profiles through completed database operations."""
 
+import asyncio
 import dataclasses
 from typing import Annotated
 
@@ -28,6 +29,8 @@ class RuntimeProfileResolutionService:
         """Return committed desired/applied state or the existing bounded failure."""
         try:
             record = await self.operations.ensure_for_agent(agent_id)
+        except asyncio.CancelledError:
+            raise
         except RuntimeProfileResolutionRejected as error:
             raise RuntimeProfileResolutionUnavailable(
                 code=error.code,

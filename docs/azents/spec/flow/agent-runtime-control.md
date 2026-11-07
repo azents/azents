@@ -366,6 +366,11 @@ Each loopback WebSocket stream owns its two directional forwarding tasks. Normal
 completion, child failure, and owner cancellation cancel and join the remaining
 tasks before returning their task-budget slots and closing the upstream socket.
 
+The public Gateway supervises browser-input forwarding alongside the next upstream
+event. A failed input child ends the exchange without waiting for an unrelated
+upstream event. Exit joins the event waiter, input child and authority guard,
+discards retained buffer ownership, and preserves the primary failure.
+
 Peers heartbeat every five seconds, and two missed intervals or an RPC failure
 closes the session within ten seconds. Planned drain withdraws readiness, fences
 Owner leases, sends `GOAWAY`, rejects post-drain Gateway or relay registration and
@@ -549,6 +554,9 @@ warning or traceback and does not increment cleanup failure evidence; it remains
 observable through the existing aggregate repair observation. The object-store
 boundary independently signals typed expected deferral instead of cleanup success.
 At the exact safe time, ordinary idempotent cleanup becomes eligible.
+Cancellation during exact multi-artifact cleanup propagates immediately, even
+after an earlier ordinary failure. Retained artifact evidence remains available
+for a later repair; cancellation is not converted into ordinary retry failure.
 A handled multipart-abort, completed-object-delete, combined, or
 preparation cleanup failure changes it to `retryable_failure` with bounded latest
 evidence. Each later failed repair updates the observation and saturating attempt
@@ -560,6 +568,13 @@ reader or relational transfer entity. The current cutover uses the
 connection generations are canonical fixed-width decimal strings. Direct-object
 admissions persist their source transport and opaque source handle in the exact Redis
 codec; URLs and provider credentials remain transient.
+
+Handled unexpected transfer-stream, lease-renewal and Workspace upload preparation
+failures retain a once-only operator diagnostic at the suppressing boundary while
+preserving their bounded protocol/settlement result. These diagnostics expose type
+and structured origin filename/function/line metadata, not exception values,
+causes, source lines, local values, object credentials or file bytes. Gateway
+transport and secondary WebSocket cleanup failures use the same projection.
 
 The handling boundary for each failed cleanup attempt emits one structured
 warning with origin traceback frames, a static replacement exception message,

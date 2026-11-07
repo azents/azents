@@ -9,6 +9,7 @@ References:
 - Dynamic Client Registration: RFC 7591
 """
 
+import asyncio
 import dataclasses
 import logging
 from urllib.parse import urlparse
@@ -112,6 +113,8 @@ async def discover_oauth_metadata(
         # Step 1: Protected Resource Metadata → AS issuer extract
         try:
             as_issuer = await _discover_authorization_server(client, server_url)
+        except asyncio.CancelledError:
+            raise
         except DiscoveryError:
             # When Protected Resource Metadata is not supported
             # fallback by using server_url itself as AS issuer
@@ -160,6 +163,8 @@ async def register_client(
                 headers={"Accept": "application/json"},
             )
             response.raise_for_status()
+    except asyncio.CancelledError:
+        raise
     except httpx.HTTPStatusError as exc:
         raise DcrError(
             f"DCR registration failed: HTTP {exc.response.status_code}"
@@ -255,6 +260,8 @@ async def _discover_authorization_server(
             resp.raise_for_status()
             response = resp
             break
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPStatusError as exc:
             last_error = DiscoveryError(
                 "Protected resource metadata request failed:"
@@ -305,6 +312,8 @@ async def _fetch_as_metadata(
             resp.raise_for_status()
             response = resp
             break
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPStatusError as exc:
             last_error = DiscoveryError(
                 f"AS metadata request failed: HTTP {exc.response.status_code}"

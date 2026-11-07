@@ -163,6 +163,8 @@ class _MemorySummaryCall:
                 if await self.check_stop():
                     return True
                 await self.executions.authorize_execution(self.principal)
+            except asyncio.CancelledError:
+                raise
             except (
                 CanonicalExecutionOwnerGenerationStaleError,
                 MemoryExecutionAuthorityError,
@@ -390,6 +392,8 @@ class MemoryRunExecutor:
                 try:
                     outcome = await host.run()
                     return self._accepted_result(principal, outcome)
+                except asyncio.CancelledError:
+                    raise
                 except ModelProviderFailure as failure:
                     if (
                         failure.category

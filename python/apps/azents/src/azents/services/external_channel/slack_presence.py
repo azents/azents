@@ -89,6 +89,8 @@ class SlackWorkPresenceClient:
         try:
             async with asyncio.timeout(20):
                 await request
+        except asyncio.CancelledError:
+            raise
         except SlackApiError as error:
             return _slack_api_outcome(error, api_method=api_method)
         except TimeoutError, aiohttp.ClientError:

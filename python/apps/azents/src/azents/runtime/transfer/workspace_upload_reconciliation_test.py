@@ -664,6 +664,57 @@ async def test_runner_generation_replacement_fences_delivery_and_stale_cas() -> 
 
 
 @pytest.mark.asyncio
+async def test_unexpected_preparation_failure_logs_once_and_still_settles(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retain a sanitized origin diagnostic alongside the durable failed result."""
+    error = RuntimeError("UPLOAD_PRIVATE_DETAIL")
+    cause = ValueError("UPLOAD_PRIVATE_CAUSE")
+
+    async def fail_prepare(
+        self: WorkspaceUploadRuntimeReconciliationHandler,
+        upload: WorkspaceUploadRecord,
+        runtime_record: RuntimeTransferRecord,
+    ) -> RuntimeTransferRecord | None:
+        del self, upload, runtime_record
+        raise error from cause
+
+    monkeypatch.setattr(
+        WorkspaceUploadRuntimeReconciliationHandler, "_prepare", fail_prepare
+    )
+    harness = _harness()
+    await _stage(harness)
+    async with asyncio.timeout(2):
+        await harness.workspace_coordinator.reconcile(
+            reconciliation_cursor=None, cleanup_cursor=None, limit=2
+        )
+    current = await _current_upload(harness)
+    assert current.phase is WorkspaceUploadPhase.RETRYABLE_FAILURE
+    assert current.outcome is None
+    assert current.delivery_attempts[-1].outcome is (
+        WorkspaceUploadDeliveryOutcome.RETRYABLE_FAILURE
+    )
+    assert current.failure is WorkspaceUploadFailure.RUNTIME
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Workspace upload Runtime preparation failed"
+    ]
+    assert len(records) == 1
+    assert records[0].__dict__["error_type"] == "RuntimeError"
+    assert records[0].__dict__["transfer_id"]
+    assert records[0].exc_info is not None
+    assert records[0].exc_info[1] is not None
+    assert records[0].exc_info[1].__cause__ is None
+    assert "UPLOAD_PRIVATE_DETAIL" not in caplog.text
+    assert "UPLOAD_PRIVATE_CAUSE" not in caplog.text
+    assert any(
+        frame["function"] == "fail_prepare"
+        for frame in records[0].__dict__["error_frames"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_integrity_mismatch_retains_and_cleans_pre_ready_transfer_object() -> (
     None
 ):

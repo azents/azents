@@ -1,5 +1,6 @@
 """Completed Session lifecycle purge checkpoint operations."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -67,6 +68,8 @@ class SessionLifecyclePurgeOperations:
                     ),
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except ArchivedSessionPurgeParticipantSnapshotInvalid as error:
             raise SessionLifecyclePurgeSnapshotValidationFailure(
                 participant_key=error.participant_key,

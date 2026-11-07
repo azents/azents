@@ -1,5 +1,6 @@
 """Human-facing Historical Memory settings service."""
 
+import asyncio
 import dataclasses
 from typing import Annotated, assert_never
 
@@ -118,6 +119,8 @@ class HistoricalMemorySettingsService:
                 cursor=cursor,
                 limit=limit,
             )
+        except asyncio.CancelledError as error:
+            raise
         except HistoricalMemorySettingsCursorError as error:
             return Failure(HistoricalMemorySettingsCursorInvalid(message=str(error)))
         return Success(HistoricalMemorySettingsListOutput.convert_from(page))

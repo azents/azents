@@ -3,6 +3,7 @@
 Converts event history into a structured summary through an LLM call.
 """
 
+import asyncio
 import dataclasses
 import logging
 from collections.abc import Awaitable
@@ -302,6 +303,8 @@ async def summarize_text_with_model(
             call_context=call_context,
             transport_state=transport_state,
         )
+    except asyncio.CancelledError:
+        raise
     except ModelProviderFailure:
         raise
     except ModelStreamTimeoutError as exc:

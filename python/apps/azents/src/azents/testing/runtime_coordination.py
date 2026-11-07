@@ -151,7 +151,6 @@ class FakeRuntimeControlProtocolService(RuntimeControlProtocolService):
     ) -> None:
         super().__init__(store, **kwargs)
         self.store = store
-        self._test_store = store
         self._test_generations: dict[tuple[RuntimeConnectionKind, str], int] = {}
 
     async def register_provider(
@@ -165,7 +164,7 @@ class FakeRuntimeControlProtocolService(RuntimeControlProtocolService):
         generation = self._test_generations.get(key, 0) + 1
         self._test_generations[key] = generation
         record = await publish_test_connection(
-            self._test_store,
+            self.store,
             kind=RuntimeConnectionKind.PROVIDER,
             subject_id=registration.provider_id,
             connection_id=registration.connection_id,
@@ -206,12 +205,12 @@ class FakeRuntimeControlProtocolService(RuntimeControlProtocolService):
         key = (RuntimeConnectionKind.RUNNER, registration.runtime_id)
         generation = self._test_generations.get(key, 0) + 1
         self._test_generations[key] = generation
-        previous = await self._test_store.get_connection(
+        previous = await self.store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=registration.runtime_id,
         )
         record = await publish_test_connection(
-            self._test_store,
+            self.store,
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=registration.runtime_id,
             connection_id=registration.connection_id,

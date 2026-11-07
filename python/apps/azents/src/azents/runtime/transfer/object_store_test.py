@@ -1,5 +1,6 @@
 """Tests for exact and state-independent Runtime transfer S3 cleanup."""
 
+import asyncio
 import logging
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -24,6 +25,8 @@ from azents.runtime.transfer.data import (
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferPhase,
+    RuntimeTransferPreparationCleanupState,
+    RuntimeTransferRecord,
     RuntimeTransferSourceTransport,
     RuntimeTransferUploadTransport,
 )
@@ -34,6 +37,110 @@ _NOW = datetime(2026, 7, 28, 12, tzinfo=UTC)
 _UNTRUSTED_CLEANUP_MESSAGE = (
     "provider=sentinel endpoint=https://storage.example/private-key"
 )
+
+
+async def _multi_artifact_cleanup_record() -> RuntimeTransferRecord:
+    store = InMemoryRuntimeTransferStateStore(
+        config=RuntimeTransferConfig(
+            per_runtime_attempts=2,
+            per_runtime_bytes=10,
+            deployment_attempts=2,
+            deployment_bytes=10,
+            admission_lease=timedelta(minutes=5),
+            consumer_lease=timedelta(minutes=1),
+            stream_lease=timedelta(seconds=30),
+            terminal_ttl=timedelta(minutes=5),
+            list_page_size=2,
+        ),
+        clock=lambda: _NOW,
+    )
+    admitted = await store.admit(
+        RuntimeTransferAdmission(
+            transfer_id="cleanup-owned",
+            attempt_id="attempt",
+            direction=RuntimeTransferDirection.DOWNLOAD,
+            runtime_id="runtime",
+            desired_generation=1,
+            operation_id="operation",
+            session_id=None,
+            agent_id=None,
+            runtime_path="/workspace/file",
+            overwrite=False,
+            conflict_precondition=None,
+            expected_size=1,
+            expected_sha256=None,
+            product_maximum_size=10,
+            provider_maximum_size=10,
+            deadline_at=_NOW + timedelta(minutes=5),
+            source_expires_at=None,
+            resource_class="file",
+            source_transport=RuntimeTransferSourceTransport.DIRECT_OBJECT,
+        ),
+        lease_id="lease",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready(
+        "cleanup-owned",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("owned-object", 1, "a" * 64),
+    )
+    assert ready is not None
+    return replace(
+        ready,
+        cleanup_status=RuntimeTransferCleanupStatus.PENDING,
+        completed_object_cleanup_required=True,
+        preparation_cleanup_state=(
+            RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+        ),
+        preparation_object_handle="preparation-owned",
+        pre_ready_object_handle="pre-ready-owned",
+    )
+
+
+@pytest.mark.parametrize("cancel_index", [0, 1])
+async def test_cleanup_cancellation_has_priority_over_ordinary_failure(
+    cancel_index: int,
+) -> None:
+    """Trusted simultaneous artifacts cannot turn cancellation into a retry."""
+    blocked, release = asyncio.Event(), asyncio.Event()
+
+    class InterruptibleStore(_ObjectStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[str] = []
+
+        async def delete(self, *, bucket: str, key: str) -> None:
+            del bucket
+            index = len(self.calls)
+            self.calls.append(key)
+            if index == cancel_index:
+                blocked.set()
+                await release.wait()
+            raise RuntimeError("synthetic ordinary cleanup failure")
+
+    record = await _multi_artifact_cleanup_record()
+    object_store = InterruptibleStore()
+    cleanup = RuntimeTransferS3Cleanup(
+        object_store=object_store,
+        bucket="bucket",
+        object_prefix="v1/runtime-transfer",
+        clock=lambda: record.admission.deadline_at + DIRECT_INGRESS_CLEANUP_GRACE,
+    )
+    owner = asyncio.create_task(cleanup.cleanup(record))
+    try:
+        async with asyncio.timeout(5):
+            await blocked.wait()
+            owner.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await owner
+        assert len(object_store.calls) == cancel_index + 1
+        assert not object_store.deleted
+    finally:
+        owner.cancel()
+        await asyncio.gather(owner, return_exceptions=True)
 
 
 class _ObjectStore:

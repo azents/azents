@@ -56,6 +56,8 @@ async def test_concurrent_same_slug_creates_one_definition_and_rejects_second(
                 definition = await operations.create(
                     scope=scope, content=_content(), owner=None
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as error:
                 return str(error)
             return definition.slug

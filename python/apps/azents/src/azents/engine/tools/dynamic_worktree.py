@@ -1,5 +1,6 @@
 """Agent-facing dynamic Git worktree Toolkit."""
 
+import asyncio
 import json
 from typing import Protocol
 
@@ -167,6 +168,8 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
                     starting_ref=input.starting_ref,
                     branch_name=input.branch_name,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
             boundary.mark_admitted(execution.call_id)
@@ -215,6 +218,8 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
                     worktree_project_path=input.worktree_project_path,
                     force=input.force,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
             boundary.mark_admitted(execution.call_id)

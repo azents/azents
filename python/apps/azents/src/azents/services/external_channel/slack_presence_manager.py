@@ -167,6 +167,8 @@ class SlackWorkPresenceManagerService:
                 raise
             except SlackPresenceLeaseLost:
                 return
+        except asyncio.CancelledError:
+            raise
         except SlackPresenceCredentialError as error:
             logger.warning(
                 "Slack Work presence credentials are unavailable",

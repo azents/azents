@@ -106,7 +106,7 @@ class _DiscordTestenvSDKSession:
     """Project bounded SDK-operation fixture responses into production DTOs."""
 
     def __init__(self, client: httpx.AsyncClient, fixture_base_url: str) -> None:
-        self._client = client
+        self.client = client
         self._url = f"{fixture_base_url}/__testenv/sdk"
         self._application_id: str | None = None
         self._bot_user_id: str | None = None
@@ -390,7 +390,7 @@ class _DiscordTestenvSDKSession:
         arguments: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         try:
-            response = await self._client.post(
+            response = await self.client.post(
                 self._url,
                 json={"operation": operation, "arguments": dict(arguments or {})},
             )

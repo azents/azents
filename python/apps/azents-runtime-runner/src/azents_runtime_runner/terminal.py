@@ -998,9 +998,11 @@ async def _wait_for_process(
     try:
         await asyncio.wait_for(asyncio.shield(wait_task), timeout=timeout_seconds)
     except TimeoutError:
-        wait_task.cancel()
-        await asyncio.gather(wait_task, return_exceptions=True)
         return False
+    finally:
+        if not wait_task.done():
+            wait_task.cancel()
+        await asyncio.gather(wait_task, return_exceptions=True)
     return True
 
 

@@ -1,5 +1,6 @@
 """Ownership-symmetric Google setup; credentials never reach response projections."""
 
+import asyncio
 import contextlib
 from collections.abc import Callable, Coroutine, Iterator
 from typing import Annotated, Any
@@ -41,6 +42,8 @@ class GoogleRoute(APIRoute):
         async def safe(request: Request) -> Response:
             try:
                 return await handler(request)
+            except asyncio.CancelledError:
+                raise
             except RequestValidationError:
                 raise HTTPException(
                     422,

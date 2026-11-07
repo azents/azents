@@ -543,6 +543,8 @@ class RunnerTerminalStreamManager:
                             )
                     case _:
                         assert_never(frame)
+            except asyncio.CancelledError:
+                raise
             except (TerminalError, ValueError) as error:
                 _set_future_exception(termination, error)
 
@@ -677,6 +679,8 @@ async def _pump_output(
     while True:
         try:
             output = await terminal.read_output()
+        except asyncio.CancelledError:
+            raise
         except TerminalOutputBackpressure:
             await output_acknowledged.wait()
             output_acknowledged.clear()

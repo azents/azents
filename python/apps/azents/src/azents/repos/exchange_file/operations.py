@@ -1,5 +1,6 @@
 """Completed database operations for ExchangeFile metadata."""
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -516,6 +517,8 @@ class ExchangeFileOperationRepository:
         try:
             async with self.read_session_manager() as session:
                 return await self.exchange_file_repository.get_by_id(session, file_id)
+        except asyncio.CancelledError:
+            raise
         except SQLAlchemyError as error:
             raise ExchangeFilePublicationRecoveryError(
                 "Exchange publication verification failed"

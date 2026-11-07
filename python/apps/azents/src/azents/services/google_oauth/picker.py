@@ -36,6 +36,8 @@ class GooglePickerService:
         await self.repository.authorize(subject)
         try:
             application = await self.application.picker()
+        except asyncio.CancelledError:
+            raise
         except GoogleApplicationUnavailable:
             raise GoogleOAuthError(
                 "picker_setup_required",

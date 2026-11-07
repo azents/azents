@@ -1,5 +1,6 @@
 """Secret-safe error boundary shared by inference authority HTTP surfaces."""
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -20,6 +21,8 @@ class LLMAuthorityRoute(APIRoute):
         async def handler(request: Request) -> Response:
             try:
                 response = await original(request)
+            except asyncio.CancelledError:
+                raise
             except RequestValidationError:
                 response = JSONResponse(
                     status_code=422, content={"detail": "Invalid authority request."}

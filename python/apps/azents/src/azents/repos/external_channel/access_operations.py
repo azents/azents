@@ -1,5 +1,6 @@
 """Completed atomic authorization, binding and access-policy operations."""
 
+import asyncio
 import datetime
 from dataclasses import dataclass
 from typing import Annotated, Literal
@@ -271,6 +272,8 @@ class ExternalChannelAccessOperations:
                         target_resource_id=resource.id,
                         preparation=provider_preparation,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except ExternalChannelConversationProvisioningError as error:
                     raise ExternalChannelAccessDecisionError(
                         "The external conversation could not be prepared."

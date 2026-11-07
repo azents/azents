@@ -1,5 +1,6 @@
 """Provider-neutral orchestration for actor-private shared model settings."""
 
+import asyncio
 import datetime
 import logging
 from collections.abc import AsyncIterator
@@ -210,6 +211,8 @@ class ExternalModelSettingsService:
             context = await self.repository.get_notice_delivery_context(
                 mutation_id=result.mutation_id
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
             L.exception(
                 "External model notice context loading failed after Apply commit",
@@ -226,6 +229,8 @@ class ExternalModelSettingsService:
                 plan=context.plan,
                 encrypted_credentials=context.encrypted_credentials,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
             L.error(
                 "External model notice delivery failed after Apply commit",
@@ -248,6 +253,8 @@ class ExternalModelSettingsService:
                 attempted_at=now,
                 error_summary=error_summary,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
             L.exception(
                 "External model notice outcome recording failed after Apply commit",

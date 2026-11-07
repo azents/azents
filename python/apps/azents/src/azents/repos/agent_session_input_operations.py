@@ -1,5 +1,6 @@
 """AgentSession input enqueue facade."""
 
+import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -338,6 +339,8 @@ class AgentSessionInputOperationsRepository:
                                 profile=inference_profile,
                                 captured=captured_admission,
                             )
+                        except asyncio.CancelledError as error:
+                            raise
                         except ValueError as error:
                             return Failure(
                                 AgentSessionInputInvalidInferenceProfile(
@@ -449,6 +452,8 @@ class AgentSessionInputOperationsRepository:
                         created=True,
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except ActiveProfileCaptureRequired as needed:
                 captured_admission = await self.active_profile_repository.capture(
                     needed.choice
@@ -596,6 +601,8 @@ class AgentSessionInputOperationsRepository:
                                 profile=inference_profile,
                                 captured=captured_admission,
                             )
+                        except asyncio.CancelledError as error:
+                            raise
                         except ValueError as error:
                             return Failure(
                                 AgentSessionInputInvalidInferenceProfile(
@@ -756,6 +763,8 @@ class AgentSessionInputOperationsRepository:
                         created=True,
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except ActiveProfileCaptureRequired as needed:
                 captured_admission = await self.active_profile_repository.capture(
                     needed.choice
@@ -903,6 +912,8 @@ class AgentSessionInputOperationsRepository:
                                 profile=inference_profile,
                                 captured=captured_admission,
                             )
+                        except asyncio.CancelledError as error:
+                            raise
                         except ValueError as error:
                             return Failure(
                                 AgentSessionInputInvalidInferenceProfile(
@@ -1063,6 +1074,8 @@ class AgentSessionInputOperationsRepository:
                         created=True,
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except ActiveProfileCaptureRequired as needed:
                 captured_admission = await self.active_profile_repository.capture(
                     needed.choice

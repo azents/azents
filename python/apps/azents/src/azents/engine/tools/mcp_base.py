@@ -582,6 +582,8 @@ def wrap_mcp_tool(
                 if call_authorization is not None
                 else auth,
             )
+        except asyncio.CancelledError:
+            raise
         except (httpx.HTTPStatusError, MCPError, ExceptionGroup) as exc:
             if (
                 call_authorization is not None
@@ -607,6 +609,8 @@ def wrap_mcp_tool(
                             if call_authorization is not None
                             else auth,
                         )
+                    except asyncio.CancelledError:
+                        raise
                     except (
                         httpx.HTTPStatusError,
                         MCPError,
@@ -844,6 +848,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         started = time.monotonic()
         try:
             authorization = await self._admitted_request_authorization()
+        except asyncio.CancelledError:
+            raise
         except FunctionToolError as exc:
             self._bg_error = str(exc)
             return
@@ -867,6 +873,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 auth_identity=authorization.connection_identity,
                 before_send=before_discovery_send,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             httpx.HTTPError,
             MCPError,
@@ -942,6 +950,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         )
         try:
             await self._save_tool_snapshot(snapshot)
+        except asyncio.CancelledError:
+            raise
         except FunctionToolError as error:
             self._bg_error = str(error)
             return

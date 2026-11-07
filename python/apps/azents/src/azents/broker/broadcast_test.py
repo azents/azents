@@ -88,6 +88,64 @@ async def test_subscribe_context_waits_for_redis_confirmation() -> None:
     assert pubsub.closed
 
 
+@pytest.mark.parametrize("phase", ["subscribe", "unsubscribe"])
+@pytest.mark.parametrize("outcome", ["cancel", "failure"])
+async def test_subscription_closes_pubsub_on_interrupted_boundary(
+    phase: str, outcome: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Acquisition and release interruptions both retain PubSub ownership."""
+    blocked, release = asyncio.Event(), asyncio.Event()
+
+    async def interrupt() -> None:
+        blocked.set()
+        await release.wait()
+        raise RuntimeError("synthetic pubsub boundary failure")
+
+    class InterruptiblePubSub(_PubSub):
+        async def subscribe(self, channel: str) -> None:
+            await super().subscribe(channel)
+            if phase == "subscribe":
+                await interrupt()
+
+        async def unsubscribe(self, channel: str) -> None:
+            await super().unsubscribe(channel)
+            if phase == "unsubscribe":
+                await interrupt()
+
+    pubsub = InterruptiblePubSub()
+    pubsub.confirmation_ready.set()
+
+    def create_pubsub(redis: Redis) -> _PubSub:
+        del redis
+        return pubsub
+
+    monkeypatch.setattr(Redis, "pubsub", create_pubsub)
+    redis = Redis()
+    broadcast = WebSocketBroadcast(redis)
+
+    async def consume() -> None:
+        async with broadcast.subscribe("session-1"):
+            pass
+
+    owner = asyncio.create_task(consume())
+    try:
+        async with asyncio.timeout(5):
+            await blocked.wait()
+            if outcome == "cancel":
+                owner.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await owner
+            else:
+                release.set()
+                with pytest.raises(RuntimeError, match="synthetic pubsub"):
+                    await owner
+        assert pubsub.closed
+    finally:
+        owner.cancel()
+        await asyncio.gather(owner, return_exceptions=True)
+        await redis.aclose()
+
+
 @pytest.mark.asyncio
 async def test_live_projection_publish_requires_current_generation(
     redis_url: str,

@@ -1,5 +1,6 @@
 """Generic text read tool for Runtime paths and registered VFS mounts."""
 
+import asyncio
 import logging
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -66,6 +67,8 @@ def make_read_text_tool(
                 limit=min(input.limit, _MAX_TEXT_READ_CHARACTERS),
                 encoding=input.encoding,
             )
+        except asyncio.CancelledError:
+            raise
         except FileNotFoundError:
             raise FunctionToolError(
                 f"File not found: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"

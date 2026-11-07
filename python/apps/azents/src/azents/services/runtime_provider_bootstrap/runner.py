@@ -68,6 +68,8 @@ class RuntimeProviderBootstrapRunner:
         )
         try:
             snapshot = await adapter.read_snapshot()
+        except asyncio.CancelledError:
+            raise
         except RuntimeProviderBootstrapSourceDocumentError as error:
             await self.service.record_source_error(
                 RuntimeProviderBootstrapSourceError(

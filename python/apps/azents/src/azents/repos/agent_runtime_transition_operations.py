@@ -1,5 +1,6 @@
 """Commit explicit Agent Runtime addition and rearm transitions."""
 
+import asyncio
 import dataclasses
 from typing import Annotated, NamedTuple
 
@@ -154,6 +155,8 @@ class AgentRuntimeTransitionOperationRepository:
                         ),
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeProfileResolutionRejected as error:
                 raise AgentRuntimeAdditionRejected(
                     code=error.code,

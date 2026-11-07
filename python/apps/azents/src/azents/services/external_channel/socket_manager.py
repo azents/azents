@@ -311,6 +311,8 @@ class SlackSocketManagerService:
                     app_token=credentials.app_token,
                     shutdown_event=shutdown_event,
                 )
+            except asyncio.CancelledError:
+                raise
             except SlackSocketRetryableIngestion:
                 await self._release(
                     connection_id,

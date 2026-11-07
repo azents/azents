@@ -1,5 +1,6 @@
 """Bridge current product/Runner file authority to direct Google operation bytes."""
 
+import asyncio
 import dataclasses
 import hashlib
 from collections.abc import Awaitable, Callable
@@ -195,6 +196,8 @@ class GoogleFileBridge:
                     )
                 )
                 await admit()
+            except asyncio.CancelledError:
+                raise
             except (GoogleSdkError, GoogleOAuthError) as error:
                 if not published:
                     raise

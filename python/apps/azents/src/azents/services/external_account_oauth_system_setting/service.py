@@ -1,5 +1,6 @@
 """Admin-managed provider OAuth System Settings service."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -178,6 +179,8 @@ class ExternalAccountOAuthSystemSettingService:
                 ),
                 http_client=self.http_client,
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError, ValidationError:
             result = SystemSettingHealthResult(
                 status=SystemSettingHealthStatus.INVALID,
@@ -333,6 +336,8 @@ async def _check_provider_endpoint(
             response = await http_client.get(endpoint)
             if response.status_code >= 500:
                 raise _ProviderOAuthUnavailable("provider_endpoint_unreachable")
+    except asyncio.CancelledError:
+        raise
     except _ProviderOAuthUnavailable:
         raise
     except httpx.HTTPError:

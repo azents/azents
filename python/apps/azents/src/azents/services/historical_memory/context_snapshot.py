@@ -1,5 +1,6 @@
 """Foreground Memory boundary operations without synchronous generation."""
 
+import asyncio
 import dataclasses
 import logging
 from typing import Annotated
@@ -39,6 +40,8 @@ class MemoryContextSnapshotService:
         """Return text and exact selected identities from one authority check."""
         try:
             return await self.repository.prompt_for_turn(session_id=session_id)
+        except asyncio.CancelledError:
+            raise
         except MemoryContextAuthorityUnavailable:
             logger.warning(
                 "Memory context authority could not be confirmed.",
@@ -58,6 +61,8 @@ class MemoryContextSnapshotService:
                 session_id=session_id,
                 after_compaction=after_compaction,
             )
+        except asyncio.CancelledError:
+            raise
         except MemoryContextAuthorityUnavailable:
             logger.warning(
                 "Memory boundary authority could not be confirmed.",

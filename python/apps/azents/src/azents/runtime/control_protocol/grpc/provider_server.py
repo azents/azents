@@ -292,6 +292,8 @@ class RuntimeProviderControlGrpcServicer(
                 protocol_version=registration.protocol_version,
                 contract_payload=registration.capability_contract,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeProviderContractUnavailable as error:
             status_code = (
                 grpc.StatusCode.PERMISSION_DENIED
@@ -312,6 +314,8 @@ class RuntimeProviderControlGrpcServicer(
                 authentication=authentication,
                 registered_at=now,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeProviderCredentialUnavailable:
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,

@@ -240,6 +240,8 @@ class DiscordGatewayClient:
         )
         try:
             await client.start(bot_token, reconnect=True)
+        except asyncio.CancelledError:
+            raise
         except discord.LoginFailure as error:
             if typing_runtime.error is not None:
                 raise typing_runtime.error from error

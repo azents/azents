@@ -1,5 +1,6 @@
 """Kimi subscription usage adapter."""
 
+import asyncio
 import datetime
 import json
 import logging
@@ -54,6 +55,8 @@ class KimiSubscriptionUsageClient:
                 f"{self.usage_base_url}/usages",
                 headers=headers,
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.TimeoutException, httpx.TransportError:
             return KimiUsageUnavailable(
                 reason=SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE,

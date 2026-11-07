@@ -1,5 +1,6 @@
 """Completed Runtime management database operations."""
 
+import asyncio
 import dataclasses
 import hashlib
 import json
@@ -237,6 +238,8 @@ class RuntimeProfileWorkspaceOperationsRepository:
                         ),
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 raise RuntimeProfileWorkspaceUnavailable(
                     code="profile_name_conflict",
@@ -321,6 +324,8 @@ class RuntimeProfileWorkspaceOperationsRepository:
                         replacement=replacement,
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 raise RuntimeProfileWorkspaceUnavailable(
                     code="profile_name_conflict",
@@ -369,6 +374,8 @@ class RuntimeProfileWorkspaceOperationsRepository:
                         expected_version=expected_version,
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 raise RuntimeProfileWorkspaceUnavailable(
                     code="runtime_profile_delete_conflict",

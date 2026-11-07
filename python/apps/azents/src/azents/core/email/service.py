@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from typing import Annotated
 from urllib.parse import urlparse
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
 from jinja2 import Environment
 from types_aiobotocore_ses.client import SESClient
@@ -240,13 +241,11 @@ class EmailService:
         :param workspace_handle: Workspace handle
         :param language: Language code (ko, en)
         """
+        L = bind_extra(logger, {"workspace_name": workspace_name})
         if not self.configured:
-            logger.warning(
+            L.warning(
                 "Email service not configured, skipping join request notification",
-                extra={
-                    "workspace_name": workspace_name,
-                    "workspace_handle": workspace_handle,
-                },
+                extra={"workspace_handle": workspace_handle},
             )
             return
 
@@ -261,13 +260,9 @@ class EmailService:
         else:
             manage_url = manage_path
 
-        logger.info(
+        L.info(
             "Join request notification ready",
-            extra={
-                "workspace_name": workspace_name,
-                "manage_url": manage_url,
-                "language": lang,
-            },
+            extra={"manage_url": manage_url, "language": lang},
         )
 
     async def send_join_request_approved(
@@ -283,24 +278,18 @@ class EmailService:
         :param workspace_name: Workspace name
         :param language: Language code (ko, en)
         """
+        L = bind_extra(logger, {"user_id": user_id, "workspace_name": workspace_name})
         if not self.configured:
-            logger.warning(
+            L.warning(
                 "Email service not configured, skipping join request approved email",
-                extra={
-                    "user_id": user_id,
-                    "workspace_name": workspace_name,
-                },
+                extra={},
             )
             return
 
         lang = language if language in JOIN_REQUEST_APPROVED_SUBJECTS else "en"
-        logger.info(
+        L.info(
             "Join request approved notification ready",
-            extra={
-                "user_id": user_id,
-                "workspace_name": workspace_name,
-                "language": lang,
-            },
+            extra={"language": lang},
         )
 
     def _render_template(self, template_name: str, **kwargs: object) -> str:

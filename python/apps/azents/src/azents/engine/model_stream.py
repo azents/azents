@@ -10,6 +10,7 @@ from typing import Annotated, Literal, Protocol, TypeVar, runtime_checkable
 import httpx
 import httpx2
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from azcommon.logging import bind_extra
 from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 from fastapi import Depends
 from openai import APITimeoutError
@@ -277,20 +278,24 @@ class ModelStreamCleanupRegistry:
         metadata = self._tasks.pop(task, None)
         if metadata is None:
             return
+        L = bind_extra(
+            logger,
+            {
+                **_context_log_fields(metadata.context),
+                "cleanup_reason": metadata.reason,
+            },
+        )
         try:
             task.result()
         except asyncio.CancelledError:
             outcome = "cancelled"
         except Exception:
             outcome = "failed"
-            logger.warning(
+            L.warning(
                 "Model stream cleanup failed",
                 extra={
-                    **_context_log_fields(metadata.context),
-                    "cleanup_reason": metadata.reason,
                     "cleanup_age_seconds": round(
-                        self.clock.time() - metadata.adopted_at,
-                        3,
+                        self.clock.time() - metadata.adopted_at, 3
                     ),
                     "cleanup_active_count": self.active_count,
                 },
@@ -299,15 +304,12 @@ class ModelStreamCleanupRegistry:
         else:
             outcome = "completed"
         if outcome != "failed":
-            logger.info(
+            L.info(
                 "Model stream cleanup settled",
                 extra={
-                    **_context_log_fields(metadata.context),
-                    "cleanup_reason": metadata.reason,
                     "cleanup_outcome": outcome,
                     "cleanup_age_seconds": round(
-                        self.clock.time() - metadata.adopted_at,
-                        3,
+                        self.clock.time() - metadata.adopted_at, 3
                     ),
                     "cleanup_active_count": self.active_count,
                 },

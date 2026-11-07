@@ -1,5 +1,6 @@
 """Admin orchestration for completed Runtime Provider binding operations."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated, Any
@@ -99,6 +100,8 @@ class RuntimeProviderBindingAdminService:
         """List bindings for one stable logical Provider ID."""
         try:
             snapshots = await self.repository.list_bindings(provider_id)
+        except asyncio.CancelledError:
+            raise
         except BindingAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return tuple(_projection(snapshot) for snapshot in snapshots)
@@ -109,6 +112,8 @@ class RuntimeProviderBindingAdminService:
         """Get one safe binding projection."""
         try:
             snapshot = await self.repository.get_binding(binding_id)
+        except asyncio.CancelledError:
+            raise
         except BindingAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return _projection(snapshot)
@@ -131,6 +136,8 @@ class RuntimeProviderBindingAdminService:
                 config=config,
                 actor_user_id=actor_user_id,
             )
+        except asyncio.CancelledError:
+            raise
         except BindingAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return _projection(snapshot)
@@ -162,6 +169,8 @@ class RuntimeProviderBindingAdminService:
                 grant_verifier=grant_verifier,
                 now=now,
             )
+        except asyncio.CancelledError:
+            raise
         except BindingAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return RuntimeProviderBindingRotation(
@@ -187,6 +196,8 @@ class RuntimeProviderBindingAdminService:
                 reason=reason,
                 actor_user_id=actor_user_id,
             )
+        except asyncio.CancelledError:
+            raise
         except BindingAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return _projection(snapshot)
@@ -199,5 +210,7 @@ class RuntimeProviderBindingAdminService:
             return await self.repository.list_audit_events(
                 binding_id, offset=offset, limit=limit
             )
+        except asyncio.CancelledError:
+            raise
         except BindingAdminOperationUnavailable as error:
             raise _unavailable(error) from error

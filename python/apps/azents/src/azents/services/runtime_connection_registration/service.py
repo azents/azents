@@ -268,6 +268,8 @@ class RuntimeRunnerConnectionRegistrationService:
                     previous_generation=previous.generation,
                     generation=generation,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 _LOGGER.exception(
                     "Runtime Runner replacement observer failed",

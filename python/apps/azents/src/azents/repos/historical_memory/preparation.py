@@ -1,5 +1,6 @@
 """Historical Memory Lightweight candidate preparation state operations."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -163,6 +164,8 @@ class HistoricalMemoryPreparationRepository:
                     session_id=None,
                     reservation=None,
                 )
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exc:
                 if (
                     captured is not None
@@ -269,6 +272,8 @@ class HistoricalMemoryPreparationRepository:
                     session_id=None,
                     reservation=None,
                 )
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exc:
                 await self._record_failure_in_session(
                     session,

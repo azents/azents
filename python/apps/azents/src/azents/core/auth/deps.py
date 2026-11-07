@@ -1,5 +1,6 @@
 """Authentication dependencies."""
 
+import asyncio
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -137,6 +138,8 @@ async def get_current_user_optional(
             user_id=payload.user_id,
             session_id=payload.session_id,
         )
+    except asyncio.CancelledError:
+        raise
     except HTTPException:
         return None
 

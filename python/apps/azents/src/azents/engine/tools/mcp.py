@@ -4,6 +4,7 @@ Create tools injected into agents with MCP Toolkit.
 Connect to MCP server, fetch tool list, and wrap each as azents Tool.
 """
 
+import asyncio
 import datetime
 import hashlib
 import logging
@@ -11,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
 import httpx
+from azcommon.logging import bind_extra
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -209,6 +211,8 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
                     toolkit_id=context.toolkit_id,
                     proxy_url=context.mcp_proxy_url,
                 )
+            except asyncio.CancelledError:
+                raise
             except PersonalToolkitExecutionDenied as error:
                 raise _personal_oauth_denied(error) from None
             if (
@@ -275,6 +279,8 @@ def _make_oauth_refresh_callback(
                 proxy_url=proxy_url,
                 force=True,
             )
+        except asyncio.CancelledError:
+            raise
         except PersonalToolkitExecutionDenied as error:
             raise _personal_oauth_denied(error) from None
         if (
@@ -383,6 +389,7 @@ async def _refresh_oauth_connection(
     :param force: Refresh even when token is not near expiry
     :return: Refreshed or existing OAuth connection
     """
+    L = bind_extra(logger, {"toolkit_id": toolkit_id})
     if connection is None:
         connection = await operations.load(toolkit_id=toolkit_id)
     if connection is None or connection.status != MCPOAuthConnectionStatus.CONNECTED:
@@ -405,15 +412,14 @@ async def _refresh_oauth_connection(
             refresh_token=connection.refresh_token,
             proxy_url=proxy_url,
         )
+    except asyncio.CancelledError:
+        raise
     except httpx.HTTPStatusError as exc:
         reconnect_required = _refresh_failure_requires_reconnect(exc)
         if not reconnect_required:
-            logger.warning(
+            L.warning(
                 "Failed to refresh MCP OAuth connection",
-                extra={
-                    "toolkit_id": toolkit_id,
-                    "status_code": exc.response.status_code,
-                },
+                extra={"status_code": exc.response.status_code},
                 exc_info=True,
             )
         return await _persist_refresh_failure(
@@ -425,9 +431,9 @@ async def _refresh_oauth_connection(
     except OAuthTokenError as exc:
         reconnect_required = "invalid_grant" in str(exc)
         if not reconnect_required:
-            logger.warning(
+            L.warning(
                 "Failed to refresh MCP OAuth connection",
-                extra={"toolkit_id": toolkit_id},
+                extra={},
                 exc_info=True,
             )
         return await _persist_refresh_failure(
@@ -437,9 +443,9 @@ async def _refresh_oauth_connection(
             reconnect_required=reconnect_required,
         )
     except httpx.HTTPError, KeyError, ValidationError:
-        logger.warning(
+        L.warning(
             "Failed to refresh MCP OAuth connection",
-            extra={"toolkit_id": toolkit_id},
+            extra={},
             exc_info=True,
         )
         return await _persist_refresh_failure(
@@ -513,6 +519,8 @@ async def _test_oauth2_discovery(
         metadata = await discover_oauth_metadata(
             config.server_url, config.discovery_url, proxy_url=proxy_url
         )
+    except asyncio.CancelledError:
+        raise
     except DiscoveryError as exc:
         if config.auth_url is not None and config.token_url is not None:
             return TestConnectionResult(

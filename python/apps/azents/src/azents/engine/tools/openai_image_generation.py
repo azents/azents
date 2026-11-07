@@ -1,5 +1,6 @@
 """Auto-bound OpenAI Images API client tool."""
 
+import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable
 
@@ -57,6 +58,8 @@ class OpenAIImageGenerationExecutor:
                             prompt=arguments.prompt,
                             n=1,
                         )
+                except asyncio.CancelledError:
+                    raise
                 except AuthenticationError as exc:
                     if self.refresh_credential is not None and not refreshed:
                         await self.refresh_credential()

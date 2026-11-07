@@ -1,5 +1,6 @@
 """Minimal Discord REST adapter for connection-authority metadata."""
 
+import asyncio
 import contextlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -237,6 +238,8 @@ class DiscordInteractionEndpointHTTPTransport:
                 headers={"Authorization": f"Bot {bot_token}"},
                 json={"interactions_endpoint_url": endpoint_url},
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.RequestError as error:
             raise DiscordAPIUnavailable from error
         _raise_for_callback_configuration_response(response)
@@ -274,6 +277,8 @@ class DiscordGuildCommandCreateHTTPTransport:
                 headers={"Authorization": f"Bot {bot_token}"},
                 json=definition.request_payload(),
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.RequestError as error:
             raise DiscordAPIUnavailable from error
         _raise_for_command_create_response(response)
@@ -314,6 +319,8 @@ class DiscordAPIClient:
                     bot_token=bot_token,
                     command_create_transport=self.command_create_transport,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             raise _api_error(error) from error
 

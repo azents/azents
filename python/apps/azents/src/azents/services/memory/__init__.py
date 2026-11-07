@@ -1,5 +1,6 @@
 """Memory service."""
 
+import asyncio
 import dataclasses
 from typing import Annotated, assert_never
 
@@ -81,6 +82,8 @@ class MemoryService:
                 cursor=cursor,
                 limit=limit,
             )
+        except asyncio.CancelledError as error:
+            raise
         except MemoryUICursorError as error:
             return Failure(MemoryCursorInvalid(message=str(error)))
         return Success(

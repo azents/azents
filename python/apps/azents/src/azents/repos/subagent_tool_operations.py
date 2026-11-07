@@ -1,5 +1,6 @@
 """Completed database operations for Engine Subagent collaboration tools."""
 
+import asyncio
 import dataclasses
 from collections.abc import Sequence
 from textwrap import dedent
@@ -293,6 +294,8 @@ class SubagentToolOperationRepository:
                     title=name,
                     last_task_message=task,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise SubagentToolOperationError(str(exc)) from None
             child_session = await self.agent_session_repository.get_by_id(
@@ -540,6 +543,8 @@ class SubagentToolOperationRepository:
                 current_session_agent_id=current.id,
                 path=agent_name,
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError:
             target = None
         return SubagentResolvedTarget(current=current, target=target)
