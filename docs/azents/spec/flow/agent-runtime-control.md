@@ -362,6 +362,10 @@ and a 1 MiB assembled-message ceiling. A repeated
 unoffered upstream selection is rejected before the public `101` and cancels the
 logical stream.
 
+Each loopback WebSocket stream owns its two directional forwarding tasks. Normal
+completion, child failure, and owner cancellation cancel and join the remaining
+tasks before returning their task-budget slots and closing the upstream socket.
+
 Peers heartbeat every five seconds, and two missed intervals or an RPC failure
 closes the session within ten seconds. Planned drain withdraws readiness, fences
 Owner leases, sends `GOAWAY`, rejects post-drain Gateway or relay registration and
@@ -1207,6 +1211,15 @@ The Runner reads six validated deployment settings: `AZ_RUNTIME_RUNNER_MAX_CONCU
 Runner owns runtime exec process handles, stdin writers, stdout/stderr drains, unread output buffers, process exit state, and process cleanup. Control and Worker store only routing/projection metadata. Process sessions are scoped to AgentSession and current Runner generation; runner restart, generation mismatch, cleanup, or missing ids produce model-visible missing/terminated/expired observations through `write_stdin` rather than server-side assistant/system failures.
 
 A Control stream disconnect fences the previous Runner generation, cancels its active operation tasks, and terminates its managed exec processes before reconnecting. Managed exec processes run in dedicated operating-system process groups. Cleanup signals the complete process group, escalates from termination to kill, drains or cancels process tasks within bounded deadlines, and must never wait indefinitely before the Runner opens its next Control stream. Cleanup emits structured process count, duration, timeout, process id, and process-group diagnostics without logging commands, credentials, or Runtime Control tokens.
+
+Forced cleanup attempts every managed process concurrently. Its best-effort boundary
+logs suppressed termination failures once with process, generation, owner and safe
+exception-frame context, while preserving the original shutdown outcome.
+
+Bounded process-exit waits also own their shielded wait task: completion, timeout,
+failure, and owner cancellation all join it before returning or propagating the
+original outcome. This wait-task cleanup does not change process-group signals or
+the termination grace periods.
 
 Process output is continuously drained into bounded Runner-owned buffers. Tool calls drain unread buffers into one model-visible client tool result and preserve structured process metadata. Shell start/write yield windows are limited to 10000 ms at model and Runner ingress. Completion observation and output collection are separate.
 

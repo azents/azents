@@ -5,6 +5,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Literal
+from unittest.mock import AsyncMock, MagicMock
 
 import h11
 import httpcore
@@ -101,6 +102,71 @@ class _HandshakeClient(_RecordingClient):
 
     def activate(self) -> None:
         self.activated = True
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "failure", "complete"])
+async def test_websocket_drains_children_before_release_and_close(
+    monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    offer = _offer()
+    client = _RecordingClient()
+    manager = _manager(client_factory=None)
+    dispatcher = _dispatcher(manager)
+    stream = _stream(
+        offer=offer, client=client, session_credit=dispatcher.response_session_credit
+    )
+    started = [asyncio.Event(), asyncio.Event()]
+    stopped = [asyncio.Event(), asyncio.Event()]
+    release = asyncio.Event()
+
+    async def child(index: int) -> None:
+        started[index].set()
+        try:
+            if index == 0:
+                await release.wait()
+                if outcome == "failure":
+                    raise ValueError("websocket child failed")
+                return
+            await asyncio.Event().wait()
+        finally:
+            stopped[index].set()
+
+    websocket = MagicMock(spec=RunnerWebSocket)
+    websocket.response_headers = ()
+
+    async def close() -> None:
+        assert all(event.is_set() for event in stopped)
+        assert dispatcher.resources.pending_tasks == 0
+
+    websocket.close = AsyncMock(side_effect=close)
+    monkeypatch.setattr(
+        manager.loopback, "websocket", AsyncMock(return_value=websocket)
+    )
+    monkeypatch.setattr(dispatcher, "_ws_from_browser", lambda *_args: child(0))
+    monkeypatch.setattr(dispatcher, "_ws_from_application", lambda *_args: child(1))
+    monkeypatch.setattr(dispatcher, "_send", AsyncMock())
+    monkeypatch.setattr(dispatcher, "_stream_end", AsyncMock())
+    owner = asyncio.create_task(dispatcher._websocket(1, stream))
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(event.wait() for event in started)), timeout=1
+        )
+        if outcome == "cancel":
+            owner.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await owner
+        elif outcome == "failure":
+            release.set()
+            with pytest.raises(ValueError, match="websocket child failed"):
+                await owner
+        else:
+            release.set()
+            await owner
+        websocket.close.assert_awaited_once()
+    finally:
+        if not owner.done():
+            owner.cancel()
+        await asyncio.gather(owner, return_exceptions=True)
 
 
 class _RecordingWebSocket(RunnerWebSocket):
@@ -295,6 +361,8 @@ async def test_shared_response_credit_wakes_another_stream() -> None:
     manager.client = client
     dispatcher = _dispatcher(manager)
     dispatcher.accepting_envelopes = True
+    observed_credit = _ObservedCondition()
+    dispatcher.response_credit_changed = observed_credit
     stream_a = _stream(
         offer=offer,
         client=client,
@@ -314,8 +382,8 @@ async def test_shared_response_credit_wakes_another_stream() -> None:
     dispatcher.streams = {1: stream_a, 2: stream_b}
 
     waiting = asyncio.create_task(dispatcher._reserve(stream_b, 1))
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(asyncio.shield(waiting), timeout=0.01)
+    await asyncio.wait_for(observed_credit.waiting.wait(), timeout=1)
+    assert not waiting.done()
 
     update = _envelope(offer, stream_id=1)
     update.window_update.direction = (

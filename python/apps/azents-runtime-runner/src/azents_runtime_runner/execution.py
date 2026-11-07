@@ -1,15 +1,12 @@
 """Runtime Runner process execution primitives."""
 
 import asyncio
-import logging
 import os
 import signal
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-
-logger = logging.getLogger(__name__)
 
 _BASH_PATH = "/bin/bash"
 
@@ -104,7 +101,7 @@ class DirectExecutionBackend:
         launcher: ProcessLauncher | None = None,
     ) -> None:
         self._inherited_environment = dict(inherited_environment or {})
-        self._launcher = launcher or _launch_subprocess
+        self.launcher = launcher or _launch_subprocess
 
     def agent_environment(
         self,
@@ -119,7 +116,7 @@ class DirectExecutionBackend:
         return environment
 
     async def start(self, spec: ExecutionSpec) -> ExecutionProcess:
-        return await self._launcher(spec)
+        return await self.launcher(spec)
 
     async def close(self) -> None:
         return
@@ -180,6 +177,8 @@ class _SubprocessExecutionProcess:
         try:
             writer.write(data)
             await writer.drain()
+        except asyncio.CancelledError:
+            raise
         except BrokenPipeError, ConnectionError, RuntimeError:
             return
 
@@ -235,10 +234,14 @@ async def _wait_process(
             asyncio.shield(wait_task),
             timeout=timeout_seconds,
         )
+    except asyncio.CancelledError:
+        raise
     except TimeoutError:
-        wait_task.cancel()
-        await asyncio.gather(wait_task, return_exceptions=True)
         return False
+    finally:
+        if not wait_task.done():
+            wait_task.cancel()
+        await asyncio.gather(wait_task, return_exceptions=True)
     return True
 
 
@@ -251,11 +254,4 @@ def _signal_process_group(
     except ProcessLookupError:
         return
     except PermissionError as error:
-        logger.exception(
-            "Runtime Runner process group signal denied",
-            extra={
-                "process_group_id": process_group_id,
-                "signal": requested_signal.name,
-            },
-        )
         raise RuntimeError("Runtime Runner process group signal was denied.") from error

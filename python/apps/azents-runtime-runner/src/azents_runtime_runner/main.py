@@ -606,6 +606,8 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                         client.close(),
                         timeout=_CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except TimeoutError as exc:
                     _log_control_client_close_timeout(
                         L,

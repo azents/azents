@@ -104,13 +104,13 @@ class LinuxSystemMetricsCollector:
         runtime_web_metrics: RuntimeWebMetrics,
     ) -> None:
         """Initialize an injected collector."""
-        self._read_text = read_text
-        self._path_exists = path_exists
-        self._statvfs = statvfs
-        self._cpu_count = cpu_count
-        self._monotonic = monotonic
+        self.read_text = read_text
+        self.path_exists = path_exists
+        self.statvfs = statvfs
+        self.cpu_count = cpu_count
+        self.monotonic = monotonic
         self._platform_name = platform_name
-        self._runtime_web_metrics = runtime_web_metrics
+        self.runtime_web_metrics = runtime_web_metrics
         self._scope = self._detect_scope()
         self._cpu_baseline: _CpuBaseline | None = None
 
@@ -123,20 +123,20 @@ class LinuxSystemMetricsCollector:
                 cpu=unsupported,
                 memory=unsupported,
                 disk=unsupported,
-                runtime_web=self._runtime_web_metrics(),
+                runtime_web=self.runtime_web_metrics(),
             )
         return CollectedRunnerSystemMetrics(
             scope=self._scope,
             cpu=self._collect_cpu(),
             memory=self._collect_memory(),
             disk=self._collect_disk(),
-            runtime_web=self._runtime_web_metrics(),
+            runtime_web=self.runtime_web_metrics(),
         )
 
     def _detect_scope(self) -> RunnerSystemMetricsScope:
         if self._platform_name != "Linux":
             return RunnerSystemMetricsScope.HOST
-        if self._path_exists(_DOCKER_ENV):
+        if self.path_exists(_DOCKER_ENV):
             return RunnerSystemMetricsScope.CONTAINER
         cgroup = self._read_optional(_PROC_ONE_CGROUP)
         if cgroup is not None and any(
@@ -164,7 +164,7 @@ class LinuxSystemMetricsCollector:
             )
         except OSError, ValueError:
             return _missing(RunnerSystemMetricAvailability.UNAVAILABLE)
-        observed_at = self._monotonic()
+        observed_at = self.monotonic()
         baseline = self._cpu_baseline
         self._cpu_baseline = _CpuBaseline(
             reading=reading,
@@ -186,7 +186,7 @@ class LinuxSystemMetricsCollector:
 
     def _read_container_cpu(self) -> _CpuReading:
         try:
-            fields = _key_value_lines(self._read_text(_CGROUP_V2_CPU_STAT))
+            fields = _key_value_lines(self.read_text(_CGROUP_V2_CPU_STAT))
             usage_usec = _required_nonnegative_int(fields, "usage_usec")
             return _CpuReading(
                 source="cgroup-v2",
@@ -194,13 +194,13 @@ class LinuxSystemMetricsCollector:
                 total_ticks=None,
                 idle_ticks=None,
                 capacity_millicores=_cgroup_v2_cpu_capacity(
-                    self._read_text(_CGROUP_V2_CPU_MAX)
+                    self.read_text(_CGROUP_V2_CPU_MAX)
                 ),
             )
         except OSError:
-            usage_ns = _parse_nonnegative_int(self._read_text(_CGROUP_V1_CPU_USAGE))
-            quota = int(self._read_text(_CGROUP_V1_CPU_QUOTA).strip())
-            period = _parse_positive_int(self._read_text(_CGROUP_V1_CPU_PERIOD))
+            usage_ns = _parse_nonnegative_int(self.read_text(_CGROUP_V1_CPU_USAGE))
+            quota = int(self.read_text(_CGROUP_V1_CPU_QUOTA).strip())
+            period = _parse_positive_int(self.read_text(_CGROUP_V1_CPU_PERIOD))
             return _CpuReading(
                 source="cgroup-v1",
                 cumulative_used_ns=usage_ns,
@@ -212,13 +212,13 @@ class LinuxSystemMetricsCollector:
             )
 
     def _read_host_cpu(self) -> _CpuReading:
-        first_line = self._read_text(_PROC_STAT).splitlines()[0].split()
+        first_line = self.read_text(_PROC_STAT).splitlines()[0].split()
         if not first_line or first_line[0] != "cpu" or len(first_line) < 5:
             raise ValueError("Aggregate CPU counters are unavailable")
         counters = [_parse_nonnegative_int(value) for value in first_line[1:]]
         total_ticks = sum(counters)
         idle_ticks = counters[3] + (counters[4] if len(counters) > 4 else 0)
-        count = self._cpu_count()
+        count = self.cpu_count()
         return _CpuReading(
             source="host",
             cumulative_used_ns=None,
@@ -242,12 +242,12 @@ class LinuxSystemMetricsCollector:
 
     def _read_container_memory(self) -> _MemoryReading:
         try:
-            used = _parse_nonnegative_int(self._read_text(_CGROUP_V2_MEMORY_CURRENT))
-            raw_total = self._read_text(_CGROUP_V2_MEMORY_MAX).strip()
+            used = _parse_nonnegative_int(self.read_text(_CGROUP_V2_MEMORY_CURRENT))
+            raw_total = self.read_text(_CGROUP_V2_MEMORY_MAX).strip()
             total = None if raw_total == "max" else _parse_positive_int(raw_total)
         except OSError:
-            used = _parse_nonnegative_int(self._read_text(_CGROUP_V1_MEMORY_USAGE))
-            parsed_total = _parse_positive_int(self._read_text(_CGROUP_V1_MEMORY_LIMIT))
+            used = _parse_nonnegative_int(self.read_text(_CGROUP_V1_MEMORY_USAGE))
+            parsed_total = _parse_positive_int(self.read_text(_CGROUP_V1_MEMORY_LIMIT))
             total = (
                 None
                 if parsed_total >= _UNLIMITED_MEMORY_THRESHOLD_BYTES
@@ -256,7 +256,7 @@ class LinuxSystemMetricsCollector:
         return _MemoryReading(used=used, total=total)
 
     def _read_host_memory(self) -> _MemoryReading:
-        fields = _memory_info(self._read_text(_PROC_MEMINFO))
+        fields = _memory_info(self.read_text(_PROC_MEMINFO))
         total = _required_nonnegative_int(fields, "MemTotal") * 1024
         available = _required_nonnegative_int(fields, "MemAvailable") * 1024
         if total <= 0 or available > total:
@@ -265,7 +265,7 @@ class LinuxSystemMetricsCollector:
 
     def _collect_disk(self) -> RunnerSystemMetricObservation:
         try:
-            stat = self._statvfs("/")
+            stat = self.statvfs("/")
             total = stat.f_frsize * stat.f_blocks
             available = stat.f_frsize * stat.f_bavail
             if total <= 0 or available < 0 or available > total:
@@ -276,7 +276,7 @@ class LinuxSystemMetricsCollector:
 
     def _read_optional(self, path: Path) -> str | None:
         try:
-            return self._read_text(path)
+            return self.read_text(path)
         except OSError:
             return None
 

@@ -1386,22 +1386,28 @@ class RunnerStreamSessionDispatcher:
                 raise RunnerStreamResourceExhausted(
                     "Runner WebSocket task hard limit is exhausted"
                 )
+            tasks: set[asyncio.Task[None]] = set()
             try:
                 browser = asyncio.create_task(self._ws_from_browser(stream, websocket))
+                tasks.add(browser)
                 application = asyncio.create_task(
                     self._ws_from_application(stream_id, stream, websocket)
                 )
-                done, pending = await asyncio.wait(
-                    (browser, application),
+                tasks.add(application)
+                done, _ = await asyncio.wait(
+                    tasks,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                for task in pending:
-                    task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
                 for task in done:
                     await task
             finally:
-                self.resources.end_tasks(2)
+                try:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                finally:
+                    self.resources.end_tasks(2)
             await self._stream_end(stream_id, stream)
         finally:
             await websocket.close()
