@@ -1,5 +1,6 @@
 """System v1 Admin API."""
 
+import asyncio
 from textwrap import dedent
 from typing import Annotated, assert_never
 
@@ -52,6 +53,8 @@ async def update_compacted_event_retention(
             retention_days=request.compacted_event_retention_days,
             user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RetentionRevisionConflict as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -109,6 +112,8 @@ async def update_file_lifecycle_settings(
             application_scope=request.application_scope,
             user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RetentionRevisionConflict as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

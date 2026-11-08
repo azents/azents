@@ -1,5 +1,6 @@
 """Local typed Workspace tools admitted against current canonical Google grants."""
 
+import asyncio
 import dataclasses
 from collections.abc import Callable
 from typing import ClassVar
@@ -83,6 +84,8 @@ class GoogleToolkit(Toolkit[GoogleToolkitConfig]):
             allowed = await self.runtime.direct_operations(
                 self.owner, self.context.toolkit_id
             )
+        except asyncio.CancelledError:
+            raise
         except GoogleOAuthError:
             allowed = frozenset()
         bridge = self.files(authority)

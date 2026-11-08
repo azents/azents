@@ -110,6 +110,7 @@ from azents.services.runtime_web.gateway_authority import (
     RuntimeWebGatewayAuthorityError,
     RuntimeWebGatewayAuthorityService,
 )
+from azents.utils.logging import content_safe_exception_diagnostic
 
 _LOGGER = logging.getLogger(__name__)
 _BROKER_BINDING_COOKIE = "__Host-Azents-Runtime-Web-Broker-Binding"
@@ -663,6 +664,8 @@ async def _dispatch(request: web.Request) -> web.StreamResponse:
         if endpoint_key is None:
             raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
         return await _endpoint(request, state, endpoint_key=endpoint_key)
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebPolicyError as error:
         return _policy_error(request, state.config, error.code)
 
@@ -698,6 +701,8 @@ async def _broker_bind(
             initiation_id=initiation_id,
             now=datetime.datetime.now(datetime.UTC),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebRepositoryConflict:
         return _bounded_error(
             request,
@@ -753,6 +758,8 @@ async def _broker_redeem(
             broker_binding_secret=broker_binding,
             now=datetime.datetime.now(datetime.UTC),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebRepositoryConflict:
         return _bounded_error(
             request,
@@ -838,6 +845,8 @@ async def _endpoint(
             identity_secret=identity_secret,
             protocol=protocol,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebGatewayAuthorityError as error:
         return _authority_error(
             request,
@@ -944,11 +953,21 @@ async def _endpoint(
             target_origin=target_origin,
             authority=authority,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebOpenRejected as error:
         return _stream_error(request, state.config, error.reason)
     except RuntimeWebGatewayResourceExhausted:
         return _stream_error(request, state.config, CloseReason.RESOURCE_EXHAUSTED)
-    except RuntimeError, TimeoutError:
+    except (RuntimeError, TimeoutError) as exc:
+        diagnostic = content_safe_exception_diagnostic(
+            exc, message="Runtime Web request transport failed"
+        )
+        _LOGGER.error(
+            "Runtime Web request transport failed",
+            exc_info=diagnostic.exc_info,
+            extra=diagnostic.log_fields(),
+        )
         return _bounded_error(
             request,
             state.config,
@@ -1211,6 +1230,7 @@ async def _proxy_websocket(
     websocket: web.WebSocketResponse | None = None
     client_task: asyncio.Task[None] | None = None
     guard_task: asyncio.Task[None] | None = None
+    event_task: asyncio.Task[BrowserStreamEvent] | None = None
     response_assembler = _WebSocketResponseAssembler()
     try:
         try:
@@ -1227,7 +1247,19 @@ async def _proxy_websocket(
             name=f"runtime-web-authority-guard:{bridge.binding.stream_id}",
         )
         while True:
-            event = await bridge.next_event()
+            event_task = asyncio.create_task(bridge.next_event())
+            if client_task is not None:
+                done, _ = await asyncio.wait(
+                    {event_task, client_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if client_task in done:
+                    completed_client = client_task
+                    client_task = None
+                    await completed_client
+            completed_event = event_task
+            event = await completed_event
+            event_task = None
             if event.payload == "response_head":
                 try:
                     if event.status is None:
@@ -1319,10 +1351,6 @@ async def _proxy_websocket(
                 break
             await bridge.release_event(event)
             raise RuntimeError("Runtime WebSocket event is invalid")
-        if client_task is not None and not client_task.done():
-            client_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await client_task
         if websocket is None:
             return _bounded_error(
                 request,
@@ -1333,17 +1361,42 @@ async def _proxy_websocket(
         await websocket.close(code=1001, message=b"Runtime Web transport closed")
         return websocket
     finally:
-        if client_task is not None and not client_task.done():
-            client_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await client_task
-        if guard_task is not None:
-            guard_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await guard_task
-        for event in response_assembler.discard_pending():
-            await bridge.discard_event(event)
-        await bridge.discard_buffered_events()
+        primary_error = sys.exception()
+        tasks = tuple(
+            task for task in (event_task, client_task, guard_task) if task is not None
+        )
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            if (
+                event_task is not None
+                and not event_task.cancelled()
+                and event_task.exception() is None
+            ):
+                await bridge.discard_event(event_task.result())
+            for event in response_assembler.discard_pending():
+                await bridge.discard_event(event)
+        finally:
+            await bridge.discard_buffered_events()
+        errors = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+        propagated_cleanup_error = (
+            errors[0] if errors and primary_error is None else None
+        )
+        for error in errors:
+            if error is primary_error or error is propagated_cleanup_error:
+                continue
+            diagnostic = content_safe_exception_diagnostic(
+                error, message="Runtime WebSocket cleanup task failed"
+            )
+            _LOGGER.error(
+                "Runtime WebSocket cleanup task failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
+        if propagated_cleanup_error is not None:
+            raise propagated_cleanup_error
 
 
 async def _guard_identity_and_access(

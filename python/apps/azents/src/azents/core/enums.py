@@ -516,6 +516,15 @@ class ArtifactStatus(enum.StrEnum):
     EXPIRED = "expired"
 
 
+class ModelFileKind(enum.StrEnum):
+    """Normalized model-input file classification."""
+
+    IMAGE = "image"
+    DOCUMENT = "document"
+    TEXT = "text"
+    BINARY = "binary"
+
+
 class ModelFileStatus(enum.StrEnum):
     """ModelFile lifecycle status."""
 

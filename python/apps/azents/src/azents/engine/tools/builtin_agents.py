@@ -351,6 +351,8 @@ class AgentsAppendixMixin:
                 limit=MAX_AGENTS_CHARACTERS,
                 encoding="utf-8",
             )
+        except asyncio.CancelledError:
+            raise
         except FileNotFoundError:
             self._agents_missing_cache[path] = now + AGENTS_MISSING_CACHE_TTL_SECONDS
             return _AgentsFileReadResult(

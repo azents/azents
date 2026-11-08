@@ -1,5 +1,6 @@
 """Kimi OAuth provider client implementation."""
 
+import asyncio
 import datetime
 from typing import assert_never
 
@@ -46,6 +47,8 @@ class KimiOAuthClient:
                 data={"client_id": KIMI_OAUTH_CLIENT_ID},
                 headers=_headers(device_id=device_id),
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPError:
             return Failure(ProviderUnavailable(reason="Kimi OAuth request failed"))
 
@@ -97,6 +100,8 @@ class KimiOAuthClient:
                 },
                 headers=_headers(device_id=device_id),
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPError:
             return Failure(ProviderUnavailable(reason="Kimi OAuth request failed"))
 
@@ -140,6 +145,8 @@ class KimiOAuthClient:
                 },
                 headers=_headers(device_id=device_id),
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPError:
             return Failure(ProviderUnavailable(reason="Kimi OAuth request failed"))
 

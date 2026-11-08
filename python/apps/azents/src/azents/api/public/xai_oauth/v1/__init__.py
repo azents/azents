@@ -1,5 +1,6 @@
 """xAI OAuth v1 Public API routes."""
 
+import asyncio
 import logging
 from textwrap import dedent
 from typing import Annotated, assert_never
@@ -111,6 +112,8 @@ async def _run_initial_catalog_sync(
             workspace_id=workspace_id,
             trigger=IntegrationCatalogSyncTrigger.CREATE,
         )
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception(
             "Unexpected xAI catalog initial sync failure.",

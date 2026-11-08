@@ -9,7 +9,7 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from azents.core.enums import ModelFileStatus
+from azents.core.enums import ModelFileKind, ModelFileStatus
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -22,6 +22,13 @@ def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
 model_file_status_enum = ENUM(
     ModelFileStatus,
     name="model_file_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+
+model_file_kind_enum = ENUM(
+    ModelFileKind,
+    name="model_file_kind",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -65,7 +72,7 @@ class RDBModelFile(RDBModel):
         nullable=False,
     )
     media_type: Mapped[str] = mapped_column(sa.String(255), nullable=False)
-    kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    kind: Mapped[ModelFileKind] = mapped_column(model_file_kind_enum, nullable=False)
     size_bytes: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     created_run_id: Mapped[str | None] = mapped_column(
         sa.String(32),
@@ -73,11 +80,6 @@ class RDBModelFile(RDBModel):
         nullable=True,
     )
     created_run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    created_run_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_runs.id", ondelete="RESTRICT"),
-        nullable=True,
-    )
     storage_key: Mapped[str] = mapped_column(
         sa.String(1024), nullable=False, init=False
     )

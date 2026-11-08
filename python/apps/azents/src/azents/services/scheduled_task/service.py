@@ -1,5 +1,6 @@
 """Bounded Scheduled Task dispatch sequencing after completed database operations."""
 
+import asyncio
 import datetime
 import logging
 from collections.abc import Callable
@@ -92,6 +93,8 @@ class ScheduledTaskDispatcher:
                     await self.broker.send_message(
                         SessionWakeUp(session_id=task.session_id)
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     logger.exception(
                         "Scheduled Task Session wake failed",

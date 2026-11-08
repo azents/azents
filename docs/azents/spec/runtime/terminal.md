@@ -101,6 +101,10 @@ escalation, idle and maximum lifetime, and complete Session-wide teardown. Share
 protocol contracts remain OS-neutral so another Runner backend can implement the same
 surface later.
 
+Terminal shell-exit waits own their shielded waiter through success, timeout,
+child failure and owner cancellation, joining it before returning or propagating
+the original outcome. This does not change POSIX session signals or grace periods.
+
 Terminal coordination is separate from ordinary Runtime operation coordination while
 sharing the Redis-or-memory deployment choice. It stores bounded volatile attachment,
 sequence, replay, quota, heartbeat, and revocation state only. PostgreSQL receives no

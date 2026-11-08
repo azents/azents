@@ -64,6 +64,8 @@ class _SessionManager:
         self.sessions.append(ReadWriteSession(session))
         try:
             yield ReadWriteSession(session)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             await session.rollback()
             raise

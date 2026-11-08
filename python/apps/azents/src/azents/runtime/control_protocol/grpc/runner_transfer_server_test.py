@@ -732,6 +732,15 @@ async def test_upload_complete_and_abort_failures_preserve_cleanup_evidence(
     assert completed_record is not None
     assert completed_record.phase is RuntimeTransferPhase.TERMINAL
     assert completed_record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+    stream_logs = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime transfer stream failed"
+    ]
+    assert len(stream_logs) == 1
+    assert stream_logs[0].__dict__["stage"] == "upload"
+    assert stream_logs[0].__dict__["error_type"] == "RuntimeError"
+    assert stream_logs[0].exc_info is not None
 
     abort_failure = await _harness(
         chunks=[],
@@ -789,7 +798,9 @@ async def test_upload_complete_and_abort_failures_preserve_cleanup_evidence(
 
 
 @pytest.mark.asyncio
-async def test_download_generic_storage_failure_maps_internal() -> None:
+async def test_download_generic_storage_failure_maps_internal(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Unclassified object-store failures settle and return bounded INTERNAL."""
     harness = await _harness(chunks=[b"abc"])
     harness.object_store.verify_error = True
@@ -808,6 +819,36 @@ async def test_download_generic_storage_failure_maps_internal() -> None:
     assert record is not None
     assert record.phase is RuntimeTransferPhase.TERMINAL
     assert record.failure is RuntimeTransferFailure.STREAM
+    stream_logs = [
+        entry
+        for entry in caplog.records
+        if entry.getMessage() == "Runtime transfer stream failed"
+    ]
+    assert len(stream_logs) == 1
+    assert stream_logs[0].__dict__["stage"] == "download"
+    assert stream_logs[0].__dict__["transfer_id"] == "transfer-1"
+    assert stream_logs[0].exc_info is not None
+
+
+def test_stream_failure_diagnostic_excludes_private_values_and_cause(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    error = RuntimeError(_UNTRUSTED_CLEANUP_MESSAGE)
+    cause = ValueError("PRIVATE_CAUSE")
+    try:
+        raise error from cause
+    except RuntimeError as observed:
+        transfer_server_module._log_stream_failure(
+            observed, None, stage="lease_renewal"
+        )
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.__dict__["error_type"] == "RuntimeError"
+    assert record.exc_info is not None
+    assert record.exc_info[1] is not None
+    assert record.exc_info[1].__cause__ is None
+    assert _UNTRUSTED_CLEANUP_MESSAGE not in caplog.text
+    assert "PRIVATE_CAUSE" not in caplog.text
 
 
 @pytest.mark.asyncio

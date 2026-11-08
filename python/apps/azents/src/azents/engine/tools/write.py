@@ -3,6 +3,7 @@
 Write text file to session data storage using scope/path format.
 """
 
+import asyncio
 import logging
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +61,8 @@ def make_write_tool(
                     abs_path,
                     agent_id=agent_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except PermissionError, ValueError:
                 exists = False
             except RuntimeStorageError as exc:
@@ -83,6 +86,8 @@ def make_write_tool(
                 media_type,
                 agent_id=agent_id,
             )
+        except asyncio.CancelledError:
+            raise
         except PermissionError:
             raise FunctionToolError(
                 f"Cannot write to read-only scope: {abs_path}. "

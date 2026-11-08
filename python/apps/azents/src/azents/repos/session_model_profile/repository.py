@@ -1,5 +1,6 @@
 """Repository-owned canonical Session model-profile operations."""
 
+import asyncio
 from typing import Annotated
 
 from fastapi import Depends
@@ -160,6 +161,8 @@ class SessionModelProfileRepository:
                                 "AgentSession model profile target changed"
                             )
                     return self._replacement_from_record(record, created=created)
+            except asyncio.CancelledError:
+                raise
             except ActiveProfileCaptureRequired as needed:
                 captured_admission = await self.active_profile_repository.capture(
                     needed.choice

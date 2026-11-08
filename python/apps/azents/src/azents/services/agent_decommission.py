@@ -133,6 +133,8 @@ class AgentDecommissionService:
                             else "agent.coordinator/advance"
                         ),
                     )
+                except asyncio.CancelledError:
+                    raise
                 except AgentDeletionOwnershipLost:
                     logger.info(
                         "Agent decommission retry lost ownership",

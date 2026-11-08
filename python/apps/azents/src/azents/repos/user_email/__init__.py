@@ -1,5 +1,7 @@
 """UserEmail repository."""
 
+import asyncio
+
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
@@ -32,6 +34,8 @@ class UserEmailRepository:
             session.write_session.add(rdb_email)
             await session.write_session.flush()
             return Success(self._build(rdb_email))
+        except asyncio.CancelledError:
+            raise
         except IntegrityError as e:
             await session.write_session.rollback()
             if is_constrained_by(e, RDBUserEmail.UQ_EMAIL):

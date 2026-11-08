@@ -1,5 +1,6 @@
 """Project browser manifest service."""
 
+import asyncio
 import dataclasses
 import datetime
 import posixpath
@@ -202,6 +203,8 @@ class ProjectBrowserManifestService:
                 session_id=session_id,
                 runtime_target=runtime,
             )
+        except asyncio.CancelledError:
+            raise
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
         working_folder_path = binding.working_folder_path
@@ -319,6 +322,8 @@ class ProjectBrowserManifestService:
                 project_paths,
                 workspace_root=workspace_root,
             )
+        except asyncio.CancelledError:
+            raise
         except (RuntimeStorageError, ValueError) as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
         prepared = await self.repository.read_preview(

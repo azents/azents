@@ -1,5 +1,6 @@
 """GPT-aligned V4A apply_patch tool backed by one Runtime Runner operation."""
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -238,6 +239,8 @@ class _ApplyPatchHandler:
                 ),
                 admission_authority=target.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeFileApplyPatchFailedError as exc:
             L.info(
                 "Runtime apply_patch failed",

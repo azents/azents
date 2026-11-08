@@ -88,6 +88,8 @@ class StuckSessionRecovery:
             try:
                 await self.session_lifecycle.mark_session_running(rec.id)
                 await self.broker.send_message(_build_resume_message(rec))
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 operation_logger.exception("Failed to enqueue RESUME for stuck session")
 

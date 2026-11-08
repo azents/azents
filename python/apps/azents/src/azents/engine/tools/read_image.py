@@ -3,10 +3,12 @@
 Return image file in session data storage as ModelFile-backed FilePart.
 """
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+from azcommon.logging import bind_extra
 from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.session_resource_authority import SessionResourceAuthority
@@ -83,6 +85,7 @@ def make_read_image_tool(
         abs_path = input.path
 
         # Infer MIME type from extension
+        L = bind_extra(logger, {"path": abs_path})
         dot_idx = abs_path.rfind(".")
         ext = abs_path[dot_idx:].lower() if dot_idx >= 0 else ""
         media_type = _EXTENSION_TO_MEDIA_TYPE.get(ext)
@@ -103,6 +106,8 @@ def make_read_image_tool(
                 abs_path,
                 agent_id=authority.agent_id,
             )
+        except asyncio.CancelledError:
+            raise
         except FileNotFoundError:
             raise FunctionToolError(
                 f"File not found: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
@@ -110,9 +115,9 @@ def make_read_image_tool(
         except RuntimeStorageError as exc:
             raise FunctionToolError(f"Failed to inspect image: {exc.detail}") from None
         except ValueError, OSError:
-            logger.exception(
+            L.exception(
                 "Failed to read image from storage",
-                extra={"path": abs_path},
+                extra={},
             )
             raise FunctionToolError(
                 f"Failed to read file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
@@ -138,6 +143,8 @@ def make_read_image_tool(
                     target=await resolve_runtime_target(),
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeImageReadError as exc:
             if isinstance(exc, RuntimeImageReadModelFileOversized):
                 return FunctionToolResult(
@@ -157,10 +164,9 @@ def make_read_image_tool(
                 "tool": "read_image",
             },
         )
-        logger.info(
+        L.info(
             "Image loaded as model file",
             extra={
-                "path": abs_path,
                 "size": expected_size,
                 "media_type": media_type,
                 "model_file_id": model_file.id,

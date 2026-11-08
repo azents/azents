@@ -1,5 +1,6 @@
 """import_file URI resolver."""
 
+import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol, assert_never
@@ -262,6 +263,8 @@ class AzentsImportResolver:
                 workspace_id=self.authority.workspace_id,
                 uri=uri,
             )
+        except asyncio.CancelledError:
+            raise
         except VfsFileResolutionError as exc:
             raise ImportResolveError(exc.code, exc.message) from None
         entry = resolved.entry
@@ -275,6 +278,8 @@ class AzentsImportResolver:
                     workspace_id=self.authority.workspace_id,
                     uri=uri,
                 )
+            except asyncio.CancelledError:
+                raise
             except VfsFileResolutionError:
                 return False
             return (

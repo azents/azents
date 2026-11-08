@@ -1,5 +1,6 @@
 """External Channel v1 provider callback routes."""
 
+import asyncio
 import datetime
 import logging
 from typing import Annotated
@@ -65,6 +66,8 @@ async def receive_discord_interaction(
             signature=x_signature_ed25519,
             received_at=datetime.datetime.now(datetime.UTC),
         )
+    except asyncio.CancelledError:
+        raise
     except DiscordInteractionUnauthorized as error:
         logger.info(
             "Rejected unauthenticated Discord interaction",
@@ -135,6 +138,8 @@ async def receive_slack_event(
             signature_header=x_slack_signature,
             received_at=received_at,
         )
+    except asyncio.CancelledError:
+        raise
     except SlackHTTPUnauthorized as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

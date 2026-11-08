@@ -366,7 +366,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         )
         self._runtime_environment_token_cache: tuple[str, float] | None = None
         self._lazy_mcp_config = lazy_mcp_config
-        self._lazy_mcp_secret_provider = lazy_mcp_secret_provider
+        self.lazy_mcp_secret_provider = lazy_mcp_secret_provider
         self._lazy_mcp_proxy_url = lazy_mcp_proxy_url
         self._lazy_mcp_task: asyncio.Task[None] | None = None
         self._lazy_mcp_error: str | None = None
@@ -543,7 +543,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             await self._mcp.__aenter__()
         elif (
             self._lazy_mcp_config is not None
-            and self._lazy_mcp_secret_provider is not None
+            and self.lazy_mcp_secret_provider is not None
             and self._lazy_mcp_task is None
         ):
             self._lazy_mcp_task = asyncio.create_task(self._prepare_lazy_mcp())
@@ -793,11 +793,11 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
     async def _prepare_lazy_mcp(self) -> None:
         """Issue GitHub token in background and start MCP lazy load."""
         assert self._lazy_mcp_config is not None
-        assert self._lazy_mcp_secret_provider is not None
+        assert self.lazy_mcp_secret_provider is not None
 
         async def refresh() -> str | None:
-            assert self._lazy_mcp_secret_provider is not None
-            return await self._admitted_token(self._lazy_mcp_secret_provider)
+            assert self.lazy_mcp_secret_provider is not None
+            return await self._admitted_token(self.lazy_mcp_secret_provider)
 
         try:
             secret = await refresh()
@@ -921,7 +921,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         if self._mcp is None:
             if (
                 self._lazy_mcp_config is not None
-                and self._lazy_mcp_secret_provider is not None
+                and self.lazy_mcp_secret_provider is not None
                 and self._lazy_mcp_task is None
             ):
                 self._lazy_mcp_task = asyncio.create_task(self._prepare_lazy_mcp())
@@ -971,6 +971,8 @@ class GitHubUserMcpToolkit(McpToolkit):
     async def _request_authorization(self) -> McpRequestAuthorization:
         try:
             connection = await self.user_runtime.current_connection(self.user_context)
+        except asyncio.CancelledError:
+            raise
         except GitHubUserOAuthError as exc:
             raise FunctionToolError(str(exc)) from None
 
@@ -1019,6 +1021,8 @@ class GitHubUserToolkit(GitHubToolkit):
             await self.effect_admission.assert_current()
         try:
             return await self.user_runtime.runtime_environment(self.user_context)
+        except asyncio.CancelledError:
+            raise
         except GitHubUserOAuthError as exc:
             raise FunctionToolError(str(exc)) from None
 
@@ -1091,6 +1095,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         mcp_config = _build_mcp_config(config)
         try:
             token = await self._resolve_test_token(credentials_json)
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             return TestConnectionResult(
                 success=False,
@@ -1333,6 +1339,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         )
         try:
             await runtime.current_connection(execution)
+        except asyncio.CancelledError:
+            raise
         except GitHubUserOAuthError as exc:
             raise FunctionToolError(str(exc)) from None
         mcp_config = _build_mcp_config(config)

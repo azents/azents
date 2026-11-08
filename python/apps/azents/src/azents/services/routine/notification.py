@@ -56,6 +56,8 @@ class RoutineNotificationService:
                 expected_primary=None if files is None else files.binding_id,
                 pin_primary=files is not None,
             )
+        except asyncio.CancelledError:
+            raise
         except SessionPrimaryChannelUnavailable:
             return await self.completion.observe_delivery(
                 scope=scope,

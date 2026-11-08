@@ -344,6 +344,8 @@ class GitHubUserOAuthService:
                     GitHubUserErrorCode.INVALID,
                     "OAuth client secret is not configured.",
                 )
+        except asyncio.CancelledError:
+            raise
         except GitHubUserOAuthError:
             await self.repository.complete_failed_exchange(attempt_id=attempt.id)
             raise
@@ -480,6 +482,8 @@ class GitHubUserOAuthService:
         if context.connection is not None:
             try:
                 prepared = await self._registration(context)
+            except asyncio.CancelledError:
+                raise
             except GitHubUserOAuthError:
                 # Missing registration does not keep a retired token executable.
                 registration = None
@@ -586,6 +590,8 @@ class GitHubUserOAuthService:
                 app_id=int(registration.app_id),
                 cursor=cursor,
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError:
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.INVALID,

@@ -246,6 +246,8 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
             await self.runtime_capability_resolver.require(
                 RuntimeCapability.RUNTIME_FILESYSTEM
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeCapabilityDeniedError:
             return None
         if context.error_message is not None or context.output_text is None:
@@ -285,6 +287,8 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
                 instruction_context,
                 target_path,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError:
             logger.exception(
                 "Failed to load Claude rules appendix candidates",
@@ -532,6 +536,8 @@ async def _list_rule_paths(
             recursive=True,
             include_directories=False,
         )
+    except asyncio.CancelledError:
+        raise
     except FileNotFoundError:
         return []
     paths: list[str] = []
@@ -583,6 +589,8 @@ async def _read_rule_file_with_counts(
             limit=MAX_CLAUDE_RULE_CHARACTERS,
             encoding="utf-8",
         )
+    except asyncio.CancelledError:
+        raise
     except FileNotFoundError:
         return _ClaudeRuleReadResult(
             rule=None,

@@ -271,6 +271,12 @@ Attachment and Artifact are not generally converted to ModelFile/FilePart. The u
 ModelFileStore is model input blob store, not original preservation store. Image ModelFile is normalized to JPEG at creation. Non-image ModelFile is not normalized and only size cap applies. ModelFile has current lifecycle status `available` or `deleted`; persistent run-age degradation and `unreachable` stages are not part of the current lifecycle. Scheduler-owned GC deletes unpinned ModelFiles after their single durable FilePart event falls behind the AgentSession model-input head cursor.
 If original non-image payload exceeds size cap, ModelFile is not created and is replaced with user-visible size cap message.
 
+ModelFile kind is the normalized `image`, `document`, `text` or `binary`
+classification. PostgreSQL stores that finite domain as `model_file_kind` ENUM.
+The conversion preserves every supported retained value and refuses unknown
+historical values before changing the schema; it does not coerce or delete them.
+The reverse migration restores string storage without changing values.
+
 Active transcript FilePart referencing deleted or missing ModelFile is rewritten at pre-lower stage into bounded text placeholder in event payload itself. This rewrite applies equally to user messages, assistant messages, client tool results, and provider tool calls, so later compaction, reload, and REST/WebSocket projection do not interpret an unavailable FilePart as rich input again.
 
 When `spawn_agent` forks parent model-visible context into a child session, FileParts are degraded to bounded text placeholders before appending the selected events to the child transcript. Forking does not copy blobs, does not create child ModelFiles, and does not share ModelFile rows through subagent tree context. If the child needs bytes, the parent must hand off a runtime path, exchange/artifact URI workflow, or another explicit transfer outside automatic context fork.

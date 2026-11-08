@@ -1,5 +1,6 @@
 """Agent automatic Project policy management service."""
 
+import asyncio
 import dataclasses
 from typing import Annotated, assert_never
 
@@ -132,6 +133,8 @@ class AgentAutomaticProjectService:
                 runtime = await self.runtime_target_resolver.resolve_operation_target(
                     agent_id
                 )
+            except asyncio.CancelledError as error:
+                raise
             except RuntimeStorageError as error:
                 return Failure(
                     AutomaticSessionProjectsRuntimeUnavailable(message=str(error))

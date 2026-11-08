@@ -484,6 +484,8 @@ def _make_list_tool(
                     parts.append(f"next_offset: {end}")
                 output += "\n".join(parts)
             return output
+        except asyncio.CancelledError:
+            raise
         except KeyError as exc:
             raise FunctionToolError(str(exc)) from None
         except ApiError as exc:
@@ -530,6 +532,8 @@ def _make_get_tool(
             if args.output_filter:
                 return _apply_output_filter(resource, args.output_filter)
             return json.dumps(resource, indent=2, default=str)
+        except asyncio.CancelledError:
+            raise
         except KeyError as exc:
             raise FunctionToolError(str(exc)) from None
         except ApiError as exc:
@@ -582,6 +586,8 @@ def _make_logs_tool(
             if not log_text:
                 return "No logs found."
             return log_text
+        except asyncio.CancelledError:
+            raise
         except ApiError as exc:
             raise FunctionToolError(
                 f"Kubernetes API error ({exc.status.code}): {exc.status.reason}"
@@ -632,6 +638,8 @@ def _make_events_tool(
             if args.output_filter:
                 return _apply_output_filter(items, args.output_filter)
             return _format_resource_list(items)
+        except asyncio.CancelledError:
+            raise
         except ApiError as exc:
             raise FunctionToolError(
                 f"Kubernetes API error ({exc.status.code}): {exc.status.reason}"
@@ -733,6 +741,8 @@ def _make_apply_tool(
                     field_manager="azents-toolkit",
                 )
                 results.append(f"{kind}/{name} applied in namespace {namespace}")
+            except asyncio.CancelledError:
+                raise
             except KeyError as exc:
                 raise FunctionToolError(str(exc)) from None
             except ApiError as exc:
@@ -769,6 +779,8 @@ def _make_delete_tool(
                 namespace=ns,
             )
             return f"{args.kind}/{args.name} deleted from namespace {ns}"
+        except asyncio.CancelledError:
+            raise
         except KeyError as exc:
             raise FunctionToolError(str(exc)) from None
         except ApiError as exc:
@@ -840,6 +852,8 @@ def _make_exec_tool(
                 return output
             finally:
                 await ws_client.close()
+        except asyncio.CancelledError:
+            raise
         except ApiException as exc:
             raise FunctionToolError(
                 f"Kubernetes API error ({exc.status}): {exc.reason}"
@@ -1120,6 +1134,8 @@ class KubernetesToolkitProvider(ToolkitProvider[KubernetesToolkitConfig]):
                     cluster_cred,
                     proxy_url=proxy_url,
                 )
+            except asyncio.CancelledError:
+                raise
             except _CLIENT_ERRORS as exc:
                 results.append(f"{cluster_config.name}: FAILED (auth: {exc})")
                 any_failed = True
@@ -1132,6 +1148,8 @@ class KubernetesToolkitProvider(ToolkitProvider[KubernetesToolkitConfig]):
             try:
                 version_info = await VersionApi(api_client).get_code()
                 results.append(f"{cluster_config.name}: v{version_info.git_version}")
+            except asyncio.CancelledError:
+                raise
             except ApiException as exc:
                 results.append(
                     f"{cluster_config.name}: FAILED (API {exc.status}: {exc.reason})"

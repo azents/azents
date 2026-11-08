@@ -196,6 +196,8 @@ class GoogleOAuthProvider:
                     code_verifier=setup.code_verifier,
                     headers={"Accept": "application/json"},
                 )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPStatusError as error:
             self._http_rejection(error)
         except httpx.RequestError:
@@ -226,6 +228,8 @@ class GoogleOAuthProvider:
                     refresh_token=refresh_token,
                     headers={"Accept": "application/json"},
                 )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPStatusError as error:
             self._http_rejection(error)
         except httpx.RequestError:
@@ -311,6 +315,8 @@ class GoogleOAuthProvider:
         try:
             async with asyncio.timeout(10):
                 return await asyncio.to_thread(verify)
+        except asyncio.CancelledError:
+            raise
         except google.auth.exceptions.TransportError, requests.RequestException:
             raise GoogleOAuthError(
                 "provider_unavailable", "Google identity verification is unavailable."

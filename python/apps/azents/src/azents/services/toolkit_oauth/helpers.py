@@ -1,5 +1,6 @@
 """Canonical pure projections and external helpers for Toolkit OAuth setup."""
 
+import asyncio
 import dataclasses
 import json
 from collections.abc import Mapping, Sequence
@@ -94,6 +95,8 @@ async def prepare_mcp_authorization(
                 dcr = await register_client(
                     metadata.registration_endpoint, redirect_uri, proxy_url=proxy_url
                 )
+            except asyncio.CancelledError:
+                raise
             except DcrError as exc:
                 raise ToolkitOAuthError(
                     ToolkitOAuthFailureReason.INVALID_REQUEST,
@@ -170,6 +173,8 @@ async def discover_required_metadata(
             mcp_config.discovery_url,
             proxy_url=proxy_url,
         )
+    except asyncio.CancelledError:
+        raise
     except DiscoveryError as exc:
         if mcp_config.auth_url is None or mcp_config.token_url is None:
             raise ToolkitOAuthError(
@@ -217,6 +222,8 @@ async def exchange_and_handle_errors(
             resource=resource,
             proxy_url=proxy_url,
         )
+    except asyncio.CancelledError:
+        raise
     except httpx.HTTPStatusError as exc:
         if 400 <= exc.response.status_code < 500:
             raise ToolkitOAuthError(

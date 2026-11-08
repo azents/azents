@@ -1,5 +1,6 @@
 """Repository-owned Runtime Web service authority operations."""
 
+import asyncio
 import base64
 import dataclasses
 import datetime
@@ -688,6 +689,8 @@ class RuntimeWebRepository:
                     session.write_session.add(rdb)
                     await session.write_session.flush()
                 return rdb
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 if "uq_runtime_web_services_hostname_key" not in str(error):
                     raise

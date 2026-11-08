@@ -1,5 +1,6 @@
 """xAI OAuth provider client implementation."""
 
+import asyncio
 import base64
 import datetime
 import json
@@ -35,7 +36,7 @@ class XaiOAuthClient:
 
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         """Inject HTTP client."""
-        self._http_client = http_client
+        self.http_client = http_client
 
     async def request_device_user_code(
         self,
@@ -45,7 +46,7 @@ class XaiOAuthClient:
     ]:
         """Request Device user-code."""
         try:
-            response = await self._http_client.post(
+            response = await self.http_client.post(
                 resolve_xai_oauth_device_code_url(),
                 data={"client_id": XAI_OAUTH_CLIENT_ID, "scope": XAI_OAUTH_SCOPE},
                 headers={
@@ -53,6 +54,8 @@ class XaiOAuthClient:
                     "Accept": "application/json",
                 },
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPError:
             return Failure(ProviderUnavailable(reason="xAI OAuth transport failed"))
 
@@ -95,7 +98,7 @@ class XaiOAuthClient:
     ]:
         """Poll Device authentication completion once."""
         try:
-            response = await self._http_client.post(
+            response = await self.http_client.post(
                 resolve_xai_oauth_token_url(),
                 data={
                     "grant_type": _DEVICE_CODE_GRANT_TYPE,
@@ -107,6 +110,8 @@ class XaiOAuthClient:
                     "Accept": "application/json",
                 },
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPError:
             return Failure(ProviderUnavailable(reason="xAI OAuth transport failed"))
 
@@ -143,7 +148,7 @@ class XaiOAuthClient:
     ]:
         """Refresh token using Refresh token grant."""
         try:
-            response = await self._http_client.post(
+            response = await self.http_client.post(
                 resolve_xai_oauth_token_url(),
                 data={
                     "grant_type": "refresh_token",
@@ -155,6 +160,8 @@ class XaiOAuthClient:
                     "Accept": "application/json",
                 },
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPError:
             return Failure(ProviderUnavailable(reason="xAI OAuth transport failed"))
 

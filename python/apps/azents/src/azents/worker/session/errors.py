@@ -1,5 +1,6 @@
 """SessionRunner error event storage and dispatch."""
 
+import asyncio
 import logging
 from typing import Protocol
 
@@ -60,6 +61,8 @@ class SessionRunnerErrorReporter:
                 error_event,
                 owner_generation=owner_generation,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             operation_logger.exception("Failed to dispatch error message")
 
@@ -87,5 +90,7 @@ class SessionRunnerErrorReporter:
                 error_event,
                 owner_generation=owner_generation,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             operation_logger.exception("Failed to publish error event")

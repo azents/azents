@@ -1,5 +1,6 @@
 """Completed authorized Scheduled Task management transactions."""
 
+import asyncio
 import dataclasses
 from typing import Literal
 
@@ -201,6 +202,8 @@ class ScheduledTaskManagementRepository:
                     timezone=timezone,
                     binding_id=channel_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except InvalidScheduledTaskSchedule:
                 raise ScheduledTaskManagementUnavailable("invalid_schedule") from None
             bindings = await self._binding_map(
@@ -306,6 +309,8 @@ class ScheduledTaskManagementRepository:
                     timezone=timezone,
                     binding_id=channel_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except InvalidScheduledTaskSchedule as error:
                 code: Literal["invalid_schedule", "conflict"] = (
                     "conflict"
@@ -374,6 +379,8 @@ class ScheduledTaskManagementRepository:
                     target=target,
                     expected_binding_id=candidate.binding_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except InvalidScheduledTaskSchedule:
                 raise ScheduledTaskManagementUnavailable("invalid_schedule") from None
             if not deleted:
@@ -635,6 +642,8 @@ class ScheduledTaskManagementRepository:
                     session_id=session_id,
                     binding_id=binding_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except InvalidScheduledTaskSchedule:
                 raise ScheduledTaskManagementUnavailable("not_found") from None
 

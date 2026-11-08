@@ -27,6 +27,7 @@ from azents_runtime_control.runtime_stream_session import (
 )
 from multidict import CIMultiDict
 
+import azents.runtime_web_gateway.server as gateway_server
 from azents.rdb.models.runtime_web import RuntimeWebAuthMode
 from azents.repos.runtime_web.data import RuntimeWebServiceRecord
 from azents.repos.runtime_web.gateway_data import (
@@ -438,6 +439,68 @@ class _WebSocketHarness:
     transport: _WebSocketTransport
     operations: RuntimeWebGatewayOperationsCoordinator
     operational_state: RuntimeWebGatewayOperationalState
+
+
+async def test_websocket_input_failure_is_supervised_and_guard_is_drained(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Forwarding failure ends the exchange without waiting for an upstream event."""
+    input_stopped, guard_started, guard_stopped = (
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+    )
+
+    async def failed_input(
+        websocket: web.WebSocketResponse, bridge: RuntimeWebBrowserStreamBridge
+    ) -> None:
+        del websocket, bridge
+        await guard_started.wait()
+        try:
+            raise RuntimeError("synthetic browser input failure")
+        finally:
+            input_stopped.set()
+
+    async def pending_guard(*args: object) -> None:
+        del args
+        guard_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            guard_stopped.set()
+
+    monkeypatch.setattr(gateway_server, "_send_websocket_frames", failed_input)
+    monkeypatch.setattr(gateway_server, "_guard_identity_and_access", pending_guard)
+    harness = await _websocket_harness((), response_frames=())
+    try:
+        async with asyncio.timeout(5):
+            websocket = await harness.client.ws_connect(
+                "/socket",
+                headers={
+                    "Host": "endpoint.services.example.net",
+                    "Cookie": "__Http-Azents-Runtime-Web=opaque-secret",
+                    "Origin": "https://endpoint.services.example.net",
+                },
+            )
+            await websocket.receive()
+            await harness.transport.unbound.wait()
+            assert input_stopped.is_set()
+            assert guard_stopped.is_set()
+            assert not harness.transport.handlers
+            failures = [
+                record
+                for record in caplog.records
+                if record.getMessage() == "Runtime Web request transport failed"
+            ]
+            assert len(failures) == 1
+            assert any(
+                frame["function"] == "failed_input"
+                for frame in failures[0].__dict__["error_frames"]
+            )
+            assert "synthetic browser input failure" not in caplog.text
+            await websocket.close()
+    finally:
+        await harness.client.close()
 
 
 async def _websocket_harness(

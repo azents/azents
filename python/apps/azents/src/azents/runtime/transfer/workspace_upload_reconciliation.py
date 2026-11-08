@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -37,6 +38,9 @@ from azents.runtime.transfer.workspace_upload_coordinator import (
 )
 from azents.runtime.transfer.workspace_upload_object import WorkspaceUploadObjectStore
 from azents.runtime.transfer.workspace_upload_store import WorkspaceUploadStore
+from azents.utils.logging import content_safe_exception_diagnostic
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -203,7 +207,19 @@ class WorkspaceUploadRuntimeReconciliationHandler(WorkspaceUploadReconciliationH
                     )
                     await self._settle_from_runtime(current, attempt, failed)
                     return
-                except Exception:
+                except Exception as exc:
+                    diagnostic = content_safe_exception_diagnostic(
+                        exc, message="Workspace upload Runtime preparation failed"
+                    )
+                    _LOGGER.error(
+                        "Workspace upload Runtime preparation failed",
+                        exc_info=diagnostic.exc_info,
+                        extra={
+                            "transfer_id": runtime_record.admission.transfer_id,
+                            "attempt_id": runtime_record.admission.attempt_id,
+                            **diagnostic.log_fields(),
+                        },
+                    )
                     failed = await self._settle_runtime_failure(
                         runtime_record,
                         RuntimeTransferFailure.STREAM,

@@ -64,7 +64,10 @@ from azents.runtime.transfer.data import (
 )
 from azents.runtime.transfer.object_store import runtime_transfer_object_identity
 from azents.runtime.transfer.store import RuntimeTransferStateStore
-from azents.utils.logging import sanitized_exception_info
+from azents.utils.logging import (
+    content_safe_exception_diagnostic,
+    sanitized_exception_info,
+)
 
 _DEFAULT_MAX_CONCURRENT_DOWNLOADS = 4
 _DEFAULT_MAX_CONCURRENT_UPLOADS = 4
@@ -72,6 +75,25 @@ _MAX_MULTIPART_PARTS = 10_000
 _PROGRESS_INTERVAL_SECONDS = 1
 _PROGRESS_MINIMUM_BYTES = 1024 * 1024
 _LOGGER = logging.getLogger(__name__)
+
+
+def _log_stream_failure(
+    error: Exception, record: RuntimeTransferRecord | None, *, stage: str
+) -> None:
+    """Record the safe origin at a stream boundary that consumes a failure."""
+    diagnostic = content_safe_exception_diagnostic(
+        error, message="Runtime transfer stream failed"
+    )
+    _LOGGER.error(
+        "Runtime transfer stream failed",
+        exc_info=diagnostic.exc_info,
+        extra={
+            "stage": stage,
+            **diagnostic.log_fields(),
+            "transfer_id": record.admission.transfer_id if record else None,
+            "attempt_id": record.admission.attempt_id if record else None,
+        },
+    )
 
 
 class _TransferCancelled(RuntimeError):
@@ -183,7 +205,10 @@ class _StreamLeaseKeeper:
                     self.termination = _StreamTermination.CANCELLED
                 except _TransferExpired:
                     self.termination = _StreamTermination.EXPIRED
-                except Exception:
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    _log_stream_failure(exc, self.record, stage="lease_renewal")
                     self.termination = _StreamTermination.FENCED
                 else:
                     self.record = current
@@ -1036,6 +1061,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         """Map direct-RPC cancellation and deadline fences to gRPC statuses."""
         try:
             current = await self._check_stream(record, credential, context)
+        except asyncio.CancelledError:
+            raise
         except _TransferCancelled:
             await context.abort(grpc.StatusCode.CANCELLED, "PUT cancelled")
             raise AssertionError("unreachable")
@@ -1259,6 +1286,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         except Exception as exc:
             if _is_abort_exception(exc):
                 raise
+            _log_stream_failure(exc, latest, stage="download")
             if latest is not None:
                 settled = await self._fail(latest)
                 if (
@@ -1683,6 +1711,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             "Transfer deadline expired",
                         )
                 raise
+            _log_stream_failure(exc, latest, stage="upload")
             if latest is not None:
                 if identity is not None:
                     latest = await self._cleanup_upload(
@@ -2092,6 +2121,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                         expected_size=actual_size,
                         expected_sha256=actual_sha256,
                     )
+        except asyncio.CancelledError:
+            raise
         except (S3TransferCancelled, S3TransferCleanupRequired) as exc:
             retained = await self.state_store.record_completed_object_cleanup(
                 latest.admission.transfer_id,

@@ -100,6 +100,8 @@ class WebSocketBroadcast(BaseWebSocketBroadcast):
         data = json.dumps(event_json, ensure_ascii=False)
         try:
             await self.redis.publish(channel, data)
+        except asyncio.CancelledError:
+            raise
         except (RedisConnectionError, OSError) as exc:
             raise WebSocketBroadcastPublishError from exc
 
@@ -124,6 +126,8 @@ class WebSocketBroadcast(BaseWebSocketBroadcast):
                 owner_generation,
                 data,
             )
+        except asyncio.CancelledError:
+            raise
         except (RedisConnectionError, OSError) as exc:
             raise WebSocketBroadcastPublishError from exc
         return result == 1
@@ -138,21 +142,25 @@ class WebSocketBroadcast(BaseWebSocketBroadcast):
         """
         channel = f"{_CHANNEL_PREFIX}{session_id}"
         pubsub = self.redis.pubsub()
-        await pubsub.subscribe(channel)
         try:
-            await self._wait_for_subscription_confirmation(pubsub, channel)
-            yield self._iter_events(pubsub)
-        finally:
+            await pubsub.subscribe(channel)
             try:
-                await pubsub.unsubscribe(channel)
+                await self._wait_for_subscription_confirmation(pubsub, channel)
+                yield self._iter_events(pubsub)
+            finally:
+                try:
+                    await pubsub.unsubscribe(channel)
+                except asyncio.CancelledError:
+                    raise
+                except RedisConnectionError, OSError:
+                    logger.debug(
+                        "Redis connection lost during broadcast cleanup",
+                        exc_info=True,
+                        extra={"channel": channel},
+                    )
+        finally:
+            with suppress(RedisConnectionError, OSError):
                 await pubsub.aclose()
-            except RedisConnectionError, OSError:
-                logger.debug(
-                    "Redis connection lost during broadcast cleanup",
-                    extra={"channel": channel},
-                )
-                with suppress(RedisConnectionError, OSError):
-                    await pubsub.aclose()
 
     @staticmethod
     async def _wait_for_subscription_confirmation(

@@ -1,5 +1,6 @@
 """Lightweight model snapshots and quota progression on the common AgentRun."""
 
+import asyncio
 import datetime
 from dataclasses import dataclass
 
@@ -177,6 +178,8 @@ class ConsolidationModelOperationRepository:
                     require_selection(
                         compiled, updated.current_candidate.model_selection
                     )
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exhausted:
                 updated = exhausted.operation
                 selection_error = exhausted
@@ -253,6 +256,8 @@ class ConsolidationModelOperationRepository:
                     reservation=None,
                 )
                 updated = selected.operation
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exhausted:
                 updated = exhausted.operation
             return await self.execution_repository.replace_after_quota_in_session(

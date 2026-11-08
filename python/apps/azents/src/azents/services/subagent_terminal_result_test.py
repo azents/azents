@@ -129,6 +129,9 @@ class _SessionManager:
         self.active_scopes += 1
         try:
             yield transaction
+        except asyncio.CancelledError:
+            self.store.rollback_count += 1
+            raise
         except BaseException:
             self.store.rollback_count += 1
             raise

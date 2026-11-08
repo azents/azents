@@ -38,6 +38,8 @@ class BrowserDisplay:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
+        except asyncio.CancelledError:
+            raise
         except OSError:
             raise BrowserDisplayError(
                 "Browser display executable is unavailable"
@@ -50,6 +52,9 @@ class BrowserDisplay:
                 raise BrowserDisplayError("Browser display readiness is invalid")
             self.environment = {**os.environ, "DISPLAY": f":{int(number)}"}
             return self.environment
+        except asyncio.CancelledError:
+            await self.close()
+            raise
         except TimeoutError:
             await self.close()
             raise BrowserDisplayError("Browser display startup timed out") from None

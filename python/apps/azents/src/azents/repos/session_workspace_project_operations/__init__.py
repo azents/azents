@@ -1,5 +1,6 @@
 """Repository-owned Session Workspace Project database operations."""
 
+import asyncio
 import dataclasses
 from datetime import UTC, datetime
 from typing import Annotated
@@ -188,6 +189,8 @@ class SessionWorkspaceProjectOperationsRepository:
                         target=target,
                         bind_pending=True,
                     )
+            except asyncio.CancelledError:
+                raise
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
             create_result = await self._create_project_in_session(
@@ -232,6 +235,8 @@ class SessionWorkspaceProjectOperationsRepository:
                 )
                 if authority is None:
                     return Failure(ProjectBindingUnavailable())
+            except asyncio.CancelledError:
+                raise
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
             create_result = await self._create_project_in_session(
@@ -300,6 +305,8 @@ class SessionWorkspaceProjectOperationsRepository:
                 )
                 if authority is None:
                     return Failure(ProjectBindingUnavailable())
+            except asyncio.CancelledError:
+                raise
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
             return Success(
@@ -353,6 +360,8 @@ class SessionWorkspaceProjectOperationsRepository:
                 )
                 if authority is None:
                     return Failure(ProjectBindingUnavailable())
+            except asyncio.CancelledError:
+                raise
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
             project = await self.project_repository.get_project_in_context(
@@ -449,6 +458,8 @@ class SessionWorkspaceProjectOperationsRepository:
                     path=path,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except SessionWorkspaceProjectCleanupInProgress:
             return Failure(ProjectCleanupInProgress(path=path))
         if update_agent_projection:

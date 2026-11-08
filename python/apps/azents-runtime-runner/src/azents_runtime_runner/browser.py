@@ -272,6 +272,8 @@ class RunnerBrowserManager:
         """Establish product engine availability without opening a Session page."""
         try:
             await self._initialize()
+        except asyncio.CancelledError:
+            raise
         except BROWSER_SDK_ERRORS:
             raise BrowserFailure(
                 "browser_unavailable", "Product browser initialization failed"
@@ -324,6 +326,8 @@ class RunnerBrowserManager:
                                 env=self.browser_environment,
                             )
                             self.sandbox = True
+                        except asyncio.CancelledError:
+                            raise
                         except BROWSER_SDK_ERRORS as exc:
                             if not _sandbox_unavailable(str(exc)):
                                 raise
@@ -347,6 +351,8 @@ class RunnerBrowserManager:
                         assert_never(self.implementation)
                 self.driver = driver
                 return driver
+            except asyncio.CancelledError:
+                raise
             except BrowserDisplayError:
                 raise BrowserFailure(
                     "browser_unavailable", "Product browser display could not start"
@@ -394,6 +400,8 @@ class RunnerBrowserManager:
                 if context is not None:
                     try:
                         await context.close()
+                    except asyncio.CancelledError:
+                        raise
                     except BROWSER_SDK_ERRORS:
                         failure.add_note("Native browser context cleanup also failed.")
 
@@ -1129,6 +1137,8 @@ class RunnerBrowserManager:
                         ) from None
                     try:
                         await handle.fill(value, timeout=action.timeout_ms)
+                    except asyncio.CancelledError:
+                        raise
                     except BROWSER_SDK_ERRORS:
                         raise BrowserFailure(
                             "browser_encrypted_input_failed",

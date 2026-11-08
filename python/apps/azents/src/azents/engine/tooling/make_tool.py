@@ -31,7 +31,7 @@ def _extract_input_model(fn: Callable[..., Any]) -> type[BaseModel] | None:
     """Extract Pydantic BaseModel subclass from first parameter of function.
 
     :param fn: Function to analyze
-    :return: BaseModel subclass or None when no parameter or not BaseModel
+    :returns: Validated input model, or None when no input model is declared
     """
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
@@ -56,7 +56,7 @@ def _build_handler(
 
     :param fn: Original function (sync or async)
     :param model: Pydantic input model; None for tool without arguments
-    :return: FunctionToolHandler (Callable[[str], Awaitable[str]])
+    :returns: Handler that validates the input before invoking the wrapped function
     """
     is_async = inspect.iscoroutinefunction(fn)
 

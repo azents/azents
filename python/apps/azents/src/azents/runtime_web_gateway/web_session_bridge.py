@@ -772,6 +772,8 @@ class RuntimeWebBrowserStreamBridge:
         size_bytes = len(data)
         try:
             await self._reserve_request_credit(size_bytes)
+        except asyncio.CancelledError:
+            raise
         except RuntimeWebGatewayResourceExhausted:
             await self.cancel(CloseReason.RESOURCE_EXHAUSTED)
             raise
@@ -814,6 +816,8 @@ class RuntimeWebBrowserStreamBridge:
         }:
             try:
                 await self._reserve_request_credit(len(data))
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebGatewayResourceExhausted:
                 await self.cancel(CloseReason.RESOURCE_EXHAUSTED)
                 raise

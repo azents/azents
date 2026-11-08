@@ -1,5 +1,6 @@
 """Memory-gated, root-authorized Session history lookup tools."""
 
+import asyncio
 import base64
 import binascii
 import datetime
@@ -363,6 +364,8 @@ def make_session_history_tools(
                 },
                 ensure_ascii=False,
             )
+        except asyncio.CancelledError:
+            raise
         except SessionHistoryUnavailableError:
             raise FunctionToolError(_UNAVAILABLE) from None
 
@@ -389,6 +392,8 @@ def make_session_history_tools(
                 },
                 ensure_ascii=False,
             )
+        except asyncio.CancelledError:
+            raise
         except SessionHistoryUnavailableError:
             raise FunctionToolError(_UNAVAILABLE) from None
 
@@ -443,6 +448,8 @@ def make_session_history_tools(
                 },
                 ensure_ascii=False,
             )
+        except asyncio.CancelledError:
+            raise
         except SessionHistoryUnavailableError:
             raise FunctionToolError(_UNAVAILABLE) from None
 

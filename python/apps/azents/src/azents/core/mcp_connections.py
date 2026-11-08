@@ -296,6 +296,9 @@ class _Connection:
                             "MCP tool listing repeated a pagination cursor"
                         )
                     seen.add(cursor)
+            except asyncio.CancelledError:
+                self.stale = True
+                raise
             except BaseException:
                 self.stale = True
                 raise

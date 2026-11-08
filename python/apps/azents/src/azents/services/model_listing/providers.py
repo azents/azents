@@ -745,6 +745,8 @@ async def list_bedrock_models_for_integration(
     """Fetch provider listing of AWS Bedrock integration."""
     try:
         return await _list_bedrock_models(integration, clients=clients)
+    except asyncio.CancelledError:
+        raise
     except (BotoCoreError, ClientError, ValueError) as exc:
         raise ListingProviderError(
             "AWS Bedrock model listing failed.",
@@ -760,6 +762,8 @@ async def list_vertex_models_for_integration(
     """Fetch provider listing of Google Vertex AI integration."""
     try:
         return await _list_vertex_models(integration, clients=clients)
+    except asyncio.CancelledError:
+        raise
     except (GoogleAuthError, httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "Google Vertex AI model listing failed.",
@@ -775,6 +779,8 @@ async def list_chatgpt_models_for_integration(
     """Fetch account-visible models from the ChatGPT Codex backend."""
     try:
         return await _list_chatgpt_models(integration, clients=clients)
+    except asyncio.CancelledError:
+        raise
     except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "ChatGPT model listing failed.",
@@ -790,6 +796,8 @@ async def list_kimi_models_for_integration(
     """Fetch account-visible models from the Kimi Code API."""
     try:
         return await _list_kimi_models(integration, clients=clients)
+    except asyncio.CancelledError:
+        raise
     except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "Kimi model listing failed.",
@@ -805,6 +813,8 @@ async def list_openrouter_models_for_integration(
     """Fetch account-visible text-output models from OpenRouter."""
     try:
         return await _list_openrouter_models(integration, clients=clients)
+    except asyncio.CancelledError:
+        raise
     except (httpx.HTTPError, OpenRouterError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "OpenRouter model listing failed.",
@@ -824,6 +834,8 @@ async def list_xai_models_for_integration(
         if integration.provider == LLMProvider.XAI_OAUTH:
             return await _list_xai_oauth_models(integration, clients=clients)
         raise ValueError("xAI integration provider is required.")
+    except asyncio.CancelledError:
+        raise
     except (
         OpenAIError,
         httpx.HTTPError,
@@ -843,6 +855,8 @@ async def list_openai_image_generation_models_for_integration(
     """List every exact model identifier visible to an OpenAI API-key integration."""
     try:
         return await _list_openai_image_generation_models(integration, clients=clients)
+    except asyncio.CancelledError:
+        raise
     except (OpenAIError, ValueError) as exc:
         raise ListingProviderError(
             "OpenAI image model listing failed.",
@@ -1596,6 +1610,8 @@ async def _list_openrouter_models(
                     timeout_ms=20_000,
                     retries=None,
                 )
+            except asyncio.CancelledError:
+                raise
             except ResponseValidationError as exc:
                 # SDK display fields are not Azents' catalog evidence contract.
                 if exc.status_code != 200 or payload is None:

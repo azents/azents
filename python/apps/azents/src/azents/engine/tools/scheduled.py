@@ -1,5 +1,6 @@
 """Root-only Scheduled Task management and execution Toolkit."""
 
+import asyncio
 import dataclasses
 import datetime
 import json
@@ -286,6 +287,8 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     timezone=args.timezone,
                     binding_id=args.channel_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             task = localize_scheduled_task_registration(task, at=args.at)
@@ -340,6 +343,8 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     session_id=self.session_id,
                     task_id=args.task_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             notification = (
@@ -408,6 +413,8 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     status=args.status,
                     result=args.result,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             if outcome.created:

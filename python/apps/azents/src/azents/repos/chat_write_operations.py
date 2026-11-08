@@ -1,5 +1,6 @@
 """REST chat write service."""
 
+import asyncio
 import dataclasses
 from typing import Annotated, NamedTuple, assert_never
 
@@ -283,6 +284,8 @@ class ChatWriteOperationsRepository:
                     ),
                     mailbox_item=mailbox_item,
                 )
+            except asyncio.CancelledError:
+                raise
             except ActiveProfileCaptureRequired as needed:
                 captured_admission = await self.active_profile_repository.capture(
                     needed.choice

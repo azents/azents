@@ -40,8 +40,8 @@ class HealthServer:
         metrics: RuntimeReplyDeliveryMetrics,
         port: int = _DEFAULT_PORT,
     ) -> None:
-        self._redis = redis
-        self._metrics = metrics
+        self.redis = redis
+        self.metrics = metrics
         self._port = port
         self._shutting_down = False
         self._runner: web.AppRunner | None = None
@@ -91,14 +91,16 @@ class HealthServer:
                 {"status": "not_ready", "reason": "shutting down"},
                 status=503,
             )
-        if self._redis is None:
+        if self.redis is None:
             return web.json_response({"status": "ok"})
         try:
             ping = (
-                self._redis.ping()
+                self.redis.ping()
             )  # redis.asyncio Redis type declaration is incomplete
             if inspect.isawaitable(ping):
                 await ping
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.warning("Readiness check failed: redis unavailable", exc_info=True)
             return web.json_response(
@@ -114,12 +116,12 @@ class HealthServer:
         while True:
             scheduled_at = loop.time() + _EVENT_LOOP_SAMPLE_INTERVAL_SECONDS
             await asyncio.sleep(_EVENT_LOOP_SAMPLE_INTERVAL_SECONDS)
-            self._metrics.record_event_loop_lag(loop.time() - scheduled_at)
+            self.metrics.record_event_loop_lag(loop.time() - scheduled_at)
             samples_since_log += 1
             if samples_since_log < _METRIC_LOG_INTERVAL_SAMPLES:
                 continue
             samples_since_log = 0
-            snapshot = self._metrics.snapshot()
+            snapshot = self.metrics.snapshot()
             logger.info(
                 "Runtime reply delivery metrics",
                 extra={

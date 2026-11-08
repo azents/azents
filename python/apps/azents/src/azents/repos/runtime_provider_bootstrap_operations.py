@@ -1,5 +1,6 @@
 """Completed database-only Runtime Provider bootstrap reconciliation."""
 
+import asyncio
 import dataclasses
 import datetime
 from collections.abc import Mapping
@@ -425,6 +426,8 @@ class RuntimeProviderBootstrapOperations:
                 provider_id=created.id,
                 now=now,
             )
+        except asyncio.CancelledError:
+            raise
         except _AuthenticationBindingConflict as conflict:
             await self._record_conflict(
                 session=session,
@@ -811,6 +814,8 @@ class RuntimeProviderBootstrapOperations:
                 provider_id=provider.id,
                 now=now,
             )
+        except asyncio.CancelledError:
+            raise
         except _AuthenticationBindingConflict as conflict:
             await self._record_conflict(
                 session=session,

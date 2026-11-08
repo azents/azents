@@ -1290,6 +1290,8 @@ async def _discard_partial_user_input_model_files(
                 model_file_ids=model_file_ids,
             )
         )
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception(
             "Failed to discard partially materialized user input ModelFiles",
@@ -1484,6 +1486,8 @@ async def resolve_agent_tools(
             )
             try:
                 await effect_admission.assert_current()
+            except asyncio.CancelledError:
+                raise
             except FunctionToolError:
                 continue
         resolve_ctx = ResolveContext(
@@ -1523,6 +1527,8 @@ async def resolve_agent_tools(
             registered_toolkit_always_expose_tools[id(resolved)] = (
                 toolkit.always_expose_tools
             )
+        except asyncio.CancelledError:
+            raise
         except FunctionToolError:
             if effect_admission is None:
                 raise

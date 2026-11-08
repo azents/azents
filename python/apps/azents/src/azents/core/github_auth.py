@@ -134,6 +134,8 @@ async def exchange_oauth_code(
         async with _sdk_error_contract():
             # The public OAuth strategy owns its client's context and close.
             auth = await strategy.async_exchange_token(client_factory(None))
+    except asyncio.CancelledError:
+        raise
     except AuthExpiredError as error:
         failure = _OAuthFailure.model_validate(
             error.args[1] if len(error.args) > 1 else {}

@@ -219,6 +219,8 @@ class ExternalChannelIngressDrainService:
                 return False
             await self._attempt_control_plans(completion.control_plans)
             return True
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelIngressProvisioningError as error:
             return await self._record_preparation_failure(
                 owner=owner,
@@ -338,6 +340,8 @@ class ExternalChannelIngressDrainService:
                     exclusive_start_position=tentative_cursor,
                     deadline=operation_deadline,
                 )
+            except asyncio.CancelledError:
+                raise
             except ExternalChannelHistoryError as error:
                 prepared.append(
                     _provider_failure(
@@ -420,6 +424,8 @@ class ExternalChannelIngressDrainService:
                         expires_at=now + datetime.timedelta(seconds=10)
                     ),
                 )
+            except asyncio.CancelledError:
+                raise
             except ExternalChannelWakeDispatchUnavailable:
                 self.metrics.record_wake_attempt(failed=True)
                 logger.warning(

@@ -1,5 +1,6 @@
 """Completed password-reset database operations."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -168,6 +169,8 @@ class PasswordResetOperationRepository:
                     ),
                 )
                 return token.user_id
+        except asyncio.CancelledError:
+            raise
         except _RejectedRedemption:
             return None
 

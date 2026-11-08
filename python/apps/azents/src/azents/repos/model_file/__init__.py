@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 
-from azents.core.enums import ModelFileStatus
+from azents.core.enums import ModelFileKind, ModelFileStatus
 from azents.rdb.models.model_file import RDBModelFile
 from azents.rdb.models.model_file_pin import RDBModelFilePin
 from azents.rdb.session_capabilities import ReadSession, WriteSession
@@ -38,7 +38,7 @@ class ModelFileRepository:
             agent_id=create.agent_id,
             name=create.name,
             media_type=create.media_type,
-            kind=create.kind,
+            kind=ModelFileKind(create.kind),
             size_bytes=create.size_bytes,
             created_run_id=create.created_run_id,
             created_run_index=create.created_run_index,

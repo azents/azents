@@ -1,5 +1,6 @@
 """One generic mutation tool surface over separate native Runtime/VFS adapters."""
 
+import asyncio
 import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Literal, Protocol, runtime_checkable
@@ -201,6 +202,8 @@ class RoutedMutationTools[PrincipalT = VfsReadContext]:
                 self.principal, request, tool_call_id=execution.call_id
             )
             result = await self.router.execute(admitted)
+        except asyncio.CancelledError:
+            raise
         except (VfsMutationError, VfsReadError) as error:
             raise FunctionToolError(
                 error.message,
@@ -278,6 +281,8 @@ class _RoutedPatchHandler[PrincipalT]:
                 tool_call_id=execution.call_id,
             )
             result = await self.owner.router.execute_patch(admitted)
+        except asyncio.CancelledError:
+            raise
         except VfsUriError as error:
             raise FunctionToolError(
                 str(error),

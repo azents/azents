@@ -3430,6 +3430,9 @@ class RedisRuntimeTransferStateStore:
         operation_failed = False
         try:
             yield token
+        except asyncio.CancelledError:
+            operation_failed = True
+            raise
         except BaseException:
             operation_failed = True
             raise
@@ -3888,6 +3891,8 @@ class RedisRuntimeTransferStateStore:
             queue(pipeline)
             try:
                 await pipeline.execute()
+            except asyncio.CancelledError:
+                raise
             except WatchError as exc:
                 raise RuntimeError(
                     "Runtime transfer mutation lock changed before commit"

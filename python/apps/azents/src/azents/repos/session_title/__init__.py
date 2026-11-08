@@ -1,5 +1,6 @@
 """Database operations for automatic Session title generation."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -139,6 +140,8 @@ class SessionTitleRepository:
                     session_id=None,
                     reservation=None,
                 )
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exc:
                 if (
                     captured is not None
@@ -245,6 +248,8 @@ class SessionTitleRepository:
                     reservation=None,
                 )
                 resulting = selected.operation
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exc:
                 resulting = exc.operation
                 exhausted = True

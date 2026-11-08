@@ -129,7 +129,7 @@ class RuntimeTransferS3Cleanup:
         safe_at = cleanup_safe_at(record)
         if safe_at is not None and self.clock() < safe_at:
             raise RuntimeTransferCleanupDeferred(safe_at=safe_at)
-        error: BaseException | None = None
+        error: Exception | None = None
         if record.preparation_object_handle is not None:
             preparation_identity = runtime_transfer_object_identity(
                 bucket=self._bucket,
@@ -148,7 +148,9 @@ class RuntimeTransferS3Cleanup:
                             upload_id=record.preparation_multipart_cleanup_handle,
                         )
                     )
-                except BaseException as exc:
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
                     error = exc
             elif (
                 record.preparation_cleanup_state
@@ -159,7 +161,9 @@ class RuntimeTransferS3Cleanup:
                         bucket=preparation_identity.bucket,
                         key=preparation_identity.key,
                     )
-                except BaseException as exc:
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
                     error = exc
         if record.pre_ready_object_handle is not None:
             pre_ready_identity = runtime_transfer_object_identity(
@@ -172,7 +176,9 @@ class RuntimeTransferS3Cleanup:
                     bucket=pre_ready_identity.bucket,
                     key=pre_ready_identity.key,
                 )
-            except BaseException as exc:
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
                 if error is None:
                     error = exc
         if record.direct_ingress_handle is not None:
@@ -186,7 +192,9 @@ class RuntimeTransferS3Cleanup:
                     bucket=ingress_identity.bucket,
                     key=ingress_identity.key,
                 )
-            except BaseException as exc:
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
                 if error is None:
                     error = exc
         if record.object is not None:
@@ -209,7 +217,9 @@ class RuntimeTransferS3Cleanup:
                         upload_id=record.multipart_cleanup_handle,
                     )
                 )
-            except BaseException as exc:
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
                 error = exc
         if record.completed_object_cleanup_required:
             object = record.object
@@ -229,7 +239,9 @@ class RuntimeTransferS3Cleanup:
                         expected_size=object.size,
                         expected_sha256=object.sha256,
                     )
-            except BaseException as exc:
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
                 if error is None:
                     error = exc
         if (

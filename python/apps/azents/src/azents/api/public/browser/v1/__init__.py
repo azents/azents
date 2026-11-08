@@ -1,5 +1,6 @@
 """Authenticated concrete Session Browser projection and page closure REST API."""
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -43,6 +44,8 @@ async def get_browser_projection(
             authentication_session_id=member.session_id,
             resource=RuntimeBrowserResource(handle, agent_id, session_id),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeBrowserRequestError as error:
         raise HTTPException(
             status_code=error.status_code,
@@ -78,6 +81,8 @@ async def close_browser_page(
             page_id=page_id,
             resource_incarnation=body.resource_incarnation,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeBrowserRequestError as error:
         raise HTTPException(
             status_code=error.status_code,
@@ -109,6 +114,8 @@ async def create_browser_page(
             authentication_session_id=member.session_id,
             resource=RuntimeBrowserResource(handle, agent_id, session_id),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeBrowserRequestError as error:
         raise HTTPException(
             status_code=error.status_code,
