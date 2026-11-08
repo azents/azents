@@ -302,7 +302,16 @@ the Node runner, finite positive duration and exit status. Missing or conflictin
 execution evidence cannot qualify a performance sample, even with green workflow
 metadata or JUnit.
 
-That job also runs the explicit Runtime Settings, GitHub Wizard, Agent Toolkit
+Linux CI source-executing jobs use the PR head commit, or the event commit for
+push and manual dispatch, matching the declared `CI_HEAD_SHA`. This includes
+Python matrix and migration tests, Docker-free support tests, Helm, structural
+hooks, E2E planning and aggregation, and workflow reporting alongside the
+existing image, E2E and TypeScript consumers. A synthetic PR merge checkout is
+not evidence for that declared head. The changed-scope job retains its
+full-history diff checkout and existing dispatch-parent base computation;
+source pinning does not alter enabled scopes, test selections or gate policy.
+
+The TypeScript job also runs the explicit Runtime Settings, GitHub Wizard, Agent Toolkit
 Management, Chat Session
 View and Routine tool-card component portfolio through Storybook's Vitest Chromium integration, with one
 browser worker. The story catalog remains available independently; only this
