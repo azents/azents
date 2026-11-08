@@ -9,7 +9,7 @@ dependencies = [
     "apscheduler==3.11.3",
     "azents-llm-contract",
     "azure-identity==1.27.0",
-    "azure-storage-blob==12.31.0",
+    "azure-storage-blob==12.31.1",
     "backoff==2.2.1",
     "expression==5.7.0",
     "fastapi==0.141.1",
