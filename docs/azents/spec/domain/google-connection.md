@@ -95,8 +95,11 @@ are directly visible in each Calendar, Drive and Gmail section and update only
 that service's group selection. Metadata, timeout and help are disclosed on demand.
 Picker remains under Drive, and local
 disconnect remains an explicit independent action. The editor body scrolls separately
-from its reachable Apply footer, so presets, disclosures and Picker controls are
-not covered by the action area.
+from its reachable Apply footer. In a modal, the header, Back control and action
+area reserve their own height while the body fits the remaining viewport. Alerts
+and service sections retain their natural height inside that scroller, so text is
+not compressed and presets, disclosures and Picker controls are not covered by
+the action area.
 
 Connect and recovery still use staged server review and atomic confirmation. A
 manager-started Web attempt automatically confirms a verified same-account result

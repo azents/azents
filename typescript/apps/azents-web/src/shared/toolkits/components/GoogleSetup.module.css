@@ -9,11 +9,35 @@
   display: flex;
   flex-direction: column;
   gap: var(--mantine-spacing-lg);
+  min-height: 0;
   max-height: calc(100dvh - var(--mantine-spacing-xl) * 5);
 }
 .content {
   min-height: 0;
   overflow-y: auto;
+}
+.content > * {
+  flex-shrink: 0;
+}
+
+:global(.mantine-Modal-content):has(.editor) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+:global(.mantine-Modal-content):has(.editor) > :global(.mantine-Modal-header) {
+  flex-shrink: 0;
+}
+:global(.mantine-Modal-body):has(.editor) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+:global(.mantine-Stack-root):has(> .editor) {
+  min-height: 0;
+}
+:global(.mantine-Stack-root):has(> .editor) > :not(.editor) {
+  flex-shrink: 0;
 }
 .service {
   border-top: 1px solid var(--mantine-color-default-border);
