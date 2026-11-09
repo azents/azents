@@ -639,6 +639,12 @@ Always-on required CI does not depend on external credentials.
   existing-Binding settings controls; and content-free evidence. Slack Socket and Discord
   Gateway journeys start the same provider-neutral External Channel gateway fixture,
   while the Agent Worker fixture remains responsible only for Session execution.
+- Slack approval checks identify delivered approval, joined and tracker controls
+  independently of concurrent model replies. The provider-native progress journey
+  holds its initial Plan update at the provider barrier while observing exact-thread
+  processing presence and initiator evidence; later transitions cannot invalidate
+  the recorded delivery. Approval deduplication and exact Session navigation remain
+  admission obligations.
 - The deterministic External Channel fixture explicitly enables provider participation;
   backend and Helm defaults remain disabled so the always-on lane is the only default
   environment that activates setup, parent-channel writes, and provider settings.
