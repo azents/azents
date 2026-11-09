@@ -3347,11 +3347,17 @@ def test_provider_native_channel_work_progress_journey(
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     azents_runtime_provider_docker_container: Container,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[DockerContainer]
+    ],
     slack_provider_fake_url: str,
     openai_proxy_url: str,
 ) -> None:
     """Render one rich canonical work snapshot through Slack's native Plan."""
     del azents_engine_worker_container, azents_runtime_provider_docker_container
+    gateway_context = azents_external_channel_gateway_factory()
+    gateway_context.__enter__()
+    request.addfinalizer(lambda: gateway_context.__exit__(None, None, None))
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
