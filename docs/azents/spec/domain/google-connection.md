@@ -94,7 +94,9 @@ exposes its complete group/operation controls in a disclosure. Permission preset
 are directly visible in each Calendar, Drive and Gmail section and update only
 that service's group selection. Metadata, timeout and help are disclosed on demand.
 Picker remains under Drive, and local
-disconnect remains an explicit independent action.
+disconnect remains an explicit independent action. The editor body scrolls separately
+from its reachable Apply footer, so presets, disclosures and Picker controls are
+not covered by the action area.
 
 Connect and recovery still use staged server review and atomic confirmation. A
 manager-started Web attempt automatically confirms a verified same-account result

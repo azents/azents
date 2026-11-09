@@ -130,6 +130,7 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
     );
   return (
     <Container
+      className={classes.editor}
       size="md"
       w="100%"
       miw={0}
@@ -648,37 +649,6 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                 />
               </Alert>
             )}
-            <Group className={classes.footer} justify="space-between">
-              <Text size="xs" c="dimmed">
-                {t(
-                  props.reconnect
-                    ? props.settingsDirty
-                      ? "dirty"
-                      : "clean"
-                    : "connectHint",
-                )}
-              </Text>
-              <Group gap="sm">
-                <Button
-                  variant="default"
-                  onClick={props.onClose}
-                  disabled={busy}
-                >
-                  {common(props.reconnect ? "cancel" : "cancel")}
-                </Button>
-                <Button
-                  onClick={props.onApply}
-                  loading={props.savingServices}
-                  disabled={
-                    busy ||
-                    unavailable ||
-                    (props.reconnect ? !props.settingsDirty : !selectable)
-                  }
-                >
-                  {t(props.reconnect ? "apply" : "connect")}
-                </Button>
-              </Group>
-            </Group>
           </>
         )}
         {editable && props.recoveryOnly && (
@@ -687,6 +657,35 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
           </Button>
         )}
       </Stack>
+      {editable && !props.recoveryOnly && (
+        <Group className={classes.footer} justify="space-between">
+          <Text size="xs" c="dimmed">
+            {t(
+              props.reconnect
+                ? props.settingsDirty
+                  ? "dirty"
+                  : "clean"
+                : "connectHint",
+            )}
+          </Text>
+          <Group gap="sm">
+            <Button variant="default" onClick={props.onClose} disabled={busy}>
+              {common("cancel")}
+            </Button>
+            <Button
+              onClick={props.onApply}
+              loading={props.savingServices}
+              disabled={
+                busy ||
+                unavailable ||
+                (props.reconnect ? !props.settingsDirty : !selectable)
+              }
+            >
+              {t(props.reconnect ? "apply" : "connect")}
+            </Button>
+          </Group>
+        </Group>
+      )}
     </Container>
   );
 }
