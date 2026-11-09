@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   deserializeGoogleDraft,
+  detachGoogleDraft,
   emptyGoogleMetadata,
   googleDraftMatches,
   googleReviewDecision,
@@ -225,4 +226,31 @@ void test("recovery keeps draft deltas without resurrecting denied groups", () =
     ),
     ["calendar_read"],
   );
+});
+
+void test("detached editor intent gets a fresh one-hour lifetime without extending OAuth authority", () => {
+  const now = Date.parse("2026-11-09T00:00:00Z");
+  const draft = deserializeGoogleDraft(
+    JSON.stringify({
+      handle: "team",
+      toolkitId: "toolkit",
+      attemptId: "attempt",
+      expiresAt: new Date(now - 1).toISOString(),
+      metadata: { ...emptyGoogleMetadata, name: "Unapplied" },
+      services: ["calendar"],
+      toolGroups: ["calendar_read"],
+      timeout: 12,
+      revision: 7,
+      baseline: null,
+    }),
+  );
+  assert.ok(draft);
+  const detached = detachGoogleDraft(draft, now);
+  const restored = deserializeGoogleDraft(JSON.stringify(detached));
+  assert.ok(restored);
+  assert.equal(restored.attemptId, void 0);
+  assert.equal(Date.parse(restored.expiresAt), now + 60 * 60 * 1000);
+  assert.equal(restored.metadata.name, "Unapplied");
+  assert.equal(restored.revision, 7);
+  assert.equal(draft.expiresAt, new Date(now - 1).toISOString());
 });

@@ -11,6 +11,7 @@ import {
 } from "../google-access";
 import {
   deserializeGoogleDraft,
+  detachGoogleDraft,
   emptyGoogleMetadata,
   GOOGLE_DRAFT_KEY,
   googleDraftMatches,
@@ -271,7 +272,7 @@ export function useGoogleSetupContainer(
     ) {
       const draft = readDraft(active.current);
       if (draft != null) {
-        saveDraft({ ...draft, attemptId: void 0 });
+        saveDraft(detachGoogleDraft(draft));
       }
       clearResume();
     }
@@ -403,7 +404,7 @@ export function useGoogleSetupContainer(
       return;
     }
     if (draft != null) {
-      saveDraft({ ...draft, attemptId: void 0 });
+      saveDraft(detachGoogleDraft(draft));
     }
     active.current = null;
     clearResume();

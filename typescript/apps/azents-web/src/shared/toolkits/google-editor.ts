@@ -47,6 +47,18 @@ export const googleDraftSchema = toolkitScopedInput({
 });
 export type GoogleEditorDraft = z.infer<typeof googleDraftSchema>;
 export const GOOGLE_DRAFT_KEY = "azents.google.editor";
+const GOOGLE_EDITOR_DRAFT_LIFETIME_MS = 60 * 60 * 1000;
+/** Retained editor intent has its own bounded lifetime, independent of OAuth. */
+export function detachGoogleDraft(
+  draft: GoogleEditorDraft,
+  now: number = Date.now(),
+): GoogleEditorDraft {
+  return {
+    ...draft,
+    attemptId: void 0,
+    expiresAt: new Date(now + GOOGLE_EDITOR_DRAFT_LIFETIME_MS).toISOString(),
+  };
+}
 export function deserializeGoogleDraft(
   value?: string,
 ): GoogleEditorDraft | null {

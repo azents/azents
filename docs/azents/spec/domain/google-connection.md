@@ -140,7 +140,9 @@ clearing the exact resume. A confirmed Apply adopts its published selection
 without another save; recovery reapplies only explicit unrelated draft deltas over
 that result. Completion, cancellation and superseded outcomes detach retained drafts
 from the ended attempt before clearing its resume; reopening restores their metadata,
-selection and original or safely rebased revision. A failed saved-state read stays
+selection and original or safely rebased revision. Detachment gives token-free
+editor intent a fresh one-hour lifetime; it does not extend OAuth attempt validity.
+A failed saved-state read stays
 in result-check recovery instead of redispatching publication. Acknowledged writes
 remain committed if optional list refresh fails. Historical outcomes are nonsecret
 observations and do not prove current readiness. Disconnect is local and does not promise Google revocation or
