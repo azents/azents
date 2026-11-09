@@ -1,4 +1,4 @@
-import { Modal } from "@mantine/core";
+import { Button, Modal, Stack } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
 import { useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
@@ -436,6 +436,93 @@ export const MobileSavedModal: Story = {
       dialog.clientWidth + 1,
     );
     await expect(body.getByRole("button", { name: "재인증" })).toBeVisible();
+  },
+};
+export const CompletedSettingsModal: Story = {
+  args: {
+    ...Complete.args,
+    ownership: "agent",
+    services: ["calendar", "drive", "gmail"],
+    toolGroups: ["calendar_read", "drive_read", "gmail_read"],
+    settingsDirty: true,
+  },
+  render: (args) => (
+    <Modal
+      opened
+      onClose={() => {}}
+      size="lg"
+      centered
+      title="Toolkit settings"
+    >
+      <Stack gap="md">
+        <Button variant="subtle" w="fit-content">
+          Back
+        </Button>
+        <GoogleSetup {...args} rootRef={{ current: null }} />
+      </Stack>
+    </Modal>
+  ),
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body),
+      dialog = body.getByRole("dialog"),
+      status = body.getByRole("status"),
+      apply = body.getByRole("button", { name: "Apply changes" });
+    const assertFooterVisible = async (): Promise<void> => {
+      const rect = apply.getBoundingClientRect(),
+        bounds = dialog.getBoundingClientRect();
+      await expect(rect.top).toBeGreaterThanOrEqual(bounds.top);
+      await expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom);
+      for (const y of [rect.top + 1, rect.bottom - 1]) {
+        const hit = apply.ownerDocument.elementFromPoint(
+          rect.x + rect.width / 2,
+          y,
+        );
+        await expect(apply.contains(hit)).toBe(true);
+      }
+    };
+    await assertFooterVisible();
+    await expect(dialog.scrollWidth).toBeLessThanOrEqual(
+      dialog.clientWidth + 1,
+    );
+    // Visibility alone does not detect text clipped by a flex-shrunk Alert.
+    await expect(status.scrollHeight).toBeLessThanOrEqual(
+      status.clientHeight + 1,
+    );
+    const description = body.getByText(
+      "The verified connection is applied. No additional save is needed.",
+    );
+    await expect(
+      description.getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(status.getBoundingClientRect().bottom);
+    for (const service of ["Calendar", "Drive", "Gmail"]) {
+      const presets = within(
+          body.getByRole("group", { name: `${service} Permission preset` }),
+        ),
+        button = presets.getByRole("button", { name: "Read only" });
+      button.scrollIntoView({ block: "center" });
+      const rect = button.getBoundingClientRect(),
+        hit = button.ownerDocument.elementFromPoint(
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2,
+        );
+      await expect(button.contains(hit)).toBe(true);
+      await userEvent.click(button);
+      await expect(args.onPresetChange).toHaveBeenCalledWith(
+        service.toLowerCase(),
+        "read_only",
+      );
+      await assertFooterVisible();
+    }
+    const advanced = body.getByText("Advanced settings");
+    advanced.scrollIntoView({ block: "center" });
+    await userEvent.click(advanced);
+    const name = body.getByLabelText("Toolkit name");
+    name.scrollIntoView({ block: "center" });
+    await userEvent.type(name, " updated");
+    await expect(args.onMetadataChange).toHaveBeenCalled();
+    await assertFooterVisible();
+    await userEvent.click(apply);
+    await expect(args.onApply).toHaveBeenCalled();
   },
 };
 export const PickerModalScroll: Story = {

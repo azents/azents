@@ -81,6 +81,7 @@ STORIES = {
         "Korean New Modal",
         "Korean Partial Review",
         "Mobile Saved Modal",
+        "Completed Settings Modal",
     ),
     "src/shared/toolkits/components/ToolkitTypeIcon.stories.tsx": ("All Providers",),
     "src/features/session-routines/components/SessionRoutines.stories.tsx": (
