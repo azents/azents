@@ -21,9 +21,60 @@ from azents.engine.events.types import (
 from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession
 from azents.repos.message import MessageRepository, _HistoricalMemoryScanBudget
-from azents.repos.message.repository_test import _native_artifact
+from azents.repos.message.repository_test import HistoricalMemoryClock, _native_artifact
 
 _PAYLOAD_ADAPTER = TypeAdapter(dict[str, JSONValue])
+
+
+def test_scan_deadline_is_exhausted_at_the_exact_elapsed_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = HistoricalMemoryClock()
+    monkeypatch.setattr(message_module, "time", clock)
+    budget = _HistoricalMemoryScanBudget.for_limit(1)
+    assert budget.deadline == 2.0
+    clock.now = 1.999
+    assert not budget.exhausted
+    clock.now = 2.0
+    assert budget.exhausted
+
+
+async def test_delayed_database_page_cannot_admit_rows_after_scan_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = HistoricalMemoryClock()
+    monkeypatch.setattr(message_module, "time", clock)
+    call = _row(
+        EventKind.CLIENT_TOOL_CALL,
+        ClientToolCallPayload(
+            call_id="generic",
+            name="generic_tool",
+            arguments="{}",
+            wire_dialect="json_function",
+            native_artifact=_native_artifact(),
+        ),
+        "1" * 32,
+    )
+    raw = AsyncMock(spec=AsyncSession)
+    page = Mock()
+    page.scalars.return_value = [call]
+
+    async def delayed_query(statement: object) -> Mock:
+        del statement
+        clock.now = 2.0
+        return page
+
+    raw.execute.side_effect = delayed_query
+    rows = await MessageRepository()._list_historical_memory_eligible_lane(
+        ReadWriteSession(raw),
+        session_id="s" * 32,
+        tail_event_id="f" * 32,
+        clause=RDBEvent.kind == EventKind.CLIENT_TOOL_CALL,
+        expected_tier=HistoricalMemoryEvidenceTier.TOOL,
+        limit=1,
+    )
+    assert rows == []
+    raw.execute.assert_awaited_once()
 
 
 def _row(

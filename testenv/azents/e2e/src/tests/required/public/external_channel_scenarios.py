@@ -1028,6 +1028,23 @@ def _successful_session_paths(provider_state: _ProviderState) -> list[str]:
     return paths
 
 
+def _slack_admission_control_posts(
+    state: _ProviderState,
+    approval_request_id: str,
+) -> list[_ProviderDelivery]:
+    """Select admission-owned posts, independent of concurrent model replies."""
+    return [
+        delivery
+        for delivery in state.deliveries
+        if delivery.operation == "chat.postMessage"
+        and delivery.outcome == "delivered"
+        and (
+            delivery.approval_request_id == approval_request_id
+            or delivery.safe_category in {"session_presence_joined", "activity_tracker"}
+        )
+    ]
+
+
 def _successful_session_navigation_categories(
     provider_state: _ProviderState,
 ) -> list[str]:
@@ -1977,16 +1994,11 @@ def test_http_admission_unknown_participant_and_approval_journey(
 
     def settled_provider_controls() -> _ProviderState | None:
         state = _provider_observation(slack_provider_fake_url)
-        counts = state.request_counts
-        has_processing_presence = any(
-            item.operation == "agents.sessions.setStatus"
-            and item.desired_state == "processing"
-            for item in state.presence
-        )
         if (
-            counts.get("chat.postMessage") == 3
-            and counts.get("chat.delete") == 1
-            and has_processing_presence
+            len(_slack_admission_control_posts(state, request_id)) == 3
+            and state.request_counts.get("chat.delete") == 1
+            and _successful_session_navigation_categories(state)
+            == ["session_presence_joined", "activity_tracker"]
         ):
             return state
         return None
@@ -2007,7 +2019,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert typed_counts["chat.getPermalink"] == 3
     # One access-review control is deleted after approval. Setup selection then
     # delivers the claim-scoped setup control, joined presence, and initial progress.
-    assert typed_counts["chat.postMessage"] == 3
+    assert len(_slack_admission_control_posts(provider_state, request_id)) == 3
     assert typed_counts["chat.delete"] == 1
     assert _successful_session_paths(provider_state) == [
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
@@ -2018,14 +2030,6 @@ def test_http_admission_unknown_participant_and_approval_journey(
         "activity_tracker",
     ]
     assert _successful_session_presence_states(provider_state) == ["joined"]
-    assert provider_state.presence[-1].model_dump(exclude_unset=True) == {
-        "operation": "agents.sessions.setStatus",
-        "channel": _CHANNEL_ID,
-        "thread_ts": root_timestamp,
-        "desired_state": "processing",
-        "has_initiator": True,
-        "outcome": "delivered",
-    }
     deliveries = provider_state.deliveries
     assert any(
         delivery.session_path
@@ -3343,11 +3347,17 @@ def test_provider_native_channel_work_progress_journey(
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     azents_runtime_provider_docker_container: Container,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[DockerContainer]
+    ],
     slack_provider_fake_url: str,
     openai_proxy_url: str,
 ) -> None:
     """Render one rich canonical work snapshot through Slack's native Plan."""
     del azents_engine_worker_container, azents_runtime_provider_docker_container
+    gateway_context = azents_external_channel_gateway_factory()
+    gateway_context.__enter__()
+    request.addfinalizer(lambda: gateway_context.__exit__(None, None, None))
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -3600,6 +3610,26 @@ def test_provider_native_channel_work_progress_journey(
         "reached": True,
         "released": False,
     }
+
+    # The pending Plan delivery holds the Run active while presence reconciles.
+    # Inspect delivery history rather than requiring processing to remain last.
+    wait_until(
+        lambda: any(
+            presence.model_dump(exclude_unset=True)
+            == {
+                "operation": "agents.sessions.setStatus",
+                "channel": _CHANNEL_ID,
+                "thread_ts": root_timestamp,
+                "desired_state": "processing",
+                "has_initiator": True,
+                "outcome": "delivered",
+            }
+            for presence in _provider_observation(slack_provider_fake_url).presence
+        ),
+        timeout=10,
+        interval=0.2,
+        message="Active Slack thread processing presence was not delivered",
+    )
 
     def rich_management_projection() -> ManagedBindingListResponse | None:
         projection = external_api.external_channel_v1_list_session_channels(

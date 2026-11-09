@@ -2758,40 +2758,6 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Watchdog idle after prefix then recover",
-        "hasToolResult": false,
-        "sequenceIndex": 0
-      },
-      "response": {
-        "content": "FAILED_IDLE_PREFIX_MUST_DISAPPEAR abcdefghijklmnopqrstuvwxyz"
-      },
-      "chunkSize": 40,
-      "recordedTimings": {
-        "ttftMs": 0,
-        "interChunkDelaysMs": [
-          0,
-          0,
-          0,
-          0,
-          1000
-        ],
-        "totalDurationMs": 1000
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "userMessage": "Watchdog idle after prefix then recover",
-        "hasToolResult": false,
-        "sequenceIndex": 1
-      },
-      "response": {
-        "content": "WATCHDOG_IDLE_PREFIX_RECOVERED"
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
         "userMessage": "Watchdog absolute cap cleans partial then recover",
         "hasToolResult": false,
         "sequenceIndex": 0

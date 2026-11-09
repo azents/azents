@@ -196,7 +196,22 @@ ordering. Teardown removes the replacement and restores the same original Worker
 its readiness, and log capture. Public/Admin services, database, bootstrap state,
 and the default fast-watchdog policy remain unchanged.
 
+The idle-after-prefix watchdog journey uses an explicit synthetic Responses stream:
+headers and a complete text-delta prefix are flushed before intentional parsed-event
+silence. Session-title requests do not consume its first sampling attempt; an
+explicit fixture reset starts each journey, and the next sampling attempt completes
+normally. The real watchdog, live-event removal, retry state and durable recovery
+remain product boundaries, with the existing fast idle/absolute policy unchanged.
+Offline support tests verify wire-event ordering without sleeping or opening a server.
+
 ### Historical Memory Deterministic Journey
+
+Repository semantic-lane and row-budget tests use a module-local controlled
+monotonic clock while retaining real database selection and projection. Separate
+clock-driven contracts verify deadline exhaustion and rejection of a database page
+that arrives after the scan deadline. Host scheduling therefore does not turn
+semantic selection assertions into wall-clock latency tests; production deadlines
+remain unchanged.
 
 The required Historical Memory public journey creates a Runtime-free Agent,
 integration and source Sessions through product APIs. Its
@@ -624,6 +639,12 @@ Always-on required CI does not depend on external credentials.
   existing-Binding settings controls; and content-free evidence. Slack Socket and Discord
   Gateway journeys start the same provider-neutral External Channel gateway fixture,
   while the Agent Worker fixture remains responsible only for Session execution.
+- Slack approval checks identify delivered approval, joined and tracker controls
+  independently of concurrent model replies. The provider-native progress journey
+  holds its initial Plan update at the provider barrier while observing exact-thread
+  processing presence and initiator evidence; later transitions cannot invalidate
+  the recorded delivery. Approval deduplication and exact Session navigation remain
+  admission obligations.
 - The deterministic External Channel fixture explicitly enables provider participation;
   backend and Helm defaults remain disabled so the always-on lane is the only default
   environment that activates setup, parent-channel writes, and provider settings.

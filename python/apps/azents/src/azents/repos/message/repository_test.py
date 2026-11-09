@@ -2,8 +2,10 @@
 
 import json
 
+import pytest
 from pydantic import TypeAdapter
 
+import azents.repos.message as message_module
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
@@ -41,6 +43,23 @@ from azents.testing.model_selection import (
 _JSON_PAYLOAD_ADAPTER: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(
     dict[str, JSONValue]
 )
+
+
+class HistoricalMemoryClock:
+    """Keep semantic selection independent from the host's scheduling latency."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def historical_memory_clock(monkeypatch: pytest.MonkeyPatch) -> HistoricalMemoryClock:
+    clock = HistoricalMemoryClock()
+    monkeypatch.setattr(message_module, "time", clock)
+    return clock
 
 
 def _native_artifact() -> NativeArtifact:
@@ -228,6 +247,7 @@ class TestMessageRepositoryPagination:
         assert has_newer is False
 
 
+@pytest.mark.usefixtures("historical_memory_clock")
 async def test_historical_memory_retrieval_bounds_semantic_lanes_independently(
     rdb_session: WriteSession,
 ) -> None:
@@ -392,6 +412,7 @@ async def test_historical_memory_retrieval_bounds_semantic_lanes_independently(
     assert event_ids[8] not in selected_ids
 
 
+@pytest.mark.usefixtures("historical_memory_clock")
 async def test_historical_memory_retrieval_stops_after_ineligible_row_budget(
     rdb_session: WriteSession,
 ) -> None:
@@ -434,6 +455,7 @@ async def test_historical_memory_retrieval_stops_after_ineligible_row_budget(
     assert events == []
 
 
+@pytest.mark.usefixtures("historical_memory_clock")
 async def test_registered_tool_scan_stops_after_ignored_call_budget(
     rdb_session: WriteSession,
 ) -> None:
