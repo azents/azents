@@ -17,6 +17,7 @@ Name | Type | Description | Notes
 **granted_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
 **accesses** | [**List[GoogleServiceAccess]**](GoogleServiceAccess.md) |  | 
+**granted_tools** | [**List[GoogleWorkspaceOperation]**](GoogleWorkspaceOperation.md) | Manager-only actual scope eligibility before local service/group selection; never execution authority. | 
 **drive_access** | [**GoogleDriveAccess**](GoogleDriveAccess.md) |  | 
 **renewable** | **bool** |  | 
 **service_access_verified** | **bool** | Saved grant metadata is not a live access probe. | 

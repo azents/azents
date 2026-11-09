@@ -332,6 +332,7 @@ __all__ = [
     "GoogleFinalSettings",
     "GoogleGroupDefinition",
     "GoogleIdentity",
+    "GoogleMetadataEdits",
     "GooglePickerTokenInput",
     "GooglePickerTokenOutput",
     "GooglePreparation",
@@ -1030,6 +1031,7 @@ from azentspublicclient.models.google_exchange_request import GoogleExchangeRequ
 from azentspublicclient.models.google_final_settings import GoogleFinalSettings as GoogleFinalSettings
 from azentspublicclient.models.google_group_definition import GoogleGroupDefinition as GoogleGroupDefinition
 from azentspublicclient.models.google_identity import GoogleIdentity as GoogleIdentity
+from azentspublicclient.models.google_metadata_edits import GoogleMetadataEdits as GoogleMetadataEdits
 from azentspublicclient.models.google_picker_token_input import GooglePickerTokenInput as GooglePickerTokenInput
 from azentspublicclient.models.google_picker_token_output import GooglePickerTokenOutput as GooglePickerTokenOutput
 from azentspublicclient.models.google_preparation import GooglePreparation as GooglePreparation

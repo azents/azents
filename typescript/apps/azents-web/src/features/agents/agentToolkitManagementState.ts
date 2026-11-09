@@ -54,6 +54,7 @@ export function canAuthorizeAgentToolkitOAuth(
     item.toolkit.config,
   );
   return (
+    item.toolkit.toolkit_type === "google" ||
     (item.toolkit.toolkit_type === "github" && eligibility.githubUser) ||
     item.toolkit.toolkit_type === "notion" ||
     item.toolkit.toolkit_type === "sentry" ||

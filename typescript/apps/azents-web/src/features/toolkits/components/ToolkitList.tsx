@@ -279,9 +279,13 @@ export function ToolkitList(props: ToolkitListProps): ReactElement {
               : m("catalogTitle")
         }
         size={
-          props.editor.type === "CREATE" || props.editor.type === "EDIT"
-            ? "xl"
-            : "lg"
+          (props.editor.type === "CREATE" &&
+            props.editor.toolkitType === "google") ||
+          (props.editor.type === "EDIT" && selected?.toolkit_type === "google")
+            ? "lg"
+            : props.editor.type === "CREATE" || props.editor.type === "EDIT"
+              ? "xl"
+              : "lg"
         }
         centered
         closeOnClickOutside={false}
@@ -374,6 +378,7 @@ export function ToolkitList(props: ToolkitListProps): ReactElement {
                       : props.onSetupPendingChange
                   }
                   onAbandonReady={props.onCreateAbandonReady}
+                  onCloseGuardReady={props.onCloseGuardReady}
                   {...(props.editor.type === "CREATE"
                     ? { initialToolkitType: props.editor.toolkitType }
                     : { toolkitId: props.editor.toolkitId })}

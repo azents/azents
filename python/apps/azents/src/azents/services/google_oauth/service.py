@@ -26,6 +26,7 @@ from azents.core.google_oauth import (
     GoogleSetup,
     GoogleSubject,
 )
+from azents.core.google_policy import GoogleService
 from azents.core.google_system_setting import (
     GoogleApplicationRegistration,
     GoogleApplicationUnavailable,
@@ -35,6 +36,7 @@ from azents.core.google_tool_groups import group_request_scopes
 from azents.core.google_workspace_policy import (
     IDENTITY_SCOPES,
     drive_access,
+    eligible_model_operations,
 )
 from azents.core.oauth2 import generate_pkce_pair
 from azents.core.toolkit_ownership import UserToolkitOwner
@@ -388,6 +390,8 @@ class GoogleOAuthService:
             expected_revision=desired.expected_revision,
             services=desired.services,
             tool_groups=desired.tool_groups,
+            timeout=desired.timeout,
+            metadata=desired.metadata,
         )
         return await self.status(subject, toolkit_id)
 
@@ -443,6 +447,20 @@ class GoogleOAuthService:
                 if connection is None
                 else connection.candidate.tokens.granted_scopes,
                 saved.tool_groups,
+            ),
+            granted_tools=tuple(
+                sorted(
+                    eligible_model_operations(
+                        (
+                            GoogleService.CALENDAR,
+                            GoogleService.DRIVE,
+                            GoogleService.GMAIL,
+                        ),
+                        None
+                        if connection is None
+                        else connection.candidate.tokens.granted_scopes,
+                    )
+                )
             ),
             drive_access=drive_access(
                 saved.services,

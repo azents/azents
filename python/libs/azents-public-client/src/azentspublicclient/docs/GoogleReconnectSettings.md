@@ -1,6 +1,6 @@
 # GoogleReconnectSettings
 
-Reconnect changes reviewed request intent, not unrelated saved metadata.
+Recovery preserves metadata unless the manager explicitly applies edits.
 
 ## Properties
 
@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
 **oauth_request_scopes** | **List[str]** |  | 
 **timeout** | **float** |  | 
+**metadata** | [**GoogleMetadataEdits**](GoogleMetadataEdits.md) |  | [optional] 
 
 ## Example
 

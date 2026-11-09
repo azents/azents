@@ -1,4 +1,5 @@
 import type { GoogleGroupPreset } from "./google-access";
+import type { GoogleReviewDecision } from "./google-editor";
 import type {
   GoogleConnectionOutput,
   GooglePreparation,
@@ -50,7 +51,6 @@ export interface GoogleSetupProps {
   toolGroups: GoogleToolGroup[];
   timeout: number;
   metadata: GoogleMetadata;
-  publishingAllowed: boolean;
   reconnect: boolean;
   ownership: "user" | "workspace" | "agent";
   cancelling: boolean;
@@ -63,19 +63,24 @@ export interface GoogleSetupProps {
   operationError: string | null;
   rootRef: RefObject<HTMLDivElement | null>;
   embedded: boolean;
+  settingsDirty: boolean;
+  recoveryOnly?: boolean;
+  reviewDecision: GoogleReviewDecision | null;
+  onApply: () => void;
+  onReauthenticate: () => void;
+  onClose: () => void;
+  onRetryAuthorization: () => Promise<void>;
   onServiceChange: (service: GoogleService, selected: boolean) => void;
   onGroupChange: (group: GoogleToolGroup, selected: boolean) => void;
-  onPresetChange: (preset: GoogleGroupPreset) => void;
+  onPresetChange: (service: GoogleService, preset: GoogleGroupPreset) => void;
   onSaveServices: () => Promise<void>;
   onOpenPicker: () => void;
   onClosePicker: () => void;
   onTimeoutChange: (value: number) => void;
   onMetadataChange: (patch: Partial<GoogleMetadata>) => void;
   onAuthorize: () => void;
-  onPublish: () => void;
-  onCheckOutcome: () => void;
-  onCancel: () => void;
-  onRestart: () => void;
+  onCheckOutcome: () => Promise<void>;
+  onCancel: () => Promise<void>;
   onRefresh: () => void;
   onAskDisconnect: () => void;
   onDismissDisconnect: () => void;

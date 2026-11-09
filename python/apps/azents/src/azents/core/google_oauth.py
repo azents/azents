@@ -173,8 +173,23 @@ class GoogleFinalSettings(GoogleWorkspaceFinalSettings):
     """Complete reviewed metadata and service/request settings; never grants."""
 
 
+class GoogleMetadataEdits(BaseModel):
+    """Explicit settings-apply intent; ordinary recovery omits this payload."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    expected_revision: int = Field(ge=0, strict=True)
+    name: str = Field(max_length=255)
+    slug: str
+    description: str | None
+    prompt: str | None
+    enabled: bool = Field(strict=True)
+    always_expose_tools: bool = Field(strict=True)
+
+
 class GoogleReconnectSettings(GoogleWorkspaceConfig):
-    """Reconnect changes reviewed request intent, not unrelated saved metadata."""
+    """Recovery preserves metadata unless the manager explicitly applies edits."""
+
+    metadata: GoogleMetadataEdits | None = None
 
 
 @dataclasses.dataclass(frozen=True)

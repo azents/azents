@@ -187,6 +187,8 @@ async def test_all_off_save_remains_connected_without_provider_io() -> None:
         expected_revision=7,
         services=(),
         tool_groups=groups_for_services(("calendar", "drive", "gmail")),
+        timeout=None,
+        metadata=None,
     )
     h.provider.refresh.assert_not_awaited()
     h.provider.exchange.assert_not_awaited()

@@ -21,8 +21,7 @@ import {
 import {
   deserializeGoogleResume,
   GOOGLE_RESUME_KEY,
-  googleResumeMatches,
-  googleReturnPath,
+  googleAgentReturnPath,
 } from "@/shared/toolkits/google-resume";
 import { projectGitHubUserMode } from "@/shared/toolkits/provider-config-views";
 import { usesToolkitCreationWizard } from "@/shared/toolkits/toolkit-form-lifecycle";
@@ -64,6 +63,12 @@ export interface AgentToolkitManagementContainerOutput extends AgentToolkitManag
   canAuthorizeShared: boolean;
   authorizationPendingId: string | null;
   githubUserPopup?: { toolkitId: string; popup: Window } | null;
+  googleRecovery?: AgentToolkitManagementItemResponse | null;
+  onCloseGoogleRecovery?: () => void;
+  onCompleteGoogleRecovery?: () => void;
+  onGoogleRecovered?: () => void;
+  googleRecovered?: boolean;
+  onCloseGuardReady?: (guard: (() => boolean) | null) => void;
   onGithubUserPopupAccepted: (popup: Window) => void;
   onAuthorize: (item: AgentToolkitManagementItemResponse) => void;
   onStartAdd: () => void;
@@ -109,6 +114,10 @@ export function useAgentToolkitManagementContainer({
     string | null
   >(null);
   const oauthPopup = useRef<Window | null>(null);
+  const closeGuard = useRef<(() => boolean) | null>(null);
+  const [googleRecovered, setGoogleRecovered] = useState(false);
+  const [googleRecovery, setGoogleRecovery] =
+    useState<AgentToolkitManagementItemResponse | null>(null);
   const [githubUserPopup, setGithubUserPopup] = useState<{
     toolkitId: string;
     popup: Window;
@@ -139,9 +148,11 @@ export function useAgentToolkitManagementContainer({
     });
     if (
       google != null &&
-      googleResumeMatches(google, { handle, agentId }, google.toolkitId) &&
-      google.returnPath ===
-        googleReturnPath({ handle, agentId }, google.toolkitId)
+      !("owner" in google) &&
+      google.handle === handle &&
+      (google.agentId === agentId ||
+        (google.agentId == null && google.returnAgentId === agentId)) &&
+      google.returnPath === googleAgentReturnPath(handle, agentId)
     ) {
       if (google.toolkitId == null) {
         setEditor({ type: "CREATE", toolkitType: "google" });
@@ -151,9 +162,15 @@ export function useAgentToolkitManagementContainer({
         (item) =>
           item.toolkit.id === google.toolkitId &&
           item.toolkit.toolkit_type === "google" &&
-          item.ownership_scope === "agent_only",
+          (item.ownership_scope === "agent_only"
+            ? google.agentId === agentId
+            : google.agentId == null),
       );
       if (target != null) {
+        if (google.purpose === "RECOVER" && google.returnAgentId === agentId) {
+          setGoogleRecovery(target);
+          return;
+        }
         setEditor({ type: "EDIT", toolkitConfigId: target.toolkit.id });
         return;
       }
@@ -287,6 +304,10 @@ export function useAgentToolkitManagementContainer({
         return;
       }
       setMutationState({ type: "IDLE" });
+      if (item.toolkit.toolkit_type === "google") {
+        setGoogleRecovery(item);
+        return;
+      }
       if (
         item.toolkit.toolkit_type === "github" &&
         projectGitHubUserMode(item.toolkit.config)
@@ -396,6 +417,9 @@ export function useAgentToolkitManagementContainer({
     ],
   );
   const closeEditor = useCallback((): void => {
+    if (closeGuard.current?.() === false) {
+      return;
+    }
     const newWizard =
       editor.type === "CREATE" && usesToolkitCreationWizard(editor.toolkitType);
     if (
@@ -441,16 +465,35 @@ export function useAgentToolkitManagementContainer({
     canAuthorizeShared,
     authorizationPendingId,
     githubUserPopup,
+    googleRecovery,
+    googleRecovered,
+    onCloseGuardReady: (guard) => {
+      closeGuard.current = guard;
+    },
+    onCompleteGoogleRecovery: () => {
+      setGoogleRecovery(null);
+    },
+    onGoogleRecovered: () => {
+      setGoogleRecovered(true);
+    },
+    onCloseGoogleRecovery: () => {
+      if (!setupPending && closeGuard.current?.() !== false) {
+        setGoogleRecovery(null);
+      }
+    },
     onGithubUserPopupAccepted,
     onAuthorize,
     onStartAdd: () => {
-      if (readOnly) {
+      if (readOnly || closeGuard.current?.() === false) {
         return;
       }
       setMutationState({ type: "IDLE" });
       setEditor({ type: "CATALOG", tab: "new" });
     },
     onCatalogTabChange: (tab) => {
+      if (closeGuard.current?.() === false) {
+        return;
+      }
       if (
         editor.type === "CREATE" &&
         usesToolkitCreationWizard(editor.toolkitType)
@@ -463,11 +506,21 @@ export function useAgentToolkitManagementContainer({
       setMutationState({ type: "IDLE" });
       setEditor({ type: "CATALOG", tab });
     },
-    onConfigureType: (toolkitType) =>
-      setEditor({ type: "CREATE", toolkitType }),
-    onDetails: (toolkitConfigId) =>
-      setEditor({ type: "DETAIL", toolkitConfigId }),
-    onEdit: (toolkitConfigId) => setEditor({ type: "EDIT", toolkitConfigId }),
+    onConfigureType: (toolkitType) => {
+      if (closeGuard.current?.() !== false) {
+        setEditor({ type: "CREATE", toolkitType });
+      }
+    },
+    onDetails: (toolkitConfigId) => {
+      if (closeGuard.current?.() !== false) {
+        setEditor({ type: "DETAIL", toolkitConfigId });
+      }
+    },
+    onEdit: (toolkitConfigId) => {
+      if (closeGuard.current?.() !== false) {
+        setEditor({ type: "EDIT", toolkitConfigId });
+      }
+    },
     onCloseEditor: closeEditor,
     onSetupPendingChange: setSetupPending,
     onCreatePublicationPendingChange: setCreatePublicationPending,

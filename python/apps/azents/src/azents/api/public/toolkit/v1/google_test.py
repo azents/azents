@@ -191,6 +191,7 @@ def test_service_save_routes_preserve_exact_manager_context(owner: str) -> None:
         granted_scopes=None,
         timeout=30.0,
         accesses=service_accesses((), None, tool_groups=groups_for_services(())),
+        granted_tools=(),
         drive_access=drive_access((), None),
         renewable=False,
         service_access_verified=False,

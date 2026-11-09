@@ -25,6 +25,11 @@ const resumeSchema = toolkitScopedInput({
     "UNKNOWN",
   ]),
   returnPath: z.string().startsWith("/"),
+  purpose: z.enum(["CONNECT", "RECOVER", "APPLY"]).optional(),
+  returnAgentId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]+$/)
+    .optional(),
 });
 export type GoogleResume = z.infer<typeof resumeSchema>;
 
@@ -46,13 +51,21 @@ export function decodeGoogleResume(value: unknown): GoogleResume | null {
     return null;
   }
   const data = parsed.data;
-  return isToolkitManagementPath(
-    googleResumeScope(data),
-    data.toolkitId ?? null,
-    data.returnPath,
-  )
+  const agentReturn =
+    !("owner" in data) &&
+    data.returnAgentId != null &&
+    data.returnPath === googleAgentReturnPath(data.handle, data.returnAgentId);
+  return agentReturn ||
+    isToolkitManagementPath(
+      googleResumeScope(data),
+      data.toolkitId ?? null,
+      data.returnPath,
+    )
     ? data
     : null;
+}
+export function googleAgentReturnPath(handle: string, agentId: string): string {
+  return `/w/${encodeURIComponent(handle)}/agents/${encodeURIComponent(agentId)}/settings/capabilities#agent-toolkits`;
 }
 export function deserializeGoogleResume(value?: string): GoogleResume | null {
   if (!value) {
@@ -88,7 +101,9 @@ export function sameGoogleResumeAttempt(
     current.attemptId === expected.attemptId &&
     current.stateDigest === expected.stateDigest &&
     current.expiresAt === expected.expiresAt &&
-    current.returnPath === expected.returnPath
+    current.returnPath === expected.returnPath &&
+    current.purpose === expected.purpose &&
+    current.returnAgentId === expected.returnAgentId
   );
 }
 /** Opaque correlation only; server-owned encrypted state remains authoritative. */

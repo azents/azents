@@ -110,6 +110,28 @@ function managerHarness(
   );
   return harness;
 }
+void test("Agent Google editor Back and catalog navigation respect the live draft guard", () => {
+  const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+  const harness = managerHarness(store, [
+    {
+      ownership_scope: "agent_only",
+      toolkit: { id: "saved", toolkit_type: "google" },
+    },
+  ]);
+  let output = harness.render({ handle: "team", agentId: "agent" });
+  harness.flushEffects();
+  invoke(output.onEdit, "saved");
+  output = harness.render();
+  let permit = false;
+  invoke(output.onCloseGuardReady, () => permit);
+  invoke(output.onDetails, "saved");
+  assert.equal(object(harness.render().editor).type, "EDIT");
+  invoke(output.onCatalogTabChange, "new");
+  assert.equal(object(harness.render().editor).type, "EDIT");
+  permit = true;
+  invoke(output.onDetails, "saved");
+  assert.equal(object(harness.render().editor).type, "DETAIL");
+});
 void test("actual Agent management restores Google create and uncertain publication", () => {
   for (const phase of ["REVIEW", "VERIFYING", "UNKNOWN", "PUBLISHING"]) {
     const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
@@ -146,6 +168,31 @@ void test("actual Agent management restores only the exact owned Google reconnec
   shared.flushEffects();
   assert.equal(object(shared.render().editor).type, "CLOSED");
 });
+for (const fromCard of [false, true]) {
+  void test(`Google recovery from ${fromCard ? "card" : "editor"} returns to its originating surface`, () => {
+    const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+    store.value = {
+      ...context("old", "saved"),
+      purpose: "RECOVER",
+      ...(fromCard && { returnAgentId: "agent" }),
+    };
+    const item = {
+      ownership_scope: "agent_only",
+      toolkit: { id: "saved", toolkit_type: "google" },
+    };
+    const harness = managerHarness(store, [item]);
+    harness.render({ handle: "team", agentId: "agent" });
+    harness.flushEffects();
+    const output = harness.render();
+    assert.equal(object(output.editor).type, fromCard ? "CLOSED" : "EDIT");
+    if (fromCard) {
+      assert.equal(object(output.googleRecovery).toolkit, item.toolkit);
+    } else {
+      assert.equal(output.googleRecovery, null);
+      assert.equal(object(output.editor).toolkitConfigId, "saved");
+    }
+  });
+}
 for (const action of ["close", "back"]) {
   void test(`actual Agent Google ${action} invokes exact abandonment and guards unknown publication`, () => {
     const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);

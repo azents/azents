@@ -23,6 +23,7 @@ from azents.core.google_oauth import (
     GoogleConnectionStatus,
     GoogleFinalSettings,
     GoogleManager,
+    GoogleMetadataEdits,
     GoogleOAuthError,
     GooglePersonalSubject,
     GooglePublication,
@@ -58,7 +59,7 @@ from azents.core.tools import GoogleToolkitConfig
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.google_oauth import RDBGoogleAttempt, RDBGoogleConnection
-from azents.rdb.models.toolkit import RDBToolkitConfig
+from azents.rdb.models.toolkit import RDBAgentToolkit, RDBToolkitConfig
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -506,6 +507,8 @@ class GoogleOAuthRepository:
         expected_revision: int,
         services: tuple[GoogleService, ...],
         tool_groups: tuple[GoogleToolGroup, ...],
+        timeout: float | None = None,
+        metadata: GoogleMetadataEdits | None = None,
     ) -> None:
         """Save only local switches while preserving credential and request intent."""
         async with self.session_manager() as session:
@@ -516,13 +519,57 @@ class GoogleOAuthRepository:
                     "stale", "Google settings changed. Reload current settings."
                 )
             config = GoogleToolkitConfig.model_validate(toolkit.config)
+            if metadata is not None:
+                await self._apply_metadata(session, toolkit, metadata)
             toolkit.config = config.model_copy(
                 update={
                     "services": tuple(sorted(set(services))),
                     "tool_groups": tuple(sorted(set(tool_groups))),
+                    "timeout": config.timeout if timeout is None else timeout,
                 }
             ).model_dump(mode="json")
             toolkit.revision += 1
+
+    async def _apply_metadata(
+        self,
+        session: WriteSession,
+        toolkit: RDBToolkitConfig,
+        metadata: GoogleMetadataEdits,
+    ) -> None:
+        """Apply validated metadata under the same owner/revision transaction."""
+        if toolkit.revision != metadata.expected_revision:
+            raise GoogleOAuthError("stale", "Google settings changed. Reload settings.")
+        identifiers = resolve_create_identifiers(
+            toolkit_type="google",
+            canonical_name="Google",
+            submitted_name=metadata.name,
+            submitted_slug=metadata.slug,
+        )
+        if isinstance(identifiers, IdentifierValidationError):
+            raise GoogleOAuthError("invalid_selection", identifiers.detail)
+        if identifiers.slug != toolkit.slug:
+            agent_ids = list(
+                await session.write_session.scalars(
+                    sa.select(RDBAgentToolkit.agent_id).where(
+                        RDBAgentToolkit.toolkit_id == toolkit.id
+                    )
+                )
+            )
+            if toolkit.owner_agent_id is not None:
+                agent_ids.append(toolkit.owner_agent_id)
+            for agent_id in sorted(set(agent_ids)):
+                await self.namespaces.ensure_active(
+                    session,
+                    agent_id=agent_id,
+                    toolkit_id=toolkit.id,
+                    base_slug=identifiers.slug,
+                )
+        toolkit.name = identifiers.name
+        toolkit.slug = identifiers.slug
+        toolkit.description = metadata.description
+        toolkit.prompt = metadata.prompt
+        toolkit.enabled = metadata.enabled
+        toolkit.always_expose_tools = metadata.always_expose_tools
 
     async def admit_picker(
         self,
@@ -777,7 +824,10 @@ class GoogleOAuthRepository:
             )
             row = await self._row(session, subject, attempt_id)
             if row.status is GoogleAttemptStatus.PUBLISHED:
-                if row.final_settings != settings.model_dump(mode="json"):
+                if (
+                    row.final_settings is None
+                    or _FINAL_SETTINGS.validate_python(row.final_settings) != settings
+                ):
                     raise GoogleOAuthError(
                         "stale", "Google confirmation settings changed."
                     )
@@ -898,6 +948,9 @@ class GoogleOAuthRepository:
                             "Reload before reconnecting.",
                         )
                     toolkit_id = setup.target.toolkit_id
+                    if settings.metadata is not None:
+                        toolkit = await self._toolkit(session, subject, toolkit_id)
+                        await self._apply_metadata(session, toolkit, settings.metadata)
                     await session.write_session.execute(
                         sa.delete(RDBGoogleConnection).where(
                             RDBGoogleConnection.toolkit_id == toolkit_id,

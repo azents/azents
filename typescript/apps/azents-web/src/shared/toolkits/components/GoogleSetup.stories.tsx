@@ -1,14 +1,13 @@
+import { Modal } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
 import { useState } from "react";
-import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import koreanMessages from "@/i18n/ko-KR-messages";
-import { expectReadableContrast } from "@/shared/storybook/contrast";
-import { googlePresetGroups } from "../google-access";
+import { emptyGoogleMetadata } from "../google-editor";
 import {
   googleFixtureScopes,
   googleGroupCatalog,
 } from "../google-group-fixtures";
-import { canPublishGoogleReview } from "../google-types";
 import { GoogleSetup } from "./GoogleSetup";
 import type { GoogleSetupProps } from "../google-types";
 import type {
@@ -30,12 +29,12 @@ const review: GoogleReview = {
   expires_at: "2030-01-01T00:00:00Z",
   identity: {
     issuer: "https://accounts.google.com",
-    subject: "test-account",
+    subject: "account",
     email: "reader@example.invalid",
   },
-  client_id: "test-client",
+  client_id: "client",
   ownership: "workspace_shared",
-  reconnect_toolkit_id: null,
+  reconnect_toolkit_id: "toolkit",
   services: ["calendar", "gmail"],
   tool_groups: ["calendar_read", "gmail_read"],
   oauth_request_scopes: googleFixtureScopes(["calendar", "gmail"]),
@@ -47,7 +46,7 @@ const review: GoogleReview = {
       enabled: true,
       status: "partial",
       permitted_tools: ["calendar_list_events"],
-      unavailable_tools: ["calendar_create_event"],
+      unavailable_tools: ["calendar_list_calendars"],
     },
     {
       service: "gmail",
@@ -55,13 +54,6 @@ const review: GoogleReview = {
       status: "not_granted",
       permitted_tools: [],
       unavailable_tools: ["gmail_search_messages"],
-    },
-    {
-      service: "drive",
-      enabled: false,
-      status: "disabled",
-      permitted_tools: [],
-      unavailable_tools: ["drive_search_files"],
     },
   ],
   drive_access: noDrive,
@@ -71,20 +63,12 @@ const review: GoogleReview = {
   service_access_verified: false,
 };
 const saved: GoogleConnectionOutput = {
+  ...review,
+  granted_tools: review.accesses.flatMap((access) => access.permitted_tools),
   toolkit_id: "toolkit",
   revision: 7,
   connection_id: "connection",
   status: "connected",
-  identity: review.identity,
-  services: review.services,
-  tool_groups: review.tool_groups,
-  oauth_request_scopes: review.oauth_request_scopes,
-  granted_scopes: review.granted_scopes,
-  timeout: 30,
-  accesses: review.accesses,
-  drive_access: noDrive,
-  renewable: true,
-  service_access_verified: false,
 };
 const props: GoogleSetupProps = {
   preparation: {
@@ -103,40 +87,36 @@ const props: GoogleSetupProps = {
   services: [],
   toolGroups: [],
   timeout: 30,
-  metadata: {
-    name: "",
-    slug: "",
-    description: "",
-    prompt: "",
-    enabled: true,
-    alwaysExposeTools: false,
-  },
-  publishingAllowed: false,
+  metadata: emptyGoogleMetadata,
   reconnect: false,
   ownership: "workspace",
   cancelling: false,
   disconnecting: false,
   savingServices: false,
   servicesDirty: false,
+  settingsDirty: false,
+  reviewDecision: null,
   picker: { type: "IDLE" },
   pickerAvailable: false,
   disconnectConfirmation: false,
   operationError: null,
   rootRef: { current: null },
-  embedded: false,
+  embedded: true,
   onServiceChange: fn(),
   onGroupChange: fn(),
   onPresetChange: fn(),
   onSaveServices: fn(() => Promise.resolve()),
+  onApply: fn(),
+  onReauthenticate: fn(),
+  onClose: fn(),
+  onRetryAuthorization: fn(() => Promise.resolve()),
   onOpenPicker: fn(),
   onClosePicker: fn(),
   onTimeoutChange: fn(),
   onMetadataChange: fn(),
   onAuthorize: fn(),
-  onPublish: fn(),
-  onCheckOutcome: fn(),
-  onCancel: fn(),
-  onRestart: fn(),
+  onCheckOutcome: fn(() => Promise.resolve()),
+  onCancel: fn(() => Promise.resolve()),
   onRefresh: fn(),
   onAskDisconnect: fn(),
   onDismissDisconnect: fn(),
@@ -153,174 +133,221 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const ExplicitSelection: Story = {
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    for (const toggle of canvas.getAllByRole("switch")) {
-      await expect(toggle).not.toBeChecked();
+    const c = within(canvasElement);
+    for (const service of ["Calendar", "Drive", "Gmail"]) {
+      await expect(c.getByRole("switch", { name: service })).not.toBeChecked();
     }
     await expect(
-      canvas.getByRole("button", { name: "Continue to Google" }),
+      c.getByRole("button", { name: "Connect to Google" }),
     ).toBeDisabled();
-    await userEvent.click(canvas.getByRole("switch", { name: "Drive" }));
+    await expect(c.getByLabelText("Toolkit name")).not.toBeVisible();
+    await userEvent.click(c.getByRole("switch", { name: "Drive" }));
     await expect(args.onServiceChange).toHaveBeenCalledWith("drive", true);
   },
 };
 export const SelectedServices: Story = {
-  args: { services: ["drive"], toolGroups: ["drive_read"] },
+  args: {
+    services: ["calendar", "drive", "gmail"],
+    toolGroups: ["calendar_read", "drive_read", "gmail_read"],
+  },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByRole("switch", { name: "Drive" })).toBeChecked();
-    await userEvent.click(
-      canvas.getByRole("button", { name: "Continue to Google" }),
-    );
-    await expect(args.onAuthorize).toHaveBeenCalled();
+    const c = within(canvasElement);
+    for (const service of ["Calendar", "Drive", "Gmail"]) {
+      const presets = within(
+        c.getByRole("group", { name: `${service} Permission preset` }),
+      );
+      const read = presets.getByRole("button", { name: "Read only" });
+      await expect(read).toBeVisible();
+      await userEvent.click(read);
+      await expect(args.onPresetChange).toHaveBeenCalledWith(
+        service.toLowerCase(),
+        "read_only",
+      );
+    }
+    await userEvent.click(c.getByRole("button", { name: "Connect to Google" }));
+    await expect(args.onApply).toHaveBeenCalled();
+    await expect(c.getByText("calendar_list_events")).not.toBeVisible();
+    const permissions = c.getAllByText("Permissions and tools").at(0);
+    if (permissions == null) {
+      throw new Error("Calendar permissions are missing.");
+    }
+    await userEvent.click(permissions);
+    await expect(
+      c.getByRole("checkbox", { name: "Read calendars and events" }),
+    ).toBeVisible();
   },
 };
-function SelectionFixture(args: GoogleSetupProps): React.ReactElement {
-  const [groups, setGroups] = useState(args.toolGroups);
-  return (
-    <GoogleSetup
-      {...args}
-      toolGroups={groups}
-      onGroupChange={(group, selected) =>
-        setGroups((current) =>
-          selected
-            ? [...current, group]
-            : current.filter((item) => item !== group),
-        )
-      }
-      onPresetChange={(preset) =>
-        setGroups(googlePresetGroups(preset, args.services, googleGroupCatalog))
-      }
-    />
-  );
-}
-export const EditablePresets: Story = {
-  args: { services: ["gmail", "calendar", "drive"], toolGroups: [] },
-  render: (args) => <SelectionFixture {...args} />,
+export const SavedEdit: Story = {
+  args: {
+    reconnect: true,
+    saved: { type: "READY", detail: saved },
+    services: saved.services,
+    toolGroups: saved.tool_groups,
+    metadata: { ...emptyGoogleMetadata, name: "Google", slug: "google" },
+  },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    const authorize = canvas.getByRole("button", {
-      name: "Continue to Google",
-    });
-    await expect(authorize).toBeDisabled();
-    await userEvent.click(canvas.getByRole("button", { name: /^Read only$/ }));
-    const read = canvas.getByRole("checkbox", {
-      name: "Read mail and attachments",
-    });
-    const send = canvas.getByRole("checkbox", {
-      name: "Send, reply and forward mail",
-    });
-    await expect(read).toBeChecked();
-    await expect(send).not.toBeChecked();
-    await userEvent.click(send);
-    await expect(send).toBeChecked();
-    await userEvent.click(read);
-    await expect(read).not.toBeChecked();
-    await userEvent.click(authorize);
-    await expect(args.onAuthorize).toHaveBeenCalled();
-    await userEvent.click(
-      canvas.getByRole("button", { name: "Clear selection" }),
-    );
-    await expect(authorize).toBeDisabled();
+    const c = within(canvasElement);
+    await expect(
+      c.getByRole("button", { name: "Reauthenticate" }),
+    ).toBeVisible();
+    await expect(
+      c.getByRole("button", { name: "Apply changes" }),
+    ).toBeDisabled();
+    await userEvent.click(c.getByRole("button", { name: "Reauthenticate" }));
+    await expect(args.onReauthenticate).toHaveBeenCalled();
+    await expect(
+      c.queryByText("1. Prepare your connection"),
+    ).not.toBeInTheDocument();
   },
 };
-
-function ReviewFixture(args: GoogleSetupProps): React.ReactElement {
-  const [services, setServices] = useState(args.services);
-  const current = args.flow.type === "REVIEW" ? args.flow.review : review;
+function Editable(args: GoogleSetupProps): React.ReactElement {
+  const [metadata, setMetadata] = useState(args.metadata);
+  const [dirty, setDirty] = useState(false);
   return (
     <GoogleSetup
       {...args}
       rootRef={{ current: null }}
-      services={services}
-      publishingAllowed={canPublishGoogleReview(current, services, Date.now())}
-      onServiceChange={(service, selected) =>
-        setServices((previous) =>
-          selected
-            ? [...previous, service]
-            : previous.filter((item) => item !== service),
-        )
-      }
+      metadata={metadata}
+      settingsDirty={dirty}
+      onMetadataChange={(patch) => {
+        setMetadata((current) => ({ ...current, ...patch }));
+        setDirty(true);
+      }}
     />
   );
 }
-export const PartialGrantReview: Story = {
-  args: {
-    flow: { type: "REVIEW", review },
-    services: ["calendar", "gmail"],
-    toolGroups: review.tool_groups,
-  },
-  render: (args) => <ReviewFixture {...args} />,
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
+export const AdvancedEdit: Story = {
+  args: SavedEdit.args,
+  render: (args) => <Editable {...args} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(c.getByText("Advanced settings"));
+    await userEvent.type(c.getByLabelText("Toolkit name"), " renamed");
     await expect(
-      canvas.getByText("Partially permitted", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByText("Not granted", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByRole("heading", { name: "Final tool groups" }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByText("1 of 4 tools available", { exact: true }),
-    ).toBeVisible();
-    const save = canvas.getByRole("button", { name: "Save Google Toolkit" });
-    await expect(save).toBeEnabled();
-    await userEvent.click(save);
-    await expect(args.onPublish).toHaveBeenCalled();
+      c.getByRole("button", { name: "Apply changes" }),
+    ).toBeEnabled();
   },
 };
-export const PersonalReview: Story = {
-  ...PartialGrantReview,
+export const PartialGrantReview: Story = {
+  args: {
+    ...SavedEdit.args,
+    flow: { type: "REVIEW", review },
+    reviewDecision: "PARTIAL",
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement);
+    await expect(
+      c.getByRole("heading", { name: "Some permissions are missing" }),
+    ).toBeVisible();
+    await userEvent.click(c.getByRole("button", { name: "Reauthenticate" }));
+    await expect(args.onRetryAuthorization).toHaveBeenCalled();
+    await expect(c.getByRole("button", { name: "Cancel" })).toBeVisible();
+  },
+};
+export const DifferentAccount: Story = {
   args: {
     ...PartialGrantReview.args,
-    ownership: "user",
-    flow: { type: "REVIEW", review: { ...review, ownership: "personal" } },
+    reviewDecision: "ACCOUNT",
+    flow: {
+      type: "REVIEW",
+      review: {
+        ...review,
+        identity: {
+          ...review.identity,
+          subject: "new-account",
+          email: "new@example.invalid",
+        },
+      },
+    },
   },
   play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
     await expect(
-      within(canvasElement).getByText(
-        /Only your personal Sessions with allowed Agents/,
+      c.getByText(
+        "Google returned a different account. Reauthenticate with the saved account. Your existing connection has not changed.",
       ),
+    ).toBeVisible();
+    await expect(
+      c.getByRole("button", { name: "Reauthenticate" }),
     ).toBeVisible();
   },
 };
 export const UnknownGrant: Story = {
   args: {
+    ...PartialGrantReview.args,
+    reviewDecision: "UNUSABLE",
     flow: {
       type: "REVIEW",
-      review: {
-        ...review,
-        grant_result: "unknown",
-        granted_scopes: null,
-        can_confirm: false,
-        accesses: review.accesses.map((access) => ({
-          ...access,
-          status: "unknown",
-          permitted_tools: [],
-        })),
-      },
+      review: { ...review, granted_scopes: null, can_confirm: false },
     },
-    services: ["calendar"],
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("button", {
+        name: "Reauthenticate",
+      }),
+    ).toBeEnabled();
   },
 };
 export const NoRenewal: Story = {
   args: {
+    ...UnknownGrant.args,
     flow: {
       type: "REVIEW",
       review: { ...review, renewable: false, can_confirm: false },
     },
-    services: ["calendar"],
+  },
+};
+export const UnknownPublication: Story = {
+  args: {
+    ...SavedEdit.args,
+    flow: { type: "UNKNOWN", checking: false, message: null },
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement);
+    await userEvent.click(
+      c.getByRole("button", { name: "Check saved result" }),
+    );
+    await expect(args.onCheckOutcome).toHaveBeenCalled();
+    await expect(
+      c.queryByRole("button", { name: "Apply changes" }),
+    ).not.toBeInTheDocument();
+  },
+};
+export const Complete: Story = {
+  args: {
+    ...SavedEdit.args,
+    flow: {
+      type: "COMPLETE",
+      outcome: {
+        toolkit_id: "toolkit",
+        connection_id: "connection",
+        current: true,
+      },
+    },
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const c = within(canvasElement);
+    await expect(c.getByRole("status")).toHaveTextContent(
+      "No additional save is needed",
+    );
     await expect(
-      canvas.getByRole("button", { name: "Save Google Toolkit" }),
+      c.getByRole("button", { name: "Apply changes" }),
     ).toBeDisabled();
-    await expect(
-      canvas.getByText(/No renewable credential was returned/),
-    ).toBeVisible();
+  },
+};
+export const Loading: Story = {
+  args: { preparation: { type: "LOADING" }, saved: { type: "LOADING" } },
+};
+export const StatusError: Story = {
+  args: {
+    saved: { type: "ERROR", message: "Unable to load the saved connection." },
+  },
+};
+export const Verifying: Story = { args: { flow: { type: "VERIFYING" } } };
+export const Failed: Story = {
+  args: {
+    flow: { type: "ERROR", message: "Authorization could not be verified." },
   },
 };
 export const MissingOperator: Story = {
@@ -338,277 +365,104 @@ export const MissingOperator: Story = {
     },
   },
 };
-export const Loading: Story = {
-  args: { preparation: { type: "LOADING" }, saved: { type: "LOADING" } },
-};
-export const StatusError: Story = {
-  args: {
-    saved: { type: "ERROR", message: "Unable to load this saved connection." },
-  },
-};
-export const Verifying: Story = { args: { flow: { type: "VERIFYING" } } };
-export const Failed: Story = {
-  args: {
-    flow: { type: "ERROR", message: "Authorization could not be verified." },
-  },
-};
-export const UnknownPublication: Story = {
-  args: { flow: { type: "UNKNOWN", checking: false, message: null } },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(
-      canvas.getByRole("button", { name: "Check saved result" }),
-    );
-    await expect(args.onCheckOutcome).toHaveBeenCalled();
-  },
-};
-export const SavedReconnectRequired: Story = {
-  args: {
-    reconnect: true,
-    services: saved.services,
-    toolGroups: saved.tool_groups,
-    saved: {
-      type: "READY",
-      detail: { ...saved, status: "reconnect_required" },
-    },
-  },
-};
-export const SavedLightContrast: Story = {
-  globals: { colorScheme: "light" },
-  args: {
-    ...SavedReconnectRequired.args,
-    saved: { type: "READY", detail: saved },
-  },
-  play: async ({ canvasElement }) => {
-    await waitFor(async () => {
-      const badges = canvasElement.querySelectorAll(".mantine-Badge-root");
-      await expect(badges.length).toBeGreaterThan(0);
-      for (const badge of badges) {
-        await expectReadableContrast(badge);
-      }
-    });
-  },
-};
-export const SavedDarkContrast: Story = {
-  ...SavedLightContrast,
-  globals: { colorScheme: "dark" },
-};
 export const DisconnectConfirmation: Story = {
-  args: { ...SavedReconnectRequired.args, disconnectConfirmation: true },
+  args: { ...SavedEdit.args, disconnectConfirmation: true },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    await expect(
-      canvas.getByText(/does not revoke Google consent/),
-    ).toBeVisible();
+    const c = within(canvasElement);
+    await expect(c.getByText(/does not revoke Google consent/)).toBeVisible();
     await userEvent.click(
-      canvas.getByRole("button", { name: "Disconnect locally" }),
+      c.getByRole("button", { name: "Disconnect locally" }),
     );
     await expect(args.onDisconnect).toHaveBeenCalled();
   },
 };
-export const AllServicesOff: Story = {
+export const PickerOpen: Story = {
   args: {
-    reconnect: true,
+    ...SavedEdit.args,
+    services: ["drive"],
     saved: {
       type: "READY",
       detail: {
         ...saved,
-        services: [],
-        accesses: saved.accesses.map((access) => ({
-          ...access,
-          enabled: false,
-          status: "disabled",
-          permitted_tools: [],
-        })),
+        services: ["drive"],
+        drive_access: {
+          ...noDrive,
+          whole_content_read: true,
+          app_file_write: true,
+        },
       },
     },
-  },
-  play: async ({ canvasElement }) => {
-    await expect(
-      within(canvasElement).getByText(
-        /saved account and grant remain connected/,
-      ),
-    ).toBeVisible();
-  },
-};
-export const LocalServiceChanges: Story = {
-  args: { ...SavedReconnectRequired.args, services: [], servicesDirty: true },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    const save = canvas.getByRole("button", { name: "Save service switches" });
-    await expect(save).toBeEnabled();
-    await userEvent.click(save);
-    await expect(args.onSaveServices).toHaveBeenCalled();
-    await expect(
-      canvas.getByRole("button", { name: "Authorize replacement connection" }),
-    ).toBeDisabled();
-  },
-};
-export const SavingServices: Story = {
-  args: { ...LocalServiceChanges.args, savingServices: true },
-};
-export const ServiceSaveError: Story = {
-  args: {
-    ...LocalServiceChanges.args,
-    operationError:
-      "Service settings changed. Review the refreshed connection.",
-  },
-};
-const mixedDrive = {
-  ...noDrive,
-  whole_content_read: true,
-  whole_metadata_read: true,
-  app_file_read: true,
-  app_file_write: true,
-};
-export const MixedDriveGrant: Story = {
-  args: {
-    ...SavedReconnectRequired.args,
-    services: ["drive"],
-    saved: {
-      type: "READY",
-      detail: { ...saved, services: ["drive"], drive_access: mixedDrive },
-    },
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByText("Read content across Drive.")).toBeVisible();
-    await expect(canvas.getByText(/Write only app-created/)).toBeVisible();
-  },
-};
-export const PickerLoading: Story = {
-  args: {
-    ...MixedDriveGrant.args,
-    picker: { type: "LOADING" },
-    pickerAvailable: true,
-  },
-};
-export const PickerOpen: Story = {
-  args: {
-    ...MixedDriveGrant.args,
     picker: { type: "OPEN" },
     pickerAvailable: true,
   },
   play: async ({ canvasElement, args }) => {
-    const close = within(canvasElement).getByRole("button", {
-      name: "Close file chooser",
-    });
-    close.focus();
+    const c = within(canvasElement);
+    const permissions = c.getAllByText("Permissions and tools").at(1);
+    if (permissions == null) {
+      throw new Error("Drive permissions are missing.");
+    }
+    await userEvent.click(permissions);
+    const button = c.getByRole("button", { name: "Close file chooser" });
+    button.focus();
     await userEvent.keyboard("{Enter}");
     await expect(args.onClosePicker).toHaveBeenCalled();
   },
 };
-export const PickerSelection: Story = {
-  args: { ...MixedDriveGrant.args, picker: { type: "SELECTED", count: 2 } },
-};
-export const PickerCancelled: Story = {
-  args: { ...MixedDriveGrant.args, picker: { type: "CANCELLED" } },
-};
-export const PickerError: Story = {
-  args: {
-    ...MixedDriveGrant.args,
-    picker: {
-      type: "ERROR",
-      message: "The temporary file-selection credential expired.",
-    },
-  },
-};
-export const MobilePartialReview: Story = {
-  ...PartialGrantReview,
-  globals: { viewport: { value: "mobile1", isRotated: false } },
-};
-export const NoGrantedServices: Story = {
-  args: {
-    ...UnknownGrant.args,
-    flow: {
-      type: "REVIEW",
-      review: {
-        ...review,
-        can_confirm: false,
-        grant_result: "none",
-        accesses: review.accesses.map((access) => ({
-          ...access,
-          permitted_tools: [],
-          status: "not_granted",
-        })),
-      },
-    },
-  },
-};
-export const FullGrantReview: Story = {
-  args: {
-    ...PartialGrantReview.args,
-    services: ["calendar"],
-    publishingAllowed: true,
-    flow: {
-      type: "REVIEW",
-      review: {
-        ...review,
-        services: ["calendar"],
-        grant_result: "full",
-        oauth_request_scopes: googleFixtureScopes(["calendar"]),
-        granted_scopes: googleFixtureScopes(["calendar"]),
-      },
-    },
-  },
-};
-export const KoreanPartialReview: Story = {
-  args: PartialGrantReview.args,
+export const KoreanSavedModal: Story = {
+  args: SavedEdit.args,
   render: (args) => (
     <NextIntlClientProvider locale="ko-KR" messages={koreanMessages}>
-      <GoogleSetup {...args} rootRef={{ current: null }} />
+      <Modal opened onClose={() => {}} size="lg" centered title="Google">
+        <GoogleSetup {...args} rootRef={{ current: null }} />
+      </Modal>
     </NextIntlClientProvider>
   ),
 };
-
-export const BroaderScopeReceipt: Story = {
-  args: {
-    ...PartialGrantReview.args,
-    services: ["gmail"],
-    toolGroups: ["gmail_read", "gmail_send"],
-    publishingAllowed: true,
-    flow: {
-      type: "REVIEW",
-      review: {
-        ...review,
-        services: ["gmail"],
-        oauth_request_scopes: [
-          "https://www.googleapis.com/auth/gmail.readonly",
-        ],
-        granted_scopes: ["https://www.googleapis.com/auth/gmail.modify"],
-        accesses: [
-          {
-            service: "gmail",
-            enabled: true,
-            status: "partial",
-            permitted_tools: ["gmail_get_message", "gmail_send_message"],
-            unavailable_tools: ["gmail_create_filter"],
-          },
-        ],
-      },
-    },
-  },
+export const KoreanNewModal: Story = {
+  ...KoreanSavedModal,
+  args: SelectedServices.args,
+};
+export const KoreanPartialReview: Story = {
+  ...KoreanSavedModal,
+  args: PartialGrantReview.args,
+};
+export const MobileSavedModal: Story = {
+  ...KoreanSavedModal,
+  globals: { viewport: { value: "mobile1", isRotated: false } },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(
-      canvas.getByText("Google returned different scope values"),
-    ).toBeVisible();
-    const groups = within(
-      canvas.getByRole("group", { name: "Final tool groups" }),
+    const body = within(canvasElement.ownerDocument.body),
+      dialog = body.getByRole("dialog");
+    await expect(dialog.scrollWidth).toBeLessThanOrEqual(
+      dialog.clientWidth + 1,
     );
-    for (const details of groups.getAllByText(
-      "Inspect exact tool permissions",
-    )) {
-      await userEvent.click(details);
+    await expect(body.getByRole("button", { name: "재인증" })).toBeVisible();
+  },
+};
+export const PickerModalScroll: Story = {
+  args: { ...PickerOpen.args, picker: { type: "IDLE" } },
+  render: (args) => (
+    <Modal opened onClose={() => {}} size="lg" centered title="Google">
+      <GoogleSetup {...args} rootRef={{ current: null }} />
+    </Modal>
+  ),
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    const permissions = body.getAllByText("Permissions and tools").at(1);
+    if (permissions == null) {
+      throw new Error("Drive permissions are missing.");
     }
-    await expect(
-      groups.getByText("gmail_get_message", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      groups.getByText("gmail_send_message", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByRole("button", { name: "Save Google Toolkit" }),
-    ).toBeEnabled();
+    await userEvent.click(permissions);
+    const button = body.getByRole("button", {
+      name: "Choose Drive files with Google",
+    });
+    button.scrollIntoView({ block: "end" });
+    const rect = button.getBoundingClientRect();
+    const hit = button.ownerDocument.elementFromPoint(
+      rect.x + rect.width / 2,
+      rect.y + rect.height / 2,
+    );
+    await expect(button.contains(hit)).toBe(true);
+    await userEvent.click(button);
+    await expect(args.onOpenPicker).toHaveBeenCalledOnce();
   },
 };

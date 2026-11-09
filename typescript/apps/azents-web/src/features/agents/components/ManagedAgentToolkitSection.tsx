@@ -24,6 +24,7 @@ import {
 } from "@/shared/toolkits/components/ToolkitCollection";
 import { ToolkitTypeIcon } from "@/shared/toolkits/components/ToolkitTypeIcon";
 import { GitHubUserAuthorizationContainer } from "@/shared/toolkits/GitHubUserAuthorizationContainer";
+import { GoogleSetupContainer } from "@/shared/toolkits/GoogleSetupContainer";
 import { projectGitHubUserMode } from "@/shared/toolkits/provider-config-views";
 import { projectToolkitDetails } from "@/shared/toolkits/toolkit-detail-projection";
 import { usesToolkitCreationWizard } from "@/shared/toolkits/toolkit-form-lifecycle";
@@ -131,7 +132,12 @@ function AuthorizationAction({
         disabled={pending || authorizationPending}
         onClick={onAuthorize}
       >
-        {t(item.toolkit.oauth_connection == null ? "authorize" : "reauthorize")}
+        {t(
+          item.toolkit.toolkit_type === "google" ||
+            item.toolkit.oauth_connection != null
+            ? "reauthorize"
+            : "authorize",
+        )}
       </Button>
     );
   }
@@ -348,6 +354,7 @@ export function ManagedAgentToolkitSectionView(
   },
 ): React.ReactElement {
   const t = useTranslations("workspace.agents");
+  const google = useTranslations("googleToolkit");
   const tWizard = useTranslations("workspace.toolkits.github.wizard");
   const { editor, state } = props;
   const detailId = editor.type === "DETAIL" ? editor.toolkitConfigId : null;
@@ -410,6 +417,39 @@ export function ManagedAgentToolkitSectionView(
         : t("toolkitManagement.addToolkit");
   return (
     <Stack id="agent-toolkits" gap="md">
+      <Modal
+        opened={props.googleRecovery != null}
+        onClose={() => props.onCloseGoogleRecovery?.()}
+        title={t("toolkitManagement.reauthorize")}
+        size="lg"
+        centered
+        closeOnClickOutside={false}
+        closeOnEscape={!props.setupPending}
+        withCloseButton={!props.setupPending}
+      >
+        {props.googleRecovery != null && (
+          <GoogleSetupContainer
+            key={props.googleRecovery.toolkit.id}
+            handle={props.handle}
+            {...(props.googleRecovery.ownership_scope === "agent_only" && {
+              agentId: props.agentId,
+            })}
+            toolkitId={props.googleRecovery.toolkit.id}
+            returnAgentId={props.agentId}
+            recoveryOnly
+            embedded
+            onComplete={props.onCompleteGoogleRecovery}
+            onRecovered={props.onGoogleRecovered}
+            onCloseGuardReady={props.onCloseGuardReady}
+            onPendingChange={props.onSetupPendingChange}
+          />
+        )}
+      </Modal>
+      {props.googleRecovered && (
+        <Alert color="green" role="status">
+          {google("savedDescription")}
+        </Alert>
+      )}
       <Group justify="space-between" align="flex-start">
         <Stack gap={2}>
           <Title order={5}>{t("toolkitsSection")}</Title>
@@ -622,6 +662,7 @@ export function ManagedAgentToolkitSectionView(
                       : props.onSetupPendingChange
                   }
                   onAbandonReady={props.onCreateAbandonReady}
+                  onCloseGuardReady={props.onCloseGuardReady}
                   {...(editor.type === "CREATE"
                     ? { initialToolkitType: editor.toolkitType }
                     : { toolkitId: editor.toolkitConfigId })}

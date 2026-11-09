@@ -1,4 +1,6 @@
-"""Real browser Google callback/review with fixed-host synthetic TLS provider."""
+"""Real browser Google recovery with fixed-host synthetic TLS provider."""
+
+from typing import Literal
 
 import azentsadminclient
 import azentspublicclient
@@ -17,6 +19,7 @@ from azentspublicclient.models.google_review import GoogleReview
 from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as ec
 
 from support.google_provider_fake import SCOPE
@@ -49,8 +52,36 @@ def check(driver: WebDriver, label: str) -> None:
     ).click()
 
 
+def disclose(driver: WebDriver, label: str, index: int = 0) -> None:
+    """Open one visible native disclosure without depending on generated CSS."""
+
+    def summary(current: WebDriver) -> WebElement | Literal[False]:
+        elements = current.find_elements(
+            By.XPATH, f"//summary[normalize-space()={label!r}]"
+        )
+        return (
+            elements[index]
+            if len(elements) > index and elements[index].is_displayed()
+            else False
+        )
+
+    element = _wait(driver).until(summary)
+    if element.find_element(By.XPATH, "..").get_dom_attribute("open") is None:
+        element.click()
+
+    def opened(current: WebDriver) -> bool:
+        element = summary(current)
+        return (
+            element is not False
+            and element.find_element(By.XPATH, "..").get_dom_attribute("open")
+            is not None
+        )
+
+    _wait(driver).until(opened)
+
+
 @pytest.mark.parametrize("agent_owned", [False, True])
-def test_google_same_context_partial_review_and_metadata_preservation(
+def test_google_automatic_recovery_preserves_single_apply_draft(
     browser_driver: WebDriver,
     azents_main_web_url: str,
     azents_public_server_url: str,
@@ -60,7 +91,7 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     agent_owned: bool,
 ) -> None:
     fixture = fixture_ready(google_provider_fixture)
-    scenario(fixture, "partial")
+    scenario(fixture, "full")
     prepare_operator(admin_api_client)
     workspace = _create_workspace(
         public_api_client=public_api_client,
@@ -111,51 +142,30 @@ def test_google_same_context_partial_review_and_metadata_preservation(
                 )
             )
         ).click()
-    _assert_visible_text(browser_driver, "1. Choose services")
-    assert not any(
-        item.is_selected()
-        for item in browser_driver.find_elements(
-            By.CSS_SELECTOR,
-            'section[aria-labelledby="google-select-heading"] input[role="switch"]',
-        )
-    )
+    _assert_visible_text(browser_driver, "Services to use")
     check(browser_driver, "Calendar")
     check(browser_driver, "Gmail")
-    _click_button(browser_driver, "Read only")
-    check(browser_driver, "Create, edit and respond to events")
+    for service in ("Calendar", "Gmail"):
+        _wait(browser_driver).until(
+            ec.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    f'//*[@role="group" and @aria-label="{service} Permission preset"]'
+                    '//button[normalize-space()="Read only"]',
+                )
+            )
+        ).click()
+    disclose(browser_driver, "Advanced settings")
+    _fill_text_input(browser_driver, "Toolkit name", "Google browser connection")
     original_window = browser_driver.current_window_handle
-    _click_button(browser_driver, "Continue to Google")
-    _assert_visible_text(browser_driver, "2. Review account and permissions")
-    _assert_visible_text(browser_driver, "Final tool groups")
-    _assert_visible_text(browser_driver, "connected-account@example.invalid")
+    _click_button(browser_driver, "Connect to Google")
+    _assert_visible_text(browser_driver, "Google browser connection")
     assert browser_driver.current_window_handle == original_window
-    assert browser_driver.current_url == azents_main_web_url + path
     assert (
         "state=" not in browser_driver.current_url
         and "code=" not in browser_driver.current_url
     )
     api = ToolkitV1Api(public_api_client)
-    if agent_id is None:
-        assert not any(
-            item.toolkit_type == "google"
-            for item in api.toolkit_v1_list_toolkit_configs(
-                workspace.handle, _headers=headers
-            ).items
-        )
-    else:
-        assert not any(
-            item.toolkit.toolkit_type == "google"
-            for item in api.toolkit_v1_list_agent_toolkit_management(
-                handle=workspace.handle, agent_id=agent_id, _headers=headers
-            ).items
-        )
-    save = browser_driver.find_element(
-        By.XPATH, '//button[normalize-space()="Save Google Toolkit"]'
-    )
-    assert save.is_enabled()
-    _fill_text_input(browser_driver, "Toolkit name", "Google browser connection")
-    _click_button(browser_driver, "Save Google Toolkit")
-    _assert_visible_text(browser_driver, "Google browser connection")
     if agent_id is None:
         saved = next(
             item
@@ -178,22 +188,14 @@ def test_google_same_context_partial_review_and_metadata_preservation(
         # Drive the same embedded edit surface that must reopen after OAuth return.
         _click_button(browser_driver, "View details")
         _click_button(browser_driver, "Edit")
-    _assert_visible_text(browser_driver, "Saved Google account")
+    _assert_visible_text(browser_driver, "Google settings")
+    disclose(browser_driver, "Advanced settings")
     _fill_text_input(browser_driver, "Tool request timeout (seconds)", "12")
-    _click_button(browser_driver, "Authorize replacement connection")
-    _assert_visible_text(browser_driver, "2. Review account and permissions")
-    _assert_visible_text(browser_driver, "Final tool groups")
-    _click_button(browser_driver, "Replace saved connection")
-    _assert_visible_text(browser_driver, "Connection saved")
-    _fill_text_input(browser_driver, "Name", "Renamed after reconnect")
-    if agent_owned:
-        _wait(browser_driver).until(
-            ec.element_to_be_clickable(
-                (By.XPATH, '//*[@role="dialog"]//button[normalize-space()="Save"]')
-            )
-        ).click()
-    else:
-        _click_button(browser_driver, "Save")
+    _fill_text_input(browser_driver, "Toolkit name", "Renamed after reconnect")
+    _click_button(browser_driver, "Reauthenticate")
+    _assert_visible_text(browser_driver, "Connection updated")
+    disclose(browser_driver, "Advanced settings")
+    _click_button(browser_driver, "Apply changes")
     _assert_visible_text(browser_driver, "Renamed after reconnect")
 
     def saved_metadata(_: WebDriver) -> ToolkitConfigResponse | None:
@@ -303,7 +305,8 @@ def test_google_picker_browser_lifetime(
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/toolkits/{published.toolkit_id}/edit"
     )
-    _assert_visible_text(browser_driver, "Saved Google account")
+    _assert_visible_text(browser_driver, "Google settings")
+    disclose(browser_driver, "Permissions and tools", 1)
     _click_button(browser_driver, "Choose Drive files with Google")
     _click_button(browser_driver, "Synthetic Picker select")
     _assert_visible_text(

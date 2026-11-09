@@ -68,6 +68,9 @@ class TestGoogleConnectionOutput(unittest.TestCase):
                             'gmail_search_messages'
                             ], )
                     ],
+                granted_tools = [
+                    'gmail_search_messages'
+                    ],
                 drive_access = azentspublicclient.models.google_drive_access.GoogleDriveAccess(
                     whole_metadata_read = True, 
                     whole_content_read = True, 
@@ -112,6 +115,9 @@ class TestGoogleConnectionOutput(unittest.TestCase):
                         unavailable_tools = [
                             'gmail_search_messages'
                             ], )
+                    ],
+                granted_tools = [
+                    'gmail_search_messages'
                     ],
                 drive_access = azentspublicclient.models.google_drive_access.GoogleDriveAccess(
                     whole_metadata_read = True, 

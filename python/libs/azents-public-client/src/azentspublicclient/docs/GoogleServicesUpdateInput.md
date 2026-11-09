@@ -9,6 +9,8 @@ Name | Type | Description | Notes
 **expected_revision** | **int** |  | 
 **services** | [**List[GoogleService]**](GoogleService.md) |  | 
 **tool_groups** | [**List[GoogleToolGroup]**](GoogleToolGroup.md) |  | 
+**timeout** | **float** |  | [optional] 
+**metadata** | [**GoogleMetadataEdits**](GoogleMetadataEdits.md) |  | [optional] 
 
 ## Example
 

@@ -24,6 +24,7 @@ from azentspublicclient.models.google_identity import GoogleIdentity
 from azentspublicclient.models.google_service import GoogleService
 from azentspublicclient.models.google_service_access import GoogleServiceAccess
 from azentspublicclient.models.google_tool_group import GoogleToolGroup
+from azentspublicclient.models.google_workspace_operation import GoogleWorkspaceOperation
 from typing import List, Optional, Set
 from typing_extensions import Self
 
@@ -42,11 +43,12 @@ class GoogleConnectionOutput(BaseModel):
     granted_scopes: Optional[List[StrictStr]]
     timeout: Union[StrictFloat, StrictInt]
     accesses: List[GoogleServiceAccess]
+    granted_tools: List[GoogleWorkspaceOperation] = Field(description="Manager-only actual scope eligibility before local service/group selection; never execution authority.")
     drive_access: GoogleDriveAccess
     renewable: StrictBool
     service_access_verified: StrictBool = Field(description="Saved grant metadata is not a live access probe.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["toolkit_id", "revision", "connection_id", "status", "identity", "services", "tool_groups", "oauth_request_scopes", "granted_scopes", "timeout", "accesses", "drive_access", "renewable", "service_access_verified"]
+    __properties: ClassVar[List[str]] = ["toolkit_id", "revision", "connection_id", "status", "identity", "services", "tool_groups", "oauth_request_scopes", "granted_scopes", "timeout", "accesses", "granted_tools", "drive_access", "renewable", "service_access_verified"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
@@ -162,6 +164,7 @@ class GoogleConnectionOutput(BaseModel):
             "granted_scopes": obj.get("granted_scopes"),
             "timeout": obj.get("timeout"),
             "accesses": [GoogleServiceAccess.from_dict(_item) for _item in obj["accesses"]] if obj.get("accesses") is not None else None,
+            "granted_tools": obj.get("granted_tools"),
             "drive_access": GoogleDriveAccess.from_dict(obj["drive_access"]) if obj.get("drive_access") is not None else None,
             "renewable": obj.get("renewable"),
             "service_access_verified": obj.get("service_access_verified")

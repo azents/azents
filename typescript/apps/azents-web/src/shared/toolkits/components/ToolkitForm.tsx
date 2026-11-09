@@ -62,6 +62,7 @@ export interface ToolkitFormProps {
   githubRegistration: GitHubFormRegistration;
   onComplete?: () => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
+  onCloseGuardReady?: (guard: (() => boolean) | null) => void;
   configProjection: ToolkitConfigProjection;
   configurationFields?: ReactNode;
   scope: ToolkitOwnerScope;
@@ -120,6 +121,7 @@ export function ToolkitForm({
   githubRegistration,
   onComplete,
   onAbandonReady,
+  onCloseGuardReady,
   configProjection,
   configurationFields,
   scope,
@@ -196,16 +198,44 @@ export function ToolkitForm({
     );
   }
 
-  if (!isEdit && currentToolSlug === "google") {
+  if (currentToolSlug === "google") {
     return configurationFields != null ? (
       <>{configurationFields}</>
     ) : (
       <GoogleSetupContainer
-        key={`google:${scopeKey}:new`}
+        key={`google:${scopeKey}:${formState.type === "EDIT" ? formState.config.id : "new"}`}
         {...scope}
         navigationOrigin={navigationOrigin}
+        {...(formState.type === "EDIT" && { toolkitId: formState.config.id })}
         embedded={embedded}
         initialDescription={form.getValues().description}
+        initialMetadata={{
+          name:
+            formState.type === "EDIT"
+              ? formState.config.name
+              : form.getValues().name,
+          slug:
+            formState.type === "EDIT"
+              ? formState.config.slug
+              : form.getValues().slug,
+          description:
+            (formState.type === "EDIT"
+              ? formState.config.description
+              : form.getValues().description) ?? "",
+          prompt:
+            (formState.type === "EDIT"
+              ? formState.config.prompt
+              : form.getValues().prompt) ?? "",
+          enabled:
+            formState.type === "EDIT"
+              ? formState.config.enabled
+              : form.getValues().enabled,
+          alwaysExposeTools:
+            formState.type === "EDIT"
+              ? formState.config.always_expose_tools
+              : form.getValues().alwaysExposeTools,
+        }}
+        onCloseGuardReady={onCloseGuardReady}
         onComplete={onComplete}
         onPendingChange={onUserSetupPendingChange}
         onAbandonReady={onAbandonReady}
@@ -435,18 +465,6 @@ export function ToolkitForm({
                       })}
                     />
                   )}
-
-                  {currentToolSlug === "google" &&
-                    formState.type === "EDIT" && (
-                      <GoogleSetupContainer
-                        key={`google:${scopeKey}:${formState.config.id}`}
-                        {...scope}
-                        navigationOrigin={navigationOrigin}
-                        toolkitId={formState.config.id}
-                        embedded
-                        onPendingChange={onUserSetupPendingChange}
-                      />
-                    )}
 
                   {currentToolSlug === "brave_search" && (
                     <BraveSearchConfigFieldsContainer
