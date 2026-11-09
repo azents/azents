@@ -34,6 +34,10 @@ _EXPLICIT_IMAGE_PROMPT = "Provider image generation explicit pin handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
 _OPENAI_IMAGE_PROMPT = "A deterministic OpenAI image"
 _OPENAI_IMAGE_CALL_ID = "call_openai_image_generation"
+WATCHDOG_IDLE_PREFIX_PROMPT = "Watchdog idle after prefix then recover"
+WATCHDOG_IDLE_PREFIX = "FAILED_IDLE_PREFIX_MUST_DISAPPEAR"
+WATCHDOG_IDLE_PREFIX_RECOVERY = "WATCHDOG_IDLE_PREFIX_RECOVERED"
+WATCHDOG_IDLE_PREFIX_CONTROL = "/v1/_watchdog_idle_prefix"
 _BROWSER_FILES_PROMPT = "Session Browser capture and publication handoff"
 _BROWSER_FILES_CALL_PREFIX = "call_browser_files_"
 _BROWSER_FILES_JOURNAL_PATH = "/v1/_browser_files_requests"
@@ -2428,6 +2432,7 @@ def _image_request_egress(request: _ImageGenerationRequest) -> dict[str, object]
 
 
 class _State:
+    watchdog_idle_prefix_attempts: ClassVar[int] = 0
     catalog_source_variant: ClassVar[_InferenceProfileSourceVariant] = "baseline"
     requests: ClassVar[list[dict[str, object]]] = []
     browser_files_requests: ClassVar[list[dict[str, object]]] = []
@@ -2529,6 +2534,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
+        if self.path == WATCHDOG_IDLE_PREFIX_CONTROL:
+            with _State.lock:
+                _State.watchdog_idle_prefix_attempts = 0
+            self._write_json(201, {"attempts": 0})
+            return
         if self.path == routine_model_fixture.JUDGMENT_BARRIER_PATH:
             _State.routine_judgment_barrier.arm()
             self._write_json(201, _State.routine_judgment_barrier.evidence())
@@ -2654,6 +2664,26 @@ class _Handler(BaseHTTPRequestHandler):
     def _dispatch_model_request(self, request: _ModelRequestInput, body: bytes) -> None:
         """Route one generation-fenced local model request."""
         request = _decode_model_request(request)
+        if _last_user_text(request) == WATCHDOG_IDLE_PREFIX_PROMPT:
+            if _SESSION_TITLE_SYSTEM_MARKER in request.matching_text:
+                self._write_text_response(
+                    request,
+                    '{"title":"Watchdog prefix recovery"}',
+                    response_id="resp_watchdog_prefix_title",
+                )
+                return
+            with _State.lock:
+                _State.watchdog_idle_prefix_attempts += 1
+                attempt = _State.watchdog_idle_prefix_attempts
+            if attempt == 1:
+                self._write_watchdog_idle_prefix(request)
+            else:
+                self._write_text_response(
+                    request,
+                    WATCHDOG_IDLE_PREFIX_RECOVERY,
+                    response_id="resp_watchdog_prefix_recovered",
+                )
+            return
         previous = request.previous_response_id
         if previous is not None and previous.startswith("resp_routine_e2e_"):
             with _State.lock:
@@ -5277,6 +5307,59 @@ class _Handler(BaseHTTPRequestHandler):
                 },
             ]
         )
+
+    def _write_watchdog_idle_prefix(self, request: _ModelRequest) -> None:
+        """Flush visible text before the intentional parsed-event idle stall."""
+        response = self._response(
+            request=request,
+            response_id="resp_watchdog_prefix_failed",
+            model=request.model or "gpt-5.5",
+            output=[],
+        )
+        item_id = "msg_watchdog_prefix_failed"
+        self._start_sse()
+        self._write_sse_events(
+            [
+                {
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {**response, "status": "in_progress"},
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 1,
+                    "output_index": 0,
+                    "item": {
+                        "id": item_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "in_progress",
+                        "content": [],
+                    },
+                },
+                {
+                    "type": "response.content_part.added",
+                    "sequence_number": 2,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "item_id": item_id,
+                    "part": {"type": "output_text", "text": "", "annotations": []},
+                },
+                {
+                    "type": "response.output_text.delta",
+                    "sequence_number": 3,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "item_id": item_id,
+                    "delta": WATCHDOG_IDLE_PREFIX,
+                },
+            ]
+        )
+        # Elapsed idle time is the tested contract, not a settle delay. Keep the
+        # socket open beyond the 0.5s idle deadline without manufacturing a
+        # completion/error event that would substitute for the watchdog.
+        threading.Event().wait(timeout=1.0)
+        self.close_connection = True
 
     def _write_semantic_web_search_response(
         self,

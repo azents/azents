@@ -24,6 +24,7 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from websockets.sync.connection import Connection
 
+from support.image_generation_openai_proxy import WATCHDOG_IDLE_PREFIX_CONTROL
 from support.image_watchdog_observations import (
     ContentObservation,
     WatchdogActionObservation,
@@ -572,9 +573,14 @@ class TestModelStreamWatchdog:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
+        openai_proxy_url: str,
     ) -> None:
         """An inter-event stall removes its visible prefix before retry recovery."""
         del azents_engine_worker_container
+        requests.post(
+            openai_proxy_url + WATCHDOG_IDLE_PREFIX_CONTROL,
+            timeout=10,
+        ).raise_for_status()
         workspace = setup_workspace(
             public_api_client,
             admin_api_client,
