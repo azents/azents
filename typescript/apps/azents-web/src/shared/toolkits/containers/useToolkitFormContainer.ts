@@ -58,6 +58,7 @@ export type ToolkitFormContainerProps = ToolkitOwnerScope & {
   onComplete?: () => void;
   onPendingChange?: (pending: boolean) => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
+  onCloseGuardReady?: (guard: (() => boolean) | null) => void;
   initialToolkitType?: string;
 };
 export type ToolkitFormContainerOutput = ToolkitFormProps;
@@ -406,6 +407,7 @@ export function useToolkitFormContainer(
     ),
     onComplete,
     onAbandonReady: props.onAbandonReady,
+    onCloseGuardReady: props.onCloseGuardReady,
     navigationOrigin: props.navigationOrigin,
     configProjection,
     embedded,

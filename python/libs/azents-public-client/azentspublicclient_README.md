@@ -754,6 +754,7 @@ Class | Method | HTTP request | Description
  - [GoogleFinalSettings](azentspublicclient/docs/GoogleFinalSettings.md)
  - [GoogleGroupDefinition](azentspublicclient/docs/GoogleGroupDefinition.md)
  - [GoogleIdentity](azentspublicclient/docs/GoogleIdentity.md)
+ - [GoogleMetadataEdits](azentspublicclient/docs/GoogleMetadataEdits.md)
  - [GooglePickerTokenInput](azentspublicclient/docs/GooglePickerTokenInput.md)
  - [GooglePickerTokenOutput](azentspublicclient/docs/GooglePickerTokenOutput.md)
  - [GooglePreparation](azentspublicclient/docs/GooglePreparation.md)

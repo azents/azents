@@ -18,8 +18,9 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Union
+from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing_extensions import Annotated
+from azentspublicclient.models.google_metadata_edits import GoogleMetadataEdits
 from azentspublicclient.models.google_service import GoogleService
 from azentspublicclient.models.google_tool_group import GoogleToolGroup
 from typing import List, Optional, Set
@@ -27,13 +28,14 @@ from typing_extensions import Self
 
 class GoogleReconnectSettings(BaseModel):
     """
-    Reconnect changes reviewed request intent, not unrelated saved metadata.
+    Recovery preserves metadata unless the manager explicitly applies edits.
     """ # noqa: E501
     services: List[GoogleService]
     tool_groups: List[GoogleToolGroup]
     oauth_request_scopes: List[StrictStr]
     timeout: Union[Annotated[float, Field(le=300.0, strict=True)], Annotated[int, Field(le=300, strict=True)]]
-    __properties: ClassVar[List[str]] = ["services", "tool_groups", "oauth_request_scopes", "timeout"]
+    metadata: Optional[GoogleMetadataEdits] = None
+    __properties: ClassVar[List[str]] = ["services", "tool_groups", "oauth_request_scopes", "timeout", "metadata"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -74,6 +76,14 @@ class GoogleReconnectSettings(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of metadata
+        if self.metadata:
+            _dict['metadata'] = self.metadata.to_dict()
+        # set to None if metadata (nullable) is None
+        # and model_fields_set contains the field
+        if self.metadata is None and "metadata" in self.model_fields_set:
+            _dict['metadata'] = None
+
         return _dict
 
     @classmethod
@@ -91,7 +101,8 @@ class GoogleReconnectSettings(BaseModel):
             "services": obj.get("services"),
             "tool_groups": obj.get("tool_groups"),
             "oauth_request_scopes": obj.get("oauth_request_scopes"),
-            "timeout": obj.get("timeout")
+            "timeout": obj.get("timeout"),
+            "metadata": GoogleMetadataEdits.from_dict(obj["metadata"]) if obj.get("metadata") is not None else None
             }.items() if _key in obj
         })
         return _obj

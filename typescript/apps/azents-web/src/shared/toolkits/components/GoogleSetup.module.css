@@ -1,0 +1,35 @@
+.identity {
+  overflow-wrap: anywhere;
+}
+.code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.service {
+  border-top: 1px solid var(--mantine-color-default-border);
+  padding-top: var(--mantine-spacing-sm);
+}
+.permission {
+  margin-top: var(--mantine-spacing-xs);
+}
+.permission summary,
+.advanced summary {
+  font-size: var(--mantine-font-size-sm);
+  cursor: pointer;
+}
+.permission[open] summary,
+.advanced[open] summary {
+  margin-bottom: var(--mantine-spacing-sm);
+}
+.advanced {
+  border-top: 1px solid var(--mantine-color-default-border);
+  padding-top: var(--mantine-spacing-md);
+}
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--mantine-color-body);
+  border-top: 1px solid var(--mantine-color-default-border);
+  padding-block: var(--mantine-spacing-md);
+}

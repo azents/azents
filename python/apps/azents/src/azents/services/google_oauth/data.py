@@ -5,11 +5,12 @@ from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
-from azents.core.google_oauth import GoogleIdentity
+from azents.core.google_oauth import GoogleIdentity, GoogleMetadataEdits
 from azents.core.google_policy import GoogleService, GoogleToolGroup
 from azents.core.google_workspace_policy import (
     GoogleDriveAccess,
     GoogleWorkspaceConnectInput,
+    GoogleWorkspaceOperation,
 )
 from azents.services.google_oauth.workspace_projection import GoogleServiceAccess
 
@@ -33,6 +34,8 @@ class GoogleServicesUpdateInput(BaseModel):
     expected_revision: int = Field(ge=0, strict=True)
     services: tuple[GoogleService, ...]
     tool_groups: tuple[GoogleToolGroup, ...]
+    timeout: float | None = Field(default=None, gt=0, le=300, allow_inf_nan=False)
+    metadata: GoogleMetadataEdits | None = None
 
     @field_validator("services")
     @classmethod
@@ -124,6 +127,12 @@ class GoogleConnectionOutput(BaseModel):
     granted_scopes: tuple[str, ...] | None
     timeout: float
     accesses: tuple[GoogleServiceAccess, ...]
+    granted_tools: tuple[GoogleWorkspaceOperation, ...] = Field(
+        description=(
+            "Manager-only actual scope eligibility before local service/group "
+            "selection; never execution authority."
+        )
+    )
     drive_access: GoogleDriveAccess
     renewable: bool
     service_access_verified: Literal[False] = Field(

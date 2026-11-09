@@ -123,6 +123,7 @@ async def test_generic_google_updates_preserve_policy_and_current_grant(
             granted_scopes=None,
             timeout=30,
             accesses=(),
+            granted_tools=(),
             drive_access=drive_access((), None),
             renewable=True,
             service_access_verified=False,

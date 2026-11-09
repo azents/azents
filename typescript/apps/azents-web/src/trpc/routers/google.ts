@@ -81,6 +81,8 @@ export const googleRouter = router({
         expectedRevision: z.number().int().nonnegative(),
         services: z.array(googleServiceSchema),
         toolGroups: z.array(googleToolGroupSchema),
+        timeout: z.number().positive().max(300).optional(),
+        metadata: googleReconnectSettingsSchema.shape.metadata,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -89,6 +91,8 @@ export const googleRouter = router({
         expected_revision: input.expectedRevision,
         services: input.services,
         tool_groups: input.toolGroups,
+        ...(input.timeout != null && { timeout: input.timeout }),
+        ...(input.metadata != null && { metadata: input.metadata }),
       };
       const { data } = await request(() =>
         "owner" in input

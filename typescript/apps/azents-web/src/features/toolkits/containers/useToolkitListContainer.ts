@@ -41,6 +41,7 @@ export interface ToolkitListContainerOutput {
   onSetupPendingChange: (pending: boolean) => void;
   onCreatePublicationPendingChange: (pending: boolean) => void;
   onCreateAbandonReady: (abandon: (() => void) | null) => void;
+  onCloseGuardReady?: (guard: (() => boolean) | null) => void;
   onCompleteSetup: () => void;
   onDelete: (toolkitId: string) => void;
   deleteTarget: string | null;
@@ -71,6 +72,7 @@ export function useToolkitListContainer({
     useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const abandonCreate = useRef<(() => void) | null>(null);
+  const closeGuard = useRef<(() => boolean) | null>(null);
   const writeInFlight = useRef(false);
   const listQuery = trpc.toolkit.listConfigs.useQuery({ handle });
   const catalogQuery = trpc.toolkit.listToolkits.useQuery();
@@ -176,7 +178,11 @@ export function useToolkitListContainer({
     setCreatePublicationPending(false);
   }
   function open(next: WorkspaceToolkitEditor): void {
-    if (!canNavigate || writeInFlight.current) {
+    if (
+      !canNavigate ||
+      writeInFlight.current ||
+      closeGuard.current?.() === false
+    ) {
       return;
     }
     abandon();
@@ -208,6 +214,9 @@ export function useToolkitListContainer({
     onEdit: (toolkitId) => open({ type: "EDIT", toolkitId }),
     onCloseEditor: () => {
       if (canNavigate && !writeInFlight.current) {
+        if (closeGuard.current?.() === false) {
+          return;
+        }
         abandon();
         changeEditor({ type: "CLOSED" });
         void refresh();
@@ -226,6 +235,9 @@ export function useToolkitListContainer({
     onSetupPendingChange,
     onCreatePublicationPendingChange,
     onCreateAbandonReady,
+    onCloseGuardReady: (guard) => {
+      closeGuard.current = guard;
+    },
     onCompleteSetup: () => {
       completeWorkspaceToolkitSetup(activeEditor.current, editor, (next) => {
         // Publication is already committed; refresh failures are read failures, not unsaved forms.

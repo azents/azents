@@ -110,6 +110,28 @@ function managerHarness(
   );
   return harness;
 }
+void test("Agent Google editor Back and catalog navigation respect the live draft guard", () => {
+  const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+  const harness = managerHarness(store, [
+    {
+      ownership_scope: "agent_only",
+      toolkit: { id: "saved", toolkit_type: "google" },
+    },
+  ]);
+  let output = harness.render({ handle: "team", agentId: "agent" });
+  harness.flushEffects();
+  invoke(output.onEdit, "saved");
+  output = harness.render();
+  let permit = false;
+  invoke(output.onCloseGuardReady, () => permit);
+  invoke(output.onDetails, "saved");
+  assert.equal(object(harness.render().editor).type, "EDIT");
+  invoke(output.onCatalogTabChange, "new");
+  assert.equal(object(harness.render().editor).type, "EDIT");
+  permit = true;
+  invoke(output.onDetails, "saved");
+  assert.equal(object(harness.render().editor).type, "DETAIL");
+});
 void test("actual Agent management restores Google create and uncertain publication", () => {
   for (const phase of ["REVIEW", "VERIFYING", "UNKNOWN", "PUBLISHING"]) {
     const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);

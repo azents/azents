@@ -30,6 +30,18 @@ export const googleReconnectSettingsSchema = z
     tool_groups: z.array(googleToolGroupSchema),
     oauth_request_scopes: z.array(z.string().min(1)),
     timeout: z.number().positive().max(300),
+    metadata: z
+      .object({
+        expected_revision: z.number().int().nonnegative(),
+        name: z.string().max(255),
+        slug: z.string().max(100),
+        description: z.string().nullable(),
+        prompt: z.string().nullable(),
+        enabled: z.boolean(),
+        always_expose_tools: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export const googleDesiredSchema = googleReconnectSettingsSchema

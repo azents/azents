@@ -87,24 +87,61 @@ the exact User and initiating Auth Session. It does not require shared-manager
 privileges. Candidate identities, callback purposes and target Toolkit ownership
 are exact; another Workspace, User or Agent cannot resume or replace them.
 
-Main Web uses the common staged Wizard for Workspace-shared, Agent-owned and
-personal Toolkits. Managers choose services, authorize at Google, review the
-connected identity and actual full/partial/none/unknown
-access, and explicitly publish. Plain Toolkit creation cannot bypass this flow.
-Saved metadata edits omit provider configuration and preserve independently saved
-service/timeout settings. Reconnect replaces authorization, not unrelated metadata.
+Main Web uses a compact Google-owned editor for Workspace-shared, Agent-owned and
+personal Toolkits rather than nesting it in the generic preparation/configuration/
+review form. Services and selected group summaries remain visible; each service
+exposes its complete group/operation controls in a disclosure. Permission presets
+are directly visible in each Calendar, Drive and Gmail section and update only
+that service's group selection. Metadata, timeout and help are disclosed on demand.
+Picker remains under Drive, and local
+disconnect remains an explicit independent action.
+
+Connect and recovery still use staged server review and atomic confirmation. A
+manager-started Web attempt automatically confirms a verified same-account result
+with all requested selected operations and renewable credentials. Changed verified
+issuer/subject, missing capabilities, unknown evidence and missing renewal do not
+silently complete. Exceptional results retain the existing connection and offer
+one prominent Reauthenticate button plus cancellation. There is no separate
+account-change action or partial-result publication control. A newly published normal
+connection does not require an additional generic save. Plain Toolkit creation still
+cannot bypass Google publication checks.
+
+The editor applies settings once. Local apply updates service/group selection,
+timeout and explicitly edited metadata in one revision-fenced transaction. It uses
+manager-only `granted_tools` scope eligibility to distinguish a newly activated
+capability requiring consent from a locally disabled but already authorized group;
+this projection is not an execution ceiling or Runtime authority. Metadata-only edits
+and unchanged partial selections do not force reconsent. Apply that needs new
+permission carries its explicit metadata edits into the existing atomic reconnect
+publication. Ordinary recovery omits metadata, preserving unapplied editor drafts.
+Other metadata-only Toolkit updates still omit Google provider configuration.
+
+Google participates in standard Agent Toolkit recovery with exact shared/Agent
+manager permissions and a validated same-Workspace Agent return context. Recovery
+from the card dispatches the Google flow directly rather than sending Google through
+generic MCP OAuth or requiring an edit detour. Successful recovery refreshes the
+original management surface. No mail, file or calendar action is replayed.
 
 The same-context `/oauth/google/callback` removes transient query data and matches
 a nonsecret digest to the exact originating attempt. Browser resume stores only
 context, deadline, attempt ID, correlation digest, phase and validated return
-location, never codes, credentials or OAuth state. Every post-await storage write
-and navigation fences the current mounted operation and resume owner. Strict Mode
-probing finishes before one-use exchange dispatch.
+location and explicit connect/recover/apply intent, never codes, credentials or
+OAuth state. A separate schema-decoded tab draft retains bounded token-free
+metadata, selection, original selection baseline and revision for the exact
+owner/target/attempt. It preserves unrelated pending edits across authentication.
+Every post-await storage write and navigation fences the current mounted operation
+and resume owner. Strict Mode probing finishes before one-use exchange and direct
+recovery dispatch; safe review reads may repeat after probing.
 
 An uncertain exchange uses review rather than exchanging again. An uncertain
 publication permits exact outcome lookup or local cancellation, not automatic
-resubmission. Historical outcomes are nonsecret observations and do not prove
-current readiness. Disconnect is local and does not promise Google revocation or
+resubmission. Completion observes the current saved connection and selection before
+clearing the exact resume. A confirmed Apply adopts its published selection
+without another save; recovery reapplies only explicit unrelated draft deltas over
+that result. Superseded outcomes preserve the draft. A failed saved-state read stays
+in result-check recovery instead of redispatching publication. Acknowledged writes
+remain committed if optional list refresh fails. Historical outcomes are nonsecret
+observations and do not prove current readiness. Disconnect is local and does not promise Google revocation or
 reversal of mail, file, calendar or filter effects.
 
 ## OAuth and Current Execution Authority

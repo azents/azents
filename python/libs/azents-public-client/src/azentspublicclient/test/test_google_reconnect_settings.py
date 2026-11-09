@@ -44,7 +44,15 @@ class TestGoogleReconnectSettings(unittest.TestCase):
                 oauth_request_scopes = [
                     ''
                     ],
-                timeout = 1.337
+                timeout = 1.337,
+                metadata = azentspublicclient.models.google_metadata_edits.GoogleMetadataEdits(
+                    expected_revision = 0.0, 
+                    name = '', 
+                    slug = '', 
+                    description = '', 
+                    prompt = '', 
+                    enabled = True, 
+                    always_expose_tools = True, )
             )
         else:
             return GoogleReconnectSettings(

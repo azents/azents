@@ -34381,6 +34381,14 @@
             "type": "array",
             "title": "Accesses"
           },
+          "granted_tools": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleWorkspaceOperation"
+            },
+            "type": "array",
+            "title": "Granted Tools",
+            "description": "Manager-only actual scope eligibility before local service/group selection; never execution authority."
+          },
           "drive_access": {
             "$ref": "#/components/schemas/GoogleDriveAccess"
           },
@@ -34408,6 +34416,7 @@
           "granted_scopes",
           "timeout",
           "accesses",
+          "granted_tools",
           "drive_access",
           "renewable",
           "service_access_verified"
@@ -34642,6 +34651,67 @@
         "title": "GoogleIdentity",
         "description": "Principal obtained only from verified signed Google identity claims."
       },
+      "GoogleMetadataEdits": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "name",
+          "slug",
+          "description",
+          "prompt",
+          "enabled",
+          "always_expose_tools"
+        ],
+        "title": "GoogleMetadataEdits",
+        "description": "Explicit settings-apply intent; ordinary recovery omits this payload."
+      },
       "GooglePickerTokenInput": {
         "properties": {
           "expected_revision": {
@@ -34834,6 +34904,16 @@
             "maximum": 300.0,
             "exclusiveMinimum": 0.0,
             "title": "Timeout"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoogleMetadataEdits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -34845,7 +34925,7 @@
           "timeout"
         ],
         "title": "GoogleReconnectSettings",
-        "description": "Reconnect changes reviewed request intent, not unrelated saved metadata."
+        "description": "Recovery preserves metadata unless the manager explicitly applies edits."
       },
       "GoogleReview": {
         "properties": {
@@ -35060,6 +35140,29 @@
             },
             "type": "array",
             "title": "Tool Groups"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 300.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoogleMetadataEdits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,

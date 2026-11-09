@@ -93,6 +93,9 @@ function managementView(): unknown {
     "@/shared/toolkits/ToolkitFormContainer": {
       ToolkitFormContainer: "fixture-form",
     },
+    "@/shared/toolkits/GoogleSetupContainer": {
+      GoogleSetupContainer: "fixture-google",
+    },
     "../agentToolkitManagementState": managementState,
   };
   const exports: Record<string, unknown> = {};

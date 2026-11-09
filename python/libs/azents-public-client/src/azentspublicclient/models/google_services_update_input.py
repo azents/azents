@@ -18,8 +18,9 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing_extensions import Annotated
+from azentspublicclient.models.google_metadata_edits import GoogleMetadataEdits
 from azentspublicclient.models.google_service import GoogleService
 from azentspublicclient.models.google_tool_group import GoogleToolGroup
 from typing import List, Optional, Set
@@ -32,7 +33,9 @@ class GoogleServicesUpdateInput(BaseModel):
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
     services: List[GoogleService]
     tool_groups: List[GoogleToolGroup]
-    __properties: ClassVar[List[str]] = ["expected_revision", "services", "tool_groups"]
+    timeout: Optional[Union[Annotated[float, Field(le=300.0, strict=True)], Annotated[int, Field(le=300, strict=True)]]] = None
+    metadata: Optional[GoogleMetadataEdits] = None
+    __properties: ClassVar[List[str]] = ["expected_revision", "services", "tool_groups", "timeout", "metadata"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -73,6 +76,19 @@ class GoogleServicesUpdateInput(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of metadata
+        if self.metadata:
+            _dict['metadata'] = self.metadata.to_dict()
+        # set to None if timeout (nullable) is None
+        # and model_fields_set contains the field
+        if self.timeout is None and "timeout" in self.model_fields_set:
+            _dict['timeout'] = None
+
+        # set to None if metadata (nullable) is None
+        # and model_fields_set contains the field
+        if self.metadata is None and "metadata" in self.model_fields_set:
+            _dict['metadata'] = None
+
         return _dict
 
     @classmethod
@@ -89,7 +105,9 @@ class GoogleServicesUpdateInput(BaseModel):
             _key: _value for _key, _value in {
             "expected_revision": obj.get("expected_revision"),
             "services": obj.get("services"),
-            "tool_groups": obj.get("tool_groups")
+            "tool_groups": obj.get("tool_groups"),
+            "timeout": obj.get("timeout"),
+            "metadata": GoogleMetadataEdits.from_dict(obj["metadata"]) if obj.get("metadata") is not None else None
             }.items() if _key in obj
         })
         return _obj
