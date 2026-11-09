@@ -1,6 +1,7 @@
 """Contract tests for E2E CI workflow configuration."""
 
 import os
+import re
 import subprocess
 import textwrap
 from pathlib import Path
@@ -10,6 +11,44 @@ import pytest
 from support.consts import REPOSITORY_ROOT
 
 _WORKFLOW_PATH = REPOSITORY_ROOT / ".github/workflows/ci.yaml"
+
+
+@pytest.mark.parametrize(
+    "job_name",
+    [
+        "ci-pre-commit",
+        "ci_python_run",
+        "ci_python_migrations_run",
+        "ci_testenv_support_run",
+        "ci_e2e_plan",
+        "ci_e2e_run",
+        "ci_e2e_aggregate",
+        "ci_observability",
+        "ci_typescript_run",
+        "ci_helm_run",
+        "ci_docker_build_run",
+    ],
+)
+def test_source_executing_jobs_checkout_the_declared_head(job_name: str) -> None:
+    """Source and receipt identity agree for PR, push and dispatch executions."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    job = workflow.split(f"  {job_name}:\n", 1)[1]
+    next_job = re.search(r"\n  [^ \n][^\n]*:\n", job)
+    if next_job is not None:
+        job = job[: next_job.start()]
+    checkout = job.split("uses: actions/checkout@", 1)[1].split("\n      - name:", 1)[0]
+    assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in checkout
+
+
+def test_scope_filter_retains_its_original_diff_checkout_and_dispatch_base() -> None:
+    """Source pinning does not change merge-base scope discovery."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    changes = workflow.split("  changes:\n", 1)[1].split("\n  ci-pre-commit:\n", 1)[0]
+    checkout = _step_block(changes, "Checkout")
+    assert "fetch-depth: 0" in checkout
+    assert "\n          ref:" not in checkout
+    assert 'base="$GITHUB_REF"' in changes
+    assert 'base="$(git rev-parse "$GITHUB_SHA^")"' in changes
 
 
 def _step_block(workflow: str, name: str) -> str:
