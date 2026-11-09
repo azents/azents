@@ -136,7 +136,7 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
       px={props.embedded ? 0 : "md"}
       py={props.embedded ? 0 : "lg"}
     >
-      <Stack gap="lg" ref={props.rootRef}>
+      <Stack gap="lg" ref={props.rootRef} className={classes.content}>
         <Group gap="sm">
           <ToolkitTypeIcon toolkitType="google" />
           <Stack gap={0}>
@@ -277,7 +277,9 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                 </Button>
                 <Button
                   variant="default"
-                  onClick={props.onCancel}
+                  onClick={() => {
+                    void props.onCancel();
+                  }}
                   disabled={flow.checking}
                   loading={props.cancelling}
                 >
@@ -336,7 +338,9 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
               <Group justify="flex-end">
                 <Button
                   variant="default"
-                  onClick={props.onCancel}
+                  onClick={() => {
+                    void props.onCancel();
+                  }}
                   loading={props.cancelling}
                 >
                   {common("cancel")}

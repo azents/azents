@@ -80,7 +80,7 @@ export interface GoogleSetupProps {
   onMetadataChange: (patch: Partial<GoogleMetadata>) => void;
   onAuthorize: () => void;
   onCheckOutcome: () => Promise<void>;
-  onCancel: () => void;
+  onCancel: () => Promise<void>;
   onRefresh: () => void;
   onAskDisconnect: () => void;
   onDismissDisconnect: () => void;

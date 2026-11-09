@@ -239,6 +239,16 @@ export function useGoogleSetupContainer(
     active.current = context;
     saveResume(context);
   };
+  const readDraft = (context: GoogleResume): GoogleEditorDraft | null => {
+    const draft = readSessionStorageValue<GoogleEditorDraft | null>({
+      key: GOOGLE_DRAFT_KEY,
+      deserialize: deserializeGoogleDraft,
+    });
+    return draft != null &&
+      googleDraftMatches(draft, scope, toolkitId, context.attemptId)
+      ? draft
+      : null;
+  };
   const close = (): void => {
     if (onComplete != null) {
       onComplete();
@@ -259,6 +269,10 @@ export function useGoogleSetupContainer(
       active.current != null &&
       sameGoogleResumeAttempt(readResume(), active.current)
     ) {
+      const draft = readDraft(active.current);
+      if (draft != null) {
+        saveDraft({ ...draft, attemptId: void 0 });
+      }
       clearResume();
     }
     active.current = null;
@@ -296,6 +310,7 @@ export function useGoogleSetupContainer(
     }
     const generation = epoch.current;
     let effective = outcome;
+    let draft = readDraft(context);
     if (outcome.current) {
       try {
         const published = await utils.toolkit.google.status.fetch(
@@ -313,41 +328,33 @@ export function useGoogleSetupContainer(
           current: published.connection_id === outcome.connection_id,
         };
         if (effective.current) {
-          const retained = readSessionStorageValue<GoogleEditorDraft | null>({
-            key: GOOGLE_DRAFT_KEY,
-            deserialize: deserializeGoogleDraft,
-          });
           const recovery = context.purpose === "RECOVER";
-          const draft =
-            retained != null &&
-            googleDraftMatches(retained, scope, toolkitId, context.attemptId)
-              ? retained
-              : null;
-          if (recovery && draft?.baseline != null) {
-            setServices(
-              reconcileGoogleSelection(
-                draft.baseline.services,
-                draft.services,
-                published.services,
-              ),
-            );
-            setToolGroups(
-              reconcileGoogleSelection(
-                draft.baseline.toolGroups,
-                draft.toolGroups,
-                published.tool_groups,
-              ),
-            );
-            setTimeoutValue(
-              draft.timeout === draft.baseline.timeout
-                ? published.timeout
-                : draft.timeout,
-            );
-          } else {
-            setServices(published.services);
-            setToolGroups(published.tool_groups);
-            setTimeoutValue(published.timeout);
-          }
+          const selection =
+            recovery && draft?.baseline != null
+              ? {
+                  services: reconcileGoogleSelection(
+                    draft.baseline.services,
+                    draft.services,
+                    published.services,
+                  ),
+                  toolGroups: reconcileGoogleSelection(
+                    draft.baseline.toolGroups,
+                    draft.toolGroups,
+                    published.tool_groups,
+                  ),
+                  timeout:
+                    draft.timeout === draft.baseline.timeout
+                      ? published.timeout
+                      : draft.timeout,
+                }
+              : {
+                  services: published.services,
+                  toolGroups: published.tool_groups,
+                  timeout: published.timeout,
+                };
+          setServices(selection.services);
+          setToolGroups(selection.toolGroups);
+          setTimeoutValue(selection.timeout);
           // Only our publication increment may rebase retained metadata edits.
           if (
             draftRevision.current != null &&
@@ -359,7 +366,19 @@ export function useGoogleSetupContainer(
             baselineMetadata.current = metadata;
             if (draft != null) {
               clearDraft();
+              draft = null;
             }
+          } else if (draft != null) {
+            draft = {
+              ...draft,
+              ...selection,
+              revision: draftRevision.current,
+              baseline: {
+                services: published.services,
+                toolGroups: published.tool_groups,
+                timeout: published.timeout,
+              },
+            };
           }
         }
       } catch {
@@ -382,6 +401,9 @@ export function useGoogleSetupContainer(
       !sameGoogleResumeAttempt(readResume(), context)
     ) {
       return;
+    }
+    if (draft != null) {
+      saveDraft({ ...draft, attemptId: void 0 });
     }
     active.current = null;
     clearResume();
@@ -1067,9 +1089,7 @@ export function useGoogleSetupContainer(
     },
     onRetryAuthorization: () => cancelExact(true),
     onCheckOutcome: checkOutcome,
-    onCancel: () => {
-      void cancelExact();
-    },
+    onCancel: () => cancelExact(),
     onRefresh: () => {
       void utils.toolkit.google.preparation.invalidate(scope);
       void utils.toolkit.google.status.invalidate();

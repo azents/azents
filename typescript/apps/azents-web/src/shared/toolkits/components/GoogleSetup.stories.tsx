@@ -116,7 +116,7 @@ const props: GoogleSetupProps = {
   onMetadataChange: fn(),
   onAuthorize: fn(),
   onCheckOutcome: fn(() => Promise.resolve()),
-  onCancel: fn(),
+  onCancel: fn(() => Promise.resolve()),
   onRefresh: fn(),
   onAskDisconnect: fn(),
   onDismissDisconnect: fn(),
@@ -433,5 +433,33 @@ export const MobileSavedModal: Story = {
       dialog.clientWidth + 1,
     );
     await expect(body.getByRole("button", { name: "재인증" })).toBeVisible();
+  },
+};
+export const PickerModalScroll: Story = {
+  args: { ...PickerOpen.args, picker: { type: "IDLE" } },
+  render: (args) => (
+    <Modal opened onClose={() => {}} size="lg" centered title="Google">
+      <GoogleSetup {...args} rootRef={{ current: null }} />
+    </Modal>
+  ),
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    const permissions = body.getAllByText("Permissions and tools").at(1);
+    if (permissions == null) {
+      throw new Error("Drive permissions are missing.");
+    }
+    await userEvent.click(permissions);
+    const button = body.getByRole("button", {
+      name: "Choose Drive files with Google",
+    });
+    button.scrollIntoView({ block: "end" });
+    const rect = button.getBoundingClientRect();
+    const hit = button.ownerDocument.elementFromPoint(
+      rect.x + rect.width / 2,
+      rect.y + rect.height / 2,
+    );
+    await expect(button.contains(hit)).toBe(true);
+    await userEvent.click(button);
+    await expect(args.onOpenPicker).toHaveBeenCalledOnce();
   },
 };

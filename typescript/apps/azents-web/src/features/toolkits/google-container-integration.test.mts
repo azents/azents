@@ -1343,3 +1343,104 @@ void test("retry after pre-navigation APPLY failure retains the pending settings
   }
   assert.equal(object(h.render().metadata).name, "Pending apply");
 });
+
+for (const result of ["recovered", "cancelled", "superseded"]) {
+  void test(`retained draft survives remount after ${result} authentication`, async () => {
+    const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+    store.value = {
+      ...context("old", "saved"),
+      purpose: "RECOVER",
+      phase: "UNKNOWN",
+    };
+    const draftStore = new BrowserStorageFixture(googleEditor.GOOGLE_DRAFT_KEY);
+    const draft: googleEditor.GoogleEditorDraft = {
+      handle: "team",
+      agentId: "agent",
+      toolkitId: "saved",
+      attemptId: "old",
+      expiresAt: deadline,
+      metadata: { ...googleEditor.emptyGoogleMetadata, name: "Unapplied edit" },
+      services: ["calendar", "gmail"],
+      toolGroups: ["calendar_read", "gmail_read"],
+      timeout: 12,
+      revision: 7,
+      baseline: {
+        services: ["calendar"],
+        toolGroups: ["calendar_read"],
+        timeout: 30,
+      },
+    };
+    let status = {
+      ...review,
+      toolkit_id: "saved",
+      revision: 7,
+      connection_id: "old-grant",
+      status: "connected",
+      granted_tools: [],
+    };
+    const management = {
+      status: () => status,
+      save: () => Promise.reject(new Error("No save")),
+    };
+    const cancelled = deferred<unknown>();
+    const h = setupHarness(
+      store,
+      () => cancelled.promise,
+      () => Promise.reject(new Error("No review")),
+      () => {},
+      management,
+      null,
+      void 0,
+      {
+        draft,
+        draftStore,
+        outcome: () =>
+          Promise.resolve({
+            toolkit_id: "saved",
+            connection_id: "new-grant",
+            current: result === "recovered",
+          }),
+      },
+    );
+    if (result === "cancelled") {
+      const cancellation = invoke(h.render().onCancel);
+      cancelled.resolve({ cancelled: true, publication: null });
+      await cancellation;
+    } else {
+      status = {
+        ...status,
+        revision: result === "recovered" ? 8 : 9,
+        connection_id: result === "recovered" ? "new-grant" : "other-grant",
+      };
+      await invoke(h.render().onCheckOutcome);
+    }
+    assert.equal(store.value, null);
+    assert.equal(object(draftStore.value).attemptId, void 0);
+    assert.equal(
+      object(draftStore.value).revision,
+      result === "recovered" ? 8 : 7,
+    );
+    h.unmount();
+    const reopened = setupHarness(
+      store,
+      () => Promise.reject(new Error("No cancel")),
+      () => Promise.reject(new Error("No review")),
+      () => {},
+      management,
+      null,
+      void 0,
+      { draftStore },
+    ).render();
+    assert.equal(object(reopened.metadata).name, "Unapplied edit");
+    assert.equal(reopened.timeout, 12);
+    assert.deepEqual(JSON.parse(JSON.stringify(reopened.services)), [
+      "calendar",
+      "gmail",
+    ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(reopened.toolGroups)), [
+      "calendar_read",
+      "gmail_read",
+    ]);
+    assert.equal(reopened.settingsDirty, true);
+  });
+}

@@ -131,13 +131,16 @@ def test_google_automatic_recovery_preserves_single_apply_draft(
             )
         ).click()
     _assert_visible_text(browser_driver, "Services to use")
-    assert not any(
-        item.is_selected()
+    services = [
+        item
         for item in browser_driver.find_elements(
             By.CSS_SELECTOR,
             '[role="dialog"] input[role="switch"]',
         )
-    )
+        if item.is_displayed()
+    ]
+    assert len(services) == 3
+    assert not any(item.is_selected() for item in services)
     check(browser_driver, "Calendar")
     check(browser_driver, "Gmail")
     for service in ("Calendar", "Gmail"):

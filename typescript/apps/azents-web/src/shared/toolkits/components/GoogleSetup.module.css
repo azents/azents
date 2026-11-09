@@ -5,6 +5,9 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+.content :where(button, input, textarea, summary) {
+  scroll-margin-block-end: calc(var(--mantine-spacing-xl) * 4);
+}
 .service {
   border-top: 1px solid var(--mantine-color-default-border);
   padding-top: var(--mantine-spacing-sm);

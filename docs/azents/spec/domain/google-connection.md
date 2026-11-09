@@ -138,7 +138,9 @@ publication permits exact outcome lookup or local cancellation, not automatic
 resubmission. Completion observes the current saved connection and selection before
 clearing the exact resume. A confirmed Apply adopts its published selection
 without another save; recovery reapplies only explicit unrelated draft deltas over
-that result. Superseded outcomes preserve the draft. A failed saved-state read stays
+that result. Completion, cancellation and superseded outcomes detach retained drafts
+from the ended attempt before clearing its resume; reopening restores their metadata,
+selection and original or safely rebased revision. A failed saved-state read stays
 in result-check recovery instead of redispatching publication. Acknowledged writes
 remain committed if optional list refresh fails. Historical outcomes are nonsecret
 observations and do not prove current readiness. Disconnect is local and does not promise Google revocation or
