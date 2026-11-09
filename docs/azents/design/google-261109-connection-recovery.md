@@ -1,6 +1,7 @@
 ---
 title: "Google Connection Recovery Design"
 created: 2026-11-09
+implemented: 2026-11-09
 document_role: primary
 document_type: design
 snapshot_id: google-261109
