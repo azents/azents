@@ -167,7 +167,7 @@ export function useAgentToolkitManagementContainer({
             : google.agentId == null),
       );
       if (target != null) {
-        if (google.purpose === "RECOVER") {
+        if (google.purpose === "RECOVER" && google.returnAgentId === agentId) {
           setGoogleRecovery(target);
           return;
         }

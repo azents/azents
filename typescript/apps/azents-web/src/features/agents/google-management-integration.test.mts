@@ -168,6 +168,31 @@ void test("actual Agent management restores only the exact owned Google reconnec
   shared.flushEffects();
   assert.equal(object(shared.render().editor).type, "CLOSED");
 });
+for (const fromCard of [false, true]) {
+  void test(`Google recovery from ${fromCard ? "card" : "editor"} returns to its originating surface`, () => {
+    const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+    store.value = {
+      ...context("old", "saved"),
+      purpose: "RECOVER",
+      ...(fromCard && { returnAgentId: "agent" }),
+    };
+    const item = {
+      ownership_scope: "agent_only",
+      toolkit: { id: "saved", toolkit_type: "google" },
+    };
+    const harness = managerHarness(store, [item]);
+    harness.render({ handle: "team", agentId: "agent" });
+    harness.flushEffects();
+    const output = harness.render();
+    assert.equal(object(output.editor).type, fromCard ? "CLOSED" : "EDIT");
+    if (fromCard) {
+      assert.equal(object(output.googleRecovery).toolkit, item.toolkit);
+    } else {
+      assert.equal(output.googleRecovery, null);
+      assert.equal(object(output.editor).toolkitConfigId, "saved");
+    }
+  });
+}
 for (const action of ["close", "back"]) {
   void test(`actual Agent Google ${action} invokes exact abandonment and guards unknown publication`, () => {
     const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);

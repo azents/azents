@@ -122,7 +122,9 @@ Google participates in standard Agent Toolkit recovery with exact shared/Agent
 manager permissions and a validated same-Workspace Agent return context. Recovery
 from the card dispatches the Google flow directly rather than sending Google through
 generic MCP OAuth or requiring an edit detour. Successful recovery refreshes the
-original management surface. No mail, file or calendar action is replayed.
+original management surface. Editor-started Agent reauthentication restores the
+editor and retained draft; only recovery with an explicit Agent-card return context
+uses the recovery-only surface. No mail, file or calendar action is replayed.
 
 The same-context `/oauth/google/callback` removes transient query data and matches
 a nonsecret digest to the exact originating attempt. Browser resume stores only
