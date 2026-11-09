@@ -134,6 +134,9 @@ type Story = StoryObj<typeof meta>;
 export const ExplicitSelection: Story = {
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement);
+    for (const service of ["Calendar", "Drive", "Gmail"]) {
+      await expect(c.getByRole("switch", { name: service })).not.toBeChecked();
+    }
     await expect(
       c.getByRole("button", { name: "Connect to Google" }),
     ).toBeDisabled();

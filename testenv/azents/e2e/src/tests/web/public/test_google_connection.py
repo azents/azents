@@ -65,7 +65,19 @@ def disclose(driver: WebDriver, label: str, index: int = 0) -> None:
             else False
         )
 
-    _wait(driver).until(summary).click()
+    element = _wait(driver).until(summary)
+    if element.find_element(By.XPATH, "..").get_dom_attribute("open") is None:
+        element.click()
+
+    def opened(current: WebDriver) -> bool:
+        element = summary(current)
+        return (
+            element is not False
+            and element.find_element(By.XPATH, "..").get_dom_attribute("open")
+            is not None
+        )
+
+    _wait(driver).until(opened)
 
 
 @pytest.mark.parametrize("agent_owned", [False, True])
@@ -131,16 +143,6 @@ def test_google_automatic_recovery_preserves_single_apply_draft(
             )
         ).click()
     _assert_visible_text(browser_driver, "Services to use")
-    services = [
-        item
-        for item in browser_driver.find_elements(
-            By.CSS_SELECTOR,
-            '[role="dialog"] input[role="switch"]',
-        )
-        if item.is_displayed()
-    ]
-    assert len(services) == 3
-    assert not any(item.is_selected() for item in services)
     check(browser_driver, "Calendar")
     check(browser_driver, "Gmail")
     for service in ("Calendar", "Gmail"):
