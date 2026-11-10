@@ -60,6 +60,8 @@ async def probe_camoufox(
         executable_path=executable,
         headless=False,
         humanize=False,
+        # An explicit canvas policy avoids the SDK's separate unproxied GPU probe.
+        canvas_noise=True,
         exclude_addons=list(DefaultAddons),
         env=environment,
         proxy=proxy,
@@ -93,6 +95,8 @@ async def open_camoufox_context(
         user_data_dir=str(profile),
         headless=False,
         humanize=False,
+        # Both startup and Session launches must stay on the owned proxy route.
+        canvas_noise=True,
         exclude_addons=list(DefaultAddons),
         env=environment,
         proxy=proxy,
