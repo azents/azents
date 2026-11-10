@@ -144,7 +144,7 @@ progress is still available; preparing an explicit message, progress title or
 files durably fences subsequent quiet completion, even if delivery is uncertain.
 The release Skill avoids routine start/progress messages for those cycles.
 
-The canonical terminal Event retains `notify` and `suppression_reason`. Quiet
+The canonical terminal Event retains `notify` and `suppression_reason`. Reported completion serializes the required null suppression reason explicitly so the event can be validated again after persistence. Quiet
 completion performs ordinary cycle cleanup and Task progression, but prepares no
 reply or parent broadcast/forward. Tracker cleanup remains independent. It does
 not manufacture an unavailable-delivery result. The existing Session conversation

@@ -490,6 +490,16 @@ class ScheduledTaskResultPayload(BaseModel):
     notify: bool
     suppression_reason: str | None
 
+    @model_serializer(mode="wrap")
+    def serialize_required_nullable_fields(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve the required nullable reporting reason in canonical JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized["suppression_reason"] = self.suppression_reason
+        return serialized
+
     @model_validator(mode="after")
     def validate_reporting(self) -> "ScheduledTaskResultPayload":
         """Keep persisted execution outcome independent from intentional silence."""
