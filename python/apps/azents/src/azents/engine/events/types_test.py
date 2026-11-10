@@ -733,6 +733,23 @@ def test_scheduled_task_payloads_are_closed_protocol_variants() -> None:
     assert "cycle_id" not in result.model_dump(mode="json")
 
 
+def test_reported_scheduled_result_keeps_null_suppression_reason() -> None:
+    result = ScheduledTaskResultPayload(
+        title="Nightly report",
+        scheduled_for=datetime.datetime.now(datetime.UTC),
+        status="finished",
+        result="Report completed.",
+        notify=True,
+        suppression_reason=None,
+    )
+
+    serialized = result.model_dump(mode="json", exclude_none=True)
+    restored = ScheduledTaskResultPayload.model_validate(serialized)
+
+    assert serialized["suppression_reason"] is None
+    assert restored == result
+
+
 def test_scheduled_cycle_identity_is_sanitized_at_public_boundaries() -> None:
     event = Event(
         id="e" * 32,
