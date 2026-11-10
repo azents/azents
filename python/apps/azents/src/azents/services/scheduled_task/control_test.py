@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -287,9 +288,18 @@ def test_signed_locator_rejects_tampering(part: int) -> None:
         )
 
 
-def test_registration_renderers_use_web_edit_and_cancel_controls() -> None:
+@pytest.mark.parametrize(
+    ("allow_silent", "reporting"),
+    [
+        (False, "Report every occurrence."),
+        (True, "Skip successful no-result messages"),
+    ],
+)
+def test_registration_renderers_use_web_edit_and_cancel_controls(
+    allow_silent: bool, reporting: str
+) -> None:
     """Registration controls use Web edit and provider-authorized cancellation."""
-    task = _task()
+    task = replace(_task(), allow_silent=allow_silent)
     edit = build_scheduled_task_control_locator(
         secret=_SECRET,
         action="edit",
@@ -343,6 +353,8 @@ def test_registration_renderers_use_web_edit_and_cancel_controls() -> None:
     assert "Every weekday at 9:00 AM PDT" in str(embeds)
     assert "0 9 * * 1-5 (America/Los_Angeles)" in str(embeds)
     assert task.objective not in str(embeds)
+    assert reporting in str(slack_blocks)
+    assert reporting in str(embeds)
     discord_actions = components[0]["components"]
     assert isinstance(discord_actions, list)
     edit_button, cancel_button = discord_actions
