@@ -299,6 +299,8 @@ async def test_conversation_search_survives_tool_exclusion_and_round_trips(
             "scheduled_for": "2026-10-22T00:00:00Z",
             "status": "finished",
             "result": "scheduled public needle",
+            "notify": True,
+            "suppression_reason": None,
         },
     )
     await _event(

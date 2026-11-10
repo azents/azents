@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from typing import List, Optional, Set
@@ -27,6 +27,7 @@ class ScheduledTaskCreateRequest(BaseModel):
     """
     Create one Task for an existing authorized Session.
     """ # noqa: E501
+    allow_silent: StrictBool
     session_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)]
     title: Annotated[str, Field(min_length=1, strict=True, max_length=120)]
     objective: Annotated[str, Field(min_length=1, strict=True, max_length=3000)]
@@ -35,7 +36,7 @@ class ScheduledTaskCreateRequest(BaseModel):
     timezone: Optional[Annotated[str, Field(strict=True, max_length=128)]]
     channel_id: Optional[Annotated[str, Field(min_length=1, strict=True, max_length=256)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["session_id", "title", "objective", "at", "cron", "timezone", "channel_id"]
+    __properties: ClassVar[List[str]] = ["allow_silent", "session_id", "title", "objective", "at", "cron", "timezone", "channel_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -117,6 +118,7 @@ class ScheduledTaskCreateRequest(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
+            "allow_silent": obj.get("allow_silent"),
             "session_id": obj.get("session_id"),
             "title": obj.get("title"),
             "objective": obj.get("objective"),

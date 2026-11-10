@@ -929,7 +929,8 @@
       "weekends": "週末 {time}",
       "weekly": "毎週{days} {time}",
       "recurring": "繰り返しスケジュール · {timezone}"
-    }
+    },
+    "quietTitle": "{title} · 完了 · メッセージ省略"
   },
   "addWorkspace": "Add workspace",
   "addExistingProject": "Add existing Project",

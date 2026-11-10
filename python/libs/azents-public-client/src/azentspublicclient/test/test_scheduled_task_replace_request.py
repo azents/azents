@@ -35,6 +35,7 @@ class TestScheduledTaskReplaceRequest(unittest.TestCase):
         model = ScheduledTaskReplaceRequest()
         if include_optional:
             return ScheduledTaskReplaceRequest(
+                allow_silent = True,
                 title = '0',
                 objective = '0',
                 at = '',
@@ -44,6 +45,7 @@ class TestScheduledTaskReplaceRequest(unittest.TestCase):
             )
         else:
             return ScheduledTaskReplaceRequest(
+                allow_silent = True,
                 title = '0',
                 objective = '0',
                 at = '',

@@ -35,6 +35,7 @@ class TestScheduledTaskCreateRequest(unittest.TestCase):
         model = ScheduledTaskCreateRequest()
         if include_optional:
             return ScheduledTaskCreateRequest(
+                allow_silent = True,
                 session_id = '012345678910111213141516171819202122232425262728293031',
                 title = '0',
                 objective = '0',
@@ -45,6 +46,7 @@ class TestScheduledTaskCreateRequest(unittest.TestCase):
             )
         else:
             return ScheduledTaskCreateRequest(
+                allow_silent = True,
                 session_id = '012345678910111213141516171819202122232425262728293031',
                 title = '0',
                 objective = '0',

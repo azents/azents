@@ -24,6 +24,7 @@ export interface ScheduledTaskDraft {
   sessionId: string;
   title: string;
   objective: string;
+  allowSilent: boolean;
   scheduleType: "once" | "cron";
   at: string;
   cron: string;

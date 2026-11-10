@@ -39,6 +39,8 @@ Each `scheduled_tasks` row stores:
 - immutable Task ID plus Workspace, Agent, and Session ownership;
 - optional exact External Channel `binding_id`;
 - editable `title` and `objective`;
+- explicit `allow_silent` permission, false for existing Tasks and explicitly
+  selected for new create/replace requests;
 - one canonical schedule shape;
 - `next_eligible_at`;
 - one active-cycle fence and at most one coalesced pending occurrence;
@@ -118,6 +120,48 @@ visibility does not grant permission to settle an unrelated or unbound cycle.
 Dynamic cycle guidance remains limited to the current Run's valid started cycle.
 A Scheduled-bound `channel_action` may report progress only with
 `continue`; terminal completion must use `submit_scheduled_task_result`.
+
+### Reporting permission and occurrence choice
+
+Scheduled execution is independent of notification obligation. A Task may permit
+successful no-result occurrences to finish without a message. The explicit
+`allow_silent` policy is shown in registration, list/detail and existing editors,
+and copied into the immutable admitted cycle. Updating a future definition does
+not change a started cycle's policy. Existing Tasks and retained cycles migrate
+to report-required; no Task is opted in automatically.
+
+Completion requires `notify` and nullable `suppression_reason` alongside the
+nonblank result and files. `notify=false` requires `finished`, captured permission,
+a nonblank reason, no files and no explicit progress communication attempt.
+`notify=true` requires a null suppression reason. The terminal transaction
+rechecks permission and progress before committing. Semantic no-result eligibility
+is model judgment: incomplete checks, uncertainty, meaningful external changes
+and user-required files must be reported. Internal bookkeeping alone is not a
+reportable external change. Uncertain eligibility conservatively reports.
+
+Quiet-permitted cycles skip automatic initial channel Tracker claims. Explicit
+progress is still available; preparing an explicit message, progress title or
+files durably fences subsequent quiet completion, even if delivery is uncertain.
+The release Skill avoids routine start/progress messages for those cycles.
+
+The canonical terminal Event retains `notify` and `suppression_reason`. Quiet
+completion performs ordinary cycle cleanup and Task progression, but prepares no
+reply or parent broadcast/forward. Tracker cleanup remains independent. It does
+not manufacture an unavailable-delivery result. The existing Session conversation
+shows a collapsed completed-without-message detail with result, omission reason
+and completion timestamp, and the terminal Run does not create a new unread
+attention boundary. Recovery keeps the first canonical choice and does not resend.
+Existing reported result rendering and lifecycle remain unchanged.
+
+The migration adds one non-null boolean to `scheduled_tasks` and enriches existing
+Scheduled Toolkit cycle JSON and terminal Event JSON. It adds no keys, foreign
+relationships or cleanup owner: the Task repository still owns definition
+removal/progression, Toolkit State owns active cycles and Session transcript
+retention owns result Events. The migration initializes old data, not a runtime
+fallback or a new schema version.
+Rollback retains terminal Event notification metadata, which older result readers
+ignore; a later upgrade fills only missing metadata so a prior quiet decision
+and its reason are never reclassified as a report.
 
 The Toolkit's active-cycle and continuity reads, Task creation, Task listing with
 derived execution state, and Task deletion are completed repository operations.
@@ -233,7 +277,7 @@ exact prompt. Legacy content that predates the structured runtime text remains
 visible as a complete fallback.
 
 `submit_scheduled_task_result` requires an explicit nullable `files` field. A
-channel-bound cycle accepts the same absolute Runtime paths and authorized
+reported channel-bound cycle accepts the same absolute Runtime paths and authorized
 `exchange://` URIs as `channel_action`, validates them against the cycle's exact
 Binding before terminalization, and publishes the terminal message and files
 through that same bound conversation. A Session-only cycle requires `files=null`.

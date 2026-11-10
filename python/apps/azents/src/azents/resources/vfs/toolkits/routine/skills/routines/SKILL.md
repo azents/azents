@@ -1,6 +1,6 @@
 ---
 name: routines
-description: Create, inspect, edit, delete, and carry out Session Routines for ongoing objectives. Use for conditional checking where the model decides whether action or output is worthwhile, including requests with timing preferences, for managing existing Routines, or for completing an admitted occurrence. Use Scheduled Tasks when output is required at every scheduled occurrence.
+description: Create, inspect, edit, delete, and carry out Session Routines for ongoing objectives whose checks judge whether work is worthwhile. Use Scheduled Tasks when work must execute at specified times, even when successful no-result messages may be omitted.
 ---
 
 # Session Routines
@@ -12,13 +12,14 @@ external write, and disclosure.
 
 ## Choose Routine or Scheduled Task
 
-Choose by the output obligation, not merely a requested time or interval:
+Choose by the execution obligation, not notification obligation alone:
 
 - "Produce a traffic-analysis report every hour" requires output each time: use
   a Scheduled Task.
-- "Check traffic every hour and tell me if anything is unusual" requires
-  conditional checking: use a Routine. A timing preference does not turn this
-  into a mandatory-output Scheduled Task.
+- "Check traffic every hour and tell me only if anything is unusual" uses a
+  Scheduled Task when every scheduled check must execute, with explicit quiet
+  completion permission. For an ongoing goal whose eligible checks judge whether
+  work is worthwhile, use a Routine. Do not promise exact per-Routine schedules.
 - A one-off investigation does not automatically create a Routine.
 
 Explain the supported timing limits: the Agent's Routine tick defaults to 180

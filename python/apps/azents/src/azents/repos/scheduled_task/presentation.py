@@ -27,6 +27,26 @@ _SCHEDULE_TIMING_GUIDANCE = """The schedule and scheduled-for timestamp are occu
 _EXECUTION_GUIDANCE = """Continue autonomously across Agent runs until the objective is complete. If required information, authority, user choice, or another prerequisite is unavailable after reasonable attempts, submit a failed result explaining what is missing. Submit a finished or failed Scheduled Task result explicitly."""  # noqa: E501
 
 
+def reporting_guidance(allow_silent: bool) -> str:
+    """Describe captured permission without weakening the execution obligation."""
+    if not allow_silent:
+        return (
+            "This occurrence requires a result message. "
+            "Complete with notify=true and suppression_reason=null."
+        )
+    return (
+        "This occurrence permits quiet completion only after successful checks "
+        "clearly satisfy the objective's omission condition and there is nothing "
+        "to report. Avoid routine start/progress messages and Trackers. Use "
+        "notify=false, a nonblank suppression_reason and files=null only then. "
+        "Report failures, incomplete checks, uncertainty, meaningful external "
+        "changes (including PRs, data changes or messages), required files and "
+        "results after explicit progress with notify=true and "
+        "suppression_reason=null. Internal bookkeeping alone is not a report. "
+        "When uncertain, report. Keep a nonblank result for Session history."
+    )
+
+
 @dataclass(frozen=True)
 class ScheduledTaskSchedulePresentation:
     """Human and canonical labels for one Scheduled Task schedule."""
@@ -99,6 +119,7 @@ def render_scheduled_task_runtime_message(
     *,
     title: str,
     objective: str,
+    allow_silent: bool,
     schedule_type: ScheduledTaskScheduleType,
     scheduled_at: datetime.datetime | None,
     cron_expression: str | None,
@@ -123,6 +144,7 @@ def render_scheduled_task_runtime_message(
         Scheduled for details: {schedule.occurrence_canonical}
         Timing semantics: {_SCHEDULE_TIMING_GUIDANCE}
         Execution guidance: {_EXECUTION_GUIDANCE}
+        Reporting policy: {reporting_guidance(allow_silent)}
         Prompt:
         """
     )
@@ -132,16 +154,20 @@ def render_scheduled_task_runtime_message(
 def render_scheduled_task_cycle_guidance(state: ScheduledTaskCycleState) -> str:
     """Render active-cycle-only dynamic execution guidance."""
     channel_guidance = (
-        """Use `channel_action` only for interim progress and publication. `submit_scheduled_task_result` finishes this Scheduled Task cycle and delivers its terminal message and files to the exact same bound conversation used by `channel_action`; do not describe this as sending to another Slack or Discord channel."""  # noqa: E501
+        """Use `channel_action` only for interim progress and publication. `submit_scheduled_task_result` finishes this Scheduled Task cycle and, when notify=true, delivers its terminal message and files to the exact same bound conversation used by `channel_action`; do not describe this as sending to another Slack or Discord channel."""  # noqa: E501
         if state.binding_id is not None
         else """This cycle is Session-only; submit the terminal result with files set to null because no external provider publication is available."""  # noqa: E501
     )
-    return dedent(
-        f"""\
+    return (
+        reporting_guidance(state.allow_silent)
+        + "\n\n"
+        + dedent(
+            f"""\
         ### Active Scheduled Task Work Cycle
 
         Schedule timing semantics: {_SCHEDULE_TIMING_GUIDANCE}
         Ending this AgentRun does not finish the work cycle. Continue autonomously through idle continuations until the objective is terminal. Use `submit_scheduled_task_result` with `finished` only after achieving the objective, or with `failed` after reasonable attempts when required information, authority, a user choice, or another prerequisite remains unavailable. {channel_guidance}"""  # noqa: E501
+        )
     )
 
 
@@ -172,6 +198,7 @@ def render_scheduled_task_compaction_snapshot(
                 f"### Cycle {index}",
                 f"- Title: {_bounded(state.title, _TITLE_LIMIT)}",
                 f"- Objective: {_bounded(state.objective, _OBJECTIVE_LIMIT)}",
+                f"- Reporting policy: {reporting_guidance(state.allow_silent)}",
                 f"- Schedule: {schedule}",
                 f"- Occurrence start time: {_utc_text(state.scheduled_for)}",
                 f"- Timing semantics: {_SCHEDULE_TIMING_GUIDANCE}",

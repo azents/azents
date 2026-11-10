@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.scheduled_task_schedule_type import ScheduledTaskScheduleType
 from azentspublicclient.models.scheduled_task_session_response import ScheduledTaskSessionResponse
@@ -33,6 +33,7 @@ class ScheduledTaskResponse(BaseModel):
     id: StrictStr
     title: StrictStr
     objective: StrictStr
+    allow_silent: StrictBool
     schedule_type: ScheduledTaskScheduleType
     scheduled_at: Optional[datetime]
     cron_expression: Optional[StrictStr]
@@ -44,7 +45,7 @@ class ScheduledTaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "title", "objective", "schedule_type", "scheduled_at", "cron_expression", "timezone", "next_eligible_at", "execution_state", "session", "target", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "title", "objective", "allow_silent", "schedule_type", "scheduled_at", "cron_expression", "timezone", "next_eligible_at", "execution_state", "session", "target", "created_at", "updated_at"]
 
     @field_validator('execution_state')
     def execution_state_validate_enum(cls, value):
@@ -142,6 +143,7 @@ class ScheduledTaskResponse(BaseModel):
             "id": obj.get("id"),
             "title": obj.get("title"),
             "objective": obj.get("objective"),
+            "allow_silent": obj.get("allow_silent"),
             "schedule_type": obj.get("schedule_type"),
             "scheduled_at": obj.get("scheduled_at"),
             "cron_expression": obj.get("cron_expression"),

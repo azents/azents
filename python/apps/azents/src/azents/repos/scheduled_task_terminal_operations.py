@@ -33,6 +33,7 @@ class ScheduledTaskTerminalEffectSnapshot:
     binding_id: str
     status: ScheduledTaskTerminalStatus
     result: str
+    notify: bool
     tracker_desired_revision: int
     tracker_projection_parts: tuple[ScheduledTrackerProjectionPart, ...]
 
@@ -89,6 +90,8 @@ class ScheduledTaskTerminalOperations:
         run_id: str,
         status: ScheduledTaskTerminalStatus,
         result: str,
+        notify: bool,
+        suppression_reason: str | None,
     ) -> ScheduledTaskTerminalOutcome:
         """Commit the canonical Event and cycle/Task transition once."""
         normalized_result = result
@@ -154,11 +157,23 @@ class ScheduledTaskTerminalOperations:
                     "The current AgentRun has no matching started Scheduled Task cycle."
                 )
 
+            if not notify:
+                if not cycle.state.allow_silent:
+                    raise ValueError(
+                        "This Scheduled Task does not allow quiet completion."
+                    )
+                if cycle.state.progress_reported:
+                    raise ValueError(
+                        "A Scheduled Task that reported progress "
+                        "must report its result."
+                    )
             payload = ScheduledTaskResultPayload(
                 title=cycle.state.title,
                 scheduled_for=cycle.state.scheduled_for,
                 status=status,
                 result=normalized_result,
+                notify=notify,
+                suppression_reason=suppression_reason,
             )
             effect_snapshot = (
                 None
@@ -172,6 +187,7 @@ class ScheduledTaskTerminalOperations:
                     binding_id=cycle.state.binding_id,
                     status=status,
                     result=normalized_result,
+                    notify=notify,
                     tracker_desired_revision=cycle.state.tracker_desired_revision,
                     tracker_projection_parts=tuple(
                         cycle.state.tracker_current_projection_parts

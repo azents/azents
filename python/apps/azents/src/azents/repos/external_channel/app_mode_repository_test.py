@@ -1624,6 +1624,7 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
             scheduled_at=_at(10),
             cron_expression=None,
             timezone=None,
+            allow_silent=False,
         ),
     )
     task_row = await rdb_session.read_session.get(RDBScheduledTask, task.id)
@@ -1647,6 +1648,7 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
             cron_expression=task.cron_expression,
             timezone=task.timezone,
             scheduled_for=_at(10),
+            allow_silent=False,
         ),
     )
     trigger = await MailboxRepository().create_idempotent(

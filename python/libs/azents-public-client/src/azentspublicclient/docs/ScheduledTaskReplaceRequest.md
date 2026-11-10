@@ -6,6 +6,7 @@ Replace editable fields that govern future work.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**allow_silent** | **bool** |  | 
 **title** | **str** |  | 
 **objective** | **str** |  | 
 **at** | **str** |  | 

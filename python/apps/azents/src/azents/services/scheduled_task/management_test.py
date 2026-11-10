@@ -359,6 +359,7 @@ def _task(
         lease_until=None,
         created_at=_NOW,
         updated_at=_NOW,
+        allow_silent=False,
     )
 
 
@@ -384,6 +385,8 @@ def _started_cycle() -> ScheduledTaskCycleRecord:
             started_at=_NOW,
             progress_title=None,
             ordered_tasks=[],
+            allow_silent=False,
+            progress_reported=False,
         ),
         version=1,
         toolkit_state_id="k" * 32,
@@ -477,6 +480,7 @@ async def test_requested_binding_is_locked_then_hidden_before_create() -> None:
             cron=None,
             timezone=None,
             channel_id=_REQUESTED_BINDING_ID,
+            allow_silent=False,
         )
 
     assert raised.value.code == "not_found"
@@ -540,6 +544,7 @@ async def test_create_rejects_locked_lifecycle_authority(
             cron=None,
             timezone=None,
             channel_id=_REQUESTED_BINDING_ID,
+            allow_silent=False,
         )
 
     assert raised.value.code == "not_found"
@@ -571,6 +576,7 @@ async def test_invalid_schedule_remains_distinct_from_binding_unavailability() -
             cron="0 8 * * *",
             timezone="UTC",
             channel_id=None,
+            allow_silent=False,
         )
 
     assert raised.value.code == "invalid_schedule"
@@ -643,6 +649,7 @@ async def test_binding_locks_and_authority_precede_shared_mutation_fence() -> No
             cron=None,
             timezone=None,
             channel_id=_REQUESTED_BINDING_ID,
+            allow_silent=False,
         )
 
     assert raised.value.code == "not_found"
@@ -759,6 +766,7 @@ async def test_started_one_time_edit_is_conflict_after_canonical_lock_order() ->
             cron=None,
             timezone=None,
             channel_id=_CURRENT_BINDING_ID,
+            allow_silent=False,
         )
 
     assert raised.value.code == "conflict"
@@ -798,6 +806,7 @@ async def test_create_localizes_registration_without_changing_api_projection() -
         target=None,
         created_at=task.created_at,
         updated_at=task.updated_at,
+        allow_silent=False,
     )
     operations = AsyncMock(spec=ScheduledTaskManagementRepository)
     operations.create.return_value = ScheduledTaskManagementMutation(
@@ -819,6 +828,7 @@ async def test_create_localizes_registration_without_changing_api_projection() -
         cron=None,
         timezone=None,
         channel_id=None,
+        allow_silent=False,
     )
 
     assert result is projection
@@ -862,6 +872,7 @@ async def test_replace_preserves_no_registration_effect() -> None:
         cron=None,
         timezone=None,
         channel_id=_CURRENT_BINDING_ID,
+        allow_silent=False,
     )
     channel.execute_registration.assert_not_awaited()
     channel.execute_deletion.assert_not_awaited()

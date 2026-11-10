@@ -392,7 +392,7 @@ class ScheduledTaskChannelService:
         cleanup_plans = preparation.cleanup_plans
 
         outcomes: list[ProviderEffectOutcome] = []
-        if not reply_plans:
+        if not reply_plans and snapshot.notify:
             outcomes.append(
                 _unavailable_outcome(
                     operation=ExternalChannelDeliveryOperation.REPLY,

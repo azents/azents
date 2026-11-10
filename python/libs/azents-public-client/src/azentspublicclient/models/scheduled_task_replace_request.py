@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from typing import List, Optional, Set
@@ -27,6 +27,7 @@ class ScheduledTaskReplaceRequest(BaseModel):
     """
     Replace editable fields that govern future work.
     """ # noqa: E501
+    allow_silent: StrictBool
     title: Annotated[str, Field(min_length=1, strict=True, max_length=120)]
     objective: Annotated[str, Field(min_length=1, strict=True, max_length=3000)]
     at: Optional[Annotated[str, Field(strict=True, max_length=64)]]
@@ -34,7 +35,7 @@ class ScheduledTaskReplaceRequest(BaseModel):
     timezone: Optional[Annotated[str, Field(strict=True, max_length=128)]]
     channel_id: Optional[Annotated[str, Field(min_length=1, strict=True, max_length=256)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["title", "objective", "at", "cron", "timezone", "channel_id"]
+    __properties: ClassVar[List[str]] = ["allow_silent", "title", "objective", "at", "cron", "timezone", "channel_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -116,6 +117,7 @@ class ScheduledTaskReplaceRequest(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
+            "allow_silent": obj.get("allow_silent"),
             "title": obj.get("title"),
             "objective": obj.get("objective"),
             "at": obj.get("at"),

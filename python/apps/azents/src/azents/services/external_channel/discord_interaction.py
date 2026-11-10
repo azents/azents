@@ -755,6 +755,7 @@ def _scheduled_task_edit(
     return ScheduledTaskEditInput(
         title=title,
         objective=objective,
+        allow_silent=None,
         at=values["azents_scheduled_task_at"],
         cron=values["azents_scheduled_task_cron"],
         timezone=values["azents_scheduled_task_timezone"],

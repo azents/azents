@@ -35,6 +35,7 @@ def _rdb_task(task_id: str = "a" * 32) -> RDBScheduledTask:
         scheduled_at=_dt(1),
         cron_expression=None,
         timezone=None,
+        allow_silent=False,
     )
     task.id = task_id
     task.created_at = _dt(0)
@@ -221,6 +222,7 @@ class TestScheduledTaskRepository:
                 scheduled_at=_dt(1),
                 cron_expression=None,
                 timezone=None,
+                allow_silent=False,
             ),
         )
 
@@ -322,6 +324,7 @@ class TestScheduledTaskRepository:
             pending_scheduled_for=None,
             lease_owner=None,
             lease_until=None,
+            allow_silent=False,
         )
         row.id = "a" * 32
         row.created_at = _dt(0)

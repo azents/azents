@@ -33,6 +33,28 @@ Session and intended channel context.
   the user only asks how Scheduled Tasks work.
 - Use List and Delete for existing Task management.
 - Replace a Task by deleting the existing definition and creating a new Task.
+- Use Scheduled Tasks for work that must execute at specified times, independently
+  of whether every successful occurrence needs a message. Use Routines for ongoing
+  goals whose checks judge whether work is worthwhile.
+
+## Reporting permission
+
+Set `allow_silent=false` unless the user explicitly permits successful no-result
+occurrences to omit messages. Checking work is not permission by itself. Record
+the clear omission/reporting condition in the objective without inventing a
+separate rule language. If a material condition is ambiguous, clarify it; until
+resolved, preserve reporting. Show the saved policy during registration and listing.
+Existing Tasks are not automatically opted in.
+
+Permission is not a command to remain silent. Failures, incomplete checks,
+uncertainty, meaningful external changes (PRs, data changes or sent messages) and
+files the user should receive require a result message. Internal bookkeeping
+alone is not a meaningful external change.
+
+For permitted occurrences, avoid routine start/progress messages and initial
+Trackers. Report meaningful findings, actions or blockers when necessary. After
+explicit progress has been reported, finish with a short report rather than
+silence. Do not delete earlier messages to simulate a quiet occurrence.
 
 ## Creation workflow
 
@@ -206,7 +228,15 @@ Do not describe replacement as an in-place update.
 ## Completing scheduled work
 
 Use `submit_scheduled_task_result` to finish or fail the active Scheduled Task
-cycle. Always supply `files` explicitly:
+cycle. Always supply `notify`, `suppression_reason`, and `files` explicitly:
+
+- use `notify=true` and `suppression_reason=null` for normal reports;
+- use `notify=false` only when captured permission allows it, all required checks
+  succeeded, the objective's omission condition clearly holds, and nothing needs
+  reporting; provide a nonblank `suppression_reason` and `files=null`;
+- keep a nonblank `result` summarizing verified work even for quiet completion;
+- never treat unknown results, failures, missing authority or interrupted work as
+  successful no-change. When uncertain, report.
 
 - set `files=null` when no files are needed;
 - for a channel-bound cycle, supply the same absolute Runtime paths or authorized
@@ -214,7 +244,7 @@ cycle. Always supply `files` explicitly:
 - for a Session-only cycle, set `files=null` because no External Channel
   publication is available.
 
-For a channel-bound cycle, the terminal result message and files are delivered to
+For a channel-bound reported cycle, the terminal result message and files are delivered to
 the exact same bound conversation represented by `channel_action`. Do not select
 another channel, reconstruct a provider identifier, or describe the result as
 having been separately sent to another Slack or Discord channel.

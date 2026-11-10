@@ -6,6 +6,7 @@ const draftSchema = z
     sessionId: z.string(),
     title: z.string().trim(),
     objective: z.string().trim(),
+    allowSilent: z.boolean(),
     scheduleType: z.enum(["once", "cron"]),
     at: z.string(),
     cron: z.string(),
@@ -70,6 +71,7 @@ export interface ScheduledTaskMutationValues {
   sessionId: string;
   title: string;
   objective: string;
+  allowSilent: boolean;
   at: string | null;
   cron: string | null;
   timezone: string | null;
@@ -114,6 +116,7 @@ export function parseScheduledTaskDraft(
       sessionId: value.sessionId,
       title: value.title.trim(),
       objective: value.objective.trim(),
+      allowSilent: value.allowSilent,
       at:
         value.scheduleType === "once" ? new Date(value.at).toISOString() : null,
       cron: value.scheduleType === "cron" ? value.cron.trim() : null,

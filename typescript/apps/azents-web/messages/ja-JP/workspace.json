@@ -1563,6 +1563,14 @@
         "oneTimeInvalid": "有効な日付と時刻を入力してください。",
         "cronRequired": "Cron式を入力してください。",
         "timezoneRequired": "IANAタイムゾーンを入力してください。"
+      },
+      "reporting": {
+        "title": "結果の報告",
+        "required": "実行のたびに結果を報告",
+        "optional": "報告事項がなければメッセージを省略可能",
+        "allowLabel": "報告事項がない場合はメッセージなしでの完了を許可",
+        "description": "作業が完了し、省略条件を満たす場合のみ省略します。失敗や確認できなかった内容は報告します。",
+        "runningNote": "変更は今後の実行に適用されます。実行中の回には元の報告設定が適用されます。"
       }
     },
     "terminalEnabledLabel": "対話型ターミナルを有効化",

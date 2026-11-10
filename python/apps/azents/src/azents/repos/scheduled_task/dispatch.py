@@ -188,6 +188,7 @@ class ScheduledTaskDispatchRepository:
                 binding_id=task.binding_id,
                 title=task.title,
                 objective=task.objective,
+                allow_silent=task.allow_silent,
                 schedule_type=task.schedule_type,
                 scheduled_at=task.scheduled_at,
                 cron_expression=task.cron_expression,
@@ -198,6 +199,7 @@ class ScheduledTaskDispatchRepository:
             content = render_scheduled_task_runtime_message(
                 title=task.title,
                 objective=task.objective,
+                allow_silent=task.allow_silent,
                 schedule_type=task.schedule_type,
                 scheduled_at=task.scheduled_at,
                 cron_expression=task.cron_expression,

@@ -1077,6 +1077,29 @@ function mapEvents(
           },
         ];
       }
+      case "scheduled_task_result": {
+        if (payload.notify !== false) {
+          return messages;
+        }
+        return [
+          ...messages,
+          {
+            id: event.id,
+            role: "assistant",
+            content: [
+              stringField(payload, "result") ?? "",
+              stringField(payload, "suppression_reason") ?? "",
+            ].join("\n\n"),
+            createdAt: event.created_at,
+            status: "complete",
+            metadata: {
+              ...eventMetadata(event),
+              source: "scheduled_task_quiet_result",
+              title: stringField(payload, "title") ?? "",
+            },
+          },
+        ];
+      }
       case "scheduled_task_trigger":
       case "scheduled_task_continuation": {
         return [

@@ -639,7 +639,10 @@ export const MessageBubble = memo(function MessageBubble({
     );
   }
 
-  if (message.role === "user" && isScheduledTaskMessage(message)) {
+  if (
+    (message.role === "user" && isScheduledTaskMessage(message)) ||
+    message.metadata?.source === "scheduled_task_quiet_result"
+  ) {
     return (
       <Box opacity={messageOpacity}>
         <ScheduledTaskMessageDisclosure

@@ -720,11 +720,7 @@ def _model_visible_event_value(event: Event) -> object | None:
     if isinstance(payload, ScheduledTaskResultPayload):
         return {
             "role": "assistant",
-            "content": (
-                f"Scheduled Task: {payload.title}\n"
-                f"Status: {payload.status}\n"
-                f"Result: {payload.result}"
-            ),
+            "content": payload.model_content(),
         }
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
         return {"role": "user", "content": _format_goal_updated_event_reminder(payload)}
@@ -823,9 +819,7 @@ def _model_visible_event_text(
     if isinstance(payload, ScheduledTaskResultPayload):
         return _format_continuity_block(
             "Assistant",
-            f"Scheduled Task: {payload.title}\n"
-            f"Status: {payload.status}\n"
-            f"Result: {payload.result}",
+            payload.model_content(),
             include_label=include_label,
         )
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):

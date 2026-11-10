@@ -487,6 +487,32 @@ class ScheduledTaskResultPayload(BaseModel):
     scheduled_for: datetime.datetime
     status: Literal["finished", "failed"]
     result: str = Field(min_length=1)
+    notify: bool
+    suppression_reason: str | None
+
+    @model_validator(mode="after")
+    def validate_reporting(self) -> "ScheduledTaskResultPayload":
+        """Keep persisted execution outcome independent from intentional silence."""
+        if self.notify and self.suppression_reason is not None:
+            raise ValueError("Reported results must not include a suppression reason.")
+        if not self.notify and (
+            self.status != "finished"
+            or self.suppression_reason is None
+            or not self.suppression_reason.strip()
+        ):
+            raise ValueError("Quiet results require success and a suppression reason.")
+        return self
+
+    def model_content(self) -> str:
+        """Preserve the saved reporting decision in model and continuity history."""
+        text = (
+            f"Scheduled Task: {self.title}\n"
+            f"Status: {self.status}\n"
+            f"Result: {self.result}"
+        )
+        if not self.notify:
+            text += f"\nMessage intentionally omitted: {self.suppression_reason}"
+        return text
 
 
 class RoutineNotificationPayload(BaseModel):

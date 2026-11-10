@@ -648,7 +648,8 @@ owner fence on Scheduled descriptions or already-admitted result settlement.
   Both providers show the Task title prominently, use a human-readable schedule
   and next-run label as the primary presentation, and retain canonical cron or UTC
   schedule text only as secondary detail.
-- Run start may create one Scheduled Activity Tracker.
+- Run start may create one Scheduled Activity Tracker for report-required Tasks.
+  Quiet-permitted occurrences do not create an automatic initial Tracker.
 - Scheduled-bound `channel_action continue` may publish a reply and replace the
   current progress title and ordered task list for the exact Binding.
 - Scheduled-bound Channel Actions reject `request_input`; Scheduled Task lifecycle
@@ -658,7 +659,10 @@ owner fence on Scheduled descriptions or already-admitted result settlement.
   cycle's exact Binding and conversation; the Agent does not choose another
   provider channel. Session-only cycles cannot publish terminal files.
 - Terminal publication starts only after the canonical Session
-  `scheduled_task_result` commits.
+  `scheduled_task_result` commits and only when its saved `notify` choice is true.
+  Intentional omission is not unavailable delivery. See
+  [reporting permission](../domain/scheduled-task.md#reporting-permission-and-occurrence-choice)
+  for structural validation and no-replay behavior.
 - Slack thread terminal replies use broadcast for parent surfacing. Discord
   thread terminal parts are forwarded to the parent channel in order.
 

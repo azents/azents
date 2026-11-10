@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Center,
+  Checkbox,
   Divider,
   Group,
   Loader,
@@ -138,6 +139,13 @@ function TaskList({
                 </Badge>
                 <Text size="xs" c="dimmed" truncate>
                   {scheduleSummary(task, locale)}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {t(
+                    task.allow_silent
+                      ? "reporting.optional"
+                      : "reporting.required",
+                  )}
                 </Text>
               </Stack>
             }
@@ -340,6 +348,14 @@ function TaskDetail({
 
       <Divider />
       <Box>
+        <Text size="sm" fw={600}>
+          {t("reporting.title")}
+        </Text>
+        <Text size="sm" c="dimmed">
+          {t(task.allow_silent ? "reporting.optional" : "reporting.required")}
+        </Text>
+      </Box>
+      <Box>
         <Text fw={700}>{t("cycle.title")}</Text>
         <Text size="sm" c="dimmed">
           {t("cycle.description")}
@@ -446,6 +462,20 @@ function TaskForm({
             updateDraft({ objective: event.currentTarget.value })
           }
         />
+        <Checkbox
+          label={t("reporting.allowLabel")}
+          description={t("reporting.description")}
+          checked={form.draft.allowSilent}
+          disabled={mutationBusy}
+          onChange={(event) =>
+            updateDraft({ allowSilent: event.currentTarget.checked })
+          }
+        />
+        {form.type === "EDIT" && (
+          <Text size="xs" c="dimmed">
+            {t("reporting.runningNote")}
+          </Text>
+        )}
         <Box>
           <Text size="sm" fw={500} mb="xs">
             {t("form.scheduleTypeLabel")}

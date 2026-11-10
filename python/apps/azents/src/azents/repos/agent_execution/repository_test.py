@@ -2265,6 +2265,59 @@ class TestEventExecutionRepositories:
 
         assert after_stop == completed
 
+    async def test_quiet_scheduled_completion_does_not_create_unread_boundary(
+        self, rdb_session: WriteSession
+    ) -> None:
+        workspace_id, agent_id, _ = await _create_agent_runtime(rdb_session)
+        agent_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                scheduled_task_cycle_id="c" * 32,
+                parent_agent_run_id=None,
+            ),
+        )
+        event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=agent_session.id,
+                kind=EventKind.SCHEDULED_TASK_RESULT,
+                payload={
+                    "title": "Check",
+                    "scheduled_for": "2026-11-10T00:00:00Z",
+                    "status": "finished",
+                    "result": "All sources checked.",
+                    "notify": False,
+                    "suppression_reason": "No changes found.",
+                },
+            ),
+        )
+        await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            terminal_result_event_id=event.id,
+            terminal_result_message="All sources checked.",
+        )
+        assert (
+            await rdb_session.read_session.get(
+                RDBAgentSessionUnreadRun, agent_session.id
+            )
+            is None
+        )
+
     async def test_terminal_transition_records_and_idempotently_acknowledges_unread_run(
         self,
         rdb_session: WriteSession,

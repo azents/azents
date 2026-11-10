@@ -57,6 +57,7 @@ function emptyDraft(sessionId: string): ScheduledTaskDraft {
     sessionId,
     title: "",
     objective: "",
+    allowSilent: false,
     scheduleType: "once",
     at: "",
     cron: "",
@@ -70,6 +71,7 @@ function taskDraft(task: ScheduledTaskResponse): ScheduledTaskDraft {
     sessionId: task.session.id,
     title: task.title,
     objective: task.objective,
+    allowSilent: task.allow_silent,
     scheduleType: task.schedule_type,
     at:
       task.scheduled_at === null ? "" : toLocalDateTimeInput(task.scheduled_at),
@@ -385,6 +387,7 @@ export function useScheduledTasksContainer({
         agentId: agent.id,
         title: values.title,
         objective: values.objective,
+        allowSilent: values.allowSilent,
         at: values.at,
         cron: values.cron,
         timezone: values.timezone,

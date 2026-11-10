@@ -929,7 +929,8 @@
       "weekends": "Every weekend at {time}",
       "weekly": "Every {days} at {time}",
       "recurring": "Recurring schedule · {timezone}"
-    }
+    },
+    "quietTitle": "{title} · Completed without a message"
   },
   "addWorkspace": "Add workspace",
   "addExistingProject": "Add existing Project",

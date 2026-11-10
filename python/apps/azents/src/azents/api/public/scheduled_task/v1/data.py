@@ -40,6 +40,7 @@ class ScheduledTaskResponse(BaseModel):
     id: str
     title: str
     objective: str
+    allow_silent: bool
     schedule_type: ScheduledTaskScheduleType
     scheduled_at: datetime.datetime | None
     cron_expression: str | None
@@ -66,6 +67,7 @@ class ScheduledTaskResponse(BaseModel):
             id=projection.id,
             title=projection.title,
             objective=projection.objective,
+            allow_silent=projection.allow_silent,
             schedule_type=projection.schedule_type,
             scheduled_at=projection.scheduled_at,
             cron_expression=projection.cron_expression,
@@ -101,6 +103,7 @@ class ScheduledTaskListResponse(BaseModel):
 class ScheduledTaskCreateRequest(BaseModel):
     """Create one Task for an existing authorized Session."""
 
+    allow_silent: bool
     session_id: str = Field(min_length=32, max_length=32)
     title: str = Field(min_length=1, max_length=120)
     objective: str = Field(
@@ -116,6 +119,7 @@ class ScheduledTaskCreateRequest(BaseModel):
 class ScheduledTaskReplaceRequest(BaseModel):
     """Replace editable fields that govern future work."""
 
+    allow_silent: bool
     title: str = Field(min_length=1, max_length=120)
     objective: str = Field(
         min_length=1,

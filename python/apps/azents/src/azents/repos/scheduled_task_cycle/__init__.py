@@ -92,6 +92,7 @@ class ScheduledTaskCycleRepository:
             binding_id=snapshot.binding_id,
             title=snapshot.title,
             objective=snapshot.objective,
+            allow_silent=snapshot.allow_silent,
             schedule_type=snapshot.schedule_type,
             scheduled_at=snapshot.scheduled_at,
             cron_expression=snapshot.cron_expression,
@@ -100,6 +101,7 @@ class ScheduledTaskCycleRepository:
             current_run_id=None,
             started_at=None,
             progress_title=None,
+            progress_reported=False,
             ordered_tasks=[],
             tracker_desired_revision=0,
             tracker_current_projection_parts=[],
@@ -198,6 +200,21 @@ class ScheduledTaskCycleRepository:
             ),
         )
         return self._build(updated)
+
+    async def mark_progress_reported(
+        self,
+        session: WriteSession,
+        *,
+        record: ScheduledTaskCycleRecord,
+    ) -> ScheduledTaskCycleRecord:
+        """Fence quiet completion before an explicit communication attempt."""
+        if record.state.progress_reported:
+            return record
+        return await self._save_state(
+            session,
+            state=record.state.model_copy(update={"progress_reported": True}),
+            expected_version=record.version,
+        )
 
     async def update_progress(
         self,

@@ -132,6 +132,11 @@ class ScheduledTaskProviderControlRepository:
                 expected_binding_id=locator.binding_id,
                 title=edit.title,
                 objective=edit.objective,
+                allow_silent=(
+                    target.task.allow_silent
+                    if edit.allow_silent is None
+                    else edit.allow_silent
+                ),
                 at=edit.at,
                 cron=edit.cron,
                 timezone=edit.timezone,

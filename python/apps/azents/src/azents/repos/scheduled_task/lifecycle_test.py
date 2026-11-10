@@ -108,6 +108,7 @@ def _rdb_task(*, binding_id: str) -> RDBScheduledTask:
         scheduled_at=_NOW,
         cron_expression=None,
         timezone=None,
+        allow_silent=False,
     )
     task.id = "t" * 32
     task.created_at = _NOW
@@ -209,6 +210,7 @@ async def _create_task_cycle(
             scheduled_at=_NOW,
             cron_expression=None,
             timezone=None,
+            allow_silent=False,
         ),
     )
     task_row = await session.read_session.get(RDBScheduledTask, task.id)
@@ -232,6 +234,7 @@ async def _create_task_cycle(
             cron_expression=None,
             timezone=None,
             scheduled_for=_NOW,
+            allow_silent=False,
         ),
     )
     trigger = await MailboxRepository().create_idempotent(
@@ -526,6 +529,7 @@ class TestScheduledTaskLifecycleRepository:
                 cron_expression=None,
                 timezone=None,
                 scheduled_for=_NOW,
+                allow_silent=False,
             ),
         )
         trigger = await MailboxRepository().create_idempotent(

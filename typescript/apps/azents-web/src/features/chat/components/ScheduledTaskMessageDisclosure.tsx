@@ -163,6 +163,18 @@ export function ScheduledTaskMessageDisclosure({
   const locale = useLocale();
   const t = useTranslations("chat.scheduledTaskMessage");
   const presentation = scheduledTaskMessagePresentation(message);
+  if (message.metadata?.source === "scheduled_task_quiet_result") {
+    return (
+      <AgentMessageDisclosure
+        title={t("quietTitle", {
+          title: presentation.title ?? t("fallbackTitle"),
+        })}
+        content={`${message.content ?? ""}\n\n${formatInstant(message.createdAt, locale, null) ?? message.createdAt}`}
+        actions={actions}
+        icon={<IconCalendarClock aria-hidden="true" size={14} stroke={1.8} />}
+      />
+    );
+  }
   const title = presentation.title ?? t("fallbackTitle");
   const canonical = presentation.scheduleCanonical;
   const cronTimezone =

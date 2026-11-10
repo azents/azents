@@ -93,6 +93,7 @@ async def test_scheduled_tool_operations_close_every_transaction() -> None:
         session_id="session-1",
         title="Daily report",
         objective="Prepare it.",
+        allow_silent=False,
         at=scheduled_at.isoformat(),
         cron=None,
         timezone=None,

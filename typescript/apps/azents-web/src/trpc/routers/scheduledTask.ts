@@ -15,6 +15,7 @@ import { publicProcedure, router } from "../init";
 const scheduleFieldsSchema = z.object({
   title: z.string().trim().min(1).max(120),
   objective: z.string().trim().min(1).max(3_000),
+  allowSilent: z.boolean(),
   at: z.string().max(64).nullable(),
   cron: z.string().max(256).nullable(),
   timezone: z.string().max(128).nullable(),
@@ -151,6 +152,7 @@ export const scheduledTaskRouter = router({
             session_id: input.sessionId,
             title: input.title,
             objective: input.objective,
+            allow_silent: input.allowSilent,
             at: input.at,
             cron: input.cron,
             timezone: input.timezone,
@@ -184,6 +186,7 @@ export const scheduledTaskRouter = router({
           body: {
             title: input.title,
             objective: input.objective,
+            allow_silent: input.allowSilent,
             at: input.at,
             cron: input.cron,
             timezone: input.timezone,

@@ -112,6 +112,7 @@ from azents.engine.tools.write import WriteInput
             {
                 "title": "Inspect",
                 "objective": "Inspect later",
+                "allow_silent": False,
                 "at": "2026-10-04T10:00:00Z",
                 "cron": None,
                 "timezone": None,
@@ -121,7 +122,13 @@ from azents.engine.tools.write import WriteInput
         (DeleteScheduledTaskInput, {"task_id": "a" * 32}),
         (
             SubmitScheduledTaskResultInput,
-            {"status": "finished", "result": "Done", "files": None},
+            {
+                "status": "finished",
+                "result": "Done",
+                "files": None,
+                "notify": True,
+                "suppression_reason": None,
+            },
         ),
         (LoadSkillInput, {"skill_path": "/runtime/skill/SKILL.md"}),
         (WriteInput, {"path": "/runtime/file", "content": "", "overwrite": False}),

@@ -238,6 +238,8 @@ def test_scheduled_task_events_validate_without_chat_message_projection() -> Non
                 scheduled_for=scheduled_for,
                 status="finished",
                 result="Report completed.",
+                notify=True,
+                suppression_reason=None,
             ),
         ),
     ]

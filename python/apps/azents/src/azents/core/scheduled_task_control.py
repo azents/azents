@@ -28,6 +28,7 @@ class ScheduledTaskEditInput:
 
     title: str
     objective: str
+    allow_silent: bool | None
     at: str | None
     cron: str | None
     timezone: str | None

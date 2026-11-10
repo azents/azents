@@ -107,6 +107,7 @@ class RDBScheduledTask(RDBModel):
     session_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     title: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     objective: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    allow_silent: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
     schedule_type: Mapped[ScheduledTaskScheduleType] = mapped_column(
         scheduled_task_schedule_type_enum,
         nullable=False,

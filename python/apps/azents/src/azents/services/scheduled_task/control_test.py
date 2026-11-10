@@ -72,6 +72,7 @@ def _task() -> ScheduledTask:
         lease_until=None,
         created_at=_NOW,
         updated_at=_NOW,
+        allow_silent=False,
     )
 
 

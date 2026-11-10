@@ -743,11 +743,7 @@ class ResponsesRequestLowerer:
         if isinstance(event.payload, ScheduledTaskResultPayload):
             return {
                 "role": "assistant",
-                "content": (
-                    f"Scheduled Task: {event.payload.title}\n"
-                    f"Status: {event.payload.status}\n"
-                    f"Result: {event.payload.result}"
-                ),
+                "content": event.payload.model_content(),
             }
         if event.kind == EventKind.GOAL_UPDATED and isinstance(
             event.payload, UserMessagePayload

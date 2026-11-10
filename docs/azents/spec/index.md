@@ -99,7 +99,7 @@ connects disconnect, archive, restore and purge to the owning Session and Agent.
 
 - [Goals and Todos](automation/goals.md) — explicit objectives, independent task lists and idle continuation.
 - [Routines](domain/routine.md) — usefulness judgment, independent occurrences, events and notifications.
-- [Scheduled Tasks](domain/scheduled-task.md) — one-time/cron definitions, occurrence tools, events and terminal results.
+- [Scheduled Tasks](domain/scheduled-task.md) — one-time/cron definitions, explicit quiet-completion permission, occurrence tools and inspectable terminal results.
 - [Periodic infrastructure](flow/periodic-execution.md) — maintenance jobs and bounded work admission.
 
 ## Models and provider execution

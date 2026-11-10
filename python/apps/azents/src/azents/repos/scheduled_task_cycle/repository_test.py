@@ -50,6 +50,7 @@ def _snapshot() -> ScheduledTaskCycleSnapshot:
         cron_expression="0 9 * * *",
         timezone="America/New_York",
         scheduled_for=_now(),
+        allow_silent=False,
     )
 
 
@@ -156,6 +157,8 @@ def _cycle_state(
         current_run_id="r" * 32 if phase == "started" else None,
         started_at=_now() if phase == "started" else None,
         progress_title=None,
+        allow_silent=False,
+        progress_reported=False,
     )
 
 

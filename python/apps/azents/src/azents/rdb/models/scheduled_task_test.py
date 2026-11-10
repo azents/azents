@@ -32,6 +32,7 @@ class TestRDBScheduledTask:
         columns = table.c
 
         assert set(columns.keys()) == {
+            "allow_silent",
             "id",
             "workspace_id",
             "agent_id",
