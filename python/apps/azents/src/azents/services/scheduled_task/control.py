@@ -251,8 +251,7 @@ def render_scheduled_task_discord_registration(
 
 def _reporting_policy(task: ScheduledTask) -> str:
     return (
-        "May omit successful no-result messages; "
-        "failures and meaningful changes are reported."
+        "Skip successful no-result messages"
         if task.allow_silent
         else "Report every occurrence."
     )
