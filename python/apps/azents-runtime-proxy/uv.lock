@@ -875,15 +875,25 @@ wheels = [
 ]
 
 [[package]]
+name = "typing-extensions"
+version = "4.16.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz", hash = "sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5", size = 113555, upload-time = "2026-07-02T08:40:05.92Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl", hash = "sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8", size = 45571, upload-time = "2026-07-02T08:40:04.659Z" },
+]
+
+[[package]]
 name = "urwid"
-version = "3.0.5"
+version = "4.0.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "typing-extensions" },
     { name = "wcwidth" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/59/67cd42db7c549c0c106d2b56d2d2ec1915c459e0a92722029efc5359e871/urwid-3.0.5.tar.gz", hash = "sha256:24be27ffafdb68c09cd95dc21b60ccfd02843320b25ce5feee1708b34fad5a23", size = 860746, upload-time = "2026-02-02T14:38:43.958Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/82/2589665991b051a1c2170694a01300d8280901d0538472c310f666e5e516/urwid-4.0.7.tar.gz", hash = "sha256:c31aff787741428028b20bac3b0774fbe4f10de00ae00fe07722244d09462248", size = 878680, upload-time = "2026-07-24T10:41:29.902Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/6a/efd8ad30ab250a4ad23dc7c07437b374921042cb35215e468d49977822f7/urwid-3.0.5-py3-none-any.whl", hash = "sha256:f188144261224fdfc9b56b4222869bd0eac90fd7895cf1e376129cdc7e13bc84", size = 296957, upload-time = "2026-02-02T14:38:42.044Z" },
+    { url = "https://files.pythonhosted.org/packages/86/ab/49f2a47aff4e2cf30523d3ade26fbf5a8a19dbbd229aef40502b90dde553/urwid-4.0.7-py3-none-any.whl", hash = "sha256:b85618b42f48ce3028405002743238c511185439cb356c3c68190c44cde4778a", size = 305955, upload-time = "2026-07-24T10:41:27.988Z" },
 ]
 
 [[package]]
