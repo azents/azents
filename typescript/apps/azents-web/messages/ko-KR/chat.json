@@ -929,7 +929,8 @@
       "weekends": "주말마다 {time}",
       "weekly": "매주 {days} {time}",
       "recurring": "반복 일정 · {timezone}"
-    }
+    },
+    "quietTitle": "{title} · 완료 · 메시지 생략"
   },
   "addWorkspace": "Workspace 추가",
   "addExistingProject": "기존 Project 추가",

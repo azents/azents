@@ -450,6 +450,7 @@ def _task(
         lease_until=lease_until,
         created_at=_NOW,
         updated_at=_NOW,
+        allow_silent=False,
     )
 
 

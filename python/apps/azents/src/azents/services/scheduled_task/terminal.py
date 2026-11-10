@@ -36,11 +36,23 @@ class ScheduledTaskTerminalService:
         run_id: str,
         status: ScheduledTaskTerminalStatus,
         result: str,
+        notify: bool,
+        suppression_reason: str | None,
     ) -> ScheduledTaskTerminalOutcome:
         """Validate text and return after the database operation completes."""
         normalized_result = result.strip()
         if not normalized_result:
             raise ValueError("Scheduled Task result must not be empty.")
+        if notify and suppression_reason is not None:
+            raise ValueError("A reported result must not include a suppression reason.")
+        if not notify and (
+            status != "finished"
+            or suppression_reason is None
+            or not suppression_reason.strip()
+        ):
+            raise ValueError(
+                "Quiet completion requires success and a suppression reason."
+            )
         return await self.operations.submit(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -48,6 +60,8 @@ class ScheduledTaskTerminalService:
             run_id=run_id,
             status=status,
             result=normalized_result,
+            notify=notify,
+            suppression_reason=suppression_reason,
         )
 
 

@@ -1377,6 +1377,16 @@ class AgentRunRepository:
         run: RDBAgentRun,
     ) -> None:
         """Record the latest unread boundary for an eligible root Session."""
+        if run.terminal_result_event_id is not None:
+            terminal = await session.read_session.get(
+                RDBEvent, run.terminal_result_event_id
+            )
+            if (
+                terminal is not None
+                and terminal.kind is EventKind.SCHEDULED_TASK_RESULT
+                and terminal.payload.get("notify") is False
+            ):
+                return
         eligible_session_id = await session.read_session.scalar(
             sa.select(RDBAgentSession.id)
             .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)

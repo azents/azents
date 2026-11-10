@@ -44257,6 +44257,10 @@
       },
       "ScheduledTaskCreateRequest": {
         "properties": {
+          "allow_silent": {
+            "type": "boolean",
+            "title": "Allow Silent"
+          },
           "session_id": {
             "type": "string",
             "maxLength": 32,
@@ -44327,6 +44331,7 @@
         },
         "type": "object",
         "required": [
+          "allow_silent",
           "session_id",
           "title",
           "objective",
@@ -44434,6 +44439,10 @@
       },
       "ScheduledTaskReplaceRequest": {
         "properties": {
+          "allow_silent": {
+            "type": "boolean",
+            "title": "Allow Silent"
+          },
           "title": {
             "type": "string",
             "maxLength": 120,
@@ -44498,6 +44507,7 @@
         },
         "type": "object",
         "required": [
+          "allow_silent",
           "title",
           "objective",
           "at",
@@ -44521,6 +44531,10 @@
           "objective": {
             "type": "string",
             "title": "Objective"
+          },
+          "allow_silent": {
+            "type": "boolean",
+            "title": "Allow Silent"
           },
           "schedule_type": {
             "$ref": "#/components/schemas/ScheduledTaskScheduleType"
@@ -44603,6 +44617,7 @@
           "id",
           "title",
           "objective",
+          "allow_silent",
           "schedule_type",
           "scheduled_at",
           "cron_expression",

@@ -11,7 +11,7 @@ from azentspublicclient.models.scheduled_task_create_request import (
     ScheduledTaskCreateRequest,
 )
 from docker.models.containers import Container
-from pydantic import StrictInt, StrictStr
+from pydantic import StrictBool, StrictInt, StrictStr
 
 from support.observations import (
     ExtensionObservation,
@@ -48,6 +48,8 @@ class _ScheduledResultObservation(ExtensionObservation):
     scheduled_for: StrictStr
     status: Literal["finished", "failed"]
     result: StrictStr
+    notify: StrictBool
+    suppression_reason: StrictStr | None
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -177,6 +179,7 @@ def test_schedule_creation_is_readable(
             session_id=setup.session_id,
             title=_CREATION_TITLE,
             objective=_CREATION_OBJECTIVE,
+            allow_silent=False,
             at=_CREATION_AT,
             cron=None,
             timezone=None,
@@ -200,6 +203,8 @@ def test_schedule_creation_is_readable(
     assert fetched.target is None
     assert fetched.title == _CREATION_TITLE
     assert fetched.objective == _CREATION_OBJECTIVE
+    assert fetched.allow_silent is False
+    assert listed.items[0].allow_silent is False
     assert fetched.next_eligible_at.isoformat() == "2099-05-01T00:00:00+00:00"
     assert [task.id for task in listed.items] == [created.id]
 
@@ -234,6 +239,7 @@ def test_session_only_one_time_task_due_now_dispatches_and_terminalizes(
             session_id=setup.session_id,
             title=_ONCE_TITLE,
             objective=_ONCE_OBJECTIVE,
+            allow_silent=True,
             at=_ONCE_AT,
             cron=None,
             timezone=None,
@@ -245,6 +251,7 @@ def test_session_only_one_time_task_due_now_dispatches_and_terminalizes(
     assert created.session.id == setup.session_id
     assert created.target is None
     assert created.execution_state == "idle"
+    assert created.allow_silent is True
     dispatch = _dispatch_at(
         azents_admin_server_url,
         now=_ONCE_AT,
@@ -274,6 +281,8 @@ def test_session_only_one_time_task_due_now_dispatches_and_terminalizes(
         "scheduled_for": _ONCE_AT,
         "status": "finished",
         "result": _ONCE_RESULT,
+        "notify": False,
+        "suppression_reason": "All checks completed; nothing to report.",
     }
     remaining = scheduled_api.scheduled_task_v1_list_scheduled_tasks(
         setup.agent_id,

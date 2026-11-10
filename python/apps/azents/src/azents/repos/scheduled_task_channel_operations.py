@@ -71,17 +71,21 @@ class ScheduledTaskChannelOperations:
     ) -> ScheduledTaskTerminalChannelEffects:
         """Capture replies and cleanup in one exact-Binding transaction."""
         async with self.session_manager() as session:
-            reply_plans = await self.repository.prepare_binding_reply_effects(
-                session,
-                links=(),
-                agent_id=snapshot.agent_id,
-                session_id=snapshot.session_id,
-                binding_id=snapshot.binding_id,
-                text=snapshot.result,
-                files=files,
-                operation_seed=f"scheduled-terminal:{snapshot.cycle_id}",
-                slack_reply_broadcast=True,
-                discord_forward_to_parent=True,
+            reply_plans = (
+                ()
+                if not snapshot.notify
+                else await self.repository.prepare_binding_reply_effects(
+                    session,
+                    links=(),
+                    agent_id=snapshot.agent_id,
+                    session_id=snapshot.session_id,
+                    binding_id=snapshot.binding_id,
+                    text=snapshot.result,
+                    files=files,
+                    operation_seed=f"scheduled-terminal:{snapshot.cycle_id}",
+                    slack_reply_broadcast=True,
+                    discord_forward_to_parent=True,
+                )
             )
             cleanup_plans: list[tuple[int, ProviderEffectPlan]] = []
             for part in snapshot.tracker_projection_parts:

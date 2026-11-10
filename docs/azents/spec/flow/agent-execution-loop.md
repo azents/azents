@@ -1454,6 +1454,12 @@ call completes the Run without another model turn. A recovered duplicate result
 uses the existing cycle-derived Event identity and does not replay provider
 effects.
 
+The saved Scheduled result includes the independent notification choice and
+omission reason. Quiet completion still terminalizes the Run, preserves
+inspectable history and progresses the schedule, without a new unread attention
+boundary or channel reply. See
+[Scheduled reporting permission](../domain/scheduled-task.md#reporting-permission-and-occurrence-choice).
+
 ## External Channel Inputs, Tools, and Continuation
 
 Synchronous External Channel acceptance atomically commits the real Session, immutable

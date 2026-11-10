@@ -148,6 +148,8 @@ def _cycle(
             progress_title=None,
             tracker_desired_revision=desired_revision,
             tracker_current_projection_parts=projection_parts or [],
+            allow_silent=False,
+            progress_reported=False,
         ),
         version=version,
         toolkit_state_id="k" * 32,
@@ -175,6 +177,7 @@ def _task() -> ScheduledTask:
         lease_until=None,
         created_at=_NOW,
         updated_at=_NOW,
+        allow_silent=False,
     )
 
 
@@ -996,6 +999,35 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
 
 
 @pytest.mark.asyncio
+async def test_quiet_terminal_prepares_no_reply_or_unavailable_delivery() -> None:
+    service, _, provider_repository, action_service = _service()
+    snapshot = ScheduledTaskTerminalEffectSnapshot(
+        cycle_id=_CYCLE_ID,
+        task_id="t" * 32,
+        workspace_id="w" * 32,
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        binding_id=_BINDING_ID,
+        status="finished",
+        result="Checked; no changes.",
+        notify=False,
+        tracker_desired_revision=0,
+        tracker_projection_parts=(),
+    )
+    outcomes = await service.execute_terminal(
+        snapshot,
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+    assert outcomes == ()
+    provider_repository.prepare_binding_reply_effects.assert_not_awaited()
+    action_service.execute_binding_effect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_terminal_cleanup_runs_after_failed_publication() -> None:
     service, _, provider_repository, action_service = _service()
     reply_one = _plan(ExternalChannelDeliveryOperation.REPLY, payload={"part": 0})
@@ -1044,6 +1076,7 @@ async def test_terminal_cleanup_runs_after_failed_publication() -> None:
                 provider_message_key="tracker-message",
             ),
         ),
+        notify=True,
     )
     manifest = ExternalChannelOutboundFileManifest(
         source=ExternalChannelOutboundFileSource.RUNTIME,
@@ -1180,6 +1213,7 @@ async def test_native_presentation_preparation_closes_before_provider_io(
                     provider_message_key="tracker-message",
                 ),
             ),
+            notify=True,
         )
         await service.execute_terminal(
             snapshot,
@@ -1237,6 +1271,7 @@ async def test_native_terminal_preparation_rolls_back_entire_group_on_cleanup_er
                 provider_message_key="tracker-message",
             ),
         ),
+        notify=True,
     )
     with pytest.raises(RuntimeError, match="Cleanup preparation failed"):
         await service.execute_terminal(

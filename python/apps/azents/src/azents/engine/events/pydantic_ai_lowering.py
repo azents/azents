@@ -649,14 +649,7 @@ class PydanticAILowerer:
         if isinstance(payload, RoutineNotificationPayload):
             return ModelResponse(parts=[TextPart(payload.content)])
         if isinstance(payload, ScheduledTaskResultPayload):
-            return ModelResponse(
-                parts=[
-                    TextPart(
-                        f"Scheduled Task: {payload.title}\n"
-                        f"Status: {payload.status}\nResult: {payload.result}"
-                    )
-                ]
-            )
+            return ModelResponse(parts=[TextPart(payload.model_content())])
         if isinstance(payload, AgentMessagePayload):
             if payload.message_kind == "agent_result":
                 assert payload.run_status is not None

@@ -1,5 +1,5 @@
 import { rem } from "@mantine/core";
-import { expect, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ScheduledTasks } from "./ScheduledTasks";
 import type {
@@ -95,6 +95,7 @@ const oneTimeTask: ScheduledTaskResponse = {
   title: "Publish release readiness report",
   objective:
     "Review the release checklist, summarize blockers, and publish a concise readiness report.",
+  allow_silent: false,
   schedule_type: "once",
   scheduled_at: "2026-08-20T16:00:00Z",
   cron_expression: null,
@@ -116,6 +117,7 @@ const recurringTask: ScheduledTaskResponse = {
   title: "Weekday release status",
   objective:
     "Collect open release blockers and post the latest status to the approved Slack thread.",
+  allow_silent: false,
   schedule_type: "cron",
   scheduled_at: null,
   cron_expression: "0 9 * * 1-5",
@@ -199,6 +201,28 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const RunningWithPending = {} satisfies Story;
+export const QuietPermission = {
+  tags: ["ci-contract"],
+  args: {
+    state: {
+      type: "LOADED",
+      tasks: [{ ...recurringTask, allow_silent: true }],
+    },
+    detail: {
+      type: "LOADED",
+      task: { ...recurringTask, allow_silent: true },
+      cycle,
+      cycleLoading: false,
+      cycleError: null,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getAllByText("May omit successful no-result messages"),
+    ).toHaveLength(2);
+  },
+} satisfies Story;
 
 export const SessionScopedManagement = {
   play: async ({ canvasElement }) => {
@@ -284,6 +308,7 @@ export const CreateOneTime = {
         sessionId: teamSession.id,
         title: "Publish release readiness report",
         objective: "Review the checklist and summarize remaining blockers.",
+        allowSilent: false,
         scheduleType: "once",
         at: "2026-08-20T09:00",
         cron: "",
@@ -307,6 +332,7 @@ export const EditRecurring = {
         sessionId: teamSession.id,
         title: recurringTask.title,
         objective: recurringTask.objective,
+        allowSilent: false,
         scheduleType: "cron",
         at: "",
         cron: recurringTask.cron_expression ?? "",
@@ -330,6 +356,7 @@ export const BindingLoading = {
         sessionId: teamSession.id,
         title: "Daily status",
         objective: "Prepare the daily release status.",
+        allowSilent: false,
         scheduleType: "cron",
         at: "",
         cron: "0 9 * * 1-5",
@@ -353,6 +380,7 @@ export const ValidationError = {
         sessionId: teamSession.id,
         title: "",
         objective: "",
+        allowSilent: false,
         scheduleType: "once",
         at: "",
         cron: "",
@@ -376,5 +404,39 @@ export const CancelConfirmation = {
 export const Conflict = {
   args: {
     actionError: { type: "CONFLICT" },
+  },
+} satisfies Story;
+
+export const CreateQuietOptIn = {
+  tags: ["ci-contract"],
+  args: {
+    ...CreateOneTime.args,
+    onChangeDraft: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const modal = within(canvasElement.ownerDocument.body);
+    const checkbox = modal.getByRole("checkbox", {
+      name: "Allow completion without a message when there is nothing to report",
+    });
+    await expect(checkbox).not.toBeChecked();
+    await userEvent.click(checkbox);
+    await expect(args.onChangeDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilent: true }),
+    );
+  },
+} satisfies Story;
+
+export const CreateQuietSelected = {
+  tags: ["ci-contract"],
+  args: {
+    ...CreateOneTime.args,
+    form: {
+      ...CreateOneTime.args.form,
+      draft: { ...CreateOneTime.args.form.draft, allowSilent: true },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const modal = within(canvasElement.ownerDocument.body);
+    await expect(modal.getByRole("checkbox")).toBeChecked();
   },
 } satisfies Story;

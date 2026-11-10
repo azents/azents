@@ -304,6 +304,7 @@ async def _start_scheduled_cycle(
                 scheduled_at=now,
                 cron_expression=None,
                 timezone=None,
+                allow_silent=False,
             ),
         )
         task_row = await session.read_session.get(RDBScheduledTask, task.id)
@@ -329,6 +330,7 @@ async def _start_scheduled_cycle(
                 cron_expression=task.cron_expression,
                 timezone=task.timezone,
                 scheduled_for=now,
+                allow_silent=False,
             ),
         )
         run = RDBAgentRun(

@@ -187,6 +187,9 @@ def test_scheduled_task_controls_project_only_bounded_locator_and_modal_input() 
                         "azents_scheduled_task_title": {
                             "azents_scheduled_task_title": {"value": "Updated"}
                         },
+                        "azents_scheduled_task_reporting": {
+                            "policy": {"selected_option": {"value": "required"}}
+                        },
                         "azents_scheduled_task_objective": {
                             "azents_scheduled_task_objective": {
                                 "value": "Updated objective"
@@ -219,6 +222,7 @@ def test_scheduled_task_controls_project_only_bounded_locator_and_modal_input() 
         at=None,
         cron="0 9 * * *",
         timezone="America/Los_Angeles",
+        allow_silent=False,
     )
 
 

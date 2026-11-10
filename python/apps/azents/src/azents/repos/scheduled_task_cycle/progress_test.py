@@ -111,6 +111,8 @@ def _cycle(
             progress_title=None,
             tracker_desired_revision=desired_revision,
             tracker_current_projection_parts=projection_parts or [],
+            allow_silent=False,
+            progress_reported=False,
         ),
         version=version,
         toolkit_state_id="k" * 32,
@@ -405,3 +407,20 @@ async def test_settlement_uses_fresh_completed_repository_transaction() -> None:
     assert not settled
     tracker.assert_inactive()
     cycle_repository.settle_tracker_projection.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_quiet_permission_skips_initial_tracker_claim() -> None:
+    tracker = _TransactionTracker()
+    fixture = _repository(tracker)
+    record = _cycle()
+    fixture.cycle_repository.get_started.return_value = record.model_copy(
+        update={"state": record.state.model_copy(update={"allow_silent": True})}
+    )
+    effect = await fixture.repository.prepare_initial_tracker(
+        agent_id=_AGENT_ID, session_id=_SESSION_ID, cycle_id=_CYCLE_ID
+    )
+    assert effect is None
+    fixture.cycle_repository.claim_tracker_projection.assert_not_awaited()
+    fixture.provider_repository.prepare_binding_effect.assert_not_awaited()
+    tracker.assert_inactive()

@@ -251,6 +251,8 @@ def _render_event(event: SessionHistoryEvent) -> dict[str, object]:
                 title=payload.title,
                 status=payload.status,
                 scheduled_for=payload.scheduled_for.isoformat(),
+                notify=payload.notify,
+                suppression_reason=payload.suppression_reason,
             )
         elif isinstance(payload, RoutineNotificationPayload):
             data.update(

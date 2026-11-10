@@ -6,6 +6,7 @@ Create one Task for an existing authorized Session.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**allow_silent** | **bool** |  | 
 **session_id** | **str** |  | 
 **title** | **str** |  | 
 **objective** | **str** |  | 

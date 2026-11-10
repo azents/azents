@@ -929,7 +929,8 @@
       "weekends": "Chaque week-end à {time}",
       "weekly": "Chaque {days} à {time}",
       "recurring": "Planification récurrente · {timezone}"
-    }
+    },
+    "quietTitle": "{title} · Terminé sans message"
   },
   "addWorkspace": "Add workspace",
   "addExistingProject": "Add existing Project",

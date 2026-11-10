@@ -99,6 +99,7 @@ def test_existing_null_default_and_whitespace_semantics_remain_explicit() -> Non
         cron="0 * * * *",
         timezone="UTC",
         channel_id=None,
+        allow_silent=False,
     )
     assert schedule.title == "Inspect"
     assert schedule.objective == "Objective"

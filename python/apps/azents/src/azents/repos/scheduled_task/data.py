@@ -17,6 +17,7 @@ class ScheduledTask:
     binding_id: str | None
     title: str
     objective: str
+    allow_silent: bool
     schedule_type: ScheduledTaskScheduleType
     scheduled_at: datetime.datetime | None
     cron_expression: str | None
@@ -40,6 +41,7 @@ class ScheduledTaskCreate:
     session_id: str
     title: str
     objective: str
+    allow_silent: bool
     schedule_type: ScheduledTaskScheduleType
     next_eligible_at: datetime.datetime
     binding_id: str | None
@@ -54,6 +56,7 @@ class ScheduledTaskReplace:
 
     title: str
     objective: str
+    allow_silent: bool
     schedule_type: ScheduledTaskScheduleType
     next_eligible_at: datetime.datetime
     binding_id: str | None

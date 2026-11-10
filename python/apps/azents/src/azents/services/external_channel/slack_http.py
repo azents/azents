@@ -1399,9 +1399,27 @@ def _interaction_scheduled_task_edit(
         limit=128,
     )
     assert title is not None and objective is not None
+    view = payload.get("view")
+    state = view.get("state") if is_external_channel_projection(view) else None
+    values = state.get("values") if is_external_channel_projection(state) else None
+    block = (
+        values.get("azents_scheduled_task_reporting")
+        if is_external_channel_projection(values)
+        else None
+    )
+    action = block.get("policy") if is_external_channel_projection(block) else None
+    option = (
+        action.get("selected_option")
+        if is_external_channel_projection(action)
+        else None
+    )
+    policy = option.get("value") if is_external_channel_projection(option) else None
+    if not isinstance(policy, str) or policy not in {"required", "allow_silent"}:
+        raise SlackHTTPInvalidPayload("Scheduled Task reporting policy is invalid.")
     return ScheduledTaskEditInput(
         title=title,
         objective=objective,
+        allow_silent=policy == "allow_silent",
         at=at,
         cron=cron,
         timezone=timezone,

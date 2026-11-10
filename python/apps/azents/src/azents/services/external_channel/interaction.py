@@ -1241,6 +1241,49 @@ def _scheduled_task_edit_view(
                 multiline=True,
                 optional=False,
             ),
+            {
+                "type": "input",
+                "block_id": "azents_scheduled_task_reporting",
+                "label": {"type": "plain_text", "text": "Reporting"},
+                "hint": {
+                    "type": "plain_text",
+                    "text": (
+                        "Failures and meaningful changes are always reported. "
+                        "Running occurrences retain their original policy."
+                    ),
+                },
+                "element": {
+                    "type": "static_select",
+                    "action_id": "policy",
+                    "options": [
+                        {
+                            "text": {
+                                "type": "plain_text",
+                                "text": "Report every occurrence",
+                            },
+                            "value": "required",
+                        },
+                        {
+                            "text": {
+                                "type": "plain_text",
+                                "text": (
+                                    "Allow successful no-result messages to be omitted"
+                                ),
+                            },
+                            "value": "allow_silent",
+                        },
+                    ],
+                    "initial_option": {
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Allow successful no-result messages to be omitted"
+                            if task.allow_silent
+                            else "Report every occurrence",
+                        },
+                        "value": "allow_silent" if task.allow_silent else "required",
+                    },
+                },
+            },
             _scheduled_task_text_input(
                 block_id="azents_scheduled_task_at",
                 label="Run once at (RFC3339 UTC)",

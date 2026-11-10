@@ -48,6 +48,7 @@ def _projection() -> ScheduledTaskManagementProjection:
         target=None,
         created_at=_NOW,
         updated_at=_NOW,
+        allow_silent=False,
     )
 
 
@@ -72,7 +73,7 @@ def _client(service: AsyncMock) -> TestClient:
     return TestClient(app)
 
 
-def _create_payload(*, channel_id: str | None = None) -> dict[str, str | None]:
+def _create_payload(*, channel_id: str | None = None) -> dict[str, str | bool | None]:
     return {
         "session_id": "s" * 32,
         "title": "Daily report",
@@ -81,10 +82,11 @@ def _create_payload(*, channel_id: str | None = None) -> dict[str, str | None]:
         "cron": None,
         "timezone": None,
         "channel_id": channel_id,
+        "allow_silent": False,
     }
 
 
-def _replace_payload() -> dict[str, str | None]:
+def _replace_payload() -> dict[str, str | bool | None]:
     payload = _create_payload()
     payload.pop("session_id")
     return payload
@@ -112,6 +114,7 @@ def test_openapi_has_exact_route_set_and_sanitized_schemas(
         spec["components"]["schemas"]["ScheduledTaskResponse"]["properties"]
     )
     assert response_properties == {
+        "allow_silent",
         "id",
         "title",
         "objective",

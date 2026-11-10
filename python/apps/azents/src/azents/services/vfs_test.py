@@ -428,9 +428,9 @@ async def test_preview_includes_platform_skill_creator_without_attachments() -> 
             "routines",
             (
                 "record_routine_result",
-                "Choose by the output obligation",
+                "Choose by the execution obligation",
                 "Produce a traffic-analysis report every hour",
-                "Check traffic every hour and tell me if anything is unusual",
+                "Check traffic every hour and tell me only if anything is unusual",
                 "Routine tick defaults to 180",
                 "minimum action delay defaults to 30 minutes",
                 "30 <= minimum delay <= tick <= 1440",

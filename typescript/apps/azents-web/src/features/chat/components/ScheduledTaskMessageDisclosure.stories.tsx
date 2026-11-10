@@ -34,6 +34,21 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Structured: Story = {};
+export const QuietCompletion: Story = {
+  tags: ["ci-contract"],
+  args: {
+    message: createChatMessage({
+      id: "quiet-completion",
+      role: "assistant",
+      content:
+        "Checked all dependency sources. No changes found.\n\nNo findings or external changes.",
+      metadata: {
+        source: "scheduled_task_quiet_result",
+        title: "Dependency check",
+      },
+    }),
+  },
+};
 export const LegacyFallback: Story = {
   args: {
     message: createChatMessage({

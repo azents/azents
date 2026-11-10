@@ -27,6 +27,7 @@ class ScheduledTaskRepository:
             session_id=create.session_id,
             title=create.title,
             objective=create.objective,
+            allow_silent=create.allow_silent,
             schedule_type=create.schedule_type,
             next_eligible_at=create.next_eligible_at,
             binding_id=create.binding_id,
@@ -131,6 +132,7 @@ class ScheduledTaskRepository:
         values: dict[str, object] = {
             "title": replace.title,
             "objective": replace.objective,
+            "allow_silent": replace.allow_silent,
             "schedule_type": replace.schedule_type,
             "next_eligible_at": replace.next_eligible_at,
             "binding_id": replace.binding_id,
@@ -330,6 +332,7 @@ class ScheduledTaskRepository:
             binding_id=rdb.binding_id,
             title=rdb.title,
             objective=rdb.objective,
+            allow_silent=rdb.allow_silent,
             schedule_type=rdb.schedule_type,
             scheduled_at=rdb.scheduled_at,
             cron_expression=rdb.cron_expression,

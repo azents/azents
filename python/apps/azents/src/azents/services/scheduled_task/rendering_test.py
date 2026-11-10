@@ -45,6 +45,8 @@ def _state(
         started_at=_NOW,
         progress_title=progress_title,
         ordered_tasks=ordered_tasks or [],
+        allow_silent=False,
+        progress_reported=False,
     )
 
 
@@ -97,6 +99,7 @@ def test_runtime_message_keeps_exact_prompt_after_structured_schedule() -> None:
         cron_expression=None,
         timezone=None,
         scheduled_for=_NOW,
+        allow_silent=False,
     )
 
     assert message.startswith("A Scheduled Task occurrence has started.")

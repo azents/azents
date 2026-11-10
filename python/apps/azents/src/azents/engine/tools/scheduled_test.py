@@ -95,6 +95,8 @@ def _cycle(
             current_run_id=run_id,
             started_at=_NOW,
             progress_title=None,
+            allow_silent=False,
+            progress_reported=False,
         ),
         version=2,
         toolkit_state_id="k" * 32,
@@ -123,6 +125,7 @@ def _task(*, active_cycle_id: str | None = None) -> ScheduledTask:
         lease_until=None,
         created_at=_NOW,
         updated_at=_NOW,
+        allow_silent=False,
     )
 
 
@@ -239,7 +242,15 @@ async def test_always_visible_terminal_tool_preserves_submission_rejection(
 
     with pytest.raises(FunctionToolError, match=re.escape(error)):
         await terminal_tool.handler(
-            json.dumps({"status": "finished", "result": "Completed.", "files": None})
+            json.dumps(
+                {
+                    "status": "finished",
+                    "result": "Completed.",
+                    "files": None,
+                    "notify": True,
+                    "suppression_reason": None,
+                }
+            )
         )
 
     terminal_service.submit.assert_awaited_once_with(
@@ -249,6 +260,8 @@ async def test_always_visible_terminal_tool_preserves_submission_rejection(
         run_id=_RUN_ID,
         status="finished",
         result="Completed.",
+        notify=True,
+        suppression_reason=None,
     )
     publish_event.assert_not_awaited()
     channel_service.execute_terminal.assert_not_awaited()
@@ -276,6 +289,7 @@ async def test_management_tools_derive_scope_and_project_execution_state() -> No
                 "cron": None,
                 "timezone": None,
                 "channel_id": None,
+                "allow_silent": False,
             }
         )
     )
@@ -344,6 +358,7 @@ async def test_registration_preserves_input_offset_without_mutating_storage(
                 "cron": None,
                 "timezone": None,
                 "channel_id": persisted.binding_id,
+                "allow_silent": False,
             }
         )
     )
@@ -368,6 +383,7 @@ async def test_registration_preserves_input_offset_without_mutating_storage(
     assert discord.payload[0]["fields"] == [
         {"name": "Schedule", "value": human},
         {"name": "Next run", "value": human},
+        {"name": "Reporting", "value": "Report every occurrence."},
         {"name": "Schedule details", "value": expected_at},
     ]
     slack = render_scheduled_task_slack_registration(
@@ -381,9 +397,35 @@ async def test_registration_preserves_input_offset_without_mutating_storage(
     )
     assert slack.payload[2]["text"] == {
         "type": "mrkdwn",
-        "text": f"*Schedule:* {human}\n*Next run:* {human}",
+        "text": (
+            f"*Schedule:* {human}\n*Next run:* {human}\n"
+            "*Reporting:* Report every occurrence."
+        ),
     }
     assert expected_at in str(slack.payload[3])
+
+
+async def test_quiet_terminal_rejects_files_before_preparing_transfer() -> None:
+    transfer_service = AsyncMock()
+    toolkit, _, terminal_service, _, _ = _toolkit(
+        active_cycle=_cycle(binding_id="b" * 32),
+        file_transfer_service=transfer_service,
+    )
+    state = await toolkit.update_context(_turn_context())
+    with pytest.raises(FunctionToolError, match="no files"):
+        await state.tools[-1].handler(
+            json.dumps(
+                {
+                    "status": "finished",
+                    "result": "No changes.",
+                    "notify": False,
+                    "suppression_reason": "No findings.",
+                    "files": ["/workspace/agent/report.png"],
+                }
+            )
+        )
+    transfer_service.prepare_outbound.assert_not_awaited()
+    terminal_service.submit.assert_not_awaited()
 
 
 async def test_recurring_registration_keeps_committed_iana_schedule() -> None:
@@ -409,6 +451,7 @@ async def test_recurring_registration_keeps_committed_iana_schedule() -> None:
                 "cron": persisted.cron_expression,
                 "timezone": persisted.timezone,
                 "channel_id": None,
+                "allow_silent": False,
             }
         )
     )
@@ -467,6 +510,7 @@ async def test_add_tool_normalizes_empty_schedule_fields(
                 "objective": "Prepare the report.",
                 **schedule,
                 "channel_id": None,
+                "allow_silent": False,
             }
         )
     )
@@ -489,6 +533,8 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
             scheduled_for=_NOW,
             status="finished",
             result="Completed.",
+            notify=True,
+            suppression_reason=None,
         ),
         external_id=f"scheduled-task-result:{_CYCLE_ID}",
         created_at=_NOW,
@@ -502,7 +548,15 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     terminal_tool = state.tools[-1]
 
     result = await terminal_tool.handler(
-        json.dumps({"status": "finished", "result": "Completed.", "files": None})
+        json.dumps(
+            {
+                "status": "finished",
+                "result": "Completed.",
+                "files": None,
+                "notify": True,
+                "suppression_reason": None,
+            }
+        )
     )
 
     assert isinstance(result, FunctionToolResult)
@@ -513,6 +567,8 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
         "recovered": False,
         "result": "Completed.",
         "status": "finished",
+        "notify": True,
+        "suppression_reason": None,
     }
     publish_event.assert_awaited_once_with(event)
     terminal_service.submit.assert_awaited_once_with(
@@ -522,6 +578,8 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
         run_id=_RUN_ID,
         status="finished",
         result="Completed.",
+        notify=True,
+        suppression_reason=None,
     )
 
 
@@ -569,6 +627,7 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
         result="Completed.",
         tracker_desired_revision=0,
         tracker_projection_parts=(),
+        notify=True,
     )
     event = Event(
         id="e" * 32,
@@ -579,6 +638,8 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
             scheduled_for=_NOW,
             status="finished",
             result="Completed.",
+            notify=True,
+            suppression_reason=None,
         ),
         external_id=f"scheduled-task-result:{_CYCLE_ID}",
         created_at=_NOW,
@@ -597,6 +658,8 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
                 "status": "finished",
                 "result": "Completed.",
                 "files": ["/workspace/agent/report.png"],
+                "notify": True,
+                "suppression_reason": None,
             }
         )
     )
@@ -631,6 +694,8 @@ async def test_terminal_tool_rejects_files_for_session_only_cycle() -> None:
                     "status": "finished",
                     "result": "Completed.",
                     "files": ["/workspace/agent/report.png"],
+                    "notify": True,
+                    "suppression_reason": None,
                 }
             )
         )
@@ -654,6 +719,8 @@ async def test_recovered_terminal_result_does_not_replay_requested_files() -> No
             scheduled_for=_NOW,
             status="finished",
             result="Canonical result.",
+            notify=True,
+            suppression_reason=None,
         ),
         external_id=f"scheduled-task-result:{_CYCLE_ID}",
         created_at=_NOW,
@@ -672,6 +739,8 @@ async def test_recovered_terminal_result_does_not_replay_requested_files() -> No
                 "status": "finished",
                 "result": "Replayed value.",
                 "files": ["/workspace/agent/new-report.png"],
+                "notify": True,
+                "suppression_reason": None,
             }
         )
     )

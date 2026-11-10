@@ -67,7 +67,9 @@ _LIST_DESCRIPTION = "List active Scheduled Tasks in the current Session."
 _DELETE_DESCRIPTION = "Delete one exact Scheduled Task by task_id."
 _SUBMIT_DESCRIPTION = (
     "Commit the finished or failed result of the current Scheduled Task cycle. "
-    "For a channel-bound cycle, the result message and files are delivered to the "
+    "Use notify=false only for permitted successful no-result work, with a "
+    "suppression reason and no files. Otherwise use notify=true and a null reason. "
+    "For a channel-bound reported cycle, the result message and files go to the "
     "exact same bound conversation used by channel_action; this does not select or "
     "send to another Slack or Discord channel. Session-only cycles do not publish "
     "externally and do not accept files."
@@ -85,6 +87,12 @@ class AddScheduledTaskInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    allow_silent: bool = Field(
+        description=(
+            "Explicit permission to omit successful no-result messages. "
+            "Use false unless the user clearly permits omission."
+        )
+    )
     title: str = Field(min_length=1, max_length=120)
     objective: str = Field(
         min_length=1,
@@ -125,6 +133,16 @@ class SubmitScheduledTaskResultInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     status: Literal["finished", "failed"]
+    notify: bool = Field(
+        description=(
+            "False only for an authorized, successful no-result occurrence. "
+            "Failures, uncertainty, meaningful external changes and prior "
+            "progress require true."
+        )
+    )
+    suppression_reason: str | None = Field(
+        description="Nonblank reason for a quiet completion; null when notify=true."
+    )
     result: str = Field(min_length=1, max_length=50_000)
     files: list[str] | None = Field(
         min_length=1,
@@ -229,6 +247,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     content=render_scheduled_task_runtime_message(
                         title=state.title,
                         objective=state.objective,
+                        allow_silent=state.allow_silent,
                         schedule_type=state.schedule_type,
                         scheduled_at=state.scheduled_at,
                         cron_expression=state.cron_expression,
@@ -282,6 +301,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     session_id=self.session_id,
                     title=args.title,
                     objective=args.objective,
+                    allow_silent=args.allow_silent,
                     at=args.at,
                     cron=args.cron,
                     timezone=args.timezone,
@@ -375,6 +395,20 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             args: SubmitScheduledTaskResultInput,
         ) -> FunctionToolResult:
             """Commit the terminal result of the current Scheduled Task cycle."""
+            if args.notify:
+                if args.suppression_reason is not None:
+                    raise FunctionToolError(
+                        "A reported result must not include a suppression reason."
+                    )
+            elif (
+                args.status != "finished"
+                or args.files is not None
+                or args.suppression_reason is None
+                or not args.suppression_reason.strip()
+            ):
+                raise FunctionToolError(
+                    "Quiet completion requires success, a reason, and no files."
+                )
             context = self.turn_context
             if context is None:
                 raise FunctionToolError("Scheduled Task execution context is missing.")
@@ -412,6 +446,8 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     run_id=context.run_id,
                     status=args.status,
                     result=args.result,
+                    notify=args.notify,
+                    suppression_reason=args.suppression_reason,
                 )
             except asyncio.CancelledError:
                 raise
@@ -451,6 +487,8 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     {
                         "status": payload.status,
                         "result": payload.result,
+                        "notify": payload.notify,
+                        "suppression_reason": payload.suppression_reason,
                         "recovered": not outcome.created,
                         "outcomes": [
                             {
@@ -527,6 +565,7 @@ def _task_definition(task: ScheduledTask) -> dict[str, object]:
         "task_id": task.id,
         "title": task.title,
         "objective": task.objective,
+        "allow_silent": task.allow_silent,
         "at": _datetime_text(task.scheduled_at),
         "cron": task.cron_expression,
         "timezone": task.timezone,

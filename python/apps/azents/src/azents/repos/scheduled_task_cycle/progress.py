@@ -78,7 +78,11 @@ class ScheduledTaskProgressRepository:
                 session_id=session_id,
                 cycle_id=cycle_id,
             )
-            if record is None or record.state.binding_id is None:
+            if (
+                record is None
+                or record.state.binding_id is None
+                or record.state.allow_silent
+            ):
                 return None
             claimed = await self._claim_tracker_effect(
                 session,
@@ -141,6 +145,10 @@ class ScheduledTaskProgressRepository:
                 )
 
             current = record
+            if message is not None or title is not None or files:
+                current = await self.cycle_repository.mark_progress_reported(
+                    session, record=current
+                )
             tracker_claim: _TrackerClaim | None = None
             if title is not None and tasks is not None:
                 current = await self.cycle_repository.update_progress(

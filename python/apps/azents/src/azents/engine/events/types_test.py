@@ -722,6 +722,8 @@ def test_scheduled_task_payloads_are_closed_protocol_variants() -> None:
             "scheduled_for": datetime.datetime.now(datetime.UTC),
             "status": "finished",
             "result": "Report completed.",
+            "notify": True,
+            "suppression_reason": None,
         },
     )
 

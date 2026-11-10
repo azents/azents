@@ -25,6 +25,12 @@ enters the ordinary Run/tool loop; completing one Routine occurrence records its
 own result without completing the Run or another Routine's work. Routines are
 neither time-specific Scheduled Tasks nor a Session Goal.
 
+Notification obligation alone does not choose the mechanism. A
+[Scheduled Task](scheduled-task.md#reporting-permission-and-occurrence-choice)
+can require every scheduled check to execute while explicitly permitting
+successful no-result messages to be omitted. Routine source checks instead judge
+whether work is useful; they are not an exact per-objective schedule.
+
 ## Definition and Management
 
 The durable definition stores ID, exact Workspace/Agent/Session ownership, stable

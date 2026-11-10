@@ -55,6 +55,7 @@ class ScheduledTaskManagementProjection:
     id: str
     title: str
     objective: str
+    allow_silent: bool
     schedule_type: ScheduledTaskScheduleType
     scheduled_at: datetime.datetime | None
     cron_expression: str | None

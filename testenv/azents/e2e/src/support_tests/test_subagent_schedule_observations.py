@@ -208,6 +208,8 @@ def test_scheduled_result_uses_event_kind_and_typed_payload(
             "scheduled_for": "2099-01-02T03:04:05Z",
             "status": "finished",
             "result": "done",
+            "notify": False,
+            "suppression_reason": "Nothing to report.",
         },
     )
     monkeypatch.setattr(

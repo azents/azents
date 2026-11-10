@@ -171,7 +171,8 @@ def render_scheduled_task_slack_registration(
                     "type": "mrkdwn",
                     "text": (
                         f"*Schedule:* {_slack(schedule.summary)}\n"
-                        f"*Next run:* {_slack(schedule.occurrence)}"
+                        f"*Next run:* {_slack(schedule.occurrence)}\n"
+                        f"*Reporting:* {_reporting_policy(task)}"
                     ),
                 },
             },
@@ -237,6 +238,7 @@ def render_scheduled_task_discord_registration(
                 "fields": [
                     {"name": "Schedule", "value": schedule.summary[:1_024]},
                     {"name": "Next run", "value": schedule.occurrence[:1_024]},
+                    {"name": "Reporting", "value": _reporting_policy(task)},
                     {
                         "name": "Schedule details",
                         "value": schedule.canonical[:1_024],
@@ -244,6 +246,15 @@ def render_scheduled_task_discord_registration(
                 ],
             }
         ],
+    )
+
+
+def _reporting_policy(task: ScheduledTask) -> str:
+    return (
+        "May omit successful no-result messages; "
+        "failures and meaningful changes are reported."
+        if task.allow_silent
+        else "Report every occurrence."
     )
 
 

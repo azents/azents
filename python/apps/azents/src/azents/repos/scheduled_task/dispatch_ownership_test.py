@@ -87,6 +87,7 @@ async def _fixture(manager: SessionManager[WriteSession]) -> _Fixture:
                 scheduled_at=_NOW,
                 cron_expression=None,
                 timezone=None,
+                allow_silent=False,
             ),
         )
     return _Fixture(

@@ -1563,6 +1563,14 @@
         "oneTimeInvalid": "Saisissez une date et une heure valides.",
         "cronRequired": "Saisissez une expression Cron.",
         "timezoneRequired": "Saisissez un fuseau horaire IANA."
+      },
+      "reporting": {
+        "title": "Compte rendu",
+        "required": "Rapporter le résultat à chaque exécution",
+        "optional": "Message facultatif si rien n’est à signaler après réussite",
+        "allowLabel": "Autoriser la fin sans message si rien n’est à signaler",
+        "description": "Le message est omis uniquement si le travail est terminé et si la condition d’omission est remplie. Les échecs et les vérifications incomplètes sont signalés.",
+        "runningNote": "Les modifications concernent les prochaines exécutions. Une exécution en cours conserve sa règle de compte rendu initiale."
       }
     },
     "terminalEnabledLabel": "Activer le terminal interactif",

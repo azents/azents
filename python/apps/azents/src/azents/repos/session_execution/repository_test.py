@@ -180,6 +180,8 @@ async def _archive_with_scheduled_continuation(
         ordered_tasks=[],
         tracker_desired_revision=0,
         tracker_current_projection_parts=[],
+        allow_silent=False,
+        progress_reported=False,
     )
     await ToolkitStateRepository().save(
         session,

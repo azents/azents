@@ -78,6 +78,8 @@ def _cycle(*, binding_id: str | None = None) -> ScheduledTaskCycleRecord:
                     provider_message_key="slack:T1:C1:1.000001",
                 )
             ],
+            allow_silent=False,
+            progress_reported=False,
         ),
         version=2,
         toolkit_state_id="k" * 32,
@@ -111,6 +113,7 @@ def _task(
         lease_until=None,
         created_at=_NOW,
         updated_at=_NOW,
+        allow_silent=False,
     )
 
 
@@ -348,6 +351,8 @@ async def test_submit_rejects_unbound_run_before_any_terminal_mutation() -> None
             run_id=_RUN_ID,
             status="finished",
             result="Completed.",
+            notify=True,
+            suppression_reason=None,
         )
 
     assert order == ["lock_run"]
@@ -380,6 +385,8 @@ async def test_submit_rejects_cycle_owned_by_another_run_without_mutation() -> N
             run_id=_RUN_ID,
             status="finished",
             result="Completed.",
+            notify=True,
+            suppression_reason=None,
         )
 
     assert order == ["lock_run", "get_event", "lock_cycle"]
@@ -404,6 +411,8 @@ async def test_submit_commits_event_cycle_and_once_task_before_run_completion() 
         run_id=_RUN_ID,
         status="finished",
         result="  Completed successfully.  ",
+        notify=True,
+        suppression_reason=None,
     )
 
     assert outcome.created is True
@@ -415,6 +424,8 @@ async def test_submit_commits_event_cycle_and_once_task_before_run_completion() 
         scheduled_for=_NOW,
         status="finished",
         result="Completed successfully.",
+        notify=True,
+        suppression_reason=None,
     )
     assert order == [
         "lock_run",
@@ -449,6 +460,8 @@ async def test_submit_releases_recurring_task_for_pending_or_future_work() -> No
         run_id=_RUN_ID,
         status="failed",
         result="Required authority is unavailable.",
+        notify=True,
+        suppression_reason=None,
     )
 
     assert task_repository.released is True
@@ -472,6 +485,8 @@ async def test_submit_captures_channel_effect_snapshot_before_cycle_deletion() -
         run_id=_RUN_ID,
         status="failed",
         result="  Provider authority is unavailable.  ",
+        notify=True,
+        suppression_reason=None,
     )
 
     assert outcome.effect_snapshot == ScheduledTaskTerminalEffectSnapshot(
@@ -492,6 +507,7 @@ async def test_submit_captures_channel_effect_snapshot_before_cycle_deletion() -
                 provider_message_key="slack:T1:C1:1.000001",
             ),
         ),
+        notify=True,
     )
     assert cycle_repository.deleted == [_cycle(binding_id="b" * 32)]
 
@@ -507,6 +523,8 @@ async def test_submit_recovers_existing_canonical_event_without_retransition() -
             scheduled_for=_NOW,
             status="finished",
             result="Canonical result.",
+            notify=True,
+            suppression_reason=None,
         ),
         external_id=f"scheduled-task-result:{_CYCLE_ID}",
         created_at=_NOW,
@@ -523,6 +541,8 @@ async def test_submit_recovers_existing_canonical_event_without_retransition() -
         run_id=_RUN_ID,
         status="failed",
         result="A different replayed value.",
+        notify=True,
+        suppression_reason=None,
     )
 
     assert outcome.created is False
@@ -550,6 +570,8 @@ async def test_empty_result_does_not_enter_terminal_transaction(result: str) -> 
             run_id=_RUN_ID,
             status="finished",
             result=result,
+            notify=True,
+            suppression_reason=None,
         )
     assert order == []
 
@@ -575,8 +597,103 @@ async def test_transaction_completion_precedes_caller_dispatch() -> None:
         run_id=_RUN_ID,
         status="finished",
         result="Finished",
+        notify=True,
+        suppression_reason=None,
     )
     assert outcome.created
     order.append("provider_dispatch")
     assert order[0] == "begin"
     assert order[-2:] == ["commit", "provider_dispatch"]
+
+
+@pytest.mark.parametrize("allowed,reported", [(False, False), (True, True)])
+async def test_quiet_completion_rejects_missing_permission_or_prior_progress(
+    allowed: bool, reported: bool
+) -> None:
+    fixture = _service(order=[], task=_task())
+    record = fixture.cycle_repository.record
+    fixture.cycle_repository.record = record.model_copy(
+        update={
+            "state": record.state.model_copy(
+                update={"allow_silent": allowed, "progress_reported": reported}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="does not allow|reported progress"):
+        await fixture.service.submit(
+            workspace_id="w" * 32,
+            agent_id="a" * 32,
+            session_id="s" * 32,
+            run_id=_RUN_ID,
+            status="finished",
+            result="No changes found.",
+            notify=False,
+            suppression_reason="All checks completed; no reportable change.",
+        )
+    assert not fixture.event_repository.creates
+    assert not fixture.cycle_repository.deleted
+
+
+async def test_quiet_completion_keeps_result_and_releases_recurring_task() -> None:
+    fixture = _service(
+        order=[], task=_task(ScheduledTaskScheduleType.CRON), binding_id="b" * 32
+    )
+    record = fixture.cycle_repository.record
+    fixture.cycle_repository.record = record.model_copy(
+        update={"state": record.state.model_copy(update={"allow_silent": True})}
+    )
+    outcome = await fixture.service.submit(
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        run_id=_RUN_ID,
+        status="finished",
+        result="Checked every source; no changes.",
+        notify=False,
+        suppression_reason="No findings or external changes.",
+    )
+    assert outcome.effect_snapshot is not None
+    assert outcome.effect_snapshot.notify is False
+    assert isinstance(outcome.event.payload, ScheduledTaskResultPayload)
+    assert outcome.event.payload.notify is False
+    assert (
+        outcome.event.payload.suppression_reason == "No findings or external changes."
+    )
+    assert fixture.task_repository.released
+    assert len(fixture.cycle_repository.deleted) == 1
+    fixture.event_repository.existing = outcome.event
+    recovered = await fixture.service.submit(
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        run_id=_RUN_ID,
+        status="finished",
+        result="Attempt to report again.",
+        notify=True,
+        suppression_reason=None,
+    )
+    assert not recovered.created
+    assert recovered.effect_snapshot is None
+    assert recovered.event.payload == outcome.event.payload
+    assert len(fixture.event_repository.creates) == 1
+
+
+@pytest.mark.parametrize(
+    "status,reason", [("failed", "No data"), ("finished", None), ("finished", "  ")]
+)
+async def test_quiet_completion_requires_success_and_a_reason(
+    status: str, reason: str | None
+) -> None:
+    fixture = _service(order=[], task=_task())
+    with pytest.raises(ValueError, match="requires success"):
+        await fixture.service.submit(
+            workspace_id="w" * 32,
+            agent_id="a" * 32,
+            session_id="s" * 32,
+            run_id=_RUN_ID,
+            status="failed" if status == "failed" else "finished",
+            result="No report.",
+            notify=False,
+            suppression_reason=reason,
+        )
+    assert not fixture.event_repository.creates

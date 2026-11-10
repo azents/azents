@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **id** | **str** |  | 
 **title** | **str** |  | 
 **objective** | **str** |  | 
+**allow_silent** | **bool** |  | 
 **schedule_type** | [**ScheduledTaskScheduleType**](ScheduledTaskScheduleType.md) |  | 
 **scheduled_at** | **datetime** |  | 
 **cron_expression** | **str** |  | 

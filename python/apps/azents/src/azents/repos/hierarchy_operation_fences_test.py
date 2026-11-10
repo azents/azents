@@ -541,6 +541,7 @@ async def test_task_creation_waits_for_archive_then_rejects_archived_target(
                     timezone=None,
                     binding_id=None,
                     now=now,
+                    allow_silent=False,
                 )
             )
             pid = await asyncio.wait_for(hierarchy.backend_pid, timeout=5)

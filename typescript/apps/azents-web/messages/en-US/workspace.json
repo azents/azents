@@ -1563,6 +1563,14 @@
         "oneTimeInvalid": "Enter a valid date and time.",
         "cronRequired": "Enter a cron expression.",
         "timezoneRequired": "Enter an IANA timezone."
+      },
+      "reporting": {
+        "title": "Reporting",
+        "required": "Report every occurrence",
+        "optional": "May omit successful no-result messages",
+        "allowLabel": "Allow completion without a message when there is nothing to report",
+        "description": "Only omit a message after completing the work and satisfying its omission condition. Failures and incomplete checks are reported.",
+        "runningNote": "Changes apply to future occurrences. A running occurrence keeps its original reporting policy."
       }
     },
     "terminalEnabledLabel": "Enable interactive Terminal",

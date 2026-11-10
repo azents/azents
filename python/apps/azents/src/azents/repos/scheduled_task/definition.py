@@ -182,6 +182,7 @@ class ScheduledTaskDefinitionRepository:
         session_id: str,
         title: str,
         objective: str,
+        allow_silent: bool,
         at: str | None,
         cron: str | None,
         timezone: str | None,
@@ -209,6 +210,7 @@ class ScheduledTaskDefinitionRepository:
                 agent_id=agent_id,
                 session_id=session_id,
                 title=_required_text(title, "title", max_length=120),
+                allow_silent=allow_silent,
                 objective=_required_text(
                     objective,
                     "objective",
@@ -240,6 +242,7 @@ class ScheduledTaskDefinitionRepository:
         task_id: str,
         title: str,
         objective: str,
+        allow_silent: bool,
         at: str | None,
         cron: str | None,
         timezone: str | None,
@@ -260,6 +263,7 @@ class ScheduledTaskDefinitionRepository:
             expected_binding_id=None,
             title=title,
             objective=objective,
+            allow_silent=allow_silent,
             at=at,
             cron=cron,
             timezone=timezone,
@@ -315,6 +319,7 @@ class ScheduledTaskDefinitionRepository:
         expected_binding_id: str | None,
         title: str,
         objective: str,
+        allow_silent: bool,
         at: str | None,
         cron: str | None,
         timezone: str | None,
@@ -362,6 +367,7 @@ class ScheduledTaskDefinitionRepository:
             task_id=current.id,
             replace=ScheduledTaskReplace(
                 title=_required_text(title, "title", max_length=120),
+                allow_silent=allow_silent,
                 objective=_required_text(
                     objective,
                     "objective",

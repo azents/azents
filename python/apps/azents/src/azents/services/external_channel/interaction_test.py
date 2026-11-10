@@ -157,6 +157,7 @@ def _scheduled_task() -> ScheduledTask:
         lease_until=None,
         created_at=now,
         updated_at=now,
+        allow_silent=False,
     )
 
 

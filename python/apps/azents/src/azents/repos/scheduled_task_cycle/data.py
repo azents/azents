@@ -26,6 +26,7 @@ class ScheduledTaskCycleState(BaseModel):
     binding_id: str | None = Field(min_length=32, max_length=32)
     title: str = Field(min_length=1)
     objective: str = Field(min_length=1)
+    allow_silent: bool
     schedule_type: ScheduledTaskScheduleType
     scheduled_at: datetime.datetime | None = None
     cron_expression: str | None = None
@@ -34,6 +35,7 @@ class ScheduledTaskCycleState(BaseModel):
     current_run_id: str | None = Field(min_length=32, max_length=32)
     started_at: datetime.datetime | None
     progress_title: str | None
+    progress_reported: bool
     ordered_tasks: list[str] = Field(default_factory=list)
     tracker_desired_revision: int = Field(default=0, ge=0)
     tracker_current_projection_parts: list["ScheduledTrackerProjectionPart"] = Field(
@@ -83,6 +85,7 @@ class ScheduledTaskCycleSnapshot(BaseModel):
     binding_id: str | None = Field(min_length=32, max_length=32)
     title: str = Field(min_length=1)
     objective: str = Field(min_length=1)
+    allow_silent: bool
     schedule_type: ScheduledTaskScheduleType
     scheduled_at: datetime.datetime | None = None
     cron_expression: str | None = None
