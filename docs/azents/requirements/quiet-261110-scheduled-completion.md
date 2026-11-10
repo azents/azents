@@ -1,6 +1,7 @@
 ---
 title: "Scheduled Task Quiet Completion Requirements"
 created: 2026-11-10
+implemented: 2026-11-10
 tags: [scheduled-task, product, notifications]
 document_role: primary
 document_type: requirements

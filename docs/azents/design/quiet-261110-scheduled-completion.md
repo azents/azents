@@ -1,6 +1,7 @@
 ---
 title: "Scheduled Task Quiet Completion Design"
 created: 2026-11-10
+implemented: 2026-11-10
 tags: [scheduled-task, backend, frontend]
 document_role: primary
 document_type: design
@@ -125,6 +126,14 @@ Existing immutable snapshots, typed Events and post-commit provider effects offe
 credible insertion points for M1–M6. Final evidence must verify notification and
 conversation consumers, persisted snapshot migration and generated interfaces.
 No product delta is authorized by feasibility findings.
+
+Local implementation verification: backend Ruff/ty, 149 focused repository,
+service and tool tests, PostgreSQL migration preservation through
+downgrade/re-upgrade, 854 web unit tests, web typecheck/lint, four Chromium
+Storybook cases, and eleven E2E support tests passed. Public clients were
+source-generated. Independent review's rollback data-loss finding was corrected
+and targeted re-review passed. Assembled E2E and exact-head CI evidence are
+recorded on the implementation PR; local verification does not claim deployment.
 
 ## Design Approval
 
