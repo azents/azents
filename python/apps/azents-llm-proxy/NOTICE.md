@@ -2,12 +2,9 @@
 
 The Azents extension is MIT-licensed. Its inference server is the original
 LiteLLM Proxy from Berri AI, installed from the published PyPI wheel
-`litellm==1.109.0rc1`. The exact registry artifact hashes are in `uv.lock`.
-This exact prerelease pin retains ChatGPT request-credential forwarding (upstream
-PR #41522) and permits patched filelock through upstream PR #49137. It requires
-maintainer review as a new one-time exception; the earlier dev-wheel approval does
-not authorize arbitrary prereleases. Replace it with a stable release containing
-both fixes after equivalent regression checks.
+`litellm==1.109.0`. The exact registry artifact hashes are in `uv.lock`.
+This stable release includes ChatGPT request-credential forwarding (upstream
+PR #41522) and permits patched filelock through upstream PR #49137.
 
 LiteLLM's original notice identifies its non-Enterprise sources as MIT-licensed.
 The wheel's license and dependency notices remain installed in distribution
