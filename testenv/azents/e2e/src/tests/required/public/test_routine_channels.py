@@ -65,257 +65,294 @@ class _RoutineUpload(ExtensionObservation):
     has_initial_comment: StrictBool
 
 
-@pytest.mark.parametrize("delivery", ["delivered", "failed"])
-def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
-    request: pytest.FixtureRequest,
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_admin_server_url: str,
-    ordinary_model_stream_worker: object,
-    azents_external_channel_gateway_factory: Callable[
-        [], AbstractContextManager[Container]
-    ],
-    slack_provider_fake_url: str,
-    openai_proxy_url: str,
-    delivery: Literal["delivered", "failed"],
-) -> None:
-    """Channel-created Session keeps Primary delivery separate from work outcome."""
-    del ordinary_model_stream_worker
-    gateway = azents_external_channel_gateway_factory()
-    gateway.__enter__()
-    request.addfinalizer(lambda: gateway.__exit__(None, None, None))
-    requests.post(
-        f"{slack_provider_fake_url}/__testenv/reset", timeout=10
-    ).raise_for_status()
+class TestRoutinePrimaryDelivery:
+    """Keep delivery variants isolated per case with one bounded Worker owner."""
 
-    def prepare(setup: AgentSessionSetup) -> str:
-        headers = {"Authorization": f"Bearer {setup.access_token}"}
-        api = ExternalChannelV1Api(public_api_client)
-        connection = api.external_channel_v1_setup_slack_connection(
-            agent_id=setup.agent_id,
-            handle=setup.workspace_handle,
-            slack_connection_setup_request=SlackConnectionSetupRequest(
-                app_id=_APP_ID,
-                transport=ExternalChannelTransport.HTTP,
-                credentials=SlackConnectionCredentials(
-                    bot_token=_BOT_TOKEN,
-                    signing_secret=_SIGNING_SECRET,
-                    app_token=None,
+    @pytest.mark.parametrize("delivery", ["delivered", "failed"])
+    def test_routine_current_primary_uses_one_provider_attempt_without_fallback(
+        self,
+        request: pytest.FixtureRequest,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_admin_server_url: str,
+        ordinary_model_stream_case: Callable[[Callable[[], object]], None],
+        azents_external_channel_gateway_factory: Callable[
+            [], AbstractContextManager[Container]
+        ],
+        slack_provider_fake_url: str,
+        openai_proxy_url: str,
+        delivery: Literal["delivered", "failed"],
+    ) -> None:
+        """Channel-created Session keeps Primary delivery separate from work outcome."""
+        gateway = azents_external_channel_gateway_factory()
+        gateway.__enter__()
+        request.addfinalizer(lambda: gateway.__exit__(None, None, None))
+        requests.post(
+            f"{slack_provider_fake_url}/__testenv/reset", timeout=10
+        ).raise_for_status()
+
+        def prepare(setup: AgentSessionSetup) -> str:
+            headers = {"Authorization": f"Bearer {setup.access_token}"}
+            chat = ChatV1Api(public_api_client)
+
+            def drain_owned_sessions() -> None:
+                def all_idle() -> bool:
+                    sessions: set[str] = {setup.session_id}
+                    for status in ("active", "archived"):
+                        page = chat.chat_v1_list_agent_sessions(
+                            agent_id=setup.agent_id,
+                            status=status,
+                            limit=100,
+                            _headers=headers,
+                        )
+                        assert len(page.items) == page.total_count
+                        sessions.update(session.id for session in page.items)
+                    return all(
+                        _live_idle(
+                            server_url=azents_public_server_url,
+                            token=setup.access_token,
+                            session_id=session_id,
+                        )
+                        for session_id in sessions
+                    )
+
+                wait_until(
+                    all_idle,
+                    timeout=120,
+                    interval=0.5,
+                    message="Shared Routine Worker did not drain its owned Sessions",
+                )
+
+            ordinary_model_stream_case(drain_owned_sessions)
+            api = ExternalChannelV1Api(public_api_client)
+            connection = api.external_channel_v1_setup_slack_connection(
+                agent_id=setup.agent_id,
+                handle=setup.workspace_handle,
+                slack_connection_setup_request=SlackConnectionSetupRequest(
+                    app_id=_APP_ID,
+                    transport=ExternalChannelTransport.HTTP,
+                    credentials=SlackConnectionCredentials(
+                        bot_token=_BOT_TOKEN,
+                        signing_secret=_SIGNING_SECRET,
+                        app_token=None,
+                    ),
                 ),
-            ),
-            _headers=headers,
-        ).connection
-        request.addfinalizer(
-            lambda: api.external_channel_v1_disconnect_connection(
+                _headers=headers,
+            ).connection
+            request.addfinalizer(
+                lambda: api.external_channel_v1_disconnect_connection(
+                    agent_id=setup.agent_id,
+                    handle=setup.workspace_handle,
+                    connection_id=connection.id,
+                    _headers=headers,
+                )
+            )
+
+            def preserve_provider_evidence() -> None:
+                state = _provider_observation(slack_provider_fake_url)
+                _write_evidence(
+                    setup.session_id,
+                    "channel-observations",
+                    {
+                        "request_counts": state.request_counts,
+                        "deliveries": [
+                            item.model_dump(mode="json") for item in state.deliveries
+                        ],
+                    },
+                )
+
+            request.addfinalizer(preserve_provider_evidence)
+            restricted = api.external_channel_v1_update_connection_access_policy(
                 agent_id=setup.agent_id,
                 handle=setup.workspace_handle,
                 connection_id=connection.id,
+                connection_access_policy_request=ConnectionAccessPolicyRequest(
+                    open_access_enabled=False
+                ),
                 _headers=headers,
             )
-        )
+            assert restricted.open_access_enabled is False
+            assert (
+                api.external_channel_v1_validate_connection(
+                    agent_id=setup.agent_id,
+                    handle=setup.workspace_handle,
+                    connection_id=connection.id,
+                    _headers=headers,
+                ).status
+                is ExternalChannelConnectionStatus.ACTIVE
+            )
+            callback = f"{azents_public_server_url}/external-channel/v1/slack/events"
+            timestamp = f"{int(time.time()) - 60}.000300"
+            text = f"<@B-E2E> {model.CHANNEL_SETUP}"
+            requests.post(
+                f"{slack_provider_fake_url}/__testenv/configure",
+                json={
+                    "history_pages": [
+                        [{"user": "U-EXTERNAL", "ts": timestamp, "text": text}]
+                    ]
+                },
+                timeout=10,
+            ).raise_for_status()
+            body = json.dumps(
+                {
+                    "type": "event_callback",
+                    "event_id": f"Ev-{unique()}",
+                    "event_time": int(time.time()),
+                    "api_app_id": _APP_ID,
+                    "team_id": _TEAM_ID,
+                    "event": {
+                        "type": "app_mention",
+                        "channel": _CHANNEL_ID,
+                        "channel_type": "channel",
+                        "user": "U-EXTERNAL",
+                        "text": text,
+                        "ts": timestamp,
+                    },
+                },
+                separators=(",", ":"),
+            ).encode()
+            requests.post(
+                callback, data=body, headers=_signed_headers(body), timeout=10
+            ).raise_for_status()
+            approval_id = wait_until(
+                lambda: _approval_request_id(slack_provider_fake_url),
+                timeout=20,
+                interval=0.2,
+                message="Routine channel setup did not request participant approval",
+            )
+            assert approval_id is not None
+            api.external_channel_v1_decide_approval_request(
+                access_request_id=approval_id,
+                external_channel_decision_input=ExternalChannelDecisionInput(
+                    decision="allow_agent", summary="Local Routine notification E2E"
+                ),
+                _headers=headers,
+            )
+            _open_slack_setup_modal(
+                callback_url=callback,
+                app_id=_APP_ID,
+                team_id=_TEAM_ID,
+                channel_id=_CHANNEL_ID,
+                user_id="U-EXTERNAL",
+            )
+            view = wait_until(
+                lambda: _latest_setup_view(slack_provider_fake_url),
+                timeout=20,
+                interval=0.2,
+                message="Routine channel setup did not present the location selector",
+            )
+            assert view is not None
+            _submit_slack_setup_location(
+                callback_url=callback,
+                app_id=_APP_ID,
+                team_id=_TEAM_ID,
+                user_id="U-EXTERNAL",
+                setup_view=view,
+            )
 
-        def preserve_provider_evidence() -> None:
+            def bound_session() -> str | None:
+                for session in chat.chat_v1_list_agent_sessions(
+                    agent_id=setup.agent_id, _headers=headers
+                ).items:
+                    channels = api.external_channel_v1_list_session_channels(
+                        agent_id=setup.agent_id,
+                        handle=setup.workspace_handle,
+                        session_id=session.id,
+                        _headers=headers,
+                    )
+                    if len(channels.items) == 1:
+                        return session.id
+                return None
+
+            session_id = wait_until(
+                bound_session,
+                timeout=30,
+                interval=0.2,
+                message="Routine channel setup did not create one bound Session",
+            )
+            assert session_id is not None
+            common = {
+                "server_url": azents_public_server_url,
+                "token": setup.access_token,
+                "session_id": session_id,
+            }
+
+            def setup_settled() -> bool:
+                return _live_idle(**common) and any(
+                    item.kind == "client_tool_result"
+                    and ToolResultObservation.model_validate(
+                        item.payload
+                    ).call_id.startswith("call_routine_e2e_channel_ignore_")
+                    and ToolResultObservation.model_validate(item.payload).status
+                    == "completed"
+                    for item in _history(**common).items
+                )
+
+            wait_until(
+                setup_settled,
+                timeout=60,
+                interval=0.2,
+                message=(
+                    "Channel setup Work did not finish through the actual ignore tool"
+                ),
+            )
+            requests.post(
+                f"{slack_provider_fake_url}/__testenv/configure",
+                json={
+                    "file_scenarios": {
+                        "files.completeUploadExternal": (
+                            "available" if delivery == "delivered" else "rejected"
+                        )
+                    }
+                },
+                timeout=10,
+            ).raise_for_status()
+            return session_id
+
+        def verify(setup: AgentSessionSetup) -> None:
             state = _provider_observation(slack_provider_fake_url)
+            assert state.request_counts.get("files.getUploadURLExternal") == 1
+            assert state.request_counts.get("file.upload") == 1
+            assert state.request_counts.get("files.completeUploadExternal") == 1
+            assert state.request_counts.get("chat.postMessage", 0) == 0
+            notifications = [
+                _RoutineUpload.model_validate(item.model_dump())
+                for item in state.deliveries
+                if item.operation == "files.completeUploadExternal"
+            ]
+            if delivery == "delivered":
+                assert (
+                    len(notifications) == 1 and notifications[0].outcome == "delivered"
+                )
+                assert notifications[0].file_count == 1
+                assert notifications[0].total_bytes == len(
+                    (model.RUNTIME_PROOF + "\n").encode()
+                )
+                assert notifications[0].has_initial_comment
+            else:
+                assert notifications == []
             _write_evidence(
                 setup.session_id,
-                "channel-observations",
+                "primary-delivery",
                 {
-                    "request_counts": state.request_counts,
-                    "deliveries": [
-                        item.model_dump(mode="json") for item in state.deliveries
+                    "provider": "local_slack_fake",
+                    "upload_attempt_count": state.request_counts[
+                        "files.completeUploadExternal"
+                    ],
+                    "expected_delivery": delivery,
+                    "notifications": [
+                        item.model_dump(mode="json") for item in notifications
                     ],
                 },
             )
 
-        request.addfinalizer(preserve_provider_evidence)
-        restricted = api.external_channel_v1_update_connection_access_policy(
-            agent_id=setup.agent_id,
-            handle=setup.workspace_handle,
-            connection_id=connection.id,
-            connection_access_policy_request=ConnectionAccessPolicyRequest(
-                open_access_enabled=False
-            ),
-            _headers=headers,
+        run_routine_journey(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+            azents_admin_server_url,
+            openai_proxy_url,
+            None,
+            RoutineChannelJourney(prepare, verify, delivery),
         )
-        assert restricted.open_access_enabled is False
-        assert (
-            api.external_channel_v1_validate_connection(
-                agent_id=setup.agent_id,
-                handle=setup.workspace_handle,
-                connection_id=connection.id,
-                _headers=headers,
-            ).status
-            is ExternalChannelConnectionStatus.ACTIVE
-        )
-        callback = f"{azents_public_server_url}/external-channel/v1/slack/events"
-        timestamp = f"{int(time.time()) - 60}.000300"
-        text = f"<@B-E2E> {model.CHANNEL_SETUP}"
-        requests.post(
-            f"{slack_provider_fake_url}/__testenv/configure",
-            json={
-                "history_pages": [
-                    [{"user": "U-EXTERNAL", "ts": timestamp, "text": text}]
-                ]
-            },
-            timeout=10,
-        ).raise_for_status()
-        body = json.dumps(
-            {
-                "type": "event_callback",
-                "event_id": f"Ev-{unique()}",
-                "event_time": int(time.time()),
-                "api_app_id": _APP_ID,
-                "team_id": _TEAM_ID,
-                "event": {
-                    "type": "app_mention",
-                    "channel": _CHANNEL_ID,
-                    "channel_type": "channel",
-                    "user": "U-EXTERNAL",
-                    "text": text,
-                    "ts": timestamp,
-                },
-            },
-            separators=(",", ":"),
-        ).encode()
-        requests.post(
-            callback, data=body, headers=_signed_headers(body), timeout=10
-        ).raise_for_status()
-        approval_id = wait_until(
-            lambda: _approval_request_id(slack_provider_fake_url),
-            timeout=20,
-            interval=0.2,
-            message="Routine channel setup did not request participant approval",
-        )
-        assert approval_id is not None
-        api.external_channel_v1_decide_approval_request(
-            access_request_id=approval_id,
-            external_channel_decision_input=ExternalChannelDecisionInput(
-                decision="allow_agent", summary="Local Routine notification E2E"
-            ),
-            _headers=headers,
-        )
-        _open_slack_setup_modal(
-            callback_url=callback,
-            app_id=_APP_ID,
-            team_id=_TEAM_ID,
-            channel_id=_CHANNEL_ID,
-            user_id="U-EXTERNAL",
-        )
-        view = wait_until(
-            lambda: _latest_setup_view(slack_provider_fake_url),
-            timeout=20,
-            interval=0.2,
-            message="Routine channel setup did not present the location selector",
-        )
-        assert view is not None
-        _submit_slack_setup_location(
-            callback_url=callback,
-            app_id=_APP_ID,
-            team_id=_TEAM_ID,
-            user_id="U-EXTERNAL",
-            setup_view=view,
-        )
-        chat = ChatV1Api(public_api_client)
-
-        def bound_session() -> str | None:
-            for session in chat.chat_v1_list_agent_sessions(
-                agent_id=setup.agent_id, _headers=headers
-            ).items:
-                channels = api.external_channel_v1_list_session_channels(
-                    agent_id=setup.agent_id,
-                    handle=setup.workspace_handle,
-                    session_id=session.id,
-                    _headers=headers,
-                )
-                if len(channels.items) == 1:
-                    return session.id
-            return None
-
-        session_id = wait_until(
-            bound_session,
-            timeout=30,
-            interval=0.2,
-            message="Routine channel setup did not create one bound Session",
-        )
-        assert session_id is not None
-        common = {
-            "server_url": azents_public_server_url,
-            "token": setup.access_token,
-            "session_id": session_id,
-        }
-
-        def setup_settled() -> bool:
-            return _live_idle(**common) and any(
-                item.kind == "client_tool_result"
-                and ToolResultObservation.model_validate(
-                    item.payload
-                ).call_id.startswith("call_routine_e2e_channel_ignore_")
-                and ToolResultObservation.model_validate(item.payload).status
-                == "completed"
-                for item in _history(**common).items
-            )
-
-        wait_until(
-            setup_settled,
-            timeout=60,
-            interval=0.2,
-            message="Channel setup Work did not finish through the actual ignore tool",
-        )
-        requests.post(
-            f"{slack_provider_fake_url}/__testenv/configure",
-            json={
-                "file_scenarios": {
-                    "files.completeUploadExternal": (
-                        "available" if delivery == "delivered" else "rejected"
-                    )
-                }
-            },
-            timeout=10,
-        ).raise_for_status()
-        return session_id
-
-    def verify(setup: AgentSessionSetup) -> None:
-        state = _provider_observation(slack_provider_fake_url)
-        assert state.request_counts.get("files.getUploadURLExternal") == 1
-        assert state.request_counts.get("file.upload") == 1
-        assert state.request_counts.get("files.completeUploadExternal") == 1
-        assert state.request_counts.get("chat.postMessage", 0) == 0
-        notifications = [
-            _RoutineUpload.model_validate(item.model_dump())
-            for item in state.deliveries
-            if item.operation == "files.completeUploadExternal"
-        ]
-        if delivery == "delivered":
-            assert len(notifications) == 1 and notifications[0].outcome == "delivered"
-            assert notifications[0].file_count == 1
-            assert notifications[0].total_bytes == len(
-                (model.RUNTIME_PROOF + "\n").encode()
-            )
-            assert notifications[0].has_initial_comment
-        else:
-            assert notifications == []
-        _write_evidence(
-            setup.session_id,
-            "primary-delivery",
-            {
-                "provider": "local_slack_fake",
-                "upload_attempt_count": state.request_counts[
-                    "files.completeUploadExternal"
-                ],
-                "expected_delivery": delivery,
-                "notifications": [
-                    item.model_dump(mode="json") for item in notifications
-                ],
-            },
-        )
-
-    run_routine_journey(
-        public_api_client,
-        admin_api_client,
-        azents_public_server_url,
-        azents_admin_server_url,
-        openai_proxy_url,
-        None,
-        RoutineChannelJourney(prepare, verify, delivery),
-    )

@@ -6,6 +6,7 @@ Invalid speed preference wire shapes are covered by the backend public Chat
 
 import json
 import time
+from collections.abc import Callable
 from typing import NamedTuple
 
 import azentsadminclient
@@ -1446,162 +1447,6 @@ class TestPerPromptInferenceProfile:
         assert all(body.model == "gpt-6-astra" for body in matching)
         assert all(body.service_tier == "ultrafast" for body in matching)
 
-    def test_prepared_ultrafast_is_immutable_while_standard_input_queues(
-        self,
-        azents_public_server_url: str,
-        openai_proxy_url: str,
-        profile_agent_setup: ProfileAgentSetup,
-        ordinary_model_stream_worker: object,
-    ) -> None:
-        """Use an explicit provider barrier instead of racing profile preparation."""
-        del ordinary_model_stream_worker
-        token, agent_id, _ = profile_agent_setup
-        session_id = _create_profile_session(
-            server_url=azents_public_server_url, token=token, agent_id=agent_id
-        )
-        barrier_url = f"{openai_proxy_url}/v1/_inference_profile_barrier"
-        requests.post(barrier_url, timeout=10).raise_for_status()
-        prepared_message = f"Ultrafast E2E prepared {unique()}"
-        queued_message = f"Ultrafast E2E queued {unique()}"
-        try:
-            _write_profile(
-                server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=session_id,
-                message=prepared_message,
-                target="Astra",
-                effort="high",
-                enabled_execution_options=["ultrafast"],
-            )
-            wait_until(
-                lambda: (
-                    _response_model(
-                        requests.get(barrier_url, timeout=10), ProfileBarrierObservation
-                    ).reached
-                ),
-                timeout=30,
-                interval=0.1,
-                message="Prepared provider request did not reach the barrier",
-            )
-            _write_profile(
-                server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=session_id,
-                message=queued_message,
-                target="Astra",
-                effort="high",
-                enabled_execution_options=[],
-            )
-            _wait_for_proxy_service_tier(
-                openai_proxy_url=openai_proxy_url,
-                message=prepared_message,
-                model_id="gpt-6-astra",
-                expected_tier="ultrafast",
-            )
-        finally:
-            requests.post(f"{barrier_url}/release", timeout=10).raise_for_status()
-        for options in (["ultrafast"], []):
-            _typed_wait_for_turn_provenance(
-                server_url=azents_public_server_url,
-                token=token,
-                session_id=session_id,
-                target="Astra",
-                effort="high",
-                enabled_execution_options=options,
-                display_name="GPT 6 Astra Deterministic",
-                effective_context_window_tokens=32_000,
-            )
-        _wait_for_proxy_service_tier(
-            openai_proxy_url=openai_proxy_url,
-            message=queued_message,
-            model_id="gpt-6-astra",
-            expected_tier="default",
-        )
-
-    def test_worker_shutdown_during_model_wait_resumes_same_run(
-        self,
-        azents_public_server_url: str,
-        openai_proxy_url: str,
-        profile_agent_setup: ProfileAgentSetup,
-        ordinary_model_stream_worker: DockerContainer,
-    ) -> None:
-        """A real Worker TERM at a blocked provider request preserves recovery."""
-        token, agent_id, _ = profile_agent_setup
-        session_id = _create_profile_session(
-            server_url=azents_public_server_url, token=token, agent_id=agent_id
-        )
-        barrier_url = f"{openai_proxy_url}/v1/_inference_profile_barrier"
-        requests.post(barrier_url, timeout=10).raise_for_status()
-        message = f"Ultrafast E2E prepared shutdown {unique()}"
-        worker = ordinary_model_stream_worker.get_wrapped_container()
-        try:
-            _write_profile(
-                server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=session_id,
-                message=message,
-                target="Astra",
-                effort="high",
-                enabled_execution_options=["ultrafast"],
-            )
-            wait_until(
-                lambda: (
-                    _response_model(
-                        requests.get(barrier_url, timeout=10), ProfileBarrierObservation
-                    ).reached
-                ),
-                timeout=30,
-                interval=0.1,
-                message="Provider request did not reach the shutdown barrier",
-            )
-            live_url = f"{azents_public_server_url}/chat/v1/sessions/{session_id}/live"
-            before = _response_model(
-                requests.get(live_url, headers=_headers(token), timeout=10),
-                LiveEventListResponse,
-            )
-            assert before.run is not None
-            run_id = before.run.run_id
-            assert before.run.status == "running"
-
-            worker.stop(timeout=35)
-
-            stopped = _response_model(
-                requests.get(live_url, headers=_headers(token), timeout=10),
-                LiveEventListResponse,
-            )
-            assert stopped.session_run_state == "running"
-            assert stopped.run is not None
-            assert stopped.run.run_id == run_id
-            assert stopped.run.status == "running"
-            assert not any(
-                event.kind == "run_marker"
-                for event in _typed_history(azents_public_server_url, token, session_id)
-            )
-        finally:
-            requests.post(f"{barrier_url}/release", timeout=10).raise_for_status()
-            worker.start()
-
-        _wait_for_session_idle(
-            server_url=azents_public_server_url,
-            token=token,
-            agent_id=agent_id,
-            session_id=session_id,
-        )
-        history = _typed_history(azents_public_server_url, token, session_id)
-        terminals = [
-            RunMarkerObservation.model_validate(event.payload)
-            for event in history
-            if event.kind == "run_marker"
-        ]
-        assert [(marker.run_id, marker.status) for marker in terminals] == [
-            (run_id, "completed")
-        ]
-        assert "INFERENCE_PROFILE_COMPLETED prepared" in _serialized_history(history)
-        assert not any(event.kind == "system_error" for event in history)
-
     def test_subagent_spawn_override_continuation(
         self,
         azents_public_server_url: str,
@@ -1832,6 +1677,182 @@ class TestPerPromptInferenceProfile:
             session_id=session_id,
         )
         assert rejected_name not in _tree_names(tree)
+
+
+class TestExplicitResponseBarriers:
+    """Keep only explicit response-barrier cases under one ordinary Worker owner."""
+
+    def test_prepared_ultrafast_is_immutable_while_standard_input_queues(
+        self,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+        ordinary_model_stream_case: Callable[[Callable[[], object]], None],
+    ) -> None:
+        """Use an explicit provider barrier instead of racing profile preparation."""
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url, token=token, agent_id=agent_id
+        )
+        ordinary_model_stream_case(
+            lambda: _wait_for_session_idle(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+        )
+        barrier_url = f"{openai_proxy_url}/v1/_inference_profile_barrier"
+        requests.post(barrier_url, timeout=10).raise_for_status()
+        prepared_message = f"Ultrafast E2E prepared {unique()}"
+        queued_message = f"Ultrafast E2E queued {unique()}"
+        try:
+            _write_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=prepared_message,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=["ultrafast"],
+            )
+            wait_until(
+                lambda: (
+                    _response_model(
+                        requests.get(barrier_url, timeout=10), ProfileBarrierObservation
+                    ).reached
+                ),
+                timeout=30,
+                interval=0.1,
+                message="Prepared provider request did not reach the barrier",
+            )
+            _write_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=queued_message,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=[],
+            )
+            _wait_for_proxy_service_tier(
+                openai_proxy_url=openai_proxy_url,
+                message=prepared_message,
+                model_id="gpt-6-astra",
+                expected_tier="ultrafast",
+            )
+        finally:
+            requests.post(f"{barrier_url}/release", timeout=10).raise_for_status()
+        for options in (["ultrafast"], []):
+            _typed_wait_for_turn_provenance(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=session_id,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=options,
+                display_name="GPT 6 Astra Deterministic",
+                effective_context_window_tokens=32_000,
+            )
+        _wait_for_proxy_service_tier(
+            openai_proxy_url=openai_proxy_url,
+            message=queued_message,
+            model_id="gpt-6-astra",
+            expected_tier="default",
+        )
+
+    def test_worker_shutdown_during_model_wait_resumes_same_run(
+        self,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+        ordinary_model_stream_worker_group: DockerContainer,
+        ordinary_model_stream_case: Callable[[Callable[[], object]], None],
+    ) -> None:
+        """A real Worker TERM at a blocked provider request preserves recovery."""
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url, token=token, agent_id=agent_id
+        )
+        ordinary_model_stream_case(
+            lambda: _wait_for_session_idle(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+        )
+        barrier_url = f"{openai_proxy_url}/v1/_inference_profile_barrier"
+        requests.post(barrier_url, timeout=10).raise_for_status()
+        message = f"Ultrafast E2E prepared shutdown {unique()}"
+        worker = ordinary_model_stream_worker_group.get_wrapped_container()
+        try:
+            _write_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=message,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=["ultrafast"],
+            )
+            wait_until(
+                lambda: (
+                    _response_model(
+                        requests.get(barrier_url, timeout=10), ProfileBarrierObservation
+                    ).reached
+                ),
+                timeout=30,
+                interval=0.1,
+                message="Provider request did not reach the shutdown barrier",
+            )
+            live_url = f"{azents_public_server_url}/chat/v1/sessions/{session_id}/live"
+            before = _response_model(
+                requests.get(live_url, headers=_headers(token), timeout=10),
+                LiveEventListResponse,
+            )
+            assert before.run is not None
+            run_id = before.run.run_id
+            assert before.run.status == "running"
+
+            worker.stop(timeout=35)
+
+            stopped = _response_model(
+                requests.get(live_url, headers=_headers(token), timeout=10),
+                LiveEventListResponse,
+            )
+            assert stopped.session_run_state == "running"
+            assert stopped.run is not None
+            assert stopped.run.run_id == run_id
+            assert stopped.run.status == "running"
+            assert not any(
+                event.kind == "run_marker"
+                for event in _typed_history(azents_public_server_url, token, session_id)
+            )
+        finally:
+            requests.post(f"{barrier_url}/release", timeout=10).raise_for_status()
+            worker.start()
+
+        _wait_for_session_idle(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        history = _typed_history(azents_public_server_url, token, session_id)
+        terminals = [
+            RunMarkerObservation.model_validate(event.payload)
+            for event in history
+            if event.kind == "run_marker"
+        ]
+        assert [(marker.run_id, marker.status) for marker in terminals] == [
+            (run_id, "completed")
+        ]
+        assert "INFERENCE_PROFILE_COMPLETED prepared" in _serialized_history(history)
+        assert not any(event.kind == "system_error" for event in history)
 
 
 class TestModelSupportContract:

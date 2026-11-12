@@ -2027,8 +2027,8 @@ def azents_engine_worker_container(
     return azents_core_service_containers.engine
 
 
-@pytest.fixture
-def ordinary_model_stream_worker(
+@pytest.fixture(scope="session")
+def ordinary_model_stream_worker_factory(
     azents_engine_worker_container: DockerContainer,
     container_network: Network,
     postgres_container: PostgresContainer,
@@ -2039,36 +2039,85 @@ def ordinary_model_stream_worker(
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
-) -> Generator[DockerContainer, None, None]:
-    """Isolate one explicit barrier from the fast-watchdog fixture policy."""
-    replacement = _create_engine_worker_container(
-        image=azents_server_image,
-        network=container_network,
-        postgres_container=postgres_container,
-        rustfs_access_key=rustfs_access_key,
-        rustfs_secret_key=rustfs_secret_key,
-        s3_bucket_name=s3_bucket_name,
-        auth_jwt_secret_key=auth_jwt_secret_key,
-        credential_encryption_key=credential_encryption_key,
-        system_bootstrap_setup_token=system_bootstrap_setup_token,
-    )
-    for key, value in ordinary_model_stream_environment().items():
-        replacement.with_env(key, value)
-    original = azents_engine_worker_container.get_wrapped_container()
-    # Keep the original container and all cached core/bootstrap state intact.
-    original.stop(timeout=10)
-    try:
-        with replacement:
-            _register_server_log_capture("azents-engine-worker", replacement)
-            _wait_for_engine_worker_ready(replacement)
-            yield replacement
-    finally:
-        _unregister_server_log_capture("azents-engine-worker")
-        original.start()
-        _register_server_log_capture(
-            "azents-engine-worker", azents_engine_worker_container
+) -> Callable[[], AbstractContextManager[DockerContainer]]:
+    """Create lazy, bounded owners without changing the original Worker policy."""
+
+    @contextmanager
+    def start() -> Generator[DockerContainer, None, None]:
+        replacement = _create_engine_worker_container(
+            image=azents_server_image,
+            network=container_network,
+            postgres_container=postgres_container,
+            rustfs_access_key=rustfs_access_key,
+            rustfs_secret_key=rustfs_secret_key,
+            s3_bucket_name=s3_bucket_name,
+            auth_jwt_secret_key=auth_jwt_secret_key,
+            credential_encryption_key=credential_encryption_key,
+            system_bootstrap_setup_token=system_bootstrap_setup_token,
         )
-        _wait_for_engine_worker_ready(azents_engine_worker_container)
+        for key, value in ordinary_model_stream_environment().items():
+            replacement.with_env(key, value)
+        original = azents_engine_worker_container.get_wrapped_container()
+        # Keep the original container and all cached core/bootstrap state intact.
+        original.stop(timeout=10)
+        try:
+            with replacement:
+                _register_server_log_capture("azents-engine-worker", replacement)
+                _wait_for_engine_worker_ready(replacement)
+                yield replacement
+        finally:
+            _unregister_server_log_capture("azents-engine-worker")
+            original.start()
+            _register_server_log_capture(
+                "azents-engine-worker", azents_engine_worker_container
+            )
+            _wait_for_engine_worker_ready(azents_engine_worker_container)
+
+    return start
+
+
+@pytest.fixture
+def ordinary_model_stream_worker(
+    ordinary_model_stream_worker_factory: Callable[
+        [], AbstractContextManager[DockerContainer]
+    ],
+) -> Generator[DockerContainer, None, None]:
+    """Keep singleton and Web barriers isolated to their original case."""
+    with ordinary_model_stream_worker_factory() as worker:
+        yield worker
+
+
+@pytest.fixture(scope="class")
+def ordinary_model_stream_worker_group(
+    ordinary_model_stream_worker_factory: Callable[
+        [], AbstractContextManager[DockerContainer]
+    ],
+) -> Generator[DockerContainer, None, None]:
+    """Share one ordinary Worker only within an explicit, drained test class."""
+    with ordinary_model_stream_worker_factory() as worker:
+        yield worker
+
+
+@pytest.fixture
+def ordinary_model_stream_case(
+    request: pytest.FixtureRequest,
+    ordinary_model_stream_worker_group: DockerContainer,
+) -> Generator[Callable[[Callable[[], object]], None], None, None]:
+    """Drain owned product state after case finalizers and fail closed if uncertain."""
+    del ordinary_model_stream_worker_group
+    drains: list[Callable[[], object]] = []
+    yield drains.append
+    errors: list[Exception] = []
+    if not drains:
+        errors.append(RuntimeError("Shared ordinary Worker case registered no drain"))
+    for drain in drains:
+        try:
+            drain()
+        except Exception as error:
+            errors.append(error)
+    if errors:
+        request.session.shouldstop = "Shared ordinary Worker case did not quiesce"
+        raise ExceptionGroup("Shared ordinary Worker case drain failed", errors)
 
 
 @pytest.fixture

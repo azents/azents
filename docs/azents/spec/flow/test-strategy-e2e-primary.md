@@ -182,17 +182,29 @@ bytes, or transient provider URLs. Production Discord remains on its real secure
 and Gateway endpoints; `http`/`ws` are permitted only for the explicit deterministic
 test origin with an explicit insecure-Gateway opt-in.
 
-The prepared inference-profile response barrier and Discord Gateway location-binding
-journey use a function-scoped ordinary model-stream Worker fixture. The Gateway
+The Discord Gateway location-binding journey and singleton/Web response barriers
+use a function-scoped ordinary model-stream Worker fixture. The Gateway
 journey pauses that replacement until direct thread delivery commits, then resumes
 it and verifies generated-title commit and exactly-once thread rename. Its model
 calls use the existing bounded ordinary policy rather than the deliberately
 shortened default fixture policy used for watchdog coverage; no policy values
 are tuned per journey.
-The fixture stops the original Worker without removing it, starts one
+One lazy lifecycle factory serves both function-owned barriers and two explicit
+class-owned groups: prepared/queued inference plus real Worker TERM/resume, and
+the two Routine Primary delivery outcomes. Other test classes retain the original
+fast policy. Each grouped case creates fresh Sessions; the profile group retains
+its class-owned Agent while channel cases create separate Agents. Each registers
+bounded authoritative Session-idle cleanup. Channel cleanup includes the case's
+primary and all active/archived Agent Sessions after connection/gateway finalizers.
+Every registered drain runs even if another fails. Missing or failed drain evidence
+fails teardown and stops subsequent cases before they can reuse an uncertain Worker;
+the normal class/session finalizers still restore the original process.
+
+The lifecycle owner stops the original Worker without removing it, starts one
 replacement with bounded ordinary stream deadlines, and waits for readiness.
 Reached, queued input, explicit release, and durable turn markers establish
-ordering. Teardown removes the replacement and restores the same original Worker,
+ordering. The TERM journey keeps its actual stopped process, same-Run recovery
+and durable completion assertions. Owner teardown removes the replacement and restores the same original Worker,
 its readiness, and log capture. Public/Admin services, database, bootstrap state,
 and the default fast-watchdog policy remain unchanged.
 
