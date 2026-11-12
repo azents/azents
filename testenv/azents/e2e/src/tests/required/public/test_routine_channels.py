@@ -105,6 +105,7 @@ class TestRoutinePrimaryDelivery:
                             status=status,
                             limit=100,
                             _headers=headers,
+                            _request_timeout=10,
                         )
                         assert len(page.items) == page.total_count
                         sessions.update(session.id for session in page.items)

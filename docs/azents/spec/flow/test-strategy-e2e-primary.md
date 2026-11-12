@@ -196,6 +196,7 @@ fast policy. Each grouped case creates fresh Sessions; the profile group retains
 its class-owned Agent while channel cases create separate Agents. Each registers
 bounded authoritative Session-idle cleanup. Channel cleanup includes the case's
 primary and all active/archived Agent Sessions after connection/gateway finalizers.
+Session-list and live HTTP reads have explicit ten-second request bounds.
 Every registered drain runs even if another fails. Missing or failed drain evidence
 fails teardown and stops subsequent cases before they can reuse an uncertain Worker;
 the normal class/session finalizers still restore the original process.
