@@ -157,19 +157,11 @@ class ChannelActionInput(BaseModel):
         max_length=80,
         description="Binding handle from context. Pass it unchanged.",
     )
-    work_cycle_id: str | None = Field(
-        min_length=1,
-        description=(
-            "Exact Channel Work cycle ID. Use get_channel_work if unknown. "
-            "Null only to create new Work when no active Work exists, or when "
-            "selecting scheduled_cycle_id instead."
-        ),
-    )
     scheduled_cycle_id: str | None = Field(
         min_length=32,
         max_length=32,
         description=(
-            "Exact Scheduled occurrence ID for progress; work_cycle_id must be null. "
+            "Exact Scheduled occurrence ID for progress. "
             "Null for ordinary Channel Work."
         ),
     )
@@ -224,10 +216,8 @@ class ChannelActionInput(BaseModel):
     @model_validator(mode="after")
     def validate_action(self) -> "ChannelActionInput":
         """Validate the fields that apply to the selected action mode."""
-        if self.work_cycle_id is not None and self.scheduled_cycle_id is not None:
-            raise ValueError("Select Channel Work or Scheduled work, not both.")
-        if self.mode == "ignore" and self.work_cycle_id is None:
-            raise ValueError("Ignore requires an exact active work_cycle_id.")
+        if self.mode == "ignore" and self.scheduled_cycle_id is not None:
+            raise ValueError("Ignore applies only to ordinary Channel Work.")
         if self.mode == "ignore":
             if any(
                 value is not None
@@ -552,6 +542,17 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                             "Selected Scheduled progress was not admitted."
                         )
                 else:
+                    work = next(
+                        (
+                            work
+                            for work in await self.service.snapshot(
+                                session_id=self.session_id,
+                                agent_id=self.agent_id,
+                            )
+                            if work.binding_id == value.binding
+                        ),
+                        None,
+                    )
                     result = await self.service.execute(
                         links=links,
                         session_id=self.session_id,
@@ -559,7 +560,9 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         run_id=self.run_id,
                         client_tool_call_id=execution.call_id,
                         binding_id=value.binding,
-                        expected_work_cycle_id=value.work_cycle_id,
+                        expected_work_cycle_id=(
+                            None if work is None else work.work_cycle_id
+                        ),
                         mode=ExternalChannelActionMode(value.mode),
                         message=value.message,
                         title=None if value.mode == "finish" else value.title,
@@ -612,8 +615,8 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
             get_channel_work,
             description=(
                 "Inspect the active Channel Work identity for one authorized binding. "
-                "Use its exact work_cycle_id for channel_action; null means no active "
-                "Work and permits a new publication. This read does not admit work "
+                "Channel actions resolve the unique active Work from the binding. "
+                "This read does not admit work "
                 "or publish a message."
             ),
             input_model=GetChannelWorkInput,
