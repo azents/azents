@@ -1500,11 +1500,6 @@ def selected_work_arguments(
     text = _decode_model_request(request).matching_text
     selected = dict(arguments)
     if name == "channel_action":
-        matches = re.findall(
-            r"Work cycle IDs?: ([0-9a-f]{32})",
-            text,
-        )
-        selected.setdefault("work_cycle_id", matches[-1] if matches else None)
         selected.setdefault("scheduled_cycle_id", None)
     elif name == "submit_scheduled_task_result":
         matches = re.findall(r"Cycle ID: ([0-9a-f]{32})", text)

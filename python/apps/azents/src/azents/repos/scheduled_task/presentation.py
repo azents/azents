@@ -151,7 +151,7 @@ def render_scheduled_task_runtime_message(
         Reporting policy: {reporting_guidance(allow_silent)}
         Work selection: Pass this exact cycle_id to submit_scheduled_task_result.
         For channel progress, use channel_action with scheduled_cycle_id set to
-        this ID and work_cycle_id=null.
+        this ID.
         Prompt:
         """
     )
@@ -176,7 +176,7 @@ def render_scheduled_task_cycle_guidance(state: ScheduledTaskCycleState) -> str:
         Title: {state.title}
         Scheduled for: {_utc_text(state.scheduled_for)}
         Delivery binding: {state.binding_id if state.binding_id is not None else "Session-only"}
-        Use this exact cycle_id for completion. For channel progress select scheduled_cycle_id={state.cycle_id} and work_cycle_id=null.
+        Use this exact cycle_id for completion. For channel progress select scheduled_cycle_id={state.cycle_id}.
 
         Schedule timing semantics: {_SCHEDULE_TIMING_GUIDANCE}
         Ending this AgentRun does not finish the work cycle. Continue autonomously through idle continuations until the objective is terminal. Use `submit_scheduled_task_result` with `finished` only after achieving the objective, or with `failed` after reasonable attempts when required information, authority, a user choice, or another prerequisite remains unavailable. {channel_guidance}"""  # noqa: E501

@@ -11,17 +11,17 @@ from support.image_generation_openai_proxy import selected_work_arguments
         (
             "channel_action",
             "Work cycle IDs: " + "a" * 32,
-            {"work_cycle_id": "a" * 32, "scheduled_cycle_id": None},
+            {"scheduled_cycle_id": None},
         ),
         (
             "channel_action",
             "Work cycle ID: " + "a" * 32 + "\nWork cycle IDs: " + "b" * 32,
-            {"work_cycle_id": "b" * 32, "scheduled_cycle_id": None},
+            {"scheduled_cycle_id": None},
         ),
         (
             "channel_action",
             "Explicit ordinary new publication",
-            {"work_cycle_id": None, "scheduled_cycle_id": None},
+            {"scheduled_cycle_id": None},
         ),
         (
             "submit_scheduled_task_result",

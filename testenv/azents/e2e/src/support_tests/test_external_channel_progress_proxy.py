@@ -708,7 +708,6 @@ def test_dispatcher_holds_work_through_sparse_retries_and_late_turn(
         assert identity not in emitted
         emitted.add(identity)
         assert json.loads(str(item["arguments"])) == {
-            "work_cycle_id": None,
             "scheduled_cycle_id": None,
             "mode": "continue",
             "binding": "binding-quiet-123",
@@ -1442,5 +1441,5 @@ def test_sparse_continuation_retains_observed_exact_work_selector(
     ]
     first = _dispatch(request, monkeypatch)
     second = _dispatch(_sparse(first), monkeypatch)
-    assert json.loads(str(_tool_item(first)["arguments"]))["work_cycle_id"] == "a" * 32
-    assert json.loads(str(_tool_item(second)["arguments"]))["work_cycle_id"] == "a" * 32
+    assert "work_cycle_id" not in json.loads(str(_tool_item(first)["arguments"]))
+    assert "work_cycle_id" not in json.loads(str(_tool_item(second)["arguments"]))
