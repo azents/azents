@@ -55,6 +55,13 @@ output, credentials, or internal exceptions.
 
 `turn_action_continuation` uses `wake_session` scheduling and is omitted from pending human-message
 presentation. It may promote only after its recorded predecessor Run is terminal. Promotion
+validates a completed same-Session `originating_run_id` as the work source. The
+predecessor must be no earlier than that source and either completed or cancelled
+without ever starting a model turn. Its accumulated work context is merged with the
+origin's context using the same resolver as lifecycle admission. Ordinary idle
+continuations still require a completed source. These checks consume existing
+valid queued results without rerunning the operation or changing Run status.
+Promotion
 atomically deletes the mailbox row and appends one invisible `system_reminder` event with a
 deterministic external identity, making the turn eligible for inference. The action result remains
 the user-visible history authority; the reminder is model input only. Replay exposes either the

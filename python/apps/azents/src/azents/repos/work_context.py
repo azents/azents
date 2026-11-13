@@ -87,20 +87,49 @@ async def continuation_work_context(
 ) -> WorkContext | None:
     """Read exact same-Session continuation provenance for lifecycle admission."""
     payload = _MAILBOX_PAYLOAD.validate_python(item.payload)
+    return await resolve_continuation_work_context(
+        session, session_id=item.session_id, payload=payload
+    )
+
+
+async def resolve_continuation_work_context(
+    session: ReadSession,
+    *,
+    session_id: str,
+    payload: MailboxEnvelopePayload,
+) -> WorkContext | None:
+    """Separate completed work authority from a terminal bridge coordinator."""
     if isinstance(payload, ContinuationMailboxPayload):
         source_run_id = payload.source_run_id
     elif isinstance(payload, TurnActionContinuationMailboxPayload):
-        source_run_id = payload.predecessor_run_id
+        source_run_id = payload.originating_run_id
     else:
         return None
     source = await session.read_session.get(RDBAgentRun, source_run_id)
     if (
         source is None
-        or source.session_id != item.session_id
+        or source.session_id != session_id
         or source.status is not AgentRunStatus.COMPLETED
     ):
         return None
-    return WorkContext.model_validate(source.work_context)
+    carried = WorkContext.model_validate(source.work_context)
+    if isinstance(payload, TurnActionContinuationMailboxPayload):
+        predecessor = await session.read_session.get(
+            RDBAgentRun, payload.predecessor_run_id
+        )
+        if (
+            predecessor is None
+            or predecessor.session_id != session_id
+            or predecessor.run_index < source.run_index
+            or not (
+                predecessor.status is AgentRunStatus.COMPLETED
+                or predecessor.status is AgentRunStatus.CANCELLED
+                and predecessor.started_at is None
+            )
+        ):
+            return None
+        carried = carried.merge(WorkContext.model_validate(predecessor.work_context))
+    return carried
 
 
 def scheduled_work_predicate(cycle_id: str) -> sa.ColumnElement[bool]:

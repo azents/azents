@@ -24,6 +24,7 @@ from azents.core.mailbox_data import (
     RoutineMailboxPayload,
     ScheduledTaskContinuationMailboxPayload,
     ScheduledTaskTriggerMailboxPayload,
+    TurnActionContinuationMailboxPayload,
 )
 from azents.core.routine import RoutineScope
 from azents.core.routine_execution import RoutineExecutionState
@@ -53,6 +54,7 @@ from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.skill_state import SkillStateRepository
+from azents.repos.work_context import resolve_continuation_work_context
 
 logger = logging.getLogger(__name__)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
@@ -253,20 +255,17 @@ class MailboxPromotionRepository:
 
             handled_failure = False
             prepared_events = plan.success_events
-            source_run_id = plan.continuation_predecessor_run_id
-            if isinstance(buffer.payload, ContinuationMailboxPayload):
-                source_run_id = buffer.payload.source_run_id
-            if source_run_id is not None:
+            if isinstance(
+                buffer.payload,
+                ContinuationMailboxPayload | TurnActionContinuationMailboxPayload,
+            ):
                 if plan.active_run_id is None:
                     raise ValueError("Continuation requires a consuming execution.")
-                source = await self.run_repository.get_by_id(session, source_run_id)
-                if (
-                    source is None
-                    or source.session_id != plan.session_id
-                    or source.status is not AgentRunStatus.COMPLETED
-                ):
-                    raise ValueError("Continuation work source is not completed.")
-                carried = source.work_context
+                carried = await resolve_continuation_work_context(
+                    session, session_id=plan.session_id, payload=buffer.payload
+                )
+                if carried is None:
+                    raise ValueError("Continuation work provenance is not valid.")
                 active_cycle_ids: list[str] = []
                 for carried_cycle_id in carried.scheduled_cycle_ids:
                     cycle = await self.scheduled_task_cycle_repository.get_started(
