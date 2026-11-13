@@ -54,14 +54,14 @@ model input boundary exposes four atomic modes:
   binding and executes those effects without a final reply. No reply, progress
   create/update, file, or unrelated provider request occurs.
 
-`channel_action` requires two nullable, mutually exclusive selectors.
-`work_cycle_id` selects existing active Channel Work; `scheduled_cycle_id` selects
-Scheduled progress and may never fall back to ordinary Work on rejection. Both null
-explicitly request a new ordinary publication, allowed only without active Work.
-`ignore` always requires an exact existing active Work selector. Exact-ID and phase
-checks repeat inside every Work CAS attempt, so a stale input cannot mutate a
-replacement. A both-null publication uses stable client-call identity to avoid a
-second cycle/effect when its committed response is lost.
+`channel_action` selects ordinary Channel Work by binding, which has at most one
+active Work. The toolkit resolves its internal identity; callers do not supply a
+Channel Work ID. `scheduled_cycle_id` still selects exact Scheduled progress and
+may never fall back to ordinary Work on rejection. Null selects ordinary Channel
+Work, creating it only if none is active. `ignore` requires existing active Work.
+The internally resolved exact-ID and phase checks repeat inside every Work CAS
+attempt, so replacement between resolution and commit is rejected. New publication
+uses stable client-call identity to avoid duplicate cycles and effects.
 
 Read-only `get_channel_work(binding)` exposes the current scoped active selector,
 including awaiting-input Work; it does not admit work or publish. Ingress freezes

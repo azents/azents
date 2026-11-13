@@ -121,7 +121,7 @@ and current canonical cycle and execution authority;
 visibility does not grant permission to settle an unrelated or unbound cycle.
 Dynamic cycle guidance lists every valid started cycle carried by the current Run.
 Several occurrences may be admitted into one Run. Scheduled progress explicitly
-selects `channel_action.scheduled_cycle_id` with `work_cycle_id=null` and permits
+selects `channel_action.scheduled_cycle_id` and permits
 only `continue`; terminal completion uses `submit_scheduled_task_result`.
 An invalid explicit Scheduled selector fails without falling back to Channel Work.
 

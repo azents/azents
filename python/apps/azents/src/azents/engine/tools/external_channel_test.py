@@ -273,6 +273,17 @@ def _channel_action_mode_enum(schema: dict[str, object]) -> list[object]:
     return require_instance(mode["enum"], list)
 
 
+def test_channel_action_selects_unique_work_by_binding() -> None:
+    """Ordinary callers never need to discover an internal Work identity."""
+    schema = ChannelActionInput.model_json_schema()
+    assert "work_cycle_id" not in schema["properties"]
+    assert "scheduled_cycle_id" in schema["properties"]
+    value = ChannelActionInput.model_validate(
+        {"mode": "ignore", "binding": "binding-1", "scheduled_cycle_id": None}
+    )
+    assert value.mode == "ignore"
+
+
 @pytest.mark.asyncio
 async def test_channel_tools_remain_visible_without_bindings_or_runtime_storage() -> (
     None
@@ -317,7 +328,6 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
         output = await state.tools[0].handler(
             json.dumps(
                 {
-                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                     "scheduled_cycle_id": None,
                     "mode": "continue",
                     "binding": "binding-1",
@@ -363,7 +373,6 @@ async def test_channel_action_requires_bound_execution_authority() -> None:
             await tool.handler(
                 json.dumps(
                     {
-                        "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                         "scheduled_cycle_id": None,
                         "mode": "continue",
                         "binding": "binding-1",
@@ -441,7 +450,6 @@ async def test_ignore_passes_no_publication_fields() -> None:
         await state.tools[0].handler(
             json.dumps(
                 {
-                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                     "scheduled_cycle_id": None,
                     "mode": "ignore",
                     "binding": "binding-1",
@@ -467,7 +475,6 @@ async def test_ignore_rejects_every_publication_or_work_update_field() -> None:
             await state.tools[0].handler(
                 json.dumps(
                     {
-                        "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                         "scheduled_cycle_id": None,
                         "mode": "ignore",
                         "binding": "binding-1",
@@ -656,7 +663,6 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
         await state.tools[0].handler(
             json.dumps(
                 {
-                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                     "scheduled_cycle_id": None,
                     "mode": "continue",
                     "binding": "binding-1",
@@ -698,7 +704,6 @@ async def test_channel_action_preflights_exchange_without_runtime_storage() -> N
         await state.tools[0].handler(
             json.dumps(
                 {
-                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                     "scheduled_cycle_id": None,
                     "mode": "continue",
                     "binding": "binding-1",
@@ -737,7 +742,6 @@ async def test_continue_requires_unfinished_work() -> None:
             await state.tools[0].handler(
                 json.dumps(
                     {
-                        "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                         "scheduled_cycle_id": None,
                         "mode": "continue",
                         "binding": "binding-1",
@@ -759,7 +763,6 @@ def test_finish_requires_message() -> None:
     with pytest.raises(ValueError, match="Finish requires a message"):
         ChannelActionInput.model_validate(
             {
-                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                 "scheduled_cycle_id": None,
                 "mode": "finish",
                 "binding": "binding-1",
@@ -772,7 +775,6 @@ def test_request_input_requires_message() -> None:
     with pytest.raises(ValueError, match="Request input requires a message"):
         ChannelActionInput.model_validate(
             {
-                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                 "scheduled_cycle_id": None,
                 "mode": "request_input",
                 "binding": "binding-1",
@@ -785,7 +787,6 @@ def test_continue_limits_todos_to_available_activity_blocks() -> None:
     with pytest.raises(ValueError, match="at most 49"):
         ChannelActionInput.model_validate(
             {
-                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                 "scheduled_cycle_id": None,
                 "mode": "continue",
                 "binding": "binding-1",
@@ -807,7 +808,6 @@ def test_channel_action_rejects_empty_file_lists() -> None:
     with pytest.raises(ValueError, match="at least 1 item"):
         ChannelActionInput.model_validate(
             {
-                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
                 "scheduled_cycle_id": None,
                 "mode": "continue",
                 "binding": "binding-1",

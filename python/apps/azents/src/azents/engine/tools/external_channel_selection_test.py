@@ -51,7 +51,6 @@ async def test_explicit_scheduled_selector_has_no_channel_work_fallback(
                         "binding": "binding-1",
                         "mode": "continue",
                         "message": "Working.",
-                        "work_cycle_id": None,
                         "scheduled_cycle_id": "s" * 32,
                     }
                 )
