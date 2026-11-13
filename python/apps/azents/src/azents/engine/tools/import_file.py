@@ -1,5 +1,6 @@
 """import_file tool."""
 
+import asyncio
 import datetime
 import logging
 import posixpath
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from typing import assert_never
 
 from azcommon.infra.s3.service import S3Service, S3TransferCleanupRequired
+from azcommon.logging import bind_extra
 from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorSourceTransport,
@@ -143,6 +145,8 @@ def make_import_file_tool(
         """Copy URI file into runtime workspace."""
         try:
             resolved = await resolver_registry.resolve(input.uri)
+        except asyncio.CancelledError:
+            raise
         except ImportResolveError as exc:
             raise FunctionToolError(exc.message) from None
 
@@ -170,6 +174,16 @@ def make_import_file_tool(
             staging_configuration=staging_configuration,
         )
         transfer_operation_id = f"{authority.run_id}:import:{uuid7().hex}"
+        L = bind_extra(
+            logger,
+            {
+                "uri": input.uri,
+                "path": destination,
+                "session_id": authority.session_id,
+                "run_id": authority.run_id,
+                "transfer_operation_id": transfer_operation_id,
+            },
+        )
         try:
             target = await resolve_runtime_target()
             await transfer_service.transfer(
@@ -191,6 +205,8 @@ def make_import_file_tool(
                     conflict_precondition=None,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except PermissionError:
             raise FunctionToolError(
                 f"Cannot write to read-only scope: {destination}. "
@@ -211,15 +227,9 @@ def make_import_file_tool(
                 "Failed to prepare imported file for Runtime transfer."
             ) from None
         except OSError:
-            logger.exception(
+            L.exception(
                 "Failed to import file into runtime workspace",
-                extra={
-                    "uri": input.uri,
-                    "path": destination,
-                    "session_id": authority.session_id,
-                    "run_id": authority.run_id,
-                    "transfer_operation_id": transfer_operation_id,
-                },
+                extra={},
             )
             raise FunctionToolError(
                 "Failed to transfer imported file to Runtime."
@@ -230,14 +240,9 @@ def make_import_file_tool(
                 "deadline."
             ) from None
         except ServerToRuntimeTransferConnectionTimeout:
-            logger.exception(
+            L.exception(
                 "Import file Runtime transfer connection timed out",
                 extra={
-                    "uri": input.uri,
-                    "path": destination,
-                    "session_id": authority.session_id,
-                    "run_id": authority.run_id,
-                    "transfer_operation_id": transfer_operation_id,
                     "transfer_failure": CoordinatorTransferFailure.STREAM.value,
                     "transfer_phase": "admission",
                 },
@@ -251,24 +256,17 @@ def make_import_file_tool(
                 "Imported file exceeds the configured Runtime transfer limit."
             ) from None
         except ServerToRuntimeTransferError as exc:
-            logger.exception(
+            L.exception(
                 "Import file Runtime transfer failed",
                 extra={
-                    "uri": input.uri,
-                    "path": destination,
-                    "session_id": authority.session_id,
-                    "run_id": authority.run_id,
-                    "transfer_operation_id": transfer_operation_id,
-                    "transfer_failure": (
-                        exc.failure.value if exc.failure is not None else None
-                    ),
-                    "transfer_phase": (
-                        exc.phase
-                        if isinstance(exc, ServerToRuntimeCoordinatorError)
-                        else "terminal"
-                        if exc.failure is not None
-                        else "unclassified"
-                    ),
+                    "transfer_failure": exc.failure.value
+                    if exc.failure is not None
+                    else None,
+                    "transfer_phase": exc.phase
+                    if isinstance(exc, ServerToRuntimeCoordinatorError)
+                    else "terminal"
+                    if exc.failure is not None
+                    else "unclassified",
                 },
             )
             raise FunctionToolError(
@@ -407,6 +405,8 @@ async def _exists(
     """Return whether runtime storage path exists."""
     try:
         return await session_storage.exists(destination, agent_id=agent_id)
+    except asyncio.CancelledError:
+        raise
     except PermissionError:
         raise FunctionToolError(
             f"Cannot write to read-only scope: {destination}. "

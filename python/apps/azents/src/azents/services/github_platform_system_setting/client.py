@@ -1,10 +1,13 @@
 """Sanitized external validation for Platform GitHub App settings."""
 
+import asyncio
 import secrets
 from dataclasses import dataclass
 from typing import TypeGuard
 
 import httpx
+from githubkit import BaseAuthStrategy, GitHub, OAuthWebAuthStrategy, UnauthAuthStrategy
+from githubkit.exception import AuthExpiredError, RequestError, RequestFailed
 
 from azents.core.github_auth import create_github_app_jwt
 from azents.core.github_system_setting import PlatformGitHubAppEffective
@@ -43,15 +46,20 @@ class PlatformGitHubAppValidationClient:
         """Return a bounded result without retaining provider response bodies."""
         jwt_token = create_github_app_jwt(effective.app_id, effective.private_key)
         try:
-            app_response = await self.http_client.get(
-                self.app_url,
-                headers={
-                    "Authorization": f"Bearer {jwt_token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-        except httpx.RequestError:
+            async with self._sdk(self.app_url.removesuffix("/app")) as sdk:
+                result = await sdk.rest.apps.async_get_authenticated(
+                    headers={
+                        "Authorization": f"Bearer {jwt_token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    }
+                )
+                app_response = result.raw_response
+        except asyncio.CancelledError:
+            raise
+        except RequestFailed as exc:
+            app_response = exc.response.raw_response
+        except RequestError, httpx.RequestError:
             return self._unavailable()
         if app_response.status_code in {429} or app_response.status_code >= 500:
             return self._unavailable()
@@ -81,20 +89,31 @@ class PlatformGitHubAppValidationClient:
             return self._unavailable(code="github_app_response_invalid")
 
         try:
-            oauth_response = await self.http_client.post(
-                self.oauth_token_url,
-                headers={"Accept": "application/json"},
-                json={
-                    "client_id": effective.client_id,
-                    "client_secret": effective.client_secret,
-                    "code": f"azents-validation-{secrets.token_urlsafe(24)}",
-                },
+            strategy = OAuthWebAuthStrategy(
+                effective.client_id,
+                effective.client_secret,
+                f"azents-validation-{secrets.token_urlsafe(24)}",
             )
-        except httpx.RequestError:
+            await strategy.async_exchange_token(
+                self._sdk(
+                    self.oauth_token_url.removesuffix("/login/oauth/access_token")
+                )
+            )
+            oauth_data: dict[str, object] = {}
+        except asyncio.CancelledError:
+            raise
+        except AuthExpiredError as exc:
+            raw = exc.args[1] if len(exc.args) > 1 else None
+            oauth_data = raw if _is_string_object_dict(raw) else {}
+        except RequestFailed as exc:
+            response = exc.response.raw_response
+            if response.status_code == 429 or response.status_code >= 500:
+                return self._unavailable()
+            oauth_data = self._json_object(response)
+        except ValueError, TypeError:
+            oauth_data = {}
+        except RequestError, httpx.RequestError:
             return self._unavailable()
-        if oauth_response.status_code in {429} or oauth_response.status_code >= 500:
-            return self._unavailable()
-        oauth_data = self._json_object(oauth_response)
         error = oauth_data.get("error")
         if error != "bad_verification_code":
             if error in {"temporarily_unavailable", "server_error"}:
@@ -110,6 +129,18 @@ class PlatformGitHubAppValidationClient:
             message=None,
             action_hint=None,
             metadata={"app_slug": slug},
+        )
+
+    def _sdk(self, base_url: str) -> GitHub[BaseAuthStrategy]:
+        """Retain transport injection while the SDK owns request construction."""
+        return GitHub[BaseAuthStrategy](
+            auth=UnauthAuthStrategy(),
+            base_url=base_url,
+            async_transport=_ValidationTransport(self.http_client),
+            auto_retry=False,
+            http_cache=False,
+            follow_redirects=False,
+            timeout=self.http_client.timeout,
         )
 
     @staticmethod
@@ -152,3 +183,14 @@ class PlatformGitHubAppValidationClient:
 def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     """Return whether a value is a dictionary with string keys."""
     return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+class _ValidationTransport(httpx.AsyncBaseTransport):
+    """Delegate SDK requests without taking ownership of the injected client."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self.client = client
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        request.extensions["timeout"] = self.client.timeout.as_dict()
+        return await self.client.send(request, stream=True)

@@ -1141,6 +1141,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     expected_size=transfer_object.size,
                     expected_sha256=transfer_object.sha256,
                 )
+            except asyncio.CancelledError:
+                raise
             except FileNotFoundError, ValueError:
                 await self._fail(claimed)
                 await context.abort(

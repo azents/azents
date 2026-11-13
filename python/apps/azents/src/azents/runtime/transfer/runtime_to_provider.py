@@ -253,10 +253,10 @@ class RuntimeToProviderBatch:
         maximum_chunk_size: int,
         settlement_recovery: bool = False,
     ) -> None:
-        self._coordinator = coordinator
-        self._resolver = resolver
-        self._object_store = object_store
-        self._clock = clock
+        self.coordinator = coordinator
+        self.resolver = resolver
+        self.object_store = object_store
+        self.clock = clock
         self._status_poll_interval = status_poll_interval
         self._consumer_lease_renew_interval = consumer_lease_renew_interval
         self._deadline_at = deadline_at
@@ -280,7 +280,7 @@ class RuntimeToProviderBatch:
         """Fail before provider I/O when any batch claim is no longer usable."""
         if self._closed:
             raise RuntimeToProviderTransferError("Runtime provider batch is closed")
-        if self._clock() >= self._deadline_at:
+        if self.clock() >= self._deadline_at:
             raise RuntimeToProviderTransferError(
                 "Runtime provider batch deadline expired"
             )
@@ -307,17 +307,17 @@ class RuntimeToProviderBatch:
                 "Runtime provider source is not verified"
             )
         source.streamed = True
-        identity = self._resolver.resolve(source.verified_object_handle)
+        identity = self.resolver.resolve(source.verified_object_handle)
         observed_size = 0
         try:
-            async with self._object_store.iter_chunks(
+            async with self.object_store.iter_chunks(
                 identity,
                 maximum_chunk_size=self._maximum_chunk_size,
             ) as chunks:
                 async for chunk in chunks:
                     if source.lease_failure is not None:
                         raise source.lease_failure
-                    if self._clock() >= self._deadline_at:
+                    if self.clock() >= self._deadline_at:
                         raise RuntimeToProviderTransferError(
                             "Runtime provider batch deadline expired during streaming"
                         )
@@ -439,9 +439,9 @@ class RuntimeToProviderBatch:
         revision = source.revision
         claim_id = _required_claim_id(source)
         recovery_retry_available = self._settlement_recovery
-        while self._settlement_recovery or self._clock() < self._deadline_at:
+        while self._settlement_recovery or self.clock() < self._deadline_at:
             try:
-                status = await self._coordinator.acknowledge_consumer(
+                status = await self.coordinator.acknowledge_consumer(
                     CoordinatorConsumerRequest(
                         identity=source.identity,
                         expected_revision=revision,
@@ -480,9 +480,9 @@ class RuntimeToProviderBatch:
     async def _settle(self, source: _PreparedRuntimeSource) -> None:
         revision = source.revision
         recovery_retry_available = self._settlement_recovery
-        while self._settlement_recovery or self._clock() < self._deadline_at:
+        while self._settlement_recovery or self.clock() < self._deadline_at:
             try:
-                status = await self._coordinator.settle_transfer(
+                status = await self.coordinator.settle_transfer(
                     CoordinatorSettleTransferRequest(
                         identity=source.identity,
                         expected_revision=revision,
@@ -538,7 +538,7 @@ class RuntimeToProviderBatch:
         source: _PreparedRuntimeSource,
     ) -> CoordinatorTransferStatus:
         try:
-            return await self._coordinator.abandon_consumer(
+            return await self.coordinator.abandon_consumer(
                 CoordinatorConsumerRequest(
                     identity=source.identity,
                     expected_revision=source.revision,
@@ -552,9 +552,9 @@ class RuntimeToProviderBatch:
 
     async def _cancel_source_attempt(self, source: _PreparedRuntimeSource) -> None:
         revision = source.revision
-        while self._clock() < self._deadline_at:
+        while self.clock() < self._deadline_at:
             try:
-                status = await self._coordinator.cancel_transfer(
+                status = await self.coordinator.cancel_transfer(
                     CoordinatorCancelTransferRequest(
                         identity=source.identity,
                         expected_revision=revision,
@@ -582,9 +582,9 @@ class RuntimeToProviderBatch:
         identity: CoordinatorTransferIdentity,
     ) -> CoordinatorTransferStatus:
         last_error: Exception | None = None
-        while self._clock() < self._deadline_at:
+        while self.clock() < self._deadline_at:
             try:
-                return await self._coordinator.get_transfer_status(
+                return await self.coordinator.get_transfer_status(
                     CoordinatorGetTransferStatusRequest(identity=identity)
                 )
             except asyncio.CancelledError:
@@ -668,6 +668,8 @@ class RuntimeToProviderBatchService:
                     deadline_at=request.deadline_at,
                     status_poll_interval=self.status_poll_interval,
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeToProviderTransferError:
                 pass
             raise

@@ -1,5 +1,6 @@
 """REST chat write service tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -927,6 +928,8 @@ class TestChatWriteService:
                 file_parts=[],
                 payload={"message": "edited"},
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Requester does not have session access"
         else:
@@ -956,6 +959,8 @@ class TestChatWriteService:
                 command_name="compact",
                 payload={"command": "compact"},
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Requester does not have session access"
         else:
@@ -986,6 +991,8 @@ class TestChatWriteService:
                 failed_event_id="failed-event-1",
                 payload={"failed_event_id": "failed-event-1"},
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Requester does not have session access"
         else:
@@ -1008,6 +1015,8 @@ class TestChatWriteService:
                 session_id="session-1",
                 user_id="user-1",
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Requester does not have session access"
         else:
@@ -1118,6 +1127,8 @@ class TestChatWriteService:
                 session_id="session-1",
                 user_id="user-1",
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Session subtree is outside the root tree"
         else:
@@ -1173,6 +1184,8 @@ class TestChatWriteService:
                 command_name="compact",
                 payload={"command": "compact"},
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Subagent sessions are read-only"
         else:
@@ -1233,6 +1246,8 @@ class TestChatWriteService:
                     history_reload_required=True,
                     payload={"command": "compact"},
                 )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Client request ID already used for another session"
         else:
@@ -1609,6 +1624,8 @@ class TestChatWriteService:
                 failed_event_id=failed_event.id,
                 payload={"failed_event_id": failed_event.id},
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             assert str(exc) == "Failed-run error is no longer the latest visible event"
         else:

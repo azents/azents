@@ -467,6 +467,8 @@ class McpConnections:
                         None,
                         None,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
                     if not streamable or not _is_http_405(exc):
                         raise

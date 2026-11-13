@@ -4,8 +4,10 @@ Delete file from session data storage.
 Used to clean up session files no longer needed by LLM.
 """
 
+import asyncio
 import logging
 
+from azcommon.logging import bind_extra
 from pydantic import BaseModel, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
@@ -42,17 +44,20 @@ def make_delete_file_tool(
         abs_path = input.path
 
         # Check whether file exists
+        L = bind_extra(logger, {"path": abs_path})
         try:
             file_exists = await session_storage.exists(
                 abs_path,
                 agent_id=agent_id,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as exc:
             raise FunctionToolError(f"Failed to access file: {exc.detail}") from None
         except ValueError, OSError:
-            logger.exception(
+            L.exception(
                 "Failed to check file existence",
-                extra={"path": abs_path},
+                extra={},
             )
             raise FunctionToolError(
                 f"Failed to access file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
@@ -69,6 +74,8 @@ def make_delete_file_tool(
                 abs_path,
                 agent_id=agent_id,
             )
+        except asyncio.CancelledError:
+            raise
         except FileNotFoundError:
             # Deleted after exists check (race condition)
             raise FunctionToolError(
@@ -78,17 +85,17 @@ def make_delete_file_tool(
         except RuntimeStorageError as exc:
             raise FunctionToolError(f"Failed to delete file: {exc.detail}") from None
         except ValueError, OSError:
-            logger.exception(
+            L.exception(
                 "Failed to delete file from storage",
-                extra={"path": abs_path},
+                extra={},
             )
             raise FunctionToolError(
                 f"Failed to delete file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
 
-        logger.info(
+        L.info(
             "File deleted from storage",
-            extra={"path": abs_path},
+            extra={},
         )
 
         return f"File deleted: {abs_path}"

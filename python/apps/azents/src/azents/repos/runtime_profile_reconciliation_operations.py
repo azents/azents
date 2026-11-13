@@ -1,5 +1,6 @@
 """Completed claim, resolution and fenced finalization operations for Profile tasks."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated, Literal
@@ -95,6 +96,8 @@ class RuntimeProfileReconciliationOperationRepository:
         """Classify only the previously handled DB and source-resolution failures."""
         try:
             record = await self.resolution_operations.ensure_for_agent(agent_id)
+        except asyncio.CancelledError:
+            raise
         except RuntimeProfileResolutionRejected:
             return "skipped"
         except SQLAlchemyError:

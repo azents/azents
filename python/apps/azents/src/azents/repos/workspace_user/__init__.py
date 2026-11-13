@@ -1,5 +1,7 @@
 """WorkspaceUser repository."""
 
+import asyncio
+
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
@@ -59,6 +61,8 @@ class WorkspaceUserRepository:
         try:
             async with session.write_session.begin_nested():
                 return Success(await self._insert(session, create))
+        except asyncio.CancelledError:
+            raise
         except IntegrityError as error:
             if is_constrained_by(error, RDBWorkspaceUser.UQ_WORKSPACE_USER):
                 return Failure(

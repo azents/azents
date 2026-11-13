@@ -98,9 +98,9 @@ class RuntimeRunnerRegistrationAccepted:
 class RuntimeProviderReport:
     """Provider runtime observed-state report.
 
-    ``workspace_path`` is the authoritative Agent Workspace path source. Runner
-    state reports must not be required before UI, prompt, or file API code can
-    resolve the Agent Workspace root.
+    ``workspace_path`` is Provider observation metadata, not Agent Workspace
+    authority. UI, prompt and file operations resolve the workspace root from
+    the current authenticated Runner report.
     """
 
     runtime_id: str

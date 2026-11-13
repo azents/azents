@@ -37,7 +37,7 @@ class CompositeRuntimeRunnerGenerationObserver:
         """Initialize the exact process-owned observer set."""
         if not observers:
             raise ValueError("At least one Runner generation observer is required")
-        self._observers = observers
+        self.observers = observers
 
     async def on_runner_replaced(
         self,
@@ -54,7 +54,7 @@ class CompositeRuntimeRunnerGenerationObserver:
                     previous_generation=previous_generation,
                     generation=generation,
                 )
-                for observer in self._observers
+                for observer in self.observers
             ),
             return_exceptions=True,
         )
@@ -73,7 +73,7 @@ class CompositeRuntimeRunnerGenerationObserver:
                     runtime_id=runtime_id,
                     generation=generation,
                 )
-                for observer in self._observers
+                for observer in self.observers
             ),
             return_exceptions=True,
         )
@@ -90,8 +90,8 @@ class RuntimeTerminalRunnerGenerationObserver:
         clock: Callable[[], datetime],
     ) -> None:
         """Initialize volatile coordination invalidation."""
-        self._store = store
-        self._clock = clock
+        self.store = store
+        self.clock = clock
 
     async def on_runner_replaced(
         self,
@@ -126,15 +126,15 @@ class RuntimeTerminalRunnerGenerationObserver:
         *,
         reason: RunnerTerminalTerminationReason,
     ) -> None:
-        now = _aware_now(self._clock)
-        invalidated = await self._store.invalidate(
+        now = _aware_now(self.clock)
+        invalidated = await self.store.invalidate(
             source=RuntimeTerminalInvalidationSource.RUNTIME,
             source_id=runtime_id,
             reason=reason,
             invalidated_at=now,
         )
         await _finalize_runner_authority_invalidated(
-            self._store,
+            self.store,
             invalidated.terminal_ids,
             reason=reason,
             finalized_at=now,
@@ -154,9 +154,9 @@ class CoordinatedRuntimeTerminalInvalidationPublisher(
         clock: Callable[[], datetime],
     ) -> None:
         """Initialize Runtime-scoped volatile invalidation."""
-        self._store = store
-        self._dispatcher = dispatcher
-        self._clock = clock
+        self.store = store
+        self.dispatcher = dispatcher
+        self.clock = clock
 
     async def publish_runtime_terminal_invalidation(self, runtime_id: str) -> None:
         """Invalidate active Terminals without blocking durable lifecycle work."""
@@ -217,16 +217,16 @@ class CoordinatedRuntimeTerminalInvalidationPublisher(
     ) -> None:
         """Invalidate and dispatch one exact durable authority source."""
         try:
-            now = _aware_now(self._clock)
-            invalidated = await self._store.invalidate(
+            now = _aware_now(self.clock)
+            invalidated = await self.store.invalidate(
                 source=source,
                 source_id=source_id,
                 reason=reason,
                 invalidated_at=now,
             )
             await _dispatch_invalidated(
-                self._store,
-                self._dispatcher,
+                self.store,
+                self.dispatcher,
                 invalidated.terminal_ids,
                 reason=reason,
                 requested_at=now,
@@ -248,9 +248,9 @@ class RuntimeTerminalPolicyInvalidationPublisher(TerminalPolicyInvalidationPubli
         clock: Callable[[], datetime],
     ) -> None:
         """Initialize policy invalidation publication."""
-        self._store = store
-        self._dispatcher = dispatcher
-        self._clock = clock
+        self.store = store
+        self.dispatcher = dispatcher
+        self.clock = clock
 
     async def publish_terminal_policy_invalidation(
         self,
@@ -258,8 +258,8 @@ class RuntimeTerminalPolicyInvalidationPublisher(TerminalPolicyInvalidationPubli
     ) -> None:
         """Invalidate active Terminals indexed by the changed durable source."""
         try:
-            now = _aware_now(self._clock)
-            invalidated = await self._store.invalidate(
+            now = _aware_now(self.clock)
+            invalidated = await self.store.invalidate(
                 source={
                     TerminalPolicySourceScope.INFRASTRUCTURE_PROFILE: (
                         RuntimeTerminalInvalidationSource.PROVIDER_PROFILE
@@ -276,8 +276,8 @@ class RuntimeTerminalPolicyInvalidationPublisher(TerminalPolicyInvalidationPubli
                 invalidated_at=now,
             )
             await _dispatch_invalidated(
-                self._store,
-                self._dispatcher,
+                self.store,
+                self.dispatcher,
                 invalidated.terminal_ids,
                 reason=RunnerTerminalTerminationReason.POLICY_REVOKED,
                 requested_at=now,

@@ -1,5 +1,6 @@
 """Completed administrative Runtime Provider binding database operations."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated, Any
@@ -162,6 +163,8 @@ class RuntimeProviderBindingAdminOperationsRepository:
                         config=config,
                     ),
                 )
+            except asyncio.CancelledError:
+                raise
             except IntegrityError:
                 raise BindingAdminOperationUnavailable("binding_conflict") from None
             await self.binding_repository.append_audit_event(

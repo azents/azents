@@ -1,5 +1,6 @@
 """Runtime Control gRPC metadata authentication."""
 
+import asyncio
 from collections.abc import Iterable
 from typing import NoReturn, Protocol
 
@@ -101,7 +102,7 @@ class RuntimeTransferCoordinatorCredentialGrpcAuth:
 
         :param verifier: deployment-rooted coordinator credential verifier
         """
-        self._verifier = verifier
+        self.verifier = verifier
 
     async def authenticate(
         self,
@@ -126,7 +127,7 @@ class RuntimeTransferCoordinatorCredentialGrpcAuth:
             raise AssertionError("unreachable")
         try:
             expected = coordinator_credential_request(operation, request)
-            return self._verifier.verify(
+            return self.verifier.verify(
                 credential,
                 expected_operation=expected.operation,
                 expected_request_sha256=expected.request_sha256,
@@ -160,7 +161,7 @@ class RuntimeTransferCoordinatorCredentialGrpcAuth:
             raise AssertionError("unreachable")
         try:
             expected = workspace_upload_credential_request(operation, request)
-            return self._verifier.verify(
+            return self.verifier.verify(
                 credential,
                 expected_operation=expected.operation,
                 expected_request_sha256=expected.request_sha256,
@@ -186,7 +187,7 @@ class RuntimeRunnerCredentialGrpcAuth:
         authenticator: RuntimeRunnerCredentialAuthenticator,
     ) -> None:
         """Initialize Runner credential authentication."""
-        self._authenticator = authenticator
+        self.authenticator = authenticator
 
     async def authenticate(
         self,
@@ -201,7 +202,9 @@ class RuntimeRunnerCredentialGrpcAuth:
             )
             raise AssertionError("unreachable")
         try:
-            return await self._authenticator.authenticate_runner(secret)
+            return await self.authenticator.authenticate_runner(secret)
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerCredentialInvalid:
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
@@ -215,7 +218,7 @@ class RuntimeProviderCredentialGrpcAuth:
 
     def __init__(self, authenticator: RuntimeProviderCredentialAuthenticator) -> None:
         """Initialize Provider credential authentication."""
-        self._authenticator = authenticator
+        self.authenticator = authenticator
 
     async def authenticate(
         self,
@@ -231,10 +234,12 @@ class RuntimeProviderCredentialGrpcAuth:
             )
             raise AssertionError("unreachable")
         try:
-            return await self._authenticator.authenticate_provider(
+            return await self.authenticator.authenticate_provider(
                 method=method,
                 secret=secret,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeProviderCredentialUnavailable:
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,

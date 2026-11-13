@@ -1,5 +1,6 @@
 """Completed database-only replay preflight and exact batch fencing."""
 
+import asyncio
 import dataclasses
 from collections import Counter
 from typing import Annotated
@@ -59,6 +60,8 @@ class TeamSessionCutoverReplayOperationsRepository:
                         session_id=candidate.session_id,
                         expected_owner_generation=candidate.owner_generation,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except ValueError:
                     failures.update(("owner_generation_stale",))
                     continue
@@ -77,6 +80,8 @@ class TeamSessionCutoverReplayOperationsRepository:
                             owner_generation=generation,
                         )
                     )
+                except asyncio.CancelledError:
+                    raise
                 except CanonicalExecutionSnapshotError:
                     failures.update(("canonical_execution_invalid",))
                     continue
@@ -121,6 +126,8 @@ class TeamSessionCutoverReplayOperationsRepository:
                             owner_generation=candidate.owner_generation,
                         )
                     )
+            except asyncio.CancelledError:
+                raise
             except CanonicalExecutionOwnerGenerationStaleError:
                 failures.update(("owner_generation_stale",))
                 continue

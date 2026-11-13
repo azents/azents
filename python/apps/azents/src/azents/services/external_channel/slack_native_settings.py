@@ -1,11 +1,13 @@
 """Slack-only orchestration of private account and shared-model controls."""
 
+import asyncio
 import datetime
 import logging
 from dataclasses import dataclass
 from typing import Annotated, assert_never
 from urllib.parse import urlsplit
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.core.config import Config
@@ -110,6 +112,8 @@ class SlackNativeSettingsService:
         )
         try:
             state = await self.linking.get_native_link_state(actor=actor, now=now)
+        except asyncio.CancelledError:
+            raise
         except ExternalAccountLinkError:
             return view
         linked = state.link is not None
@@ -135,6 +139,14 @@ class SlackNativeSettingsService:
                 offset=0,
                 limit=_MODEL_PAGE_SIZE,
             )
+            L = bind_extra(
+                logger,
+                {
+                    "connection_id": actor.connection_id,
+                    "binding_id": binding.id,
+                    "session_id": binding.agent_session_id,
+                },
+            )
             match editor.kind:
                 case "ready":
                     model_metadata = sign_native_scope(
@@ -142,23 +154,14 @@ class SlackNativeSettingsService:
                         secret=self.config.auth.jwt.secret_key,
                     )
                 case "rejected":
-                    logger.info(
+                    L.info(
                         "External model editor authorization rejected",
-                        extra={
-                            "external_model_rejection_code": editor.code.value,
-                            "connection_id": actor.connection_id,
-                            "binding_id": binding.id,
-                            "session_id": binding.agent_session_id,
-                        },
+                        extra={"external_model_rejection_code": editor.code.value},
                     )
                 case "busy":
-                    logger.info(
+                    L.info(
                         "External model editor authorization busy",
-                        extra={
-                            "connection_id": actor.connection_id,
-                            "binding_id": binding.id,
-                            "session_id": binding.agent_session_id,
-                        },
+                        extra={},
                     )
                 case _ as unreachable:
                     assert_never(unreachable)

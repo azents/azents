@@ -1,5 +1,6 @@
 """Agent Project catalog service."""
 
+import asyncio
 import dataclasses
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, assert_never
@@ -73,6 +74,8 @@ class AgentProjectCatalogService:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as exc:
             return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         try:
@@ -97,6 +100,8 @@ class AgentProjectCatalogService:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
         try:
@@ -131,6 +136,8 @@ class AgentProjectCatalogService:
                 wait_timeout_seconds=0.0,
                 start_if_stopped=False,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
         try:
@@ -156,6 +163,8 @@ class AgentProjectCatalogService:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             return Failure(InvalidProjectPath(path=path, reason=str(error)))
         try:
@@ -187,6 +196,8 @@ class AgentProjectCatalogService:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             return Failure(InvalidProjectPath(path="", reason=str(error)))
         try:
@@ -233,6 +244,8 @@ class AgentProjectCatalogService:
                 deadline_at=_project_status_sync_deadline(),
                 admission_authority=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,

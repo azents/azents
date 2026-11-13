@@ -1,5 +1,6 @@
 """Current Agent-service and Runtime orchestration for Gateway admission."""
 
+import asyncio
 import enum
 import hashlib
 
@@ -52,6 +53,8 @@ class RuntimeWebGatewayAuthorityService:
                 hostname_key=hostname_key,
                 identity_hash=hashlib.sha256(identity_secret.encode()).hexdigest(),
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeWebGatewayOperationRejected as error:
             raise RuntimeWebGatewayAuthorityError(
                 RuntimeWebGatewayAuthorityCode(error.code.value)

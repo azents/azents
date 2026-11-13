@@ -1,5 +1,6 @@
 """Agent-only Runtime environment API with sanitized secret-input errors."""
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any, NoReturn, assert_never
 
@@ -30,6 +31,8 @@ class RuntimeEnvironmentRoute(APIRoute):
         async def safe_handler(request: Request) -> Response:
             try:
                 return await handler(request)
+            except asyncio.CancelledError:
+                raise
             except RequestValidationError:
                 raise HTTPException(
                     status_code=422, detail="Invalid Runtime environment request."
@@ -102,6 +105,8 @@ async def replace_runtime_environment(
             workspace_user_id=member.workspace_user_id,
             role=member.role,
         )
+    except asyncio.CancelledError:
+        raise
     except InvalidRuntimeEnvironment as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     match result:

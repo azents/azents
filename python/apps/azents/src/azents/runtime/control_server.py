@@ -1125,6 +1125,9 @@ async def runtime_control_server_lifespan(
                     timeout_seconds=10,
                     resources=data_plane.resources,
                 )
+            except asyncio.CancelledError:
+                await channel.close()
+                raise
             except BaseException:
                 await channel.close()
                 raise

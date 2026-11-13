@@ -77,6 +77,9 @@ class _ObservedSessionManager:
         try:
             async with self.source() as session:
                 yield session
+        except asyncio.CancelledError:
+            self.failed_scopes += 1
+            raise
         except BaseException:
             self.failed_scopes += 1
             raise

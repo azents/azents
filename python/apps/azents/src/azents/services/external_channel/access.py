@@ -1,5 +1,6 @@
 """External Channel access decision orchestration and provider replay."""
 
+import asyncio
 import datetime
 import logging
 from dataclasses import dataclass
@@ -70,6 +71,8 @@ class ExternalChannelAccessService:
                     connection_id=target.connection_id,
                     target_resource_id=target.resource_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except ExternalChannelConversationProvisioningError as error:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation could not be prepared."

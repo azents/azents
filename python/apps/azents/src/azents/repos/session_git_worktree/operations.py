@@ -1,5 +1,6 @@
 """Specific repository-owned Session worktree atomic operations."""
 
+import asyncio
 import dataclasses
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -796,6 +797,8 @@ class SessionGitWorktreeOperationsRepository:
                 if not claimed:
                     raise RemovalClaimConflict(allocation=allocation)
                 return RemovalIntent(allocation=allocation, project=project)
+            except asyncio.CancelledError:
+                raise
             except ValueError as error:
                 raise RemovalAuthorityChanged(
                     reason=str(error), allocation=allocation

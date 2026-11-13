@@ -1,5 +1,6 @@
 """External dispatch after completed atomic conversation-trigger admission."""
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -70,6 +71,8 @@ class ExternalChannelIngressAdmissionService:
                     now=now,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except JobRuntimeClosedError:
             logger.warning(
                 "External Channel ingress Runtime submission is unavailable",

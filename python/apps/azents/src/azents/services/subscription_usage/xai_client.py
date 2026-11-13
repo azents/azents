@@ -1,5 +1,6 @@
 """xAI subscription usage adapter."""
 
+import asyncio
 import dataclasses
 import datetime
 import ipaddress
@@ -135,6 +136,8 @@ class XaiSubscriptionUsageClient:
                 f"{self.usage_base_url}/settings",
                 headers=headers,
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.TimeoutException, httpx.TransportError:
             self._log_optional_failure(endpoint="settings", http_status=None)
             return _SettingsData(None, None)
@@ -181,6 +184,8 @@ class XaiSubscriptionUsageClient:
                 params={"format": "credits"},
                 headers=headers,
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.TimeoutException, httpx.TransportError:
             return XaiUsageUnavailable(
                 reason=SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE,
@@ -230,6 +235,8 @@ class XaiSubscriptionUsageClient:
                 f"{self.usage_base_url}/auto-topup-rule",
                 headers=headers,
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.TimeoutException, httpx.TransportError:
             self._log_optional_failure(endpoint="auto_top_up", http_status=None)
             return None

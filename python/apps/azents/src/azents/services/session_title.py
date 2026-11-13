@@ -406,6 +406,8 @@ class SessionTitleService:
                         watchdog=self.model_stream_watchdog,
                         output_mode=active_mode,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except TitleOutputContractError as exc:
                     L.warning(
                         "Automatic session title output contract was not honored",
@@ -598,6 +600,8 @@ async def generate_session_title_with_model(
                     else None
                 ),
             )
+    except asyncio.CancelledError:
+        raise
     except ModelProviderFailure:
         raise
     except ResponsesOutputError as exc:

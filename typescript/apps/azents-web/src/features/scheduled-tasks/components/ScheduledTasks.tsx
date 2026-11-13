@@ -361,27 +361,25 @@ function TaskDetail({
           {t("cycle.description")}
         </Text>
       </Box>
-      {detail.cycleLoading && (
+      {detail.cycleState.type === "LOADING" && (
         <Center py="md">
           <Loader size="sm" />
         </Center>
       )}
-      {detail.cycleError !== null && (
+      {detail.cycleState.type === "ERROR" && (
         <Alert color="red" icon={<IconAlertCircle size={rem(18)} />}>
-          {detail.cycleError}
+          {detail.cycleState.message}
         </Alert>
       )}
-      {!detail.cycleLoading &&
-        detail.cycleError === null &&
-        detail.cycle === null && (
+      {detail.cycleState.type === "LOADED" &&
+        detail.cycleState.cycle === null && (
           <Text size="sm" c="dimmed">
             {t("cycle.empty")}
           </Text>
         )}
-      {!detail.cycleLoading &&
-        detail.cycleError === null &&
-        detail.cycle !== null && (
-          <CurrentCycle cycle={detail.cycle} locale={locale} />
+      {detail.cycleState.type === "LOADED" &&
+        detail.cycleState.cycle !== null && (
+          <CurrentCycle cycle={detail.cycleState.cycle} locale={locale} />
         )}
     </Stack>
   );
@@ -407,7 +405,9 @@ function TaskForm({
   if (form.type === "CLOSED") {
     return <></>;
   }
-  const bindingData = form.bindings.map((binding) => ({
+  const bindingData = (
+    form.bindingsState.type !== "LOADING" ? form.bindingsState.bindings : []
+  ).map((binding) => ({
     value: binding.id,
     label: `${binding.resource_label} · ${binding.provider} · ${t(
       `location.${binding.conversation_location}`,
@@ -532,7 +532,7 @@ function TaskForm({
           label={t("form.bindingLabel")}
           description={t("form.bindingDescription")}
           placeholder={
-            form.bindingsLoading
+            form.bindingsState.type === "LOADING"
               ? t("form.bindingLoading")
               : t("form.bindingPlaceholder")
           }
@@ -541,14 +541,18 @@ function TaskForm({
           searchable
           clearable
           disabled={
-            mutationBusy || form.bindingsLoading || form.draft.sessionId === ""
+            mutationBusy ||
+            form.bindingsState.type === "LOADING" ||
+            form.draft.sessionId === ""
           }
-          rightSection={form.bindingsLoading ? <Loader size="xs" /> : null}
+          rightSection={
+            form.bindingsState.type === "LOADING" ? <Loader size="xs" /> : null
+          }
           onChange={(value) => updateDraft({ channelId: value })}
         />
-        {form.bindingsError !== null && (
+        {form.bindingsState.type === "ERROR" && (
           <Alert color="red" icon={<IconAlertCircle size={rem(18)} />}>
-            {form.bindingsError}
+            {form.bindingsState.message}
           </Alert>
         )}
         <Group justify="flex-end">

@@ -1,5 +1,6 @@
 """Runtime Web v1 Public API."""
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated, Any, NoReturn, assert_never
 
@@ -160,6 +161,8 @@ async def issue_runtime_web_shared_identity(
             auth_session_id=current_user.session_id,
             now=datetime.now(UTC),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebRepositoryConflict:
         _raise_auth_conflict()
     return RuntimeWebIdentitySecretResponse(
@@ -212,6 +215,8 @@ async def initiate_runtime_web_separate_identity(
             service_id=request_body.service_id,
             now=datetime.now(UTC),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebRepositoryConflict:
         _raise_auth_conflict()
     return RuntimeWebSeparateInitiateResponse(
@@ -243,6 +248,8 @@ async def mark_runtime_web_separate_identity_bound(
             auth_session_id=current_user.session_id,
             now=datetime.now(UTC),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebRepositoryConflict:
         _raise_auth_conflict()
 
@@ -269,6 +276,8 @@ async def issue_runtime_web_separate_ticket(
             auth_session_id=current_user.session_id,
             now=datetime.now(UTC),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeWebRepositoryConflict:
         _raise_auth_conflict()
     return RuntimeWebSeparateTicketResponse(

@@ -1,5 +1,6 @@
 """Current Team Session Toolkit delegation and exact credential failure writes."""
 
+import asyncio
 import dataclasses
 from typing import Annotated
 
@@ -98,6 +99,8 @@ class GitHubUserRuntimeOperationRepository:
             )
             try:
                 toolkit = await personal.admit_in_session(session, target)
+            except asyncio.CancelledError:
+                raise
             except PersonalToolkitExecutionDenied:
                 return None
             if toolkit.toolkit_type != "github":

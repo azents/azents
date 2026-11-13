@@ -474,6 +474,8 @@ class ChatSessionService:
                 workspace_root = normalize_agent_workspace_root(
                     runtime.workspace_path
                 ).as_posix()
+            except asyncio.CancelledError:
+                raise
             except (RuntimeStorageError, ValueError) as exc:
                 return Failure(InvalidProjectPath(path="", reason=str(exc)))
             workspace_items_result = _workspace_items_from_request(
@@ -585,6 +587,8 @@ class ChatSessionService:
                 session_id=root_session_id,
                 runtime_target=runtime,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError, SessionWorkingFolderBindingError:
             await self._complete_working_folder_cleanup(
                 context_id=context.id,

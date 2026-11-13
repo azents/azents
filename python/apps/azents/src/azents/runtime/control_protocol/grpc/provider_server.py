@@ -73,6 +73,7 @@ from azents.runtime.coordination.data import (
 from azents.services.runtime_connection_registration.service import (
     RuntimeProviderConnectionRegistrar,
 )
+from azents.utils.logging import content_safe_exception_diagnostic
 
 _DEFAULT_COMMAND_BLOCK_MS = 500
 _MAX_OUTBOUND_MESSAGES = 1
@@ -732,6 +733,7 @@ class RuntimeProviderControlGrpcServicer(
                     "provider_id": provider_id,
                     "request_id": envelope.request_id,
                     "runtime_id": envelope.runtime_id,
+                    "provider_generation": generation,
                 },
             )
             try:
@@ -740,22 +742,20 @@ class RuntimeProviderControlGrpcServicer(
                     runner_credential_issuer=self.runner_credential_issuer,
                 )
             except InvalidRuntimeProviderCommandPayload as exc:
+                diagnostic = content_safe_exception_diagnostic(
+                    exc, message="Runtime Provider command payload invalid"
+                )
                 L.warning(
                     "Runtime Provider command payload invalid",
-                    extra={
-                        "provider_generation": generation,
-                        "error_code": exc.code,
-                    },
+                    exc_info=diagnostic.exc_info,
+                    extra={"error_code": exc.code, **diagnostic.log_fields()},
                 )
                 await outbound.put(_error(envelope.request_id, exc.code, str(exc)))
                 await self.control_protocol.ack_claimed_request(envelope)
                 continue
             L.info(
                 "Runtime Provider command relayed",
-                extra={
-                    "provider_generation": generation,
-                    "operation_type": envelope.operation_type,
-                },
+                extra={"operation_type": envelope.operation_type},
             )
             command_slot.clear()
             commands_by_request_id[envelope.request_id] = _RelayedProviderCommand(

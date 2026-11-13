@@ -1,5 +1,6 @@
 """Google operator preparation under existing Admin System Settings authority."""
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any, Never
 
@@ -34,6 +35,8 @@ class GoogleOperatorRoute(APIRoute):
         async def safe(request: Request) -> Response:
             try:
                 return await handler(request)
+            except asyncio.CancelledError:
+                raise
             except RequestValidationError:
                 raise HTTPException(
                     422,
@@ -95,6 +98,8 @@ async def get_google_oauth_setting(
     del system_admin
     try:
         return await service.detail()
+    except asyncio.CancelledError:
+        raise
     except GoogleApplicationUnavailable:
         raise HTTPException(
             422,
@@ -140,6 +145,8 @@ async def patch_google_oauth_setting(
             ),
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except (
         SystemSettingVersionConflict,
         SystemSettingEnvironmentFieldReadOnly,

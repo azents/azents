@@ -920,6 +920,8 @@ class ExternalChannelActionService:
                                 workflow_session_open=True,
                             )
                         )
+                except asyncio.CancelledError:
+                    raise
                 except DiscordSDKError as error:
                     return _sdk_delivery_failure(error)
                 except TimeoutError:
@@ -1646,6 +1648,8 @@ class ExternalChannelActionService:
                 if batch is not None:
                     try:
                         await batch.abandon_or_cancel()
+                    except asyncio.CancelledError:
+                        raise
                     except RuntimeToProviderTransferError:
                         return SlackControlMessageResult(
                             status="unknown",
@@ -1671,6 +1675,8 @@ class ExternalChannelActionService:
             if batch is not None:
                 try:
                     await batch.abandon_or_cancel()
+                except asyncio.CancelledError:
+                    raise
                 except RuntimeToProviderCleanupError:
                     return SlackControlMessageResult(
                         status="unknown",
@@ -2684,6 +2690,8 @@ async def _slack_runtime_provider_content(
     try:
         async for chunk in batch.iter_source_chunks(source_index):
             yield chunk
+    except asyncio.CancelledError:
+        raise
     except RuntimeToProviderTransferError as error:
         raise SlackOutboundFileContentError from error
 
@@ -2706,6 +2714,8 @@ async def _slack_exchange_outbound_content(
             authority=authority,
         ):
             yield chunk
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelFileTransferError as error:
         raise SlackOutboundFileContentError from error
 
@@ -2745,6 +2755,8 @@ async def _discord_outbound_content(
                     yield chunk
             case _ as unreachable:
                 assert_never(unreachable)
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelFileTransferError as error:
         raise DiscordOutboundFileContentError from error
 

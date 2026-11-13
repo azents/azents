@@ -475,6 +475,8 @@ class GrpcPersistentControlRelay:
             heartbeat.heartbeat.monotonic_sequence = self.heartbeat_sequence
             try:
                 await self.send(heartbeat)
+            except asyncio.CancelledError:
+                raise
             except RuntimeError:
                 return
 

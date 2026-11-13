@@ -3,6 +3,7 @@
 Workspace-scoped LLM provider integration CRUD endpoints.
 """
 
+import asyncio
 import datetime
 import logging
 from email.utils import format_datetime
@@ -693,6 +694,8 @@ async def _run_image_catalog_sync(
             workspace_id=workspace_id,
             trigger=trigger,
         )
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception(
             "Unexpected image generation catalog sync failure.",
@@ -764,6 +767,8 @@ async def _run_catalog_sync(
             workspace_id=workspace_id,
             trigger=trigger,
         )
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception(
             "Unexpected integration catalog initial sync failure.",

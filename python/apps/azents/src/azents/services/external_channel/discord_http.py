@@ -1,5 +1,6 @@
 """Discord signed HTTP interaction admission boundary."""
 
+import asyncio
 import datetime
 import hashlib
 from collections.abc import AsyncIterator
@@ -375,6 +376,8 @@ class DiscordHTTPAdmissionService:
                 context=context,
                 received_at=received_at,
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError:
             await self.admission_service.finish_interaction_provider_mutation(
                 interaction_id=admission.interaction.id,
@@ -419,6 +422,8 @@ class DiscordHTTPAdmissionService:
                 interaction_token=handoff.interaction_token,
                 response=response.response,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             await self._finish_private_settings_failure(handoff.interaction_id)
             raise
@@ -507,6 +512,8 @@ class DiscordHTTPAdmissionService:
                 context=context,
                 now=received_at,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             await self.admission_service.finish_interaction_provider_mutation(
                 interaction_id=interaction_id,
@@ -553,6 +560,8 @@ class DiscordHTTPAdmissionService:
                     now=received_at,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             await self.admission_service.finish_interaction_provider_mutation(
                 interaction_id=admission.interaction.id,
@@ -641,6 +650,8 @@ class DiscordHTTPAdmissionService:
                 raise ScheduledTaskProviderControlError(
                     "Scheduled Task control is unavailable."
                 )
+        except asyncio.CancelledError:
+            raise
         except ScheduledTaskProviderControlError, ValueError:
             response = _scheduled_task_unavailable_component_response()
         except Exception:
@@ -787,6 +798,8 @@ class DiscordHTTPAdmissionService:
                     principal_id=principal_id,
                     now=received_at,
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             await self.admission_service.finish_interaction_provider_mutation(
                 interaction_id=admission.interaction.id,
@@ -827,6 +840,8 @@ class DiscordHTTPAdmissionService:
                 context=context,
                 now=received_at,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             await self.admission_service.finish_interaction_provider_mutation(
                 interaction_id=admission.interaction.id,

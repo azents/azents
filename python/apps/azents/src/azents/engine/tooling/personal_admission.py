@@ -1,5 +1,6 @@
 """Bind exact personal source admission to Engine effects without ambient User state."""
 
+import asyncio
 import dataclasses
 
 from azents.core.engine_tool_state import McpToolSnapshotState
@@ -24,6 +25,8 @@ class PersonalToolkitAdmission:
         """Admit only this exact source; expose no owner or credential in errors."""
         try:
             await self.repository.admit(self.target)
+        except asyncio.CancelledError:
+            raise
         except PersonalToolkitExecutionDenied as error:
             raise _unavailable(error) from None
 
@@ -58,5 +61,7 @@ async def publish_tool_snapshot(
         await store.replace_personal(
             snapshot, repository=admission.repository, target=admission.target
         )
+    except asyncio.CancelledError:
+        raise
     except PersonalToolkitExecutionDenied as error:
         raise _unavailable(error) from None

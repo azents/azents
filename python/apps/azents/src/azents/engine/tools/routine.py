@@ -1,5 +1,6 @@
 """Root-owned Session Routine management and independent occurrence results."""
 
+import asyncio
 import datetime
 import json
 from dataclasses import asdict
@@ -161,6 +162,8 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
             )
         try:
             await self.completion.authorize(scope=self.scope, authority=authority)
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             raise FunctionToolError(str(exc)) from None
         return authority
@@ -235,6 +238,8 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
                     content=RoutineContent.model_validate(args.model_dump()),
                     owner=authority.execution_owner,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             return _json(asdict(definition))
@@ -269,6 +274,8 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
                     changes=args.changes,
                     owner=authority.execution_owner,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             return _json(asdict(definition))
@@ -279,6 +286,8 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
                 definition = await self.operations.delete(
                     scope=self.scope, slug=args.slug, owner=authority.execution_owner
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             return _json({"deleted": True, "routine": asdict(definition)})
@@ -292,6 +301,8 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
                     slug=args.slug,
                     execution_id=args.execution_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             return state.context.model_dump_json()
@@ -339,6 +350,8 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
                     ),
                     now=datetime.datetime.now(datetime.UTC),
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
             state = await self.notifications.deliver(

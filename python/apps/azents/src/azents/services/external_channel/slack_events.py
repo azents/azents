@@ -309,6 +309,8 @@ class SlackPrivateFileTransport:
                 private_url,
                 headers={"Authorization": f"Bearer {bot_token}"},
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.RequestError as error:
             raise SlackProviderTemporaryError(
                 "Slack file download is temporarily unavailable."
@@ -380,6 +382,8 @@ class SlackPrivateFileTransport:
                     content_length=declared_response_size,
                     chunks=chunks(),
                 )
+        except asyncio.CancelledError:
+            raise
         except httpx.RequestError as error:
             raise SlackProviderTemporaryError(
                 "Slack file download did not produce a complete response."
@@ -412,6 +416,8 @@ class SlackExternalUploadTransport:
                 content=file.content(),
                 timeout=timeout,
             )
+        except asyncio.CancelledError:
+            raise
         except SlackOutboundFileContentError:
             return SlackExternalUploadResult("unknown")
         except httpx.RequestError:
@@ -956,6 +962,8 @@ class SlackConversationClient:
                         request=request,
                         deadline=deadline,
                     )
+            except asyncio.CancelledError:
+                raise
             except SlackProviderRateLimited as error:
                 raise ExternalChannelHistoryRateLimited(
                     error.retry_after_seconds
@@ -1431,6 +1439,8 @@ class SlackConversationClient:
                     before_provider_request=before_provider_request,
                     deadline_at=deadline_at,
                 )
+        except asyncio.CancelledError:
+            raise
         except TimeoutError, SlackProviderTemporaryError:
             return SlackControlMessageResult(
                 status="unknown",
@@ -1546,6 +1556,8 @@ class SlackConversationClient:
                     token=bot_token,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except SlackProviderPermissionDenied as error:
             _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
@@ -1800,6 +1812,8 @@ class SlackConversationClient:
                 argument_names=argument_names,
                 request=request,
             )
+        except asyncio.CancelledError:
+            raise
         except SlackProviderRequestRejected as error:
             if error.error_code == "trigger_expired":
                 return SlackInteractionViewResult(
@@ -1860,6 +1874,8 @@ class SlackConversationClient:
                 argument_names=argument_names,
                 request=request(allow_icon_fallback),
             )
+        except asyncio.CancelledError:
+            raise
         except SlackProviderPermissionDenied:
             if allow_icon_fallback:
                 return await self._attempt_message_operation(
@@ -1966,6 +1982,8 @@ class SlackConversationClient:
                     raise TimeoutError
                 async with asyncio.timeout(remaining):
                     response = await request
+        except asyncio.CancelledError:
+            raise
         except SlackApiError as error:
             raise _slack_provider_error(
                 error,

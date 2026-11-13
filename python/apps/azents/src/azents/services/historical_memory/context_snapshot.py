@@ -14,6 +14,7 @@ from azents.core.historical_memory_context import (
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.repos.memory_context_snapshot import MemoryContextSnapshotRepository
+from azents.utils.logging import content_safe_exception_diagnostic
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,14 @@ class MemoryContextSnapshotService:
             return await self.repository.prompt_for_turn(session_id=session_id)
         except asyncio.CancelledError:
             raise
-        except MemoryContextAuthorityUnavailable:
+        except MemoryContextAuthorityUnavailable as error:
+            diagnostic = content_safe_exception_diagnostic(
+                error, message="Memory context authority unavailable"
+            )
             logger.warning(
                 "Memory context authority could not be confirmed.",
-                extra={"session_id": session_id},
+                exc_info=diagnostic.exc_info,
+                extra={"session_id": session_id, **diagnostic.log_fields()},
             )
             return prepare_memory_context_prompt(None)
 
@@ -63,9 +68,13 @@ class MemoryContextSnapshotService:
             )
         except asyncio.CancelledError:
             raise
-        except MemoryContextAuthorityUnavailable:
+        except MemoryContextAuthorityUnavailable as error:
+            diagnostic = content_safe_exception_diagnostic(
+                error, message="Memory boundary authority unavailable"
+            )
             logger.warning(
                 "Memory boundary authority could not be confirmed.",
-                extra={"session_id": session_id},
+                exc_info=diagnostic.exc_info,
+                extra={"session_id": session_id, **diagnostic.log_fields()},
             )
             return False

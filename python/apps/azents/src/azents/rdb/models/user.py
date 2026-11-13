@@ -1,9 +1,11 @@
 """User model."""
 
 import datetime
+from typing import get_args
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.locale import SupportedLocale
@@ -38,7 +40,7 @@ class RDBUser(RDBModel):
         nullable=False,
     )
     locale: Mapped[SupportedLocale] = mapped_column(
-        sa.String(35),
+        ENUM(*get_args(SupportedLocale), name="user_locale", create_type=False),
         nullable=False,
         server_default="en-US",
     )
