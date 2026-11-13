@@ -114,6 +114,26 @@
       "enabled": false
     },
     {
+      "description": "Exempt only the Python Bookworm digest containing apt 2.6.2 (CVE-2026-109518) from release-age waiting",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchCurrentValue": "3.14-slim-bookworm",
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "matchJsonata": [
+        "newDigest = 'sha256:3fe1a0b6c2d6b2ebb572906cdabeca75aeb558c0c17db5ffefbcf8094871c32b'"
+      ],
+      "minimumReleaseAge": null,
+      "addLabels": [
+        "security"
+      ]
+    },
+    {
       "description": "Keep @types/node on the Node.js 24 major used by the TypeScript workspace",
       "matchPackageNames": [
         "@types/node"
