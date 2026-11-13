@@ -12,6 +12,7 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStatus,
     ExternalChannelActionMode,
+    ExternalChannelWorkStatus,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.external_channel_ingestion import (
@@ -175,7 +176,6 @@ class ExternalChannelActionOperations:
         run_id: str | None,
         client_tool_call_id: str,
         binding_id: str,
-        expected_work_cycle_id: str | None,
         mode: ExternalChannelActionMode,
         message: str | None,
         title: str | None,
@@ -187,6 +187,12 @@ class ExternalChannelActionOperations:
         async with self.session_manager() as session:
             if self.execution_owner is not None:
                 await validate_session_execution_owner(session, self.execution_owner)
+            work = await self.repository.work_state_store.load(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                binding_id=binding_id,
+            )
             result = await self.repository.commit_direct_action(
                 session,
                 links=links,
@@ -195,7 +201,12 @@ class ExternalChannelActionOperations:
                 run_id=run_id,
                 client_tool_call_id=client_tool_call_id,
                 binding_id=binding_id,
-                expected_work_cycle_id=expected_work_cycle_id,
+                expected_work_cycle_id=(
+                    work.work_cycle_id
+                    if work is not None
+                    and work.status is ExternalChannelWorkStatus.ACTIVE
+                    else None
+                ),
                 mode=mode,
                 message=message,
                 title=title,

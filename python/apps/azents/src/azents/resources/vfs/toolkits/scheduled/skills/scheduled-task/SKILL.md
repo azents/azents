@@ -254,6 +254,6 @@ another channel, reconstruct a provider identifier, or describe the result as
 having been separately sent to another Slack or Discord channel.
 
 Use `channel_action` only for interim progress while the Scheduled Task remains
-active, with `scheduled_cycle_id` set to that exact occurrence, `work_cycle_id=null`,
+active, with `scheduled_cycle_id` set to that exact occurrence,
 and `mode="continue"`. It does not replace terminal result submission and must not
 select or finish ordinary Channel Work.

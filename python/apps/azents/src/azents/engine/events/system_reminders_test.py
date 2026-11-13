@@ -13,5 +13,6 @@ def test_external_channel_continuation_instructs_silent_completion() -> None:
 
     assert '`mode="ignore"`' in reminder
     assert "binding-1" in reminder
+    assert "that binding handle" in reminder
     assert "Do not include a message, title, task update, or files." in reminder
     assert "does not schedule another continuation" in reminder

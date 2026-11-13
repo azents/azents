@@ -772,7 +772,6 @@ async def test_execute_serializes_actions_for_the_same_binding() -> None:
     async def invoke(client_tool_call_id: str) -> ChannelActionResult:
         return await ExternalChannelActionService.execute(
             service,
-            expected_work_cycle_id=None,
             links=(),
             session_id="session-1",
             agent_id="agent-1",
@@ -813,6 +812,7 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     effect = _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE)
     repository = MagicMock(
         spec=ExternalChannelWorkRepository,
+        work_state_store=SimpleNamespace(load=AsyncMock(return_value=None)),
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -858,7 +858,6 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
 
     result = await ExternalChannelActionService._execute_serialized(
         service,
-        expected_work_cycle_id=None,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -899,6 +898,7 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
     delete = _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE)
     repository = MagicMock(
         spec=ExternalChannelWorkRepository,
+        work_state_store=SimpleNamespace(load=AsyncMock(return_value=None)),
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -944,7 +944,6 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
 
     result = await ExternalChannelActionService._execute_serialized(
         service,
-        expected_work_cycle_id=None,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -975,6 +974,7 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     repository = MagicMock(
         spec=ExternalChannelWorkRepository,
+        work_state_store=SimpleNamespace(load=AsyncMock(return_value=None)),
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -1025,7 +1025,6 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
 
     result = await ExternalChannelActionService._execute_serialized(
         service,
-        expected_work_cycle_id=None,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -1064,6 +1063,7 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     repository = MagicMock(
         spec=ExternalChannelWorkRepository,
+        work_state_store=SimpleNamespace(load=AsyncMock(return_value=None)),
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -1109,7 +1109,6 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
 
     result = await ExternalChannelActionService._execute_serialized(
         service,
-        expected_work_cycle_id=None,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -1150,6 +1149,7 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
     create.provider.target.request_payload.pop("provider_message_key", None)
     repository = MagicMock(
         spec=ExternalChannelWorkRepository,
+        work_state_store=SimpleNamespace(load=AsyncMock(return_value=None)),
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -1206,7 +1206,6 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
 
     result = await ExternalChannelActionService._execute_serialized(
         service,
-        expected_work_cycle_id=None,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -1248,6 +1247,7 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
     )
     repository = MagicMock(
         spec=ExternalChannelWorkRepository,
+        work_state_store=SimpleNamespace(load=AsyncMock(return_value=None)),
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -1300,7 +1300,6 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
 
     result = await ExternalChannelActionService._execute_serialized(
         service,
-        expected_work_cycle_id=None,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -2349,7 +2348,6 @@ async def test_stale_execution_cannot_commit_direct_channel_work(
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
         await service._execute_serialized(
             links=(),
-            expected_work_cycle_id=None,
             session_id=authority.session_id,
             agent_id=authority.agent_id,
             run_id=authority.run_id,
@@ -2636,7 +2634,6 @@ async def test_native_direct_action_commits_before_provider_effect(
     service._deliver = AsyncMock(side_effect=deliver)
     result = await service.execute(
         links=(),
-        expected_work_cycle_id="action-post-commit-cycle",
         session_id=fixture.agent_session_id,
         agent_id=fixture.agent_id,
         run_id="action-post-commit-run",

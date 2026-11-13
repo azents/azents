@@ -55,8 +55,9 @@ model input boundary exposes four atomic modes:
   create/update, file, or unrelated provider request occurs.
 
 `channel_action` selects ordinary Channel Work by binding, which has at most one
-active Work. The toolkit resolves its internal identity; callers do not supply a
-Channel Work ID. `scheduled_cycle_id` still selects exact Scheduled progress and
+active Work. After execution-owner validation, the database operation resolves
+that binding's internal identity inside its write transaction; callers do not supply
+a Channel Work ID. `scheduled_cycle_id` still selects exact Scheduled progress and
 may never fall back to ordinary Work on rejection. Null selects ordinary Channel
 Work, creating it only if none is active. `ignore` requires existing active Work.
 The internally resolved exact-ID and phase checks repeat inside every Work CAS

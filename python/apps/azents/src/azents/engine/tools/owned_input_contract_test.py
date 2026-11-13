@@ -90,7 +90,6 @@ from azents.engine.tools.write import WriteInput
         (
             ChannelActionInput,
             {
-                "work_cycle_id": "c" * 32,
                 "scheduled_cycle_id": None,
                 "mode": "ignore",
                 "binding": "active",

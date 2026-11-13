@@ -57,7 +57,6 @@ async def test_tool_invocation_carries_actions_through_scheduled_probe(
         await tool.handler(
             json.dumps(
                 {
-                    "work_cycle_id": "c" * 32,
                     "scheduled_cycle_id": None,
                     "mode": mode,
                     "binding": "binding-1",
