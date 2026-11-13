@@ -29,7 +29,9 @@ immutable typed payload whose ordered items use stable `(mailbox_item_id, item_k
 Broker wake-ups are payload-free signals and never carry model input.
 
 Idle continuation envelopes require their completed source Run identity independently
-of model-visible text. Durable-action continuation retains its exact predecessor.
+of model-visible text. Durable-action continuation retains both its completed
+originating Run and its execution-order predecessor. A predecessor that never
+started a model turn may terminate as cancelled; it is not the work authority.
 Promotion merges validated source [logical work context](runs.md#logical-work-context)
 into the consuming Run in the same transaction as Event append and mailbox removal.
 It does not assign a new current host to domain work, infer work from Session
@@ -84,7 +86,7 @@ Canonical outcomes are:
 | `routine_trigger` / `routine_continuation` | Matching typed Routine event after current occurrence binding; see [Routines](../domain/routine.md). |
 | `agent_message`           | Durable `agent_message` event.                                                                                         |
 | `external_channel_message` | One source-attributed `external_channel_message` event.                                                           |
-| `turn_action_continuation` | Invisible deterministic `system_reminder` after its same-Session predecessor Run completed; validated work context is carried and the turn becomes inference-eligible. |
+| `turn_action_continuation` | Invisible deterministic `system_reminder` after a valid terminal same-Session predecessor; completed-origin work and accumulated predecessor context are carried and the turn becomes inference-eligible. See [Actions](actions.md). |
 | Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
 | Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
 | Worktree `action_message` | Mailbox-item-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
