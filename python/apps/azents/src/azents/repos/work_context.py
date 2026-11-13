@@ -180,6 +180,21 @@ def queued_bridge_carries_run(*, require_routine_only: bool) -> sa.ColumnElement
     ).correlate(RDBAgentRun)
 
 
+async def run_has_queued_bridge(
+    session: ReadSession, *, run_id: str, require_routine_only: bool
+) -> bool:
+    """Check exact retained lineage for one already-authorized execution."""
+    return bool(
+        await session.read_session.scalar(
+            sa.select(
+                queued_bridge_carries_run(require_routine_only=require_routine_only)
+            )
+            .select_from(RDBAgentRun)
+            .where(RDBAgentRun.id == run_id)
+        )
+    )
+
+
 def scheduled_work_predicate(cycle_id: str) -> sa.ColumnElement[bool]:
     """Match an explicit carried occurrence, never arbitrary active Session work."""
     return RDBAgentRun.work_context["scheduled_cycle_ids"].contains([cycle_id])

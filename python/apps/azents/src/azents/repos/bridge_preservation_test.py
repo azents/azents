@@ -26,6 +26,7 @@ from azents.repos.scheduled_task.lifecycle_test import (
     _create_task_cycle,
 )
 from azents.repos.turn_action_work_context_test import _continuation
+from azents.testing.routine import make_test_routine_lifecycle
 
 
 async def _queue_bridge(
@@ -171,3 +172,21 @@ async def test_routine_bridge_retains_exact_work_without_mixed_archive_authority
         .where(RDBAgentSession.id == scope.session_id)
     )
     assert result is (other_context == "empty")
+    if other_context == "empty":
+        lifecycle = make_test_routine_lifecycle()
+        assert await lifecycle.has_preservable_started_work(
+            rdb_session, session_ids=(scope.session_id,)
+        )
+        cleanup = await lifecycle.terminate_session_tree(
+            rdb_session, session_ids=(scope.session_id,)
+        )
+        assert cleanup.preserved_started_count == 1
+        assert await rdb_session.read_session.scalar(
+            sa.select(preserved_routine_work_exists())
+            .select_from(RDBAgentSession)
+            .where(RDBAgentSession.id == scope.session_id)
+        )
+        with pytest.raises(RuntimeError, match="has not finished"):
+            await lifecycle.require_purge_ready(
+                rdb_session, session_ids=(scope.session_id,)
+            )

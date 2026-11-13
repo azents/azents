@@ -29,7 +29,10 @@ from azents.repos.routine.authority import (
 )
 from azents.repos.routine.preserved import preserved_routine_work_exists
 from azents.repos.routine.state import ROUTINE_STATE_NAMESPACE, RoutineStateRepository
-from azents.repos.work_context import continuation_work_context
+from azents.repos.work_context import (
+    continuation_work_context,
+    run_has_queued_bridge,
+)
 
 
 @dataclass(frozen=True)
@@ -283,6 +286,9 @@ class RoutineLifecycleRepository:
                             session, scope=scope, run_id=run.id
                         )
                     )
+                    or await run_has_queued_bridge(
+                        session, run_id=run.id, require_routine_only=True
+                    )
                 ):
                     preserved.append(item.toolkit_state_id)
         deleted_definitions = (
@@ -424,12 +430,17 @@ class RoutineLifecycleRepository:
                 if (
                     run is not None
                     and run.session_id == scope.session_id
-                    and run.status
-                    in {
-                        AgentRunStatus.PENDING,
-                        AgentRunStatus.RUNNING,
-                        AgentRunStatus.COMPLETED,
-                    }
+                    and (
+                        run.status
+                        in {
+                            AgentRunStatus.PENDING,
+                            AgentRunStatus.RUNNING,
+                            AgentRunStatus.COMPLETED,
+                        }
+                        or await run_has_queued_bridge(
+                            session, run_id=run.id, require_routine_only=False
+                        )
+                    )
                 ):
                     return True
         return False
