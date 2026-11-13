@@ -42,6 +42,7 @@ from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
 from azents.repos.work_context import (
     continuation_work_context,
     latest_work_execution,
+    queued_bridge_carries_run,
     scheduled_work_predicate,
 )
 
@@ -397,35 +398,36 @@ class ScheduledTaskLifecycleRepository:
             AgentRunStatus.RUNNING,
         }:
             return True
-        if run.status is not AgentRunStatus.COMPLETED:
+        if run.status is not AgentRunStatus.COMPLETED and not (
+            run.status is AgentRunStatus.CANCELLED and run.started_at is None
+        ):
             return False
         conversation = await session.read_session.get(RDBConversation, cycle.session_id)
         if (
-            conversation is not None
+            run.status is AgentRunStatus.COMPLETED
+            and conversation is not None
             and conversation.pending_idle_continuation_run_id == run.id
         ):
             return True
         return bool(
             await session.read_session.scalar(
                 sa.select(
-                    sa.exists().where(
-                        RDBMailboxItem.session_id == cycle.session_id,
-                        sa.or_(
+                    sa.or_(
+                        sa.exists().where(
+                            RDBMailboxItem.session_id == cycle.session_id,
                             sa.and_(
                                 RDBMailboxItem.kind
                                 == MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
                                 RDBMailboxItem.payload["cycle_id"].astext
                                 == cycle.cycle_id,
-                            ),
-                            sa.and_(
-                                RDBMailboxItem.kind
-                                == MailboxItemKind.TURN_ACTION_CONTINUATION,
-                                RDBMailboxItem.payload["predecessor_run_id"].astext
-                                == run.id,
+                                RDBAgentRun.status == AgentRunStatus.COMPLETED,
                             ),
                         ),
+                        queued_bridge_carries_run(require_routine_only=False),
                     )
                 )
+                .select_from(RDBAgentRun)
+                .where(RDBAgentRun.id == run.id)
             )
         )
 

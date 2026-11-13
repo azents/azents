@@ -2,8 +2,9 @@
 
 import sqlalchemy as sa
 from pydantic import TypeAdapter
+from sqlalchemy.orm import aliased
 
-from azents.core.enums import AgentRunStatus
+from azents.core.enums import AgentRunStatus, MailboxItemKind
 from azents.core.goal import GOAL_TOOLKIT_NAMESPACE, GOAL_TOOLKIT_STATE_NAME
 from azents.core.mailbox_data import (
     ContinuationMailboxPayload,
@@ -130,6 +131,68 @@ async def resolve_continuation_work_context(
             return None
         carried = carried.merge(WorkContext.model_validate(predecessor.work_context))
     return carried
+
+
+def queued_bridge_carries_run(*, require_routine_only: bool) -> sa.ColumnElement[bool]:
+    """Correlate either exact source of a valid queued bridge with the outer Run."""
+    origin = aliased(RDBAgentRun)
+    predecessor = aliased(RDBAgentRun)
+    context_constraints = (
+        [
+            sa.func.jsonb_array_length(run.work_context["scheduled_cycle_ids"]) == 0
+            for run in (origin, predecessor)
+        ]
+        + [
+            run.work_context["unrelated_input"].as_boolean().is_(False)
+            for run in (origin, predecessor)
+        ]
+        if require_routine_only
+        else []
+    )
+    return sa.exists(
+        sa.select(1)
+        .select_from(RDBMailboxItem)
+        .join(
+            origin,
+            origin.id == RDBMailboxItem.payload["originating_run_id"].astext,
+        )
+        .join(
+            predecessor,
+            predecessor.id == RDBMailboxItem.payload["predecessor_run_id"].astext,
+        )
+        .where(
+            RDBMailboxItem.kind == MailboxItemKind.TURN_ACTION_CONTINUATION,
+            RDBMailboxItem.session_id == RDBAgentRun.session_id,
+            origin.session_id == RDBAgentRun.session_id,
+            predecessor.session_id == RDBAgentRun.session_id,
+            origin.status == AgentRunStatus.COMPLETED,
+            predecessor.run_index >= origin.run_index,
+            sa.or_(
+                predecessor.status == AgentRunStatus.COMPLETED,
+                sa.and_(
+                    predecessor.status == AgentRunStatus.CANCELLED,
+                    predecessor.started_at.is_(None),
+                ),
+            ),
+            sa.or_(origin.id == RDBAgentRun.id, predecessor.id == RDBAgentRun.id),
+            *context_constraints,
+        )
+    ).correlate(RDBAgentRun)
+
+
+async def run_has_queued_bridge(
+    session: ReadSession, *, run_id: str, require_routine_only: bool
+) -> bool:
+    """Check exact retained lineage for one already-authorized execution."""
+    return bool(
+        await session.read_session.scalar(
+            sa.select(
+                queued_bridge_carries_run(require_routine_only=require_routine_only)
+            )
+            .select_from(RDBAgentRun)
+            .where(RDBAgentRun.id == run_id)
+        )
+    )
 
 
 def scheduled_work_predicate(cycle_id: str) -> sa.ColumnElement[bool]:
