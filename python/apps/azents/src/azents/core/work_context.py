@@ -59,6 +59,13 @@ class WorkContext(BaseModel):
         )
 
     @property
+    def scheduled_only(self) -> bool:
+        """Preserve the archive exception only for unmixed Scheduled work."""
+        return bool(self.scheduled_cycle_ids) and (
+            not self.routine_executions and not self.unrelated_input
+        )
+
+    @property
     def routine_only(self) -> bool:
         """Preserve the existing narrow archive exception for Routine-only work."""
         return bool(self.routine_executions) and (

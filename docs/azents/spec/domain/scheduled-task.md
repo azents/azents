@@ -371,7 +371,7 @@ terminalize in the Session.
 
 Session archive removes all Task definitions and pre-start Scheduled work in the
 archived tree. Archive is allowed with active Runs only when every such Run is a
-preservable started Scheduled cycle; unrelated active work still blocks archive.
+preservable started Scheduled-only work context; carried Routine refs or ordinary-input provenance block this exception even when a Scheduled cycle is present. Exact continuation sources and pending idle boundaries apply the same unmixed-work test. Unrelated active work still blocks archive.
 Archived Sessions accept only the internal continuation required to finish those
 preserved cycles. Restore does not recreate deleted Tasks.
 

@@ -222,9 +222,10 @@ class ScheduledTaskLifecycleRepository:
             return True
         active_session_ids: set[str] = set()
         for run in runs:
-            cycle_ids = WorkContext.model_validate(run.work_context).scheduled_cycle_ids
-            if not cycle_ids:
+            context = WorkContext.model_validate(run.work_context)
+            if not context.scheduled_only:
                 return False
+            cycle_ids = context.scheduled_cycle_ids
             agent_id = await session.read_session.scalar(
                 sa.select(RDBAgentSession.agent_id).where(
                     RDBAgentSession.id == run.session_id
@@ -251,10 +252,6 @@ class ScheduledTaskLifecycleRepository:
                     RDBConversation.session_id.in_(session_ids),
                     RDBConversation.session_id == RDBAgentRun.session_id,
                     RDBAgentRun.status == AgentRunStatus.COMPLETED,
-                    sa.func.jsonb_array_length(
-                        RDBAgentRun.work_context["scheduled_cycle_ids"]
-                    )
-                    > 0,
                 )
             )
         ).all()
@@ -264,9 +261,12 @@ class ScheduledTaskLifecycleRepository:
                     RDBAgentSession.id == run.session_id
                 )
             )
-            cycle_ids = WorkContext.model_validate(run.work_context).scheduled_cycle_ids
-            if agent_id is None or not cycle_ids:
-                continue
+            context = WorkContext.model_validate(run.work_context)
+            if not context.scheduled_only:
+                return False
+            if agent_id is None:
+                return False
+            cycle_ids = context.scheduled_cycle_ids
             if await self._any_started_cycle(
                 session,
                 agent_id=agent_id,
@@ -303,15 +303,16 @@ class ScheduledTaskLifecycleRepository:
                 MailboxItemKind.TURN_ACTION_CONTINUATION,
             }:
                 return False
-            if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
-                context = await continuation_work_context(session, item=item)
-                if context is None or not context.scheduled_cycle_ids:
-                    return False
-                cycle_ids = context.scheduled_cycle_ids
-            else:
+            context = await continuation_work_context(session, item=item)
+            if context is None or not context.scheduled_only:
+                return False
+            cycle_ids = context.scheduled_cycle_ids
+            if item.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
                 payload = ScheduledTaskContinuationMailboxPayload.model_validate(
                     item.payload
                 )
+                if payload.cycle_id not in cycle_ids:
+                    return False
                 cycle_ids = (payload.cycle_id,)
             agent_id = await session.read_session.scalar(
                 sa.select(RDBAgentSession.agent_id).where(

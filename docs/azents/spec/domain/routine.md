@@ -276,7 +276,10 @@ Public Routine inspection authorizes the requested active Session and exact
 Agent/Workspace/member boundary, returning 404 without cross-Session fallback.
 Archive removes definitions, retained records and pre-start work. Preserved
 started Routine-only work may finish without recreating removed data; unrelated
-active work still blocks archive. Restore does not reconstruct Routine state.
+active work still blocks archive. Active Runs, completed pending-idle sources and
+typed continuation sources must retain Routine-only provenance. A different
+pre-start trigger cannot turn a mixed source into an archive exception, including
+through fallback between Scheduled and Routine lifecycle participants. Restore does not reconstruct Routine state.
 Purge waits for preserved work and verifies namespace absence. Team Primary
 archive protection is unchanged.
 

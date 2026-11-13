@@ -168,6 +168,15 @@ class RoutineLifecycleRepository:
                 predecessor is not None
                 and predecessor.session_id == scope.session_id
                 and predecessor.status is AgentRunStatus.COMPLETED
+                and not await self.authority.run_is_routine_only(
+                    session, scope=scope, run_id=predecessor_id
+                )
+            ):
+                return False
+            if (
+                predecessor is not None
+                and predecessor.session_id == scope.session_id
+                and predecessor.status is AgentRunStatus.COMPLETED
                 and any(
                     [
                         item.state.phase == "started"
@@ -200,9 +209,17 @@ class RoutineLifecycleRepository:
                         session, scope=scope, refs=payload.executions, phase="admitted"
                     )
                 case MailboxItemKind.ROUTINE_CONTINUATION:
+                    context = await continuation_work_context(session, item=item)
+                    if context is None or not context.routine_only:
+                        return False
                     payload = RoutineContinuationMailboxPayload.model_validate(
                         item.payload
                     )
+                    if any(
+                        ref not in context.routine_executions
+                        for ref in payload.executions
+                    ):
+                        return False
                     valid = await self.authority.refs_are_current(
                         session, scope=scope, refs=payload.executions, phase="started"
                     )
