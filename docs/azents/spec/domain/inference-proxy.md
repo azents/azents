@@ -160,13 +160,10 @@ No built-in limit is represented as a cluster-wide guarantee without shared coor
 
 ## Packaging and deployment
 
-The exact published PyPI wheel is `litellm==1.109.0rc1`, locked with registry
-artifact hashes. This exact prerelease retains upstream ChatGPT forwarding PR41522
-and permits patched filelock through PR49137. The new one-time packaging exception
-requires maintainer review; the earlier dev-wheel approval does not authorize it
-automatically. The dependency comment records replacing it with a stable containing
-both fixes after equivalent auth/isolation/stream tests. This does not authorize
-arbitrary future prereleases, Git source builds or a maintained vendor patch.
+The exact published stable PyPI wheel is `litellm==1.109.0`, locked with registry
+artifact hashes. It includes upstream ChatGPT request-credential forwarding PR41522
+and permits patched filelock through PR49137. Request authentication, concurrent
+account isolation and native stream privacy remain covered by the Proxy tests.
 
 The MIT-covered core is installed without the Enterprise-pulling `proxy` extra.
 The runtime audit checks exact release identity, original MIT notice, absent

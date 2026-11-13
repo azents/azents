@@ -27,7 +27,7 @@ def verify_core_composition() -> CoreComposition:
     if proxy.premium_user or proxy.enterprise_proxy_config is not None:
         raise RuntimeError("Unexpected Enterprise configuration in the Proxy artifact.")
     distribution = importlib.metadata.distribution("litellm")
-    if distribution.version != "1.109.0rc1":
+    if distribution.version != "1.109.0":
         raise RuntimeError("The installed Proxy version differs from the audited pin.")
     if distribution.read_text("direct_url.json") is not None:
         raise RuntimeError(
