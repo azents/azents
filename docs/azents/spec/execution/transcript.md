@@ -17,13 +17,15 @@ Owns durable event types, model-visible history and model-turn provenance. Sessi
 - [Context compaction](../flow/context-compaction.md)
 - [Chat resynchronization](../flow/chat-session-resync.md)
 - [Agent execution](../flow/agent-execution-loop.md)
+- [Run state and operation snapshots](runs.md)
+- [Model selection and prepared inference](../models/selection.md)
 
 ## Durable event types and visibility
 
 Event transcript is the durable source of truth for model/tool/session output. Event payloads are
 stored as JSONB and validated by event kind.
 
-Event kinds:
+The typed event registry accepts these kinds:
 
 - `user_message`
 - `assistant_message`
@@ -40,11 +42,28 @@ Event kinds:
 - `goal_continuation`
 - `goal_updated`
 - `agent_message`
+- `external_channel_message`
+- `external_channel_continuation`
+- `scheduled_task_trigger`
+- `scheduled_task_continuation`
+- `scheduled_task_result`
+- `routine_judgment`
+- `routine_trigger`
+- `routine_continuation`
+- `routine_notification`
+- `action_message`
 - `action_execution_result`
 - `skill_loaded`
 - `goal_briefing`
 - `system_error`
 - `unknown_adapter_output`
+
+An accepted stored kind is not a promise that current producers emit it. In particular,
+`action_message` remains a readable typed event shape, while current TurnAction promotion uses
+the side effects described below. Scheduled and Routine event lifecycles belong to
+[Scheduled Tasks](../domain/scheduled-task.md) and [Routines](../domain/routine.md);
+External Channel ingress and continuation belong to
+[External Channels](../domain/external-channel.md).
 
 Turn-marker token usage stores normalized input/output/total/cache/reasoning counters,
 nullable `cost_usd` and optional typed `cost_provenance`. Native raw usage and hidden
@@ -180,43 +199,43 @@ metadata.
 
 ## Execution transcript and model-turn markers
 
-Durable event kinds:
+### Append identity and deduplication
 
-- `user_message`
-- `assistant_message`
-- `reasoning`
-- `client_tool_call`
-- `client_tool_result`
-- `provider_tool_call`
-- `turn_marker`
-- `run_marker`
-- `interrupted`
-- `compaction_marker`
-- `compaction_summary`
-- `system_reminder`
-- `goal_continuation`
-- `goal_updated`
-- `skill_loaded`
-- `goal_briefing`
-- `system_error`
-- `unknown_adapter_output`
+[`EventTranscriptRepository.append`](../../../../python/apps/azents/src/azents/repos/agent_execution/__init__.py)
+validates and serializes the payload for its kind. A non-null `external_id` is a
+Session-scoped idempotency key backed by the partial unique index on
+`(session_id, external_id)`. Concurrent keyed appends use insert-on-conflict-do-nothing:
+the existing event is returned with its original ID and payload, rather than replaced by the
+retry's content. Callers must choose keys that identify the same logical event; a key collision
+is not a content-equality check. An append without an external ID creates a separate UUIDv7 event.
+This does not guarantee exactly-once provider execution or deduplicate arbitrary model output.
 
-Native/raw artifacts are not interpreted by event core. They are opaque same-native replay
-optimizations. Each adapter lowerer replays a native artifact item only when this compatibility key
-matches exactly. OpenAI SDK artifacts use `openai:responses` identity; the Pydantic AI model layer
-uses `pydantic_ai:model_messages`, exact raw provider/model IDs and schema version `1`.
-Historical LiteLLM artifacts retain their `litellm` identity and are not relabeled.
-Canonical fallback lowering is used across an adapter, provider, model, format, or schema mismatch,
-including a cutover from historical LiteLLM artifacts or a compatible code-version rollback
-that encounters artifacts owned by another adapter.
-Every provider-hosted native item is represented by one durable `provider_tool_call` carrying required
-bounded `semantic` content with readable input, model-visible output, and typed URL/file/other
-references. The shared deterministic renderer is the canonical textual fallback; event-core consumers
-never recover semantics by parsing opaque native artifacts.
+Normal inserts advance Session projections in the caller's transaction; the deferred-projection
+append variant lets its composing repository batch that work. Neither low-level append method
+commits independently. Model-input reads exclude reverted events, order by event ID and include
+the selected head event when a head is supplied. The head changes the input view, not append order.
 
-```text
-adapter:native_format:provider:model:schema_version
-```
+### Usage and immutable applied provenance
+
+[`EngineEventMutationRepository.append_turn_marker`](../../../../python/apps/azents/src/azents/repos/engine_event_mutation.py)
+appends a `turn_marker` only when normalized usage is present. Its payload stores the Run ID and
+usage plus the prepared call's optional public applied profile, physical route and effective
+context/automatic-compaction limits. The call carries its turn-local `SessionInferenceState`;
+marker creation does not query a later mutable Session value. Explicit null reasoning effort
+in an applied profile survives serialization. Historical or other callers without inference state
+may have usage-only markers; absence of a marker does not prove that no model output was admitted.
+
+The production model-output path passes `prepared.call.inference_state` to
+[`EngineOutputOperationRepository.admit_model_output`](../../../../python/apps/azents/src/azents/repos/engine_output_operation.py).
+Under the execution owner fence, normalized events, the optional usage marker, output metadata,
+the current system-prompt analysis snapshot, retry-state clearing and any active client-tool
+ownership/phase update commit as one group. A late error or cancellation rolls back that group.
+Events and live phase updates are published after admission returns. The system-prompt analysis
+snapshot is separate from the marker payload. See [Run retry boundaries](runs.md#execution-state-and-terminal-boundaries)
+and [model snapshot preparation](../models/selection.md#runtime-resolve).
+
+Native replay compatibility and canonical fallback are described above under
+[durable event types and visibility](#durable-event-types-and-visibility).
 
 Cross-model lowering drops reasoning text and summary. Reasoning is preserved as event
 `reasoning` for UI/audit and is not converted into assistant/user/system content.
