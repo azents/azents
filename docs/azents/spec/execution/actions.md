@@ -61,8 +61,11 @@ without ever starting a model turn. Its accumulated work context is merged with 
 origin's context using the same resolver as lifecycle admission. Ordinary idle
 continuations still require a completed source. These checks consume existing
 valid queued results without rerunning the operation or changing Run status.
-Promotion
-atomically deletes the mailbox row and appends one invisible `system_reminder` event with a
+Scheduled lifecycle retention recognizes exact work carried by either validated
+source while this bridge remains queued. Routine archive/recovery uses the same
+lineage and checks both contexts for Scheduled or ordinary input, preserving the
+routine-only exception without laundering mixed work through an empty coordinator.
+Promotion atomically deletes the mailbox row and appends one invisible `system_reminder` event with a
 deterministic external identity, making the turn eligible for inference. The action result remains
 the user-visible history authority; the reminder is model input only. Replay exposes either the
 pending mailbox row or the promoted event, never duplicate continuation input.

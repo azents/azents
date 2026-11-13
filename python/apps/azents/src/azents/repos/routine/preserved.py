@@ -10,6 +10,7 @@ from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.repos.routine.state import ROUTINE_STATE_NAMESPACE
+from azents.repos.work_context import queued_bridge_carries_run
 
 
 def preserved_routine_work_exists() -> sa.ColumnElement[bool]:
@@ -35,17 +36,8 @@ def preserved_routine_work_exists() -> sa.ColumnElement[bool]:
         .select_from(RDBMailboxItem)
         .where(
             RDBMailboxItem.session_id == RDBAgentSession.id,
-            sa.or_(
-                sa.and_(
-                    RDBMailboxItem.kind == MailboxItemKind.ROUTINE_CONTINUATION,
-                    RDBMailboxItem.payload["source_run_id"].astext == RDBAgentRun.id,
-                ),
-                sa.and_(
-                    RDBMailboxItem.kind == MailboxItemKind.TURN_ACTION_CONTINUATION,
-                    RDBMailboxItem.payload["predecessor_run_id"].astext
-                    == RDBAgentRun.id,
-                ),
-            ),
+            RDBMailboxItem.kind == MailboxItemKind.ROUTINE_CONTINUATION,
+            RDBMailboxItem.payload["source_run_id"].astext == RDBAgentRun.id,
         )
     ).correlate(RDBAgentSession, RDBAgentRun)
     idle = sa.exists(
@@ -88,6 +80,7 @@ def preserved_routine_work_exists() -> sa.ColumnElement[bool]:
                     RDBAgentRun.status == AgentRunStatus.COMPLETED,
                     sa.or_(idle, continuation),
                 ),
+                queued_bridge_carries_run(require_routine_only=True),
             ),
         )
     ).correlate(RDBAgentSession)
