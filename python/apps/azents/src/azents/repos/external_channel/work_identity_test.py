@@ -66,7 +66,7 @@ async def test_exact_selector_and_new_publication_replay(
                     state=current, result=None
                 ),
             )
-        with pytest.raises(ValueError, match="exact work_cycle_id"):
+        with pytest.raises(ValueError, match="changed before admission"):
             await finish(None, "must-not-select-active")
         with pytest.raises(ValueError, match="no longer active"):
             await finish("stale-work", "must-not-select-replacement")

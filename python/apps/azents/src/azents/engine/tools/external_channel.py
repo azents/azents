@@ -542,17 +542,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                             "Selected Scheduled progress was not admitted."
                         )
                 else:
-                    work = next(
-                        (
-                            work
-                            for work in await self.service.snapshot(
-                                session_id=self.session_id,
-                                agent_id=self.agent_id,
-                            )
-                            if work.binding_id == value.binding
-                        ),
-                        None,
-                    )
                     result = await self.service.execute(
                         links=links,
                         session_id=self.session_id,
@@ -560,9 +549,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         run_id=self.run_id,
                         client_tool_call_id=execution.call_id,
                         binding_id=value.binding,
-                        expected_work_cycle_id=(
-                            None if work is None else work.work_cycle_id
-                        ),
                         mode=ExternalChannelActionMode(value.mode),
                         message=value.message,
                         title=None if value.mode == "finish" else value.title,

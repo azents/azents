@@ -1344,7 +1344,7 @@ class ExternalChannelWorkRepository:
         def default_work() -> ChannelWorkState:
             nonlocal initial
             if mode is ExternalChannelActionMode.IGNORE:
-                raise ValueError("Ignore requires an exact active work_cycle_id.")
+                raise ValueError("Ignore requires active Channel Work.")
             if expected_work_cycle_id is not None:
                 raise ValueError("The selected Channel Work is no longer active.")
             initial = new_work("visible")
@@ -1357,7 +1357,7 @@ class ExternalChannelWorkRepository:
                 work = current.model_copy(deep=True)
             elif expected_work_cycle_id is None:
                 if mode is ExternalChannelActionMode.IGNORE:
-                    raise ValueError("Ignore requires an exact active work_cycle_id.")
+                    raise ValueError("Ignore requires active Channel Work.")
                 if current.work_cycle_id == creation_id:
                     return ChannelWorkStateMutation(
                         state=current,
@@ -1372,8 +1372,8 @@ class ExternalChannelWorkRepository:
                     )
                 if current.status is ExternalChannelWorkStatus.ACTIVE:
                     raise ValueError(
-                        "Active Channel Work requires its exact work_cycle_id; "
-                        "use get_channel_work to inspect it."
+                        "Channel Work changed before admission; "
+                        "retry the binding action."
                     )
                 work = new_work(current.tracker_visibility)
             else:
