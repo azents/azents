@@ -76,6 +76,8 @@ def test_semantic_actions_reject_invalid_combinations(action: dict[str, str]) ->
 def test_actions_work_with_each_publication_mode(mode: str) -> None:
     value = ChannelActionInput.model_validate(
         {
+            "work_cycle_id": "c" * 32,
+            "scheduled_cycle_id": None,
             "mode": mode,
             "binding": "binding",
             "message": "Please open",
@@ -88,9 +90,23 @@ def test_actions_work_with_each_publication_mode(mode: str) -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        {"mode": "ignore", "binding": "binding", "actions": [{"type": "browser"}]},
-        {"mode": "continue", "binding": "binding", "actions": [{"type": "browser"}]},
         {
+            "work_cycle_id": "c" * 32,
+            "scheduled_cycle_id": None,
+            "mode": "ignore",
+            "binding": "binding",
+            "actions": [{"type": "browser"}],
+        },
+        {
+            "work_cycle_id": "c" * 32,
+            "scheduled_cycle_id": None,
+            "mode": "continue",
+            "binding": "binding",
+            "actions": [{"type": "browser"}],
+        },
+        {
+            "work_cycle_id": "c" * 32,
+            "scheduled_cycle_id": None,
             "mode": "finish",
             "binding": "binding",
             "message": "Open",

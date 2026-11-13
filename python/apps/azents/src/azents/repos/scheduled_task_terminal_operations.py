@@ -17,6 +17,7 @@ from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTrackerProjectionPart
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
+from azents.repos.work_context import has_unfinished_work
 
 ScheduledTaskTerminalStatus = Literal["finished", "failed"]
 
@@ -44,6 +45,7 @@ class ScheduledTaskTerminalOutcome:
 
     event: Event
     created: bool
+    finish_run: bool
     effect_snapshot: ScheduledTaskTerminalEffectSnapshot | None
 
 
@@ -88,6 +90,7 @@ class ScheduledTaskTerminalOperations:
         agent_id: str,
         session_id: str,
         run_id: str,
+        cycle_id: str,
         status: ScheduledTaskTerminalStatus,
         result: str,
         notify: bool,
@@ -100,18 +103,19 @@ class ScheduledTaskTerminalOperations:
             if self.owner is not None:
                 if self.owner.session_id != session_id:
                     raise ValueError("Scheduled terminal Session does not match owner")
-                await fence_owned_session_mutation(session, self.owner)
+                owner = await fence_owned_session_mutation(session, self.owner)
+                if owner.stop_requested_at is not None:
+                    raise ValueError("Scheduled Task execution was stopped.")
             run = await self.run_repository.lock_by_id(session, run_id)
             if (
                 run is None
                 or run.session_id != session_id
                 or run.status is not AgentRunStatus.RUNNING
-                or run.scheduled_task_cycle_id is None
+                or cycle_id not in run.work_context.scheduled_cycle_ids
             ):
                 raise ValueError(
                     "The current AgentRun is not an active Scheduled Task cycle."
                 )
-            cycle_id = run.scheduled_task_cycle_id
             external_id = _result_external_id(cycle_id)
             existing = await self.event_repository.get_by_external_id(
                 session,
@@ -124,7 +128,10 @@ class ScheduledTaskTerminalOperations:
                     raise RuntimeError(
                         "Scheduled Task terminal Event identity is inconsistent."
                     )
-                if run.terminal_result_event_id is None:
+                finish_run = not await has_unfinished_work(
+                    session, session_id=session_id, context=run.work_context
+                )
+                if finish_run and run.terminal_result_event_id is None:
                     await self.run_repository.update(
                         session,
                         run_id,
@@ -136,6 +143,7 @@ class ScheduledTaskTerminalOperations:
                 return ScheduledTaskTerminalOutcome(
                     event=existing,
                     created=False,
+                    finish_run=finish_run,
                     effect_snapshot=None,
                 )
 
@@ -151,7 +159,6 @@ class ScheduledTaskTerminalOperations:
                 or cycle.state.workspace_id != workspace_id
                 or cycle.state.agent_id != agent_id
                 or cycle.state.session_id != session_id
-                or cycle.state.current_run_id != run_id
             ):
                 raise ValueError(
                     "The current AgentRun has no matching started Scheduled Task cycle."
@@ -234,17 +241,22 @@ class ScheduledTaskTerminalOperations:
                 if not transitioned:
                     raise RuntimeError("Scheduled Task changed during terminalization.")
 
-            await self.run_repository.update(
-                session,
-                run_id,
-                AgentRunPatch(
-                    terminal_result_event_id=event.id,
-                    terminal_result_message=normalized_result,
-                ),
+            finish_run = not await has_unfinished_work(
+                session, session_id=session_id, context=run.work_context
             )
+            if finish_run:
+                await self.run_repository.update(
+                    session,
+                    run_id,
+                    AgentRunPatch(
+                        terminal_result_event_id=event.id,
+                        terminal_result_message=normalized_result,
+                    ),
+                )
             return ScheduledTaskTerminalOutcome(
                 event=event,
                 created=True,
+                finish_run=finish_run,
                 effect_snapshot=effect_snapshot,
             )
 

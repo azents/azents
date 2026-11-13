@@ -146,7 +146,7 @@ async def test_idle_description_does_not_wait_for_held_owner_or_hierarchy_rows(
                 timeout=5,
             )
             assert not result.eligible
-            assert result.archived_cycle_id is None
+            assert result.archived_cycle_ids is None
     finally:
         await _cleanup_workspace_fixture(rdb_engine, workspace_id)
 

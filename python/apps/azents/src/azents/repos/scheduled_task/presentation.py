@@ -117,6 +117,8 @@ def render_scheduled_task_schedule(
 
 def render_scheduled_task_runtime_message(
     *,
+    cycle_id: str,
+    binding_id: str | None,
     title: str,
     objective: str,
     allow_silent: bool,
@@ -137,6 +139,8 @@ def render_scheduled_task_runtime_message(
     prefix = dedent(
         f"""\
         A Scheduled Task occurrence has started.
+        Cycle ID: {cycle_id}
+        Delivery binding: {binding_id if binding_id is not None else "Session-only"}
         Title: {title}
         Schedule: {schedule.summary}
         Schedule details: {schedule.canonical}
@@ -145,6 +149,9 @@ def render_scheduled_task_runtime_message(
         Timing semantics: {_SCHEDULE_TIMING_GUIDANCE}
         Execution guidance: {_EXECUTION_GUIDANCE}
         Reporting policy: {reporting_guidance(allow_silent)}
+        Work selection: Pass this exact cycle_id to submit_scheduled_task_result.
+        For channel progress, use channel_action with scheduled_cycle_id set to
+        this ID and work_cycle_id=null.
         Prompt:
         """
     )
@@ -164,6 +171,12 @@ def render_scheduled_task_cycle_guidance(state: ScheduledTaskCycleState) -> str:
         + dedent(
             f"""\
         ### Active Scheduled Task Work Cycle
+
+        Cycle ID: {state.cycle_id}
+        Title: {state.title}
+        Scheduled for: {_utc_text(state.scheduled_for)}
+        Delivery binding: {state.binding_id if state.binding_id is not None else "Session-only"}
+        Use this exact cycle_id for completion. For channel progress select scheduled_cycle_id={state.cycle_id} and work_cycle_id=null.
 
         Schedule timing semantics: {_SCHEDULE_TIMING_GUIDANCE}
         Ending this AgentRun does not finish the work cycle. Continue autonomously through idle continuations until the objective is terminal. Use `submit_scheduled_task_result` with `finished` only after achieving the objective, or with `failed` after reasonable attempts when required information, authority, a user choice, or another prerequisite remains unavailable. {channel_guidance}"""  # noqa: E501
@@ -196,6 +209,7 @@ def render_scheduled_task_compaction_snapshot(
             [
                 "",
                 f"### Cycle {index}",
+                f"- Cycle ID: {state.cycle_id}",
                 f"- Title: {_bounded(state.title, _TITLE_LIMIT)}",
                 f"- Objective: {_bounded(state.objective, _OBJECTIVE_LIMIT)}",
                 f"- Reporting policy: {reporting_guidance(state.allow_silent)}",
@@ -204,6 +218,8 @@ def render_scheduled_task_compaction_snapshot(
                 f"- Timing semantics: {_SCHEDULE_TIMING_GUIDANCE}",
             ]
         )
+        if state.binding_id is not None:
+            lines.append(f"- Delivery binding: {state.binding_id}")
         if state.progress_title:
             progress_title = _bounded(
                 state.progress_title,
@@ -221,7 +237,8 @@ def render_scheduled_task_compaction_snapshot(
             )
         lines.append(
             "- Continue autonomously until terminal. Use "
-            "`submit_scheduled_task_result` with `finished` or `failed`; ending one "
+            "`submit_scheduled_task_result` with this exact cycle_id and "
+            "`finished` or `failed`; ending one "
             "AgentRun does not finish the cycle."
         )
     return "\n".join(lines)

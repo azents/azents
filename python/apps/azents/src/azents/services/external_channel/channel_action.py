@@ -365,6 +365,31 @@ class ExternalChannelActionService:
             agent_id=agent_id,
         )
 
+    async def inspect_work(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        binding_id: str,
+    ) -> ChannelWorkSnapshot | None:
+        """Read an exact authorized binding's active identity without admitting work."""
+        await self.operations.navigation_context(
+            session_id=session_id,
+            agent_id=agent_id,
+            binding_id=binding_id,
+            service_ids=[],
+        )
+        return next(
+            (
+                work
+                for work in await self.snapshot(
+                    session_id=session_id, agent_id=agent_id
+                )
+                if work.binding_id == binding_id
+            ),
+            None,
+        )
+
     async def prepare_navigation(
         self,
         *,
@@ -424,6 +449,7 @@ class ExternalChannelActionService:
         run_id: str,
         client_tool_call_id: str,
         binding_id: str,
+        expected_work_cycle_id: str | None,
         mode: ExternalChannelActionMode,
         message: str | None,
         title: str | None,
@@ -452,6 +478,7 @@ class ExternalChannelActionService:
                 run_id=run_id,
                 client_tool_call_id=client_tool_call_id,
                 binding_id=binding_id,
+                expected_work_cycle_id=expected_work_cycle_id,
                 mode=mode,
                 message=message,
                 title=title,
@@ -472,6 +499,7 @@ class ExternalChannelActionService:
         run_id: str,
         client_tool_call_id: str,
         binding_id: str,
+        expected_work_cycle_id: str | None,
         mode: ExternalChannelActionMode,
         message: str | None,
         title: str | None,
@@ -491,6 +519,7 @@ class ExternalChannelActionService:
             run_id=run_id,
             client_tool_call_id=client_tool_call_id,
             binding_id=binding_id,
+            expected_work_cycle_id=expected_work_cycle_id,
             mode=mode,
             message=message,
             title=title,
@@ -571,6 +600,7 @@ class ExternalChannelActionService:
             state_revision = settlement.state_revision
         return ChannelActionResult(
             binding_id=transition.binding_id,
+            work_id=transition.work_id,
             work_status=transition.work_status,
             state_revision=state_revision,
             awaiting_input=awaiting_input,

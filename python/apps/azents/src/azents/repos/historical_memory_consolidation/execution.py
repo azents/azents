@@ -47,6 +47,7 @@ from azents.core.model_operation import (
 )
 from azents.core.session_execution_file import require_execution_path
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -488,7 +489,7 @@ class MemoryExecutionRepository:
             session,
             session_id=binding.session_id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         await repository.update(
             session,
@@ -660,7 +661,7 @@ class MemoryExecutionRepository:
                     session,
                     session_id=owner.session_id,
                     parent_agent_run_id=None,
-                    scheduled_task_cycle_id=None,
+                    work_context=WorkContext.empty(),
                 )
                 run_id = pending.id
             else:

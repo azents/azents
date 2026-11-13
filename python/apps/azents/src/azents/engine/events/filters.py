@@ -329,11 +329,14 @@ def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
     """Render model-visible reminder for goal_updated event metadata."""
     if payload.metadata.get("goal_control_action") == "resume":
         return format_goal_resumed_reminder(
+            goal_id=payload.metadata.get("goal_id"),
             goal_objective=payload.metadata.get("goal_objective"),
             previous_goal_status=payload.metadata.get("previous_goal_status"),
             resume_hint=payload.metadata.get("resume_hint"),
         )
-    return format_goal_updated_reminder(payload.metadata.get("goal_objective"))
+    return format_goal_updated_reminder(
+        payload.metadata.get("goal_objective"), payload.metadata.get("goal_id")
+    )
 
 
 def _estimate_event_tokens(events: Sequence[Event]) -> int:
@@ -697,7 +700,7 @@ def _model_visible_event_value(event: Event) -> object | None:
         return {
             "role": "user",
             "content": format_goal_continuation_reminder(
-                payload.metadata.get("goal_objective")
+                payload.metadata.get("goal_objective"), payload.metadata.get("goal_id")
             ),
         }
     if event.kind == EventKind.EXTERNAL_CHANNEL_CONTINUATION and isinstance(
@@ -789,7 +792,9 @@ def _model_visible_event_text(
     ):
         return _format_continuity_block(
             "User",
-            format_goal_continuation_reminder(payload.metadata.get("goal_objective")),
+            format_goal_continuation_reminder(
+                payload.metadata.get("goal_objective"), payload.metadata.get("goal_id")
+            ),
             include_label=include_label,
         )
     if event.kind == EventKind.EXTERNAL_CHANNEL_CONTINUATION and isinstance(

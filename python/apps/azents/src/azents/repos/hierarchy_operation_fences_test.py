@@ -25,6 +25,7 @@ from azents.core.enums import (
 )
 from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.session_agent import RDBSessionAgent
@@ -268,7 +269,7 @@ async def test_real_deadlock_retries_whole_parent_or_terminal_operation_once(
             scope,
             session_id=hierarchy.child.agent_session_id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
     pids: dict[str, int] = {}
     attempts: dict[str, int] = {}

@@ -10,6 +10,7 @@ from azcommon.uuid import uuid7
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentRunStatus, AgentSessionProductMode, EventKind
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.engine.context.compaction import CompactionSummaryBudget
 from azents.engine.events.engine_adapter import _OwnerBoundClientToolInvoker
 from azents.engine.events.execution import AgentRunExecution, AgentRunExecutionRequest
@@ -102,7 +103,7 @@ async def _create_execution(
             AgentRunCreate(
                 session_id=created.id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             ),
         )
         event = await EventTranscriptRepository().append(

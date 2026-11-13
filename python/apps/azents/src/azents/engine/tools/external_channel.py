@@ -157,6 +157,22 @@ class ChannelActionInput(BaseModel):
         max_length=80,
         description="Binding handle from context. Pass it unchanged.",
     )
+    work_cycle_id: str | None = Field(
+        min_length=1,
+        description=(
+            "Exact Channel Work cycle ID. Use get_channel_work if unknown. "
+            "Null only to create new Work when no active Work exists, or when "
+            "selecting scheduled_cycle_id instead."
+        ),
+    )
+    scheduled_cycle_id: str | None = Field(
+        min_length=32,
+        max_length=32,
+        description=(
+            "Exact Scheduled occurrence ID for progress; work_cycle_id must be null. "
+            "Null for ordinary Channel Work."
+        ),
+    )
     message: str | None = Field(
         default=None,
         min_length=1,
@@ -208,6 +224,10 @@ class ChannelActionInput(BaseModel):
     @model_validator(mode="after")
     def validate_action(self) -> "ChannelActionInput":
         """Validate the fields that apply to the selected action mode."""
+        if self.work_cycle_id is not None and self.scheduled_cycle_id is not None:
+            raise ValueError("Select Channel Work or Scheduled work, not both.")
+        if self.mode == "ignore" and self.work_cycle_id is None:
+            raise ValueError("Ignore requires an exact active work_cycle_id.")
         if self.mode == "ignore":
             if any(
                 value is not None
@@ -263,6 +283,14 @@ class ChannelActionInput(BaseModel):
             if len(task_ids) != len(set(task_ids)):
                 raise ValueError("Channel Work task IDs must be unique.")
         return self
+
+
+class GetChannelWorkInput(BaseModel):
+    """Read active work identity within one authorized delivery binding."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    binding: str = Field(min_length=1, max_length=80)
 
 
 class DownloadExternalFileInput(BaseModel):
@@ -362,6 +390,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
             tools=[
                 self._make_channel_action_tool(),
                 self._make_download_external_file_tool(),
+                self._make_get_channel_work_tool(),
             ],
         )
 
@@ -412,6 +441,14 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     metadata={
                         "source": "external_channel",
                         "active_bindings": ",".join(handles),
+                        "active_work_cycles": json.dumps(
+                            {
+                                work.binding_id: work.work_cycle_id
+                                for work in works
+                                if not work.awaiting_input
+                            },
+                            sort_keys=True,
+                        ),
                     },
                 )
             ]
@@ -491,24 +528,30 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     if runtime_context is None
                     else runtime_context.resolve_runtime_target
                 )
-                scheduled = await self.scheduled_channel_service.execute_progress(
-                    links=links,
-                    session_id=self.session_id,
-                    agent_id=self.agent_id,
-                    run_id=self.run_id,
-                    binding_id=value.binding,
-                    mode=ExternalChannelActionMode(value.mode),
-                    message=value.message,
-                    title=None if value.mode == "finish" else value.title,
-                    tasks=tasks,
-                    files=manifests,
-                    file_storage=file_storage,
-                    authority=authority,
-                    provider_delivery_service=provider_delivery_service,
-                    resolve_runtime_target=resolve_runtime_target,
-                )
-                result = scheduled.result
-                if result is None:
+                if value.scheduled_cycle_id is not None:
+                    scheduled = await self.scheduled_channel_service.execute_progress(
+                        links=links,
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        run_id=self.run_id,
+                        binding_id=value.binding,
+                        cycle_id=value.scheduled_cycle_id,
+                        mode=ExternalChannelActionMode(value.mode),
+                        message=value.message,
+                        title=None if value.mode == "finish" else value.title,
+                        tasks=tasks,
+                        files=manifests,
+                        file_storage=file_storage,
+                        authority=authority,
+                        provider_delivery_service=provider_delivery_service,
+                        resolve_runtime_target=resolve_runtime_target,
+                    )
+                    result = scheduled.result
+                    if result is None:
+                        raise ValueError(
+                            "Selected Scheduled progress was not admitted."
+                        )
+                else:
                     result = await self.service.execute(
                         links=links,
                         session_id=self.session_id,
@@ -516,6 +559,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         run_id=self.run_id,
                         client_tool_call_id=execution.call_id,
                         binding_id=value.binding,
+                        expected_work_cycle_id=value.work_cycle_id,
                         mode=ExternalChannelActionMode(value.mode),
                         message=value.message,
                         title=None if value.mode == "finish" else value.title,
@@ -529,7 +573,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
             return json.dumps(
-                _result_payload(result),
+                _result_payload(result, scheduled_cycle_id=value.scheduled_cycle_id),
                 ensure_ascii=False,
                 sort_keys=True,
             )
@@ -538,6 +582,41 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
             channel_action,
             description=_CHANNEL_ACTION_DESCRIPTION,
             input_model=ChannelActionInput,
+        )
+
+    def _make_get_channel_work_tool(self) -> FunctionTool:
+        async def get_channel_work(args: GetChannelWorkInput) -> str:
+            """Read a binding's current exact work selector without publishing."""
+            if self.resource_authority is None:
+                raise FunctionToolError("External Channel authority is unavailable.")
+            try:
+                work = await self.service.inspect_work(
+                    session_id=self.session_id,
+                    agent_id=self.agent_id,
+                    binding_id=args.binding,
+                )
+            except ValueError as error:
+                raise FunctionToolError(str(error)) from None
+            return json.dumps(
+                {
+                    "binding": args.binding,
+                    "work_cycle_id": None if work is None else work.work_cycle_id,
+                    "active": work is not None,
+                    "title": None if work is None else work.title,
+                    "awaiting_input": False if work is None else work.awaiting_input,
+                },
+                ensure_ascii=False,
+            )
+
+        return make_tool(
+            get_channel_work,
+            description=(
+                "Inspect the active Channel Work identity for one authorized binding. "
+                "Use its exact work_cycle_id for channel_action; null means no active "
+                "Work and permits a new publication. This read does not admit work "
+                "or publish a message."
+            ),
+            input_model=GetChannelWorkInput,
         )
 
     def _make_download_external_file_tool(self) -> FunctionTool:
@@ -733,6 +812,7 @@ def render_channel_work_compaction_snapshot(
         lines.extend(
             [
                 f"### Binding `{work.binding_id}`",
+                f"- Work cycle ID: {work.work_cycle_id}",
                 f"- Provider: {work.provider.value}",
                 f"- Resource: {work.resource_label}",
                 f"- Current work title: {work.title or 'Not declared yet'}",
@@ -757,9 +837,15 @@ def render_channel_work_compaction_snapshot(
     return "\n".join(lines).rstrip()
 
 
-def _result_payload(result: ChannelActionResult) -> dict[str, object]:
+def _result_payload(
+    result: ChannelActionResult,
+    *,
+    scheduled_cycle_id: str | None,
+) -> dict[str, object]:
     return {
         "binding": result.binding_id,
+        "work_cycle_id": result.work_id if scheduled_cycle_id is None else None,
+        "scheduled_cycle_id": scheduled_cycle_id,
         "state": result.work_status.value,
         "state_revision": result.state_revision,
         "awaiting_input": result.awaiting_input,

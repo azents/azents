@@ -82,13 +82,19 @@ class UserMessageMailboxPayload(MailboxPayloadBase):
     type: Literal["user_message"]
 
 
-class GoalContinuationMailboxPayload(MailboxPayloadBase):
+class ContinuationMailboxPayload(MailboxPayloadBase):
+    """Server-created continuation with an exact same-Session input source."""
+
+    source_run_id: str = Field(min_length=32, max_length=32)
+
+
+class GoalContinuationMailboxPayload(ContinuationMailboxPayload):
     """Typed goal-continuation mailbox payload."""
 
     type: Literal["goal_continuation"]
 
 
-class ExternalChannelContinuationMailboxPayload(MailboxPayloadBase):
+class ExternalChannelContinuationMailboxPayload(ContinuationMailboxPayload):
     """Typed External Channel continuation mailbox payload."""
 
     type: Literal["external_channel_continuation"]
@@ -107,7 +113,7 @@ class ScheduledTaskTriggerMailboxPayload(MailboxPayloadBase):
         return self
 
 
-class ScheduledTaskContinuationMailboxPayload(MailboxPayloadBase):
+class ScheduledTaskContinuationMailboxPayload(ContinuationMailboxPayload):
     """Typed Scheduled Task cycle continuation mailbox payload."""
 
     type: Literal["scheduled_task_continuation"]
@@ -142,7 +148,9 @@ class RoutineTriggerMailboxPayload(RoutineMailboxPayload):
     type: Literal["routine_trigger"]
 
 
-class RoutineContinuationMailboxPayload(RoutineMailboxPayload):
+class RoutineContinuationMailboxPayload(
+    RoutineMailboxPayload, ContinuationMailboxPayload
+):
     """Incomplete Routine work consumed at an ordinary idle continuation."""
 
     type: Literal["routine_continuation"]
@@ -281,9 +289,17 @@ def mailbox_payload_from_fields(
     if kind is MailboxItemKind.USER_MESSAGE:
         return UserMessageMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.GOAL_CONTINUATION:
-        return GoalContinuationMailboxPayload(type=kind.value, items=[item])
+        return GoalContinuationMailboxPayload(
+            type=kind.value,
+            source_run_id=metadata["continuation_source_run_id"],
+            items=[item],
+        )
     if kind is MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
-        return ExternalChannelContinuationMailboxPayload(type=kind.value, items=[item])
+        return ExternalChannelContinuationMailboxPayload(
+            type=kind.value,
+            source_run_id=metadata["continuation_source_run_id"],
+            items=[item],
+        )
     if kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
         return ScheduledTaskTriggerMailboxPayload(
             type=kind.value,
@@ -293,6 +309,7 @@ def mailbox_payload_from_fields(
     if kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
         return ScheduledTaskContinuationMailboxPayload(
             type=kind.value,
+            source_run_id=metadata["continuation_source_run_id"],
             cycle_id=metadata.get("cycle_id", ""),
             items=[item],
         )

@@ -14,6 +14,7 @@ from azents.core.mailbox_data import (
     TurnActionMailboxPayload,
 )
 from azents.core.routine import RoutineScope
+from azents.core.routine_presentation import routine_execution_ref
 from azents.engine.events.action_messages import RoutineJudgmentAction
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -22,9 +23,13 @@ from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.routine import RDBRoutine, RDBRoutineWorkRecord
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.routine.authority import RoutineExecutionAuthorityRepository
+from azents.repos.routine.authority import (
+    RoutineExecutionAuthorityRepository,
+    latest_routine_execution,
+)
 from azents.repos.routine.preserved import preserved_routine_work_exists
 from azents.repos.routine.state import ROUTINE_STATE_NAMESPACE, RoutineStateRepository
+from azents.repos.work_context import continuation_work_context
 
 
 @dataclass(frozen=True)
@@ -137,7 +142,10 @@ class RoutineLifecycleRepository:
             started = [
                 item.state
                 for item in await self.states.list_executions(session, scope=scope)
-                if item.state.phase == "started" and item.state.current_run_id == run.id
+                if item.state.phase == "started"
+                and await self.authority.run_carries_execution(
+                    session, scope=scope, run_id=run.id, state=item.state
+                )
             ]
             if not started or not await self.authority.run_is_routine_only(
                 session, scope=scope, run_id=run.id
@@ -161,9 +169,18 @@ class RoutineLifecycleRepository:
                 and predecessor.session_id == scope.session_id
                 and predecessor.status is AgentRunStatus.COMPLETED
                 and any(
-                    item.state.phase == "started"
-                    and item.state.current_run_id == predecessor_id
-                    for item in await self.states.list_executions(session, scope=scope)
+                    [
+                        item.state.phase == "started"
+                        and await self.authority.run_carries_execution(
+                            session,
+                            scope=scope,
+                            run_id=predecessor_id,
+                            state=item.state,
+                        )
+                        for item in await self.states.list_executions(
+                            session, scope=scope
+                        )
+                    ]
                 )
             ):
                 permitted.add(scope.session_id)
@@ -188,6 +205,24 @@ class RoutineLifecycleRepository:
                     )
                     valid = await self.authority.refs_are_current(
                         session, scope=scope, refs=payload.executions, phase="started"
+                    )
+                case MailboxItemKind.TURN_ACTION_CONTINUATION:
+                    context = await continuation_work_context(session, item=item)
+                    if context is None or not context.routine_only:
+                        return False
+                    states = [
+                        record.state
+                        for record in await self.states.list_executions(
+                            session, scope=scope
+                        )
+                    ]
+                    valid = any(state.phase == "started" for state in states) and all(
+                        any(
+                            state.phase in {"started", "completed"}
+                            and routine_execution_ref(state) == ref
+                            for state in states
+                        )
+                        for ref in context.routine_executions
                     )
                 case MailboxItemKind.ACTION_MESSAGE:
                     envelope = TurnActionMailboxPayload.model_validate(item.payload)
@@ -220,9 +255,9 @@ class RoutineLifecycleRepository:
         for scope in await self.scopes(session, session_ids):
             for item in await self.states.list_executions(session, scope=scope):
                 state = item.state
-                if state.phase != "started" or state.current_run_id is None:
+                if state.phase != "started":
                     continue
-                run = await session.read_session.get(RDBAgentRun, state.current_run_id)
+                run = await latest_routine_execution(session, state=state)
                 if run is not None and (
                     run.status is AgentRunStatus.COMPLETED
                     or (
@@ -366,9 +401,9 @@ class RoutineLifecycleRepository:
         for scope in await self.scopes(session, session_ids):
             for item in await self.states.list_executions(session, scope=scope):
                 state = item.state
-                if state.phase != "started" or state.current_run_id is None:
+                if state.phase != "started":
                     continue
-                run = await session.read_session.get(RDBAgentRun, state.current_run_id)
+                run = await latest_routine_execution(session, state=state)
                 if (
                     run is not None
                     and run.session_id == scope.session_id

@@ -207,7 +207,13 @@ async def test_interruption_stops_all_trees_and_cancels_only_runtime_actions(
     running_run_id = uuid4().hex
     lagged_run_id = uuid4().hex
     await rdb_session.write_session.execute(
-        sa.insert(RDBAgentRun),
+        sa.insert(RDBAgentRun).values(
+            work_context={
+                "scheduled_cycle_ids": [],
+                "routine_executions": [],
+                "unrelated_input": False,
+            }
+        ),
         [
             {
                 "id": running_run_id,

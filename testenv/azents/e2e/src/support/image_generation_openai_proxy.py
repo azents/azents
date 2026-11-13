@@ -1490,6 +1490,30 @@ def external_channel_binding(request: _ModelRequestInput) -> str | None:
     return None if compaction_match is None else compaction_match.group(1)
 
 
+def selected_work_arguments(
+    request: _ModelRequestInput,
+    *,
+    name: str,
+    arguments: dict[str, object],
+) -> dict[str, object]:
+    """Select only logical IDs visible to the deterministic fixture model."""
+    text = _decode_model_request(request).matching_text
+    selected = dict(arguments)
+    if name == "channel_action":
+        matches = re.findall(
+            r"Work cycle IDs?: ([0-9a-f]{32})",
+            text,
+        )
+        selected.setdefault("work_cycle_id", matches[-1] if matches else None)
+        selected.setdefault("scheduled_cycle_id", None)
+    elif name == "submit_scheduled_task_result":
+        matches = re.findall(r"Cycle ID: ([0-9a-f]{32})", text)
+        if not matches:
+            raise ValueError("Scheduled fixture input has no exact cycle selector.")
+        selected["cycle_id"] = matches[-1]
+    return selected
+
+
 def latest_external_channel_human_binding(
     request: _ModelRequestInput,
 ) -> str | None:
@@ -2664,6 +2688,57 @@ class _Handler(BaseHTTPRequestHandler):
     def _dispatch_model_request(self, request: _ModelRequestInput, body: bytes) -> None:
         """Route one generation-fenced local model request."""
         request = _decode_model_request(request)
+        if (
+            "Title: Scheduled Task E2E once" in request.matching_text
+            and "Submit the deterministic Scheduled Task E2E result."
+            in request.matching_text
+        ):
+            latest = _last_user_text(request) or ""
+            arguments: dict[str, object]
+            if "worktree removal reached terminal status completed" in latest:
+                tool_name = "submit_scheduled_task_result"
+                call_id = "call_scheduled_task_e2e_terminal"
+                arguments = {
+                    "status": "finished",
+                    "result": "SCHEDULED_TASK_E2E_FINISHED",
+                    "files": None,
+                    "notify": False,
+                    "suppression_reason": "All checks completed; nothing to report.",
+                }
+            elif "worktree creation reached terminal status completed" in latest:
+                generated = re.search(
+                    r"Generated worktree path: ([^\s\"<>]+)\.",
+                    latest,
+                )
+                if generated is None:
+                    raise ValueError(
+                        "Scheduled fixture has no generated worktree path."
+                    )
+                tool_name = "remove_git_worktree"
+                call_id = "call_scheduled_worktree_remove"
+                arguments = {
+                    "worktree_project_path": generated.group(1),
+                    "force": False,
+                }
+            else:
+                tool_name = "create_git_worktree"
+                call_id = "call_scheduled_worktree_create"
+                arguments = {
+                    "source_project_path": "/workspace/agent/scheduled-worktree-source",
+                    "starting_ref": None,
+                    "branch_name": "e2e/scheduled-continuity",
+                }
+            if not _request_has_named_tool(request, tool_name):
+                call_id = f"call_scheduled_search_{tool_name}"
+                arguments = {"query": tool_name}
+                tool_name = "tool_search"
+            self._write_function_call_response(
+                request,
+                call_id=call_id,
+                name=tool_name,
+                arguments=arguments,
+            )
+            return
         if _last_user_text(request) == WATCHDOG_IDLE_PREFIX_PROMPT:
             if _SESSION_TITLE_SYSTEM_MARKER in request.matching_text:
                 self._write_text_response(
@@ -5586,6 +5661,7 @@ class _Handler(BaseHTTPRequestHandler):
     ) -> None:
         """Write one deterministic Responses function call."""
         request = _decode_model_request(request)
+        arguments = selected_work_arguments(request, name=name, arguments=arguments)
         model = request.model if request.model is not None else "gpt-5.5"
         response_id = f"resp_{call_id.removeprefix('call_')}"
         item_id = f"fc_{call_id.removeprefix('call_')}"

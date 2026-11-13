@@ -87,7 +87,7 @@ async def test_failed_boundary_consume_rolls_back_new_admissions(
         order_sequence=0,
         content="continue",
         idempotency_key="idle:1",
-        metadata={},
+        metadata={"continuation_source_run_id": "r" * 32},
         attachments=[],
         file_parts=[],
         payload=None,
@@ -119,7 +119,7 @@ async def test_failed_boundary_consume_rolls_back_new_admissions(
                 kind=MailboxItemKind.GOAL_CONTINUATION,
                 content="continue",
                 idempotency_key="idle:1",
-                metadata={},
+                metadata={"continuation_source_run_id": "r" * 32},
                 payload=None,
                 scheduled_cycle_id=None,
             )

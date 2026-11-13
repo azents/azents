@@ -708,6 +708,8 @@ def test_dispatcher_holds_work_through_sparse_retries_and_late_turn(
         assert identity not in emitted
         emitted.add(identity)
         assert json.loads(str(item["arguments"])) == {
+            "work_cycle_id": None,
+            "scheduled_cycle_id": None,
             "mode": "continue",
             "binding": "binding-quiet-123",
             "title": "Investigating error logs…",

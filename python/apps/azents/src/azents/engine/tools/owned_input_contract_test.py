@@ -87,11 +87,19 @@ from azents.engine.tools.write import WriteInput
             ChannelActionTaskInput,
             {"id": "task-1", "title": "Task", "status": "pending"},
         ),
-        (ChannelActionInput, {"mode": "ignore", "binding": "active"}),
+        (
+            ChannelActionInput,
+            {
+                "work_cycle_id": "c" * 32,
+                "scheduled_cycle_id": None,
+                "mode": "ignore",
+                "binding": "active",
+            },
+        ),
         (DownloadExternalFileInput, {"file": "opaque-file", "path": "/runtime/f"}),
         (GitHubSwitchInstallationInput, {"installation": "123"}),
         (CreateGoalInput, {"objective": "Inspect"}),
-        (UpdateGoalInput, {"status": "complete"}),
+        (UpdateGoalInput, {"goal_id": "a" * 32, "status": "complete"}),
         (ImportFileInput, {"uri": "exchange://object", "path": None}),
         (K8sListInput, {"cluster": "home", "kind": "Pod"}),
         (K8sGetInput, {"cluster": "home", "kind": "Pod", "name": "pod"}),
@@ -123,6 +131,7 @@ from azents.engine.tools.write import WriteInput
         (
             SubmitScheduledTaskResultInput,
             {
+                "cycle_id": "c" * 32,
                 "status": "finished",
                 "result": "Done",
                 "files": None,

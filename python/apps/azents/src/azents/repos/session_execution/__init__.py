@@ -19,6 +19,7 @@ from azents.core.routine import RoutineScope
 from azents.core.routine_execution import RoutineExecutionState
 from azents.core.routine_presentation import routine_execution_ref
 from azents.core.session_execution_data import SessionExecutionRecord
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -32,6 +33,7 @@ from azents.rdb.session_capabilities import ReadSession
 from azents.repos.routine.state import ROUTINE_STATE_NAMESPACE
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
 from azents.repos.session_execution_record import SessionExecutionRecordRepository
+from azents.repos.work_context import continuation_work_context
 
 from .data import CanonicalExecutionSnapshot, PendingCommandSnapshot
 
@@ -285,30 +287,41 @@ class SessionExecutionRepository:
             session, agent_session=agent_session, oldest_input=oldest_input
         ):
             return True
-        if (
-            oldest_input is None
-            or oldest_input.kind is not MailboxItemKind.SCHEDULED_TASK_CONTINUATION
-        ):
+        if oldest_input is None:
             return False
-        payload = ScheduledTaskContinuationMailboxPayload.model_validate(
-            oldest_input.payload
-        )
-        cycle_row = await session.read_session.scalar(
-            sa.select(RDBToolkitState).where(
-                RDBToolkitState.agent_id == agent_session.agent_id,
-                RDBToolkitState.session_id == agent_session.id,
-                RDBToolkitState.toolkit_namespace == "scheduled",
-                RDBToolkitState.state_name == f"cycle:{payload.cycle_id}",
+        if oldest_input.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
+            context = await continuation_work_context(session, item=oldest_input)
+            if context is None or not context.scheduled_cycle_ids:
+                return False
+            cycle_ids = context.scheduled_cycle_ids
+        elif oldest_input.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
+            payload = ScheduledTaskContinuationMailboxPayload.model_validate(
+                oldest_input.payload
             )
-        )
-        if cycle_row is None:
+            cycle_ids = (payload.cycle_id,)
+        else:
             return False
-        cycle = ScheduledTaskCycleState.model_validate(cycle_row.state_json)
-        return (
+        cycle_rows = (
+            await session.read_session.scalars(
+                sa.select(RDBToolkitState).where(
+                    RDBToolkitState.agent_id == agent_session.agent_id,
+                    RDBToolkitState.session_id == agent_session.id,
+                    RDBToolkitState.toolkit_namespace == "scheduled",
+                    RDBToolkitState.state_name.in_(
+                        tuple(f"cycle:{cycle_id}" for cycle_id in cycle_ids)
+                    ),
+                )
+            )
+        ).all()
+        return any(
             cycle.phase == "started"
             and cycle.workspace_id == agent_session.workspace_id
             and cycle.agent_id == agent_session.agent_id
             and cycle.session_id == agent_session.id
+            for cycle in (
+                ScheduledTaskCycleState.model_validate(row.state_json)
+                for row in cycle_rows
+            )
         )
 
     async def _archived_routine_execution(
@@ -319,10 +332,10 @@ class SessionExecutionRepository:
         oldest_input: RDBMailboxItem | None,
     ) -> bool:
         """Recover or continue only the canonical state preserved by archive."""
-        if (
-            oldest_input is not None
-            and oldest_input.kind is not MailboxItemKind.ROUTINE_CONTINUATION
-        ):
+        if oldest_input is not None and oldest_input.kind not in {
+            MailboxItemKind.ROUTINE_CONTINUATION,
+            MailboxItemKind.TURN_ACTION_CONTINUATION,
+        }:
             return False
         scope = RoutineScope(
             workspace_id=agent_session.workspace_id,
@@ -348,15 +361,23 @@ class SessionExecutionRepository:
         if not preserved:
             return False
         if oldest_input is not None:
-            payload = RoutineContinuationMailboxPayload.model_validate(
-                oldest_input.payload
-            )
-            return all(
+            if oldest_input.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
+                context = await continuation_work_context(session, item=oldest_input)
+                if context is None or not context.routine_only:
+                    return False
+                refs = context.routine_executions
+            else:
+                payload = RoutineContinuationMailboxPayload.model_validate(
+                    oldest_input.payload
+                )
+                refs = payload.executions
+            return any(state.phase == "started" for state in preserved) and all(
                 any(
-                    state.phase == "started" and routine_execution_ref(state) == ref
+                    state.phase in {"started", "completed"}
+                    and routine_execution_ref(state) == ref
                     for state in preserved
                 )
-                for ref in payload.executions
+                for ref in refs
             )
         active_runs = (
             await session.read_session.scalars(
@@ -370,7 +391,13 @@ class SessionExecutionRepository:
         ).all()
         if active_runs:
             return all(
-                any(state.current_run_id == run.id for state in preserved)
+                any(
+                    WorkContext.model_validate(run.work_context).contains_routine(
+                        routine_id=state.context.candidate.routine_id,
+                        execution_id=state.context.execution_id,
+                    )
+                    for state in preserved
+                )
                 for run in active_runs
             )
         conversation = await session.read_session.get(RDBConversation, scope.session_id)
@@ -386,7 +413,13 @@ class SessionExecutionRepository:
             predecessor is not None
             and predecessor.session_id == scope.session_id
             and predecessor.status is AgentRunStatus.COMPLETED
-            and any(state.current_run_id == predecessor_id for state in preserved)
+            and any(
+                WorkContext.model_validate(predecessor.work_context).contains_routine(
+                    routine_id=state.context.candidate.routine_id,
+                    execution_id=state.context.execution_id,
+                )
+                for state in preserved
+            )
         )
 
     def _pending_command(

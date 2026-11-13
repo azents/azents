@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionProductMode,
     EventKind,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -170,7 +171,7 @@ async def stop_fixture(
             AgentRunCreate(
                 session_id=session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 phase=AgentRunPhase.EXECUTING_TOOLS,
                 status=AgentRunStatus.RUNNING,
             ),

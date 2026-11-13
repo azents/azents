@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from azents.api.admin.system.v1.data import CompactedEventRetentionUpdateRequest
 from azents.core.archived_session_retention_data import RetentionRevisionConflict
 from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -211,7 +212,7 @@ async def test_active_run_inputs_are_protected(
             session,
             AgentRunCreate(
                 session_id=history.session_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
                 status=run_status,
             ),

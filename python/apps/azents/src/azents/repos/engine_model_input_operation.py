@@ -2,9 +2,14 @@
 
 import dataclasses
 import datetime
+import json
 from collections.abc import Sequence
 
+import sqlalchemy as sa
+from pydantic import ValidationError
+
 from azents.core.enums import AgentRunPhase
+from azents.core.scheduled_task import ScheduledTaskCycleTarget
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.tool_results import cancelled_tool_result
 from azents.engine.events.types import (
@@ -12,7 +17,9 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
     OutputTextPart,
+    ScheduledTaskResultPayload,
 )
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.engine_event_contracts import (
@@ -28,6 +35,7 @@ from azents.repos.session_execution.ownership import (
     fence_owned_session_mutation,
     validate_session_execution_owner,
 )
+from azents.repos.work_context import has_unfinished_work
 
 
 @dataclasses.dataclass(frozen=True)
@@ -131,18 +139,37 @@ class EngineModelInputOperationRepository:
             for call_id, call in calls_by_id.items()
             if call_id not in result_call_ids
         ]
-        terminal_calls: list[ClientToolCallPayload] = []
-        if (
-            run_state.scheduled_task_cycle_id is not None
-            and run_state.terminal_result_event_id is not None
-        ):
-            terminal_calls = [
-                call
-                for call in unresolved_calls
-                if call.name == "submit_scheduled_task_result"
-            ]
+        terminal_calls: list[
+            tuple[ClientToolCallPayload, ScheduledTaskResultPayload, str]
+        ] = []
+        for call in unresolved_calls:
+            if call.name != "submit_scheduled_task_result":
+                continue
+            try:
+                target = ScheduledTaskCycleTarget.model_validate_json(call.arguments)
+            except ValidationError:
+                continue
+            if target.cycle_id not in run_state.work_context.scheduled_cycle_ids:
+                continue
+            saved = await session.read_session.scalar(
+                sa.select(RDBEvent.payload).where(
+                    RDBEvent.session_id == session_id,
+                    RDBEvent.external_id == f"scheduled-task-result:{target.cycle_id}",
+                )
+            )
+            if saved is not None:
+                terminal_calls.append(
+                    (
+                        call,
+                        ScheduledTaskResultPayload.model_validate(saved),
+                        target.cycle_id,
+                    )
+                )
         appended: list[Event] = []
-        for call in terminal_calls:
+        finish_run = bool(terminal_calls) and not await has_unfinished_work(
+            session, session_id=session_id, context=run_state.work_context
+        )
+        for call, saved_result, cycle_id in terminal_calls:
             appended.append(
                 await self.tool_result_repository.finalize_in_session(
                     session,
@@ -156,14 +183,27 @@ class EngineModelInputOperationRepository:
                         status="completed",
                         output=[
                             OutputTextPart(
-                                text="The Scheduled Task result was already committed."
+                                text=json.dumps(
+                                    {
+                                        "cycle_id": cycle_id,
+                                        "status": saved_result.status,
+                                        "result": saved_result.result,
+                                        "notify": saved_result.notify,
+                                        "suppression_reason": (
+                                            saved_result.suppression_reason
+                                        ),
+                                        "recovered": True,
+                                        "outcomes": [],
+                                    },
+                                    ensure_ascii=False,
+                                ),
                             )
                         ],
-                        terminal_run=True,
+                        terminal_run=finish_run,
                     ),
                 )
             )
-        terminal_call_ids = {call.call_id for call in terminal_calls}
+        terminal_call_ids = {call.call_id for call, _, _ in terminal_calls}
         for call in unresolved_calls:
             if call.call_id in terminal_call_ids:
                 continue

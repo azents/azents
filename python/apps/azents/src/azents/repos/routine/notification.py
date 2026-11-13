@@ -103,7 +103,6 @@ class RoutineNotificationOperations:
             or not work.notify
             or work.message is None
             or state.context.scope != scope
-            or state.current_run_id != authority.run_id
             or state.phase != "completed"
         ):
             raise ValueError("Routine delivery requires a newly recorded notification.")
@@ -111,6 +110,10 @@ class RoutineNotificationOperations:
             await self.execution_authority.fence_execution_scope(
                 session, scope=scope, authority=authority
             )
+            if not await self.execution_authority.run_carries_execution(
+                session, scope=scope, run_id=authority.run_id, state=state
+            ):
+                raise ValueError("Routine notification work context is unavailable.")
             binding_id = await self.primary.get_current(
                 session,
                 workspace_id=scope.workspace_id,

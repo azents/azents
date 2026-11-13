@@ -68,6 +68,7 @@ def _snapshot(
     awaiting_input: bool = False,
 ) -> ChannelWorkSnapshot:
     return ChannelWorkSnapshot(
+        work_cycle_id="cccccccccccccccccccccccccccccccc",
         binding_id=binding_id,
         provider=ExternalChannelProvider.SLACK,
         resource_label="#incident",
@@ -123,6 +124,7 @@ class _ActionService(ExternalChannelActionService):
     async def execute(self, **kwargs: object) -> ChannelActionResult:
         self.calls.append(kwargs)
         return ChannelActionResult(
+            work_id="cccccccccccccccccccccccccccccccc",
             binding_id=str(kwargs["binding_id"]),
             work_status=ExternalChannelWorkStatus.ACTIVE,
             state_revision=4,
@@ -284,6 +286,7 @@ async def test_channel_tools_remain_visible_without_bindings_or_runtime_storage(
     assert [tool.spec.name for tool in state.tools] == [
         "channel_action",
         "download_external_file",
+        "get_channel_work",
     ]
     service.snapshots = [_snapshot()]
     active_state = await toolkit.update_context(_turn_context())
@@ -308,11 +311,14 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     assert [tool.spec.name for tool in state.tools] == [
         "channel_action",
         "download_external_file",
+        "get_channel_work",
     ]
     with client_tool_execution_context(call_id="call-42", name="channel_action"):
         output = await state.tools[0].handler(
             json.dumps(
                 {
+                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                    "scheduled_cycle_id": None,
                     "mode": "continue",
                     "binding": "binding-1",
                     "message": "I am investigating.",
@@ -357,6 +363,8 @@ async def test_channel_action_requires_bound_execution_authority() -> None:
             await tool.handler(
                 json.dumps(
                     {
+                        "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                        "scheduled_cycle_id": None,
                         "mode": "continue",
                         "binding": "binding-1",
                         "message": "Progress.",
@@ -433,6 +441,8 @@ async def test_ignore_passes_no_publication_fields() -> None:
         await state.tools[0].handler(
             json.dumps(
                 {
+                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                    "scheduled_cycle_id": None,
                     "mode": "ignore",
                     "binding": "binding-1",
                 }
@@ -457,6 +467,8 @@ async def test_ignore_rejects_every_publication_or_work_update_field() -> None:
             await state.tools[0].handler(
                 json.dumps(
                     {
+                        "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                        "scheduled_cycle_id": None,
                         "mode": "ignore",
                         "binding": "binding-1",
                         "message": "Do not publish this.",
@@ -481,6 +493,7 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
     assert [tool.spec.name for tool in state.tools] == [
         "channel_action",
         "download_external_file",
+        "get_channel_work",
     ]
     download_schema = state.tools[1].spec.input_schema
     properties = download_schema.get("properties")
@@ -643,6 +656,8 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
         await state.tools[0].handler(
             json.dumps(
                 {
+                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                    "scheduled_cycle_id": None,
                     "mode": "continue",
                     "binding": "binding-1",
                     "message": "Attached report.",
@@ -683,6 +698,8 @@ async def test_channel_action_preflights_exchange_without_runtime_storage() -> N
         await state.tools[0].handler(
             json.dumps(
                 {
+                    "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                    "scheduled_cycle_id": None,
                     "mode": "continue",
                     "binding": "binding-1",
                     "message": "Attached report.",
@@ -720,6 +737,8 @@ async def test_continue_requires_unfinished_work() -> None:
             await state.tools[0].handler(
                 json.dumps(
                     {
+                        "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                        "scheduled_cycle_id": None,
                         "mode": "continue",
                         "binding": "binding-1",
                         "title": "Wrapping up the work…",
@@ -740,6 +759,8 @@ def test_finish_requires_message() -> None:
     with pytest.raises(ValueError, match="Finish requires a message"):
         ChannelActionInput.model_validate(
             {
+                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                "scheduled_cycle_id": None,
                 "mode": "finish",
                 "binding": "binding-1",
             }
@@ -751,6 +772,8 @@ def test_request_input_requires_message() -> None:
     with pytest.raises(ValueError, match="Request input requires a message"):
         ChannelActionInput.model_validate(
             {
+                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                "scheduled_cycle_id": None,
                 "mode": "request_input",
                 "binding": "binding-1",
             }
@@ -762,6 +785,8 @@ def test_continue_limits_todos_to_available_activity_blocks() -> None:
     with pytest.raises(ValueError, match="at most 49"):
         ChannelActionInput.model_validate(
             {
+                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                "scheduled_cycle_id": None,
                 "mode": "continue",
                 "binding": "binding-1",
                 "title": "Reviewing the task list…",
@@ -782,6 +807,8 @@ def test_channel_action_rejects_empty_file_lists() -> None:
     with pytest.raises(ValueError, match="at least 1 item"):
         ChannelActionInput.model_validate(
             {
+                "work_cycle_id": "cccccccccccccccccccccccccccccccc",
+                "scheduled_cycle_id": None,
                 "mode": "continue",
                 "binding": "binding-1",
                 "message": "Attached report.",
@@ -848,7 +875,14 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     assert idle is not None
     assert len(idle.continuations) == 1
     assert idle.continuations[0].metadata["active_bindings"] == "binding-2"
-    assert set(idle.continuations[0].metadata) == {"source", "active_bindings"}
+    assert json.loads(idle.continuations[0].metadata["active_work_cycles"]) == {
+        "binding-2": "cccccccccccccccccccccccccccccccc",
+    }
+    assert set(idle.continuations[0].metadata) == {
+        "source",
+        "active_bindings",
+        "active_work_cycles",
+    }
 
 
 @pytest.mark.asyncio
@@ -885,7 +919,8 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     )
     state = await toolkit.update_context(_turn_context())
 
-    channel_action, download_external_file = state.tools
+    channel_action, download_external_file, get_channel_work = state.tools
+    assert get_channel_work.spec.name == "get_channel_work"
     description = " ".join(channel_action.spec.description.split())
     assert "ordinary user explicitly requests external publication" in description
     assert "active binding or prior External Channel history alone" in description

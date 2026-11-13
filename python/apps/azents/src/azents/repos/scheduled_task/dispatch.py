@@ -197,6 +197,8 @@ class ScheduledTaskDispatchRepository:
             )
             await self.cycle_repository.create_admitted(session, snapshot)
             content = render_scheduled_task_runtime_message(
+                cycle_id=cycle_id,
+                binding_id=task.binding_id,
                 title=task.title,
                 objective=task.objective,
                 allow_silent=task.allow_silent,

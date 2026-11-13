@@ -88,7 +88,11 @@ class RoutineCompletionRepository:
             return tuple(
                 item.state
                 for item in await self.states.list_executions(session, scope=scope)
-                if item.state.phase == "started" and item.state.current_run_id == run_id
+                if item.state.phase == "started"
+                and run.work_context.contains_routine(
+                    routine_id=item.state.context.candidate.routine_id,
+                    execution_id=item.state.context.execution_id,
+                )
             )
 
     async def observe_delivery(
@@ -117,7 +121,12 @@ class RoutineCompletionRepository:
             if (
                 current is None
                 or current.state.phase != "completed"
-                or current.state.current_run_id != authority.run_id
+                or not await self.execution_authority.run_carries_execution(
+                    session,
+                    scope=scope,
+                    run_id=authority.run_id,
+                    state=current.state,
+                )
                 or current.state.work != original.work
             ):
                 raise RoutineUnavailable(
@@ -161,7 +170,12 @@ class RoutineCompletionRepository:
             )
             if (
                 record is None
-                or record.state.current_run_id != authority.run_id
+                or not await self.execution_authority.run_carries_execution(
+                    session,
+                    scope=scope,
+                    run_id=authority.run_id,
+                    state=record.state,
+                )
                 or record.state.phase not in {"started", "completed"}
             ):
                 raise RoutineUnavailable(
@@ -180,10 +194,17 @@ class RoutineCompletionRepository:
             )
             await self._require_run(session, authority=authority)
             return tuple(
-                item.state
-                for item in await self.states.list_executions(session, scope=scope)
-                if item.state.phase == "started"
-                and item.state.current_run_id == authority.run_id
+                [
+                    item.state
+                    for item in await self.states.list_executions(session, scope=scope)
+                    if item.state.phase == "started"
+                    and await self.execution_authority.run_carries_execution(
+                        session,
+                        scope=scope,
+                        run_id=authority.run_id,
+                        state=item.state,
+                    )
+                ]
             )
 
     async def list_for_compaction(
@@ -228,7 +249,10 @@ class RoutineCompletionRepository:
             record = await self.states.get_occurrence(
                 session, scope=scope, slug=slug, execution_id=execution_id
             )
-            if record is None or record.state.current_run_id != authority.run_id:
+            if record is None or not run.work_context.contains_routine(
+                routine_id=record.state.context.candidate.routine_id,
+                execution_id=record.state.context.execution_id,
+            ):
                 raise RoutineUnavailable(
                     "Routine occurrence is not available to this Run."
                 )
@@ -271,7 +295,6 @@ class RoutineCompletionRepository:
             completed = RoutineExecutionState(
                 context=current.context,
                 phase="completed",
-                current_run_id=current.current_run_id,
                 started_at=current.started_at,
                 completed_at=now if saved.record is None else saved.record.completed_at,
                 work=work,

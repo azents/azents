@@ -409,10 +409,19 @@ authorized batch appends the corresponding revision event.
 
 Scheduled Toolkit enriches the generated summary before continuity history is
 appended. It removes any stale Scheduled Task section and inserts current started
-cycles ordered by their stable cycle state. Each entry retains only the title,
-objective, schedule, scheduled instant, progress title, and ordered work items
-needed to continue autonomously. Internal Task, cycle, Run, lease, Binding, and
-provider-message identities are omitted.
+cycles ordered by their stable cycle state. Each entry retains the model-facing
+cycle selector, title, objective, schedule, scheduled instant, progress title,
+and ordered work items needed to continue autonomously. Internal Task, Run,
+lease and provider-message identities remain omitted.
+
+Goal and Channel Work snapshots likewise expose their exact logical selectors.
+The summary is context, not authority: the Run's persisted work context and
+canonical domain state survive independently of transcript retention. Scheduled
+request preparation reconstructs applicable selectors from admitted references;
+`get_goal` and scoped `get_channel_work` allow inspection when a summary enrichment
+hook fails open. An unsuccessful or stale compaction creates no new work authority
+or model-input boundary. Auto, manual and input-limit paths retain the same
+enrichment-before-continuity ordering and atomic head settlement.
 
 The enricher reads the current Session-scoped cycle Toolkit State and creates no
 new durable authority. Task deletion, Session archive, or Binding disconnect does

@@ -32,6 +32,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
 )
 from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import RoutineInputPayload, UserMessagePayload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -42,7 +43,7 @@ from azents.rdb.models.routine import RDBRoutine
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.historical_memory_consolidation.execution_lifecycle_test import (
@@ -189,7 +190,7 @@ async def test_archived_started_work_finishes_without_recreating_definition(
 
 
 @pytest.mark.parametrize("ordinary_input", [False, True])
-async def test_archive_requires_actual_routine_only_input_provenance(
+async def test_archive_requires_carried_routine_only_work_context(
     rdb_session_manager: SessionManager[WriteSession],
     *,
     ordinary_input: bool,
@@ -213,12 +214,12 @@ async def test_archive_requires_actual_routine_only_input_provenance(
                 session, run_id=f.authority.run_id, event_ids=[event.id]
             )
     else:
-        # A started snapshot without input provenance cannot create the exception.
+        # Domain state alone must not grant unrelated execution its archive exception.
         async with rdb_session_manager() as session:
-            await session.write_session.execute(
-                sa.delete(RDBAgentRunInputEvent).where(
-                    RDBAgentRunInputEvent.agent_run_id == f.authority.run_id
-                )
+            await f.repository.runs.update(
+                session,
+                f.authority.run_id,
+                AgentRunPatch(work_context=WorkContext.empty()),
             )
     result = await _service(rdb_session_manager).operations.archive_agent_session(
         agent_id=f.scope.agent_id,
@@ -228,6 +229,24 @@ async def test_archive_requires_actual_routine_only_input_provenance(
     assert isinstance(result, Failure) and isinstance(
         result.error, RunningSessionArchiveBlocked
     )
+    async with rdb_session_manager() as session:
+        states = await f.repository.states.list_executions(session, scope=f.scope)
+        assert len(states) == 2
+        assert all(state.state.phase == "started" for state in states)
+
+
+async def test_archive_preserves_work_context_after_input_associations_are_pruned(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    f = await fixture(rdb_session_manager)
+    await _attach_routine_input(rdb_session_manager, f)
+    async with rdb_session_manager() as session:
+        await session.write_session.execute(
+            sa.delete(RDBAgentRunInputEvent).where(
+                RDBAgentRunInputEvent.agent_run_id == f.authority.run_id
+            )
+        )
+    await _archive(rdb_session_manager, f)
     assert (
         len(await f.repository.list_started(scope=f.scope, authority=f.authority)) == 2
     )
@@ -631,7 +650,6 @@ async def test_archive_removes_admitted_trigger_and_retained_completed_records(
     admitted = second.model_copy(
         update={
             "phase": "admitted",
-            "current_run_id": None,
             "started_at": None,
         }
     )

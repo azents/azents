@@ -897,6 +897,7 @@ async def test_channel_action_ignores_connection_health_status() -> None:
     with pytest.raises(ResourceLookupReached):
         await repository.commit_direct_action(
             session,
+            expected_work_cycle_id=None,
             links=(),
             session_id="session-1",
             agent_id="agent-1",
@@ -922,6 +923,7 @@ async def test_request_input_requires_participant_visible_message() -> None:
     with pytest.raises(ValueError, match="Request input requires"):
         await repository.commit_direct_action(
             _session_mock(),
+            expected_work_cycle_id=None,
             links=(),
             session_id="session-1",
             agent_id="agent-1",
@@ -1145,6 +1147,7 @@ async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
 
     transition = await repository.commit_direct_action(
         session,
+        expected_work_cycle_id=current.work_cycle_id,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -1268,6 +1271,7 @@ async def test_continue_after_finished_work_with_tasks_is_visible(
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     transition = await repository.commit_direct_action(
         session,
+        expected_work_cycle_id=None,
         links=(),
         session_id="session-1",
         agent_id="agent-1",
@@ -1403,6 +1407,7 @@ async def _commit_action(
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     transition = await repository.commit_direct_action(
         session,
+        expected_work_cycle_id=current.work_cycle_id,
         links=(),
         session_id="session-1",
         agent_id="agent-1",

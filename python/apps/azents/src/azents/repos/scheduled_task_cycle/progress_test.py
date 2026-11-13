@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRunStatus,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
@@ -25,6 +26,8 @@ from azents.core.external_channel_provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.core.work_context import WorkContext
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -48,6 +51,24 @@ _SESSION_ID = "s" * 32
 _CYCLE_ID = "c" * 32
 _BINDING_ID = "b" * 32
 _RUN_ID = "r" * 32
+_AUTHORITY = SessionResourceAuthority(
+    workspace_id="w" * 32,
+    agent_id=_AGENT_ID,
+    session_id=_SESSION_ID,
+    root_session_id=_SESSION_ID,
+    run_id=_RUN_ID,
+    run_index=1,
+    owner_generation=1,
+)
+
+
+@pytest.fixture(autouse=True)
+def owned_session_fence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate progress planning from the independently tested owner repository."""
+    monkeypatch.setattr(
+        "azents.repos.scheduled_task_cycle.progress.fence_owned_session_mutation",
+        AsyncMock(return_value=SimpleNamespace(stop_requested_at=None)),
+    )
 
 
 class _TrackedSession(AsyncSession):
@@ -106,7 +127,6 @@ def _cycle(
             cron_expression=None,
             timezone=None,
             scheduled_for=_NOW,
-            current_run_id=_RUN_ID,
             started_at=_NOW,
             progress_title=None,
             tracker_desired_revision=desired_revision,
@@ -183,7 +203,12 @@ def _repository(tracker: _TransactionTracker) -> _RepositoryFixture:
 def _scheduled_run() -> SimpleNamespace:
     return SimpleNamespace(
         session_id=_SESSION_ID,
-        scheduled_task_cycle_id=_CYCLE_ID,
+        status=AgentRunStatus.RUNNING,
+        work_context=WorkContext(
+            scheduled_cycle_ids=(_CYCLE_ID,),
+            routine_executions=(),
+            unrelated_input=False,
+        ),
     )
 
 
@@ -245,6 +270,8 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
     provider_repository.prepare_binding_reply_effects.side_effect = prepare_reply
 
     first = await repository.prepare_progress(
+        cycle_id=_CYCLE_ID,
+        authority=_AUTHORITY,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -257,6 +284,8 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
         files=(),
     )
     second = await repository.prepare_progress(
+        cycle_id=_CYCLE_ID,
+        authority=_AUTHORITY,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -323,7 +352,7 @@ async def test_initial_tracker_preserves_scheduled_presentation_and_seed() -> No
 
 
 @pytest.mark.asyncio
-async def test_not_scheduled_precedes_scheduled_only_validation() -> None:
+async def test_unadmitted_selection_fails_without_scheduled_mutation() -> None:
     tracker = _TransactionTracker()
     fixture = _repository(tracker)
     repository = fixture.repository
@@ -331,20 +360,21 @@ async def test_not_scheduled_precedes_scheduled_only_validation() -> None:
     cycle_repository = fixture.cycle_repository
     run_repository.get_by_id.return_value = None
 
-    preparation = await repository.prepare_progress(
-        links=(),
-        agent_id=_AGENT_ID,
-        session_id=_SESSION_ID,
-        run_id=_RUN_ID,
-        binding_id=_BINDING_ID,
-        mode=ExternalChannelActionMode.FINISH,
-        message="Finished.",
-        title=None,
-        tasks=None,
-        files=(),
-    )
-
-    assert preparation.status == "not_scheduled"
+    with pytest.raises(ValueError, match="no active admitted work context"):
+        await repository.prepare_progress(
+            cycle_id=_CYCLE_ID,
+            authority=_AUTHORITY,
+            links=(),
+            agent_id=_AGENT_ID,
+            session_id=_SESSION_ID,
+            run_id=_RUN_ID,
+            binding_id=_BINDING_ID,
+            mode=ExternalChannelActionMode.FINISH,
+            message="Finished.",
+            title=None,
+            tasks=None,
+            files=(),
+        )
     cycle_repository.lock.assert_not_awaited()
     tracker.assert_inactive()
 
@@ -360,6 +390,8 @@ async def test_admission_rejects_superseded_and_inactive_cycles() -> None:
     cycle_repository.lock.side_effect = [_cycle(version=5), None]
 
     superseded = await repository.admit_progress_effects(
+        cycle_id=_CYCLE_ID,
+        authority=_AUTHORITY,
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -367,6 +399,8 @@ async def test_admission_rejects_superseded_and_inactive_cycles() -> None:
         tracker_expected_desired_revision=1,
     )
     inactive = await repository.admit_progress_effects(
+        cycle_id=_CYCLE_ID,
+        authority=_AUTHORITY,
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,

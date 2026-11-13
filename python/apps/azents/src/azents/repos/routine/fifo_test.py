@@ -20,6 +20,7 @@ from azents.core.routine_presentation import (
     render_routine_execution_input,
     routine_execution_ref,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import RoutineInputPayload
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -51,7 +52,6 @@ async def test_fifo_starts_only_current_occurrences_without_replacing_the_run(
                 admitted_at=datetime.datetime(2026, 10, 18, tzinfo=datetime.UTC),
             ),
             phase="admitted",
-            current_run_id=None,
             started_at=None,
             completed_at=None,
             work=None,
@@ -65,7 +65,7 @@ async def test_fifo_starts_only_current_occurrences_without_replacing_the_run(
             session,
             AgentRunCreate(
                 session_id=scope.session_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -141,11 +141,14 @@ async def test_fifo_starts_only_current_occurrences_without_replacing_the_run(
         )
         assert restored is not None and restored.state.phase == "started"
         assert restored.state.context == valid.context
-        assert restored.state.current_run_id == run.id
         assert restored.state.started_at is not None
         same_run = await runs.get_by_id(session, run.id)
         assert same_run is not None and same_run.status is AgentRunStatus.RUNNING
         assert same_run.id == run.id
+        assert same_run.work_context.contains_routine(
+            routine_id=valid.context.candidate.routine_id,
+            execution_id=valid.context.execution_id,
+        )
         assert (
             await runs.get_active_by_session_id(session, session_id=scope.session_id)
             == same_run

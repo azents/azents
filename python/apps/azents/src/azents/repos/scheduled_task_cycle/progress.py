@@ -10,6 +10,7 @@ from azents.core.discord_external_channel_presentation import (
     render_scheduled_task_discord_progress,
 )
 from azents.core.enums import (
+    AgentRunStatus,
     ExternalChannelActionMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelWorkProjectionStatus,
@@ -21,6 +22,7 @@ from azents.core.external_channel_progress import (
     ExternalChannelWorkTask,
     checking_progress,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.slack_external_channel_progress import (
     render_scheduled_task_slack_progress,
 )
@@ -37,14 +39,7 @@ from azents.repos.scheduled_task_cycle.progress_data import (
     ScheduledTaskProgressPreparation,
     ScheduledTaskTrackerEffect,
 )
-
-
-@dataclasses.dataclass(frozen=True)
-class _ScheduledRunResolution:
-    """Whether one Run is Scheduled-bound and its current started cycle."""
-
-    scheduled: bool
-    record: ScheduledTaskCycleRecord | None
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 @dataclasses.dataclass
@@ -98,6 +93,8 @@ class ScheduledTaskProgressRepository:
         agent_id: str,
         session_id: str,
         run_id: str,
+        cycle_id: str,
+        authority: SessionResourceAuthority,
         binding_id: str,
         mode: ExternalChannelActionMode,
         message: str | None,
@@ -107,21 +104,14 @@ class ScheduledTaskProgressRepository:
     ) -> ScheduledTaskProgressPreparation:
         """Prepare one current Scheduled progress action atomically."""
         async with self.session_manager() as session:
-            resolution = await self._resolve_run_cycle(
+            record = await self._resolve_run_cycle(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
                 run_id=run_id,
+                cycle_id=cycle_id,
+                authority=authority,
             )
-            if not resolution.scheduled:
-                return ScheduledTaskProgressPreparation(
-                    status="not_scheduled",
-                    cycle_id=None,
-                    state_revision=None,
-                    reply_plans=(),
-                    tracker=None,
-                )
-            record = resolution.record
             if record is None:
                 return ScheduledTaskProgressPreparation(
                     status="inactive",
@@ -201,18 +191,21 @@ class ScheduledTaskProgressRepository:
         agent_id: str,
         session_id: str,
         run_id: str,
+        cycle_id: str,
+        authority: SessionResourceAuthority,
         state_revision: int,
         tracker_expected_desired_revision: int | None,
     ) -> ScheduledTaskProgressAdmission:
         """Revalidate one prepared progress action before external effects."""
         async with self.session_manager() as session:
-            resolution = await self._resolve_run_cycle(
+            record = await self._resolve_run_cycle(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
                 run_id=run_id,
+                cycle_id=cycle_id,
+                authority=authority,
             )
-            record = resolution.record
             if record is None:
                 return ScheduledTaskProgressAdmission(
                     status="inactive",
@@ -262,27 +255,37 @@ class ScheduledTaskProgressRepository:
         agent_id: str,
         session_id: str,
         run_id: str,
-    ) -> _ScheduledRunResolution:
+        cycle_id: str,
+        authority: SessionResourceAuthority,
+    ) -> ScheduledTaskCycleRecord | None:
+        if (
+            authority.agent_id != agent_id
+            or authority.session_id != session_id
+            or authority.run_id != run_id
+        ):
+            raise ValueError("Scheduled progress execution authority does not match.")
+        owner = await fence_owned_session_mutation(session, authority.execution_owner)
+        if owner.stop_requested_at is not None:
+            raise ValueError("Scheduled progress execution was stopped.")
         run = await self.run_repository.get_by_id(session, run_id)
-        if run is None:
-            return _ScheduledRunResolution(scheduled=False, record=None)
-        if run.session_id != session_id:
-            raise ValueError("The current AgentRun does not belong to this Session.")
-        if run.scheduled_task_cycle_id is None:
-            return _ScheduledRunResolution(scheduled=False, record=None)
+        if (
+            run is None
+            or run.session_id != session_id
+            or run.status is not AgentRunStatus.RUNNING
+            or cycle_id not in run.work_context.scheduled_cycle_ids
+        ):
+            raise ValueError("Scheduled progress has no active admitted work context.")
         cycle = await self.cycle_repository.lock(
             session,
             agent_id=agent_id,
             session_id=session_id,
-            cycle_id=run.scheduled_task_cycle_id,
+            cycle_id=cycle_id,
         )
-        if (
-            cycle is None
-            or cycle.state.phase != "started"
-            or cycle.state.current_run_id != run_id
-        ):
-            return _ScheduledRunResolution(scheduled=True, record=None)
-        return _ScheduledRunResolution(scheduled=True, record=cycle)
+        if cycle is None or cycle.state.phase != "started":
+            return None
+        if cycle.state.workspace_id != authority.workspace_id:
+            raise ValueError("Scheduled progress Workspace does not match.")
+        return cycle
 
     async def _claim_tracker_effect(
         self,

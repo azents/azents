@@ -24,6 +24,7 @@ from azents.core.mailbox_data import (
     MailboxPresentationItem,
     ScheduledTaskContinuationMailboxPayload,
 )
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -263,7 +264,11 @@ async def _create_task_cycle(
     if started:
         run = RDBAgentRun(
             session_id=subject.session_id,
-            scheduled_task_cycle_id=cycle_id,
+            work_context=WorkContext(
+                scheduled_cycle_ids=(cycle_id,),
+                routine_executions=(),
+                unrelated_input=False,
+            ).model_dump(mode="json"),
             run_index=1,
             parent_agent_run_id=None,
             requested_model_target_label=None,
@@ -276,7 +281,6 @@ async def _create_task_cycle(
         cycle = await cycle_repository.start(
             session,
             record=cycle,
-            run_id=run.id,
             started_at=_NOW,
         )
         assert await MailboxRepository().delete_by_session_and_id(
@@ -379,7 +383,7 @@ class TestScheduledTaskLifecycleRepository:
             cycle_id=started.cycle.state.cycle_id,
         )
         assert preserved is not None
-        assert preserved.state.current_run_id == started.run_id
+        assert preserved.state.phase == "started"
         assert started.run_id is not None
         assert (
             await rdb_session.read_session.get(RDBAgentRun, started.run_id) is not None
@@ -410,7 +414,7 @@ class TestScheduledTaskLifecycleRepository:
 
         ordinary = RDBAgentRun(
             session_id=subject.session_id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty().model_dump(mode="json"),
             run_index=2,
             parent_agent_run_id=None,
             requested_model_target_label=None,
@@ -743,6 +747,7 @@ class TestScheduledTaskLifecycleRepository:
             idempotency_key=f"queued-cycle:{cycle_id}",
             payload=ScheduledTaskContinuationMailboxPayload(
                 type="scheduled_task_continuation",
+                source_run_id="r" * 32,
                 cycle_id=cycle_id,
                 items=[
                     MailboxPresentationItem(

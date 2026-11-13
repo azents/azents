@@ -6,12 +6,14 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import AsyncContextManager, Self
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import SessionInferenceState
+from azents.core.work_context import WorkContext
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
@@ -200,7 +202,7 @@ class _RunRepo:
     def __init__(self) -> None:
         self.phases: list[AgentRunPhase] = []
         self.terminal: AgentRunStatus | None = None
-        self.scheduled_task_cycle_id: str | None = None
+        self.work_context = WorkContext.empty()
         self.active_tool_calls: list[ActiveToolCall] = []
         self.active_tool_call_snapshots: list[list[ActiveToolCall]] = []
         self.model_call_started_at: datetime.datetime | None = None
@@ -219,7 +221,7 @@ class _RunRepo:
         return AgentRunState(
             id=run_id if len(run_id) == 32 else "1" * 32,
             session_id="session-1",
-            scheduled_task_cycle_id=self.scheduled_task_cycle_id,
+            work_context=self.work_context,
             run_index=1,
             phase=self.phases[-1] if self.phases else AgentRunPhase.IDLE,
             status=self.terminal or AgentRunStatus.RUNNING,
@@ -2274,10 +2276,18 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     ]
 
 
-async def test_terminal_tool_completes_run_without_another_model_turn() -> None:
+async def test_terminal_tool_completes_run_without_another_model_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A durable terminal tool result ends the Run after its result is finalized."""
+    monkeypatch.setattr(
+        "azents.repos.engine_run_finalization_operation.has_unfinished_work",
+        AsyncMock(return_value=False),
+    )
     run_repo = _RunRepo()
-    run_repo.scheduled_task_cycle_id = "c" * 32
+    run_repo.work_context = run_repo.work_context.model_copy(
+        update={"scheduled_cycle_ids": ("c" * 32,)}
+    )
     transcript_repo = _TranscriptRepo()
     lowerer = _RecordingLowerer()
     normalizer = _OutputSequenceNormalizer(
@@ -2348,10 +2358,36 @@ async def test_terminal_tool_completes_run_without_another_model_turn() -> None:
     )
 
 
-async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch() -> None:
+async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Recovery repairs the missing Tool result and completes without model replay."""
+    monkeypatch.setattr(
+        "azents.repos.engine_run_finalization_operation.has_unfinished_work",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "azents.repos.engine_model_input_operation.has_unfinished_work",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        _Session,
+        "scalar",
+        AsyncMock(
+            return_value={
+                "title": "Scheduled work",
+                "scheduled_for": "2026-11-13T00:00:00Z",
+                "status": "finished",
+                "result": "Scheduled work completed.",
+                "notify": True,
+                "suppression_reason": None,
+            }
+        ),
+    )
     run_repo = _RunRepo()
-    run_repo.scheduled_task_cycle_id = "c" * 32
+    run_repo.work_context = run_repo.work_context.model_copy(
+        update={"scheduled_cycle_ids": ("c" * 32,)}
+    )
     run_repo.terminal_result_event_id = "e" * 32
     run_repo.terminal_result_message = "Scheduled work completed."
     run_repo.active_tool_calls = [
@@ -2365,7 +2401,17 @@ async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch() -
         )
     ]
     transcript_repo = _TranscriptRepo()
-    transcript_repo.events.append(_tool_call_event(name="submit_scheduled_task_result"))
+    call = _tool_call_event(name="submit_scheduled_task_result")
+    assert isinstance(call.payload, ClientToolCallPayload)
+    transcript_repo.events.append(
+        call.model_copy(
+            update={
+                "payload": call.payload.model_copy(
+                    update={"arguments": '{"cycle_id":"' + "c" * 32 + '"}'}
+                ),
+            }
+        )
+    )
     lowerer = _RecordingLowerer()
     normalizer = _OutputSequenceNormalizer([])
     execution = _execution(
@@ -2411,9 +2457,10 @@ async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch() -
     payload = results[0].payload
     assert isinstance(payload, ClientToolResultPayload)
     assert payload.status == "completed"
-    assert payload.output == [
-        OutputTextPart(text="The Scheduled Task result was already committed.")
-    ]
+    assert len(payload.output) == 1
+    assert isinstance(payload.output[0], OutputTextPart)
+    assert '"cycle_id": "' + "c" * 32 + '"' in payload.output[0].text
+    assert '"recovered": true' in payload.output[0].text
 
 
 @pytest.mark.parametrize("needs_follow_up", [True, False])

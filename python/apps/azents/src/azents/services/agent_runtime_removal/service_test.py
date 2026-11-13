@@ -217,6 +217,11 @@ async def test_confirmation_records_private_tree_aggregate_and_exact_replay(
         )
         await session.write_session.execute(
             sa.insert(RDBAgentRun).values(
+                work_context={
+                    "scheduled_cycle_ids": [],
+                    "routine_executions": [],
+                    "unrelated_input": False,
+                },
                 id=uuid4().hex,
                 session_id=subagent_id,
                 run_index=1,

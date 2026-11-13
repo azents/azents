@@ -154,7 +154,6 @@ def _cycle_state(
         cron_expression="0 9 * * *",
         timezone="America/New_York",
         scheduled_for=scheduled_for,
-        current_run_id="r" * 32 if phase == "started" else None,
         started_at=_now() if phase == "started" else None,
         progress_title=None,
         allow_silent=False,
@@ -260,7 +259,6 @@ async def test_create_admitted_persists_complete_snapshot() -> None:
     assert record.state.task_id == "t" * 32
     assert record.state.title == "Daily report"
     assert record.state.scheduled_for == _now()
-    assert record.state.current_run_id is None
     assert record.state.started_at is None
     assert record.state.ordered_tasks == []
     assert record.state.tracker_desired_revision == 0
@@ -287,44 +285,16 @@ async def test_start_uses_exact_version_and_records_first_run() -> None:
     started = await repository.start(
         _session(),
         record=admitted,
-        run_id="r" * 32,
         started_at=started_at,
     )
 
     assert started.state.phase == "started"
-    assert started.state.current_run_id == "r" * 32
+    assert started.state.phase == "started"
     assert started.state.started_at == started_at
     assert started.state.scheduled_for == admitted.state.scheduled_for
     assert started.version == 2
     saved = state_repository.saves[-1]
     assert saved.expected_version == admitted.version
-
-
-async def test_bind_run_preserves_started_snapshot() -> None:
-    """Continuation binding changes only the current Run identity."""
-    repository = _repository().repository
-    admitted = await repository.create_admitted(
-        _session(),
-        _snapshot(),
-    )
-    started = await repository.start(
-        _session(),
-        record=admitted,
-        run_id="r" * 32,
-        started_at=_now(),
-    )
-
-    rebound = await repository.bind_run(
-        _session(),
-        record=started,
-        run_id="n" * 32,
-    )
-
-    assert rebound.state.phase == "started"
-    assert rebound.state.current_run_id == "n" * 32
-    assert rebound.state.started_at == started.state.started_at
-    assert rebound.state.objective == started.state.objective
-    assert rebound.version == 3
 
 
 async def test_update_progress_advances_only_scheduled_tracker_revision() -> None:
@@ -339,7 +309,6 @@ async def test_update_progress_advances_only_scheduled_tracker_revision() -> Non
     started = await repository.start(
         _session(),
         record=admitted,
-        run_id="r" * 32,
         started_at=_now(),
     )
 
@@ -369,7 +338,6 @@ async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> No
     await repository.start(
         _session(),
         record=admitted,
-        run_id="r" * 32,
         started_at=_now(),
     )
     state_repository.conflicts_remaining = 1
@@ -444,7 +412,6 @@ async def test_tracker_settlement_rejects_stale_desired_revision() -> None:
     started = await repository.start(
         _session(),
         record=admitted,
-        run_id="r" * 32,
         started_at=_now(),
     )
     await repository.update_progress(
@@ -490,30 +457,21 @@ def test_cycle_state_rejects_noncanonical_tracker_projection_parts() -> None:
 
 
 async def test_invalid_phase_transitions_are_rejected() -> None:
-    """Start and continuation binding reject the opposite lifecycle phase."""
+    """Already-started work cannot be admitted again."""
     repository = _repository().repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
     )
-    with pytest.raises(ValueError, match="not started"):
-        await repository.bind_run(
-            _session(),
-            record=admitted,
-            run_id="n" * 32,
-        )
-
     started = await repository.start(
         _session(),
         record=admitted,
-        run_id="r" * 32,
         started_at=_now(),
     )
     with pytest.raises(ValueError, match="not admitted"):
         await repository.start(
             _session(),
             record=started,
-            run_id="n" * 32,
             started_at=_now(),
         )
 
@@ -539,7 +497,6 @@ async def test_get_started_filters_admitted_state() -> None:
     await repository.start(
         _session(),
         record=admitted,
-        run_id="r" * 32,
         started_at=_now(),
     )
     started = await repository.get_started(
@@ -550,7 +507,7 @@ async def test_get_started_filters_admitted_state() -> None:
     )
 
     assert started is not None
-    assert started.state.current_run_id == "r" * 32
+    assert started.state.phase == "started"
 
 
 async def test_list_started_filters_and_orders_current_cycle_rows() -> None:

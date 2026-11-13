@@ -247,6 +247,7 @@ class ScheduledTaskChannelService:
         agent_id: str,
         session_id: str,
         run_id: str,
+        cycle_id: str,
         binding_id: str,
         mode: ExternalChannelActionMode,
         message: str | None,
@@ -258,12 +259,16 @@ class ScheduledTaskChannelService:
         provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> ScheduledTaskProgressExecution:
-        """Route one current Scheduled Run action before Channel Work mutation."""
+        """Publish progress for one explicitly selected admitted occurrence."""
+        if authority is None:
+            raise ValueError("Scheduled progress execution authority is unavailable.")
         preparation = await self.progress_repository.prepare_progress(
             links=links,
             agent_id=agent_id,
             session_id=session_id,
             run_id=run_id,
+            cycle_id=cycle_id,
+            authority=authority,
             binding_id=binding_id,
             mode=mode,
             message=message,
@@ -271,8 +276,6 @@ class ScheduledTaskChannelService:
             tasks=tasks,
             files=files,
         )
-        if preparation.status == "not_scheduled":
-            return ScheduledTaskProgressExecution(result=None)
         if preparation.status == "inactive":
             raise ValueError("The current Scheduled Task cycle is no longer active.")
         cycle_id, state_revision = _prepared_progress_identity(preparation)
@@ -284,6 +287,8 @@ class ScheduledTaskChannelService:
             agent_id=agent_id,
             session_id=session_id,
             run_id=run_id,
+            cycle_id=cycle_id,
+            authority=authority,
             state_revision=state_revision,
             tracker_expected_desired_revision=(
                 None if tracker is None else tracker.expected_desired_revision
@@ -369,6 +374,7 @@ class ScheduledTaskChannelService:
         return ScheduledTaskProgressExecution(
             result=ChannelActionResult(
                 binding_id=binding_id,
+                work_id=cycle_id,
                 work_status=ExternalChannelWorkStatus.ACTIVE,
                 state_revision=state_revision,
                 awaiting_input=False,

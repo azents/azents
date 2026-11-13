@@ -22,6 +22,7 @@ from azents.core.mailbox_data import (
     ScheduledTaskContinuationMailboxPayload,
     ScheduledTaskTriggerMailboxPayload,
 )
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -38,6 +39,11 @@ from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
+from azents.repos.work_context import (
+    continuation_work_context,
+    latest_work_execution,
+    scheduled_work_predicate,
+)
 
 _NAMESPACE = "scheduled"
 _STATE_NAME_PREFIX = "cycle:"
@@ -171,6 +177,25 @@ class ScheduledTaskLifecycleRepository:
             cleanup_plans=cleanup.cleanup_plans + remaining_cleanup.cleanup_plans,
         )
 
+    async def _any_started_cycle(
+        self,
+        session: ReadSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        cycle_ids: Sequence[str],
+    ) -> bool:
+        for cycle_id in cycle_ids:
+            cycle = await self._cycle(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                cycle_id=cycle_id,
+            )
+            if cycle is not None and cycle.phase == "started":
+                return True
+        return False
+
     async def archive_allows_active_runs(
         self,
         session: ReadSession,
@@ -197,8 +222,8 @@ class ScheduledTaskLifecycleRepository:
             return True
         active_session_ids: set[str] = set()
         for run in runs:
-            cycle_id = run.scheduled_task_cycle_id
-            if cycle_id is None:
+            cycle_ids = WorkContext.model_validate(run.work_context).scheduled_cycle_ids
+            if not cycle_ids:
                 return False
             agent_id = await session.read_session.scalar(
                 sa.select(RDBAgentSession.agent_id).where(
@@ -207,16 +232,11 @@ class ScheduledTaskLifecycleRepository:
             )
             if agent_id is None:
                 return False
-            cycle = await self._cycle(
+            if not await self._any_started_cycle(
                 session,
                 agent_id=agent_id,
                 session_id=run.session_id,
-                cycle_id=cycle_id,
-            )
-            if (
-                cycle is None
-                or cycle.phase != "started"
-                or cycle.current_run_id != run.id
+                cycle_ids=cycle_ids,
             ):
                 return False
             active_session_ids.add(run.session_id)
@@ -231,7 +251,10 @@ class ScheduledTaskLifecycleRepository:
                     RDBConversation.session_id.in_(session_ids),
                     RDBConversation.session_id == RDBAgentRun.session_id,
                     RDBAgentRun.status == AgentRunStatus.COMPLETED,
-                    RDBAgentRun.scheduled_task_cycle_id.is_not(None),
+                    sa.func.jsonb_array_length(
+                        RDBAgentRun.work_context["scheduled_cycle_ids"]
+                    )
+                    > 0,
                 )
             )
         ).all()
@@ -241,18 +264,14 @@ class ScheduledTaskLifecycleRepository:
                     RDBAgentSession.id == run.session_id
                 )
             )
-            if agent_id is None or run.scheduled_task_cycle_id is None:
+            cycle_ids = WorkContext.model_validate(run.work_context).scheduled_cycle_ids
+            if agent_id is None or not cycle_ids:
                 continue
-            cycle = await self._cycle(
+            if await self._any_started_cycle(
                 session,
                 agent_id=agent_id,
                 session_id=run.session_id,
-                cycle_id=run.scheduled_task_cycle_id,
-            )
-            if (
-                cycle is not None
-                and cycle.phase == "started"
-                and cycle.current_run_id == run.id
+                cycle_ids=cycle_ids,
             ):
                 active_session_ids.add(run.session_id)
         scheduled_mailbox_session_ids: set[str] = set()
@@ -279,11 +298,21 @@ class ScheduledTaskLifecycleRepository:
                     return False
                 scheduled_mailbox_session_ids.add(item.session_id)
                 continue
-            if item.kind is not MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
+            if item.kind not in {
+                MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
+                MailboxItemKind.TURN_ACTION_CONTINUATION,
+            }:
                 return False
-            payload = ScheduledTaskContinuationMailboxPayload.model_validate(
-                item.payload
-            )
+            if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
+                context = await continuation_work_context(session, item=item)
+                if context is None or not context.scheduled_cycle_ids:
+                    return False
+                cycle_ids = context.scheduled_cycle_ids
+            else:
+                payload = ScheduledTaskContinuationMailboxPayload.model_validate(
+                    item.payload
+                )
+                cycle_ids = (payload.cycle_id,)
             agent_id = await session.read_session.scalar(
                 sa.select(RDBAgentSession.agent_id).where(
                     RDBAgentSession.id == item.session_id
@@ -291,13 +320,12 @@ class ScheduledTaskLifecycleRepository:
             )
             if agent_id is None:
                 return False
-            cycle = await self._cycle(
+            if not await self._any_started_cycle(
                 session,
                 agent_id=agent_id,
                 session_id=item.session_id,
-                cycle_id=payload.cycle_id,
-            )
-            if cycle is None or cycle.phase != "started":
+                cycle_ids=cycle_ids,
+            ):
                 return False
             scheduled_mailbox_session_ids.add(item.session_id)
         allowed_running_session_ids = active_session_ids | scheduled_mailbox_session_ids
@@ -350,14 +378,17 @@ class ScheduledTaskLifecycleRepository:
     async def _has_preservable_host(
         session: ReadSession, *, cycle: ScheduledTaskCycleState
     ) -> bool:
-        if cycle.current_run_id is None:
-            return False
-        run = await session.read_session.get(RDBAgentRun, cycle.current_run_id)
+        run = await latest_work_execution(
+            session,
+            session_id=cycle.session_id,
+            predicate=scheduled_work_predicate(cycle.cycle_id),
+        )
         if run is None:
             return False
         if (
             run.session_id != cycle.session_id
-            or run.scheduled_task_cycle_id != cycle.cycle_id
+            or cycle.cycle_id
+            not in WorkContext.model_validate(run.work_context).scheduled_cycle_ids
         ):
             raise RuntimeError("Scheduled Task cycle host identity is inconsistent.")
         if run.status in {
@@ -378,9 +409,20 @@ class ScheduledTaskLifecycleRepository:
                 sa.select(
                     sa.exists().where(
                         RDBMailboxItem.session_id == cycle.session_id,
-                        RDBMailboxItem.kind
-                        == MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
-                        RDBMailboxItem.payload["cycle_id"].astext == cycle.cycle_id,
+                        sa.or_(
+                            sa.and_(
+                                RDBMailboxItem.kind
+                                == MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
+                                RDBMailboxItem.payload["cycle_id"].astext
+                                == cycle.cycle_id,
+                            ),
+                            sa.and_(
+                                RDBMailboxItem.kind
+                                == MailboxItemKind.TURN_ACTION_CONTINUATION,
+                                RDBMailboxItem.payload["predecessor_run_id"].astext
+                                == run.id,
+                            ),
+                        ),
                     )
                 )
             )

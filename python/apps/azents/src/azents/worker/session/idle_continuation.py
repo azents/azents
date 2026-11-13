@@ -132,6 +132,7 @@ class IdleContinuationService:
             case _:
                 assert_never(continuation)
         metadata: dict[str, JSONValue] = dict(continuation.metadata)
+        metadata["continuation_source_run_id"] = run_id
         if continuation.hook_provider_slug is not None:
             metadata["provider_slug"] = continuation.hook_provider_slug
         payload = None
@@ -140,6 +141,7 @@ class IdleContinuationService:
             metadata["title"] = continuation.title
             payload = ScheduledTaskContinuationMailboxPayload(
                 type="scheduled_task_continuation",
+                source_run_id=run_id,
                 cycle_id=continuation.cycle_id,
                 items=[
                     MailboxPresentationItem(
@@ -153,6 +155,7 @@ class IdleContinuationService:
         if isinstance(continuation, RoutineSessionContinuationInput):
             payload = RoutineContinuationMailboxPayload(
                 type="routine_continuation",
+                source_run_id=run_id,
                 executions=continuation.executions,
                 items=[
                     MailboxPresentationItem(

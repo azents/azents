@@ -76,6 +76,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     validate_requested_profile_against_options,
 )
+from azents.core.work_context import WorkContext
 from azents.core.workspace import (
     WorkspaceCreate,
 )
@@ -400,7 +401,7 @@ async def _create_discord_gateway_typing_fixture(
     session.write_session.add(
         RDBAgentRun(
             session_id=agent_session.id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty().model_dump(mode="json"),
             run_index=1,
             parent_agent_run_id=None,
             requested_model_target_label=None,

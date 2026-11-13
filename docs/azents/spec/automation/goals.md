@@ -35,6 +35,7 @@ Fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
+| `goal_id` | `string | null` | Server-issued per-creation identity; null only for empty state |
 | `objective` | `string | null` | User-provided objective text |
 | `status` | `active | paused | blocked | complete | null` | Goal lifecycle state |
 | `created_at` | `string | null` | Creation timestamp |
@@ -69,13 +70,19 @@ Goal Toolkit exposes these unprefixed tools in turns that have session context:
 
 - `get_goal`: read the current session Goal.
 - `create_goal`: create a new Goal when no unfinished Goal exists.
-- `update_goal`: mark the active Goal `complete` or `blocked`.
+- `update_goal`: mark the exact active `goal_id` `complete` or `blocked`.
 
 The exposed Goal tool set is fixed across empty, active, blocked, paused, and complete state. Goal state changes must not add or remove model-visible Goal tools.
 
 Creation and update rules:
 
 - Creating a new Goal is rejected while an unfinished Goal (`active`, `paused`, or `blocked`) exists.
+- A creation allocates one identity shared by composer preparation, its event,
+  and committed Goal state. Objective edits and pause/resume preserve it.
+  A replacement receives a different identity even when its objective is identical.
+- Model status updates compare `goal_id` inside each Toolkit State CAS attempt.
+  A stale selector cannot finish or block a replacement. `get_goal` exposes the
+  current selector without granting additional execution authority.
 - Marking a Goal `complete` requires evidence that the objective is actually complete.
 - Marking a Goal `blocked` is allowed only when the agent cannot make meaningful progress.
 
@@ -156,6 +163,7 @@ Metadata:
   - `source=goal`
   - `provider_slug=goal`
   - `goal_objective=<Goal objective snapshot>`
+  - `goal_id=<exact Goal identity>`
   - `goal_status=<Goal status snapshot>`
   - `goal_created_at=<Goal created_at snapshot>`
   - `goal_updated_at=<Goal updated_at snapshot>`
@@ -210,14 +218,14 @@ The Goal Toolkit prompt itself is fixed instruction text. It does not include th
 objective or status. A model that needs exact current state must call `get_goal`; active-goal idle
 continuation carries the objective through continuation metadata instead of duplicating it in the
 Toolkit prompt. During compaction, Goal Toolkit appends a readable `Goal Snapshot` to the summary
-only when Goal state is unfinished and non-empty. Empty or completed Goal state does not render a
-Goal snapshot section.
+only when Goal state is unfinished and non-empty, including its `goal_id`.
+Empty or completed Goal state does not render a Goal snapshot section.
 
 Lowering rules:
 
 - `EventKind.GOAL_CONTINUATION` always lowers as a user-role compatible reminder
   to keep pursuing the active session Goal.
-- The continuation prompt includes the Goal objective and treats continuation content as internal
+- The continuation prompt includes the Goal objective and exact `goal_id`, and treats continuation content as internal
   control input, not as a new user message.
 - `EventKind.GOAL_UPDATED` lowers as a reminder that the active Goal was updated by the user.
 - If `goal_updated` metadata has `goal_control_action=resume`, the lowerer renders a `goal_resumed`
@@ -301,7 +309,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 ## Goal Toolkit eligibility
 
-Goal Toolkit is a session-scoped Toolkit State tool that is always auto-bound without user settings. State namespace/name is `goal/goal`; it stores `schema_version`, `objective`, `status`, `created_at`, `updated_at`. Supported statuses are `active`, `paused`, `blocked`, `complete`.
+Goal Toolkit is a session-scoped Toolkit State tool that is always auto-bound without user settings. State namespace/name is `goal/goal`; it stores `schema_version`, `goal_id`, `objective`, `status`, `created_at`, `updated_at`. Supported statuses are `active`, `paused`, `blocked`, `complete`.
 
 Exposed tools are `get_goal`, `create_goal`, `update_goal`. `create_goal` fails if unfinished Goal already exists. `update_goal` only allows transitioning active Goal to `complete` or `blocked`.
 

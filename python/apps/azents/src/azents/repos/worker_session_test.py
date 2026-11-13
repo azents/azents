@@ -29,6 +29,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentRunState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -181,7 +182,7 @@ async def create_run(
             AgentRunCreate(
                 session_id=session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 status=status,
             ),
         )
@@ -759,7 +760,7 @@ async def test_recovery_reads_running_before_pending_without_mutation(
             session,
             session_id=fixture.session_id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
     recovered = await fixture.repository.claim_recoverable_agent_run(
         fixture.session_id, owner_generation=fixture.generation

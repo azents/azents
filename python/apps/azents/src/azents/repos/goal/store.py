@@ -3,6 +3,7 @@
 import dataclasses
 from typing import Annotated
 
+from azcommon.uuid import uuid7
 from fastapi import Depends
 
 from azents.core.enums import EventKind
@@ -98,8 +99,8 @@ class GoalStateStore:
         """Fetch Session Goal state in a composing repository transaction."""
         handle = self._make_handle(session, agent_id, session_id)
         if handle is None:
-            return GoalState()
-        return await handle.load(default_factory=GoalState)
+            return GoalState(goal_id=None)
+        return await handle.load(default_factory=lambda: GoalState(goal_id=None))
 
     async def create(
         self,
@@ -113,6 +114,7 @@ class GoalStateStore:
         async with self.session_manager() as session:
             return await self.create_in_session(
                 session,
+                goal_id=uuid7().hex,
                 agent_id=agent_id,
                 session_id=session_id,
                 objective=objective,
@@ -123,6 +125,7 @@ class GoalStateStore:
         self,
         session: WriteSession,
         *,
+        goal_id: str,
         agent_id: str,
         session_id: str,
         objective: str,
@@ -131,7 +134,7 @@ class GoalStateStore:
         """Create a Goal in a composing repository transaction."""
         handle = self._make_handle(session, agent_id, session_id)
         if handle is None:
-            return GoalState()
+            return GoalState(goal_id=None)
         updated: GoalState | None = None
 
         def create_goal(current: GoalState) -> GoalState:
@@ -139,6 +142,7 @@ class GoalStateStore:
             if _unfinished(current):
                 raise GoalAlreadyExistsError("An unfinished goal already exists.")
             updated = GoalState(
+                goal_id=goal_id,
                 objective=objective,
                 status="active",
                 created_at=updated_at,
@@ -146,7 +150,9 @@ class GoalStateStore:
             )
             return updated
 
-        await handle.update(default_factory=GoalState, mutator=create_goal)
+        await handle.update(
+            default_factory=lambda: GoalState(goal_id=None), mutator=create_goal
+        )
         if updated is None:
             raise RuntimeError("Goal create completed without an updated state")
         return updated
@@ -162,10 +168,10 @@ class GoalStateStore:
             await require_active_agent(session, agent_id=agent_id)
             handle = self._make_handle(session, agent_id, session_id)
             if handle is None:
-                return GoalState()
-            cleared = GoalState()
+                return GoalState(goal_id=None)
+            cleared = GoalState(goal_id=None)
             await handle.update(
-                default_factory=GoalState,
+                default_factory=lambda: GoalState(goal_id=None),
                 mutator=lambda _current: cleared,
             )
             return cleared
@@ -183,7 +189,9 @@ class GoalStateStore:
             await require_active_agent(session, agent_id=agent_id)
             handle = self._make_handle(session, agent_id, session_id)
             if handle is None:
-                return GoalObjectiveUpdate(updated=GoalState(), changed=False)
+                return GoalObjectiveUpdate(
+                    updated=GoalState(goal_id=None), changed=False
+                )
             changed = False
             updated: GoalState | None = None
 
@@ -198,7 +206,9 @@ class GoalStateStore:
                 )
                 return updated
 
-            await handle.update(default_factory=GoalState, mutator=update_goal)
+            await handle.update(
+                default_factory=lambda: GoalState(goal_id=None), mutator=update_goal
+            )
             if updated is None:
                 raise RuntimeError("Goal objective update completed without state")
             return GoalObjectiveUpdate(updated=updated, changed=changed)
@@ -240,7 +250,9 @@ class GoalStateStore:
                 )
                 return updated
 
-            await handle.update(default_factory=GoalState, mutator=update_goal)
+            await handle.update(
+                default_factory=lambda: GoalState(goal_id=None), mutator=update_goal
+            )
             if previous_status is None or updated is None:
                 raise RuntimeError("Goal control update completed without state")
             return GoalControlStatusUpdate(
@@ -252,6 +264,7 @@ class GoalStateStore:
     async def set_status(
         self,
         *,
+        goal_id: str,
         agent_id: str,
         session_id: str,
         status: GoalUpdateStatus,
@@ -261,6 +274,7 @@ class GoalStateStore:
         async with self.session_manager() as session:
             return await self.set_status_in_session(
                 session,
+                goal_id=goal_id,
                 agent_id=agent_id,
                 session_id=session_id,
                 status=status,
@@ -271,6 +285,7 @@ class GoalStateStore:
         self,
         session: WriteSession,
         *,
+        goal_id: str,
         agent_id: str,
         session_id: str,
         status: GoalUpdateStatus,
@@ -285,15 +300,21 @@ class GoalStateStore:
 
         def update_goal(current: GoalState) -> GoalState:
             nonlocal previous, updated
-            if current.status != "active" or not current.objective:
-                raise GoalNotActiveError("No active goal exists.")
+            if (
+                current.status != "active"
+                or not current.objective
+                or current.goal_id != goal_id
+            ):
+                raise GoalNotActiveError("The selected Goal is no longer active.")
             previous = current
             updated = current.model_copy(
                 update={"status": status, "updated_at": updated_at}
             )
             return updated
 
-        await handle.update(default_factory=GoalState, mutator=update_goal)
+        await handle.update(
+            default_factory=lambda: GoalState(goal_id=None), mutator=update_goal
+        )
         if previous is None or updated is None:
             raise RuntimeError("Goal status update completed without state")
         return GoalStatusUpdate(previous=previous, updated=updated)

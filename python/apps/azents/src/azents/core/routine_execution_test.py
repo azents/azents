@@ -33,7 +33,6 @@ def execution(scope: RoutineScope) -> RoutineExecutionState:
             admitted_at=_NOW,
         ),
         phase="admitted",
-        current_run_id=None,
         started_at=None,
         completed_at=None,
         work=None,
@@ -74,7 +73,7 @@ def test_phase_contract_separates_start_completion_and_delivery(phase: str) -> N
     values = original.model_dump()
     values["phase"] = phase
     if phase in {"started", "completed"}:
-        values.update(current_run_id="ordinary-run", started_at=_NOW)
+        values.update(started_at=_NOW)
     if phase in {"completed", "cancelled"}:
         values["completed_at"] = _NOW
     if phase == "completed":
@@ -97,7 +96,7 @@ def test_phase_contract_separates_start_completion_and_delivery(phase: str) -> N
     "changes",
     [
         {"phase": "started"},
-        {"current_run_id": "invented-run"},
+        {"started_at": _NOW},
         {"phase": "completed", "completed_at": _NOW},
         {"phase": "cancelled"},
         {"delivery_status": "delivered"},

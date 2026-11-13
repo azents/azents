@@ -4,6 +4,7 @@ from typing import Literal
 
 import azentsadminclient
 import azentspublicclient
+import docker as docker_py
 import requests
 from azentspublicclient.api.scheduled_task_v1_api import ScheduledTaskV1Api
 from azentspublicclient.models.live_event_list_response import LiveEventListResponse
@@ -26,7 +27,11 @@ from support.utils import (
 
 _ONCE_AT = "2099-01-02T03:04:05Z"
 _ONCE_TITLE = "Scheduled Task E2E once"
-_ONCE_OBJECTIVE = "Submit the deterministic Scheduled Task E2E result."
+_ONCE_OBJECTIVE = (
+    "Submit the deterministic Scheduled Task E2E result. "
+    "First create and remove a temporary managed worktree of the registered "
+    "/workspace/agent/scheduled-worktree-source Project."
+)
 _ONCE_RESULT = "SCHEDULED_TASK_E2E_FINISHED"
 _CREATION_TITLE = "Scheduled Task E2E creation"
 _CREATION_OBJECTIVE = "Verify Scheduled Task creation and retrieval."
@@ -50,6 +55,54 @@ class _ScheduledResultObservation(ExtensionObservation):
     result: StrictStr
     notify: StrictBool
     suppression_reason: StrictStr | None
+
+
+class _WorktreeAction(ExtensionObservation):
+    type: StrictStr
+    client_tool_call_id: StrictStr | None = None
+    originating_run_id: StrictStr | None = None
+
+
+class _WorktreeExecution(ExtensionObservation):
+    status: StrictStr
+    action: _WorktreeAction
+
+
+class _WorktreeProjection(ExtensionObservation):
+    execution: _WorktreeExecution
+
+
+class _WorktreeResult(ExtensionObservation):
+    action_execution: _WorktreeProjection
+
+
+def _completed_worktree_sources(
+    public_server_url: str,
+    setup: AgentSessionSetup,
+) -> dict[str, str]:
+    response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{setup.session_id}/history",
+        headers=_headers(setup.access_token),
+        params={"limit": 100},
+        timeout=10,
+    )
+    response.raise_for_status()
+    result = {}
+    for event in decode_history_page(response.json()).items:
+        if event.kind != "action_execution_result":
+            continue
+        observed = _WorktreeResult.model_validate(event.payload)
+        execution = observed.action_execution.execution
+        if execution.status == "completed" and execution.action.type in {
+            "agent_create_git_worktree",
+            "agent_remove_git_worktree",
+        }:
+            assert execution.action.client_tool_call_id is not None
+            assert execution.action.originating_run_id is not None
+            result[execution.action.client_tool_call_id] = (
+                execution.action.originating_run_id
+            )
+    return result
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -223,13 +276,42 @@ def test_session_only_one_time_task_due_now_dispatches_and_terminalizes(
     azents_admin_server_url: str,
     azents_engine_worker_container: Container,
 ) -> None:
-    """A one-time Task due at the controlled pass instant runs immediately."""
+    """A due occurrence survives real create/remove action continuations."""
     del azents_engine_worker_container
     setup = _setup(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
     )
+    client = docker_py.from_env()
+    try:
+        runtimes = client.containers.list(
+            filters={"label": f"azents/agent-id={setup.agent_id}"},
+        )
+        assert len(runtimes) == 1
+        prepared = runtimes[0].exec_run(
+            [
+                "sh",
+                "-lc",
+                "set -eu; mkdir -p /workspace/agent/scheduled-worktree-source; "
+                "cd /workspace/agent/scheduled-worktree-source; "
+                "git init -b main; git config user.email e2e@example.com; "
+                "git config user.name 'Azents E2E'; "
+                "printf 'Scheduled continuity\\n' > README.md; "
+                "git add README.md; git commit -m 'prepare scheduled worktree source'",
+            ]
+        )
+        assert prepared.exit_code == 0
+    finally:
+        client.close()
+    registered = requests.post(
+        f"{azents_public_server_url}/chat/v1/agents/{setup.agent_id}"
+        f"/sessions/{setup.session_id}/projects/register",
+        headers=_headers(setup.access_token),
+        json={"path": "/workspace/agent/scheduled-worktree-source"},
+        timeout=30,
+    )
+    registered.raise_for_status()
     scheduled_api = ScheduledTaskV1Api(public_api_client)
     headers = _headers(setup.access_token)
     created = scheduled_api.scheduled_task_v1_create_scheduled_task(
@@ -284,6 +366,11 @@ def test_session_only_one_time_task_due_now_dispatches_and_terminalizes(
         "notify": False,
         "suppression_reason": "All checks completed; nothing to report.",
     }
+    worktree_sources = _completed_worktree_sources(azents_public_server_url, setup)
+    assert (
+        worktree_sources["call_scheduled_worktree_create"]
+        != worktree_sources["call_scheduled_worktree_remove"]
+    )
     remaining = scheduled_api.scheduled_task_v1_list_scheduled_tasks(
         setup.agent_id,
         setup.workspace_handle,

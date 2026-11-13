@@ -4920,6 +4920,7 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
             metadata={},
             payload=build_external_channel_mailbox_payload(
                 item,
+                work_cycle_id=None,
                 context_omitted=item.context_omitted,
                 initial_title_eligible=item.prompt_role == "invocation",
             ),

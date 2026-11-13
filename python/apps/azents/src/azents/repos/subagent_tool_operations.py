@@ -20,6 +20,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.mailbox_data import MailboxItemCreate
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentRunState, Event
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
@@ -308,7 +309,7 @@ class SubagentToolOperationRepository:
                 session,
                 session_id=child.agent_session_id,
                 parent_agent_run_id=parent_run.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             )
             await self.agent_session_repository.set_applied_inference_profile(
                 session,

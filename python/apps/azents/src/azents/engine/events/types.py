@@ -43,6 +43,7 @@ from azents.core.routine_judgment import (
     RoutineJudgmentDecision,
 )
 from azents.core.vfs import VfsProjection
+from azents.core.work_context import WorkContext
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
@@ -402,6 +403,7 @@ class ExternalChannelMessagePayload(BaseModel):
     resource_type: ExternalChannelResourceType
     binding_id: str = Field(min_length=1)
     invocation_batch_id: str = Field(min_length=1)
+    work_cycle_id: str | None = Field(default=None)
     external_message_id: str = Field(min_length=1)
     revision_id: str | None = Field(default=None, exclude=True)
     revision_kind: ExternalChannelMessageRevisionKind = Field(
@@ -1099,7 +1101,7 @@ class AgentRunState(BaseModel):
 
     id: str = Field(min_length=32, max_length=32)
     session_id: str = Field(min_length=1)
-    scheduled_task_cycle_id: str | None = Field(min_length=32, max_length=32)
+    work_context: WorkContext
     run_index: int = Field(ge=1)
     phase: AgentRunPhase
     status: AgentRunStatus

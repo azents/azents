@@ -381,7 +381,6 @@ def _started_cycle() -> ScheduledTaskCycleRecord:
             cron_expression=None,
             timezone=None,
             scheduled_for=_NOW,
-            current_run_id="r" * 32,
             started_at=_NOW,
             progress_title=None,
             ordered_tasks=[],

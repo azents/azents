@@ -13,7 +13,10 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectOutcome
-from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
+from azents.core.scheduled_task import (
+    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+    ScheduledTaskCycleTarget,
+)
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -127,7 +130,7 @@ class DeleteScheduledTaskInput(BaseModel):
     task_id: str = Field(min_length=32, max_length=32)
 
 
-class SubmitScheduledTaskResultInput(BaseModel):
+class SubmitScheduledTaskResultInput(ScheduledTaskCycleTarget):
     """submit_scheduled_task_result tool input."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -218,10 +221,15 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
 
     async def get_dynamic_prompt(self, context: TurnContext) -> str:
         """Return execution guidance only for the current started cycle."""
-        cycle = await self._active_cycle(context.run_id)
-        if cycle is None:
-            return ""
-        return render_scheduled_task_cycle_guidance(cycle.state)
+        cycles = await self.operations.active_cycles(
+            workspace_id=self.workspace_id,
+            agent_id=self.agent_id,
+            session_id=self.session_id,
+            run_id=context.run_id,
+        )
+        return "\n\n".join(
+            render_scheduled_task_cycle_guidance(cycle.state) for cycle in cycles
+        )
 
     def hooks(self) -> RuntimeHooks:
         """Return Scheduled idle and compaction continuity hooks."""
@@ -245,6 +253,8 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     cycle_id=state.cycle_id,
                     title=state.title,
                     content=render_scheduled_task_runtime_message(
+                        cycle_id=state.cycle_id,
+                        binding_id=state.binding_id,
                         title=state.title,
                         objective=state.objective,
                         allow_silent=state.allow_silent,
@@ -275,6 +285,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
     async def _active_cycle(
         self,
         run_id: str,
+        cycle_id: str,
     ) -> ScheduledTaskCycleRecord | None:
         """Resolve the current Run's valid started cycle binding."""
         return await self.operations.active_cycle(
@@ -282,6 +293,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             agent_id=self.agent_id,
             session_id=self.session_id,
             run_id=run_id,
+            cycle_id=cycle_id,
         )
 
     async def _started_cycle_states(self) -> list[ScheduledTaskCycleState]:
@@ -413,7 +425,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             if context is None:
                 raise FunctionToolError("Scheduled Task execution context is missing.")
             try:
-                cycle = await self._active_cycle(context.run_id)
+                cycle = await self._active_cycle(context.run_id, args.cycle_id)
                 runtime_context = (
                     None
                     if self.runtime_context_store is None
@@ -444,6 +456,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     agent_id=self.agent_id,
                     session_id=self.session_id,
                     run_id=context.run_id,
+                    cycle_id=args.cycle_id,
                     status=args.status,
                     result=args.result,
                     notify=args.notify,
@@ -485,6 +498,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             return FunctionToolResult(
                 output=_json(
                     {
+                        "cycle_id": args.cycle_id,
                         "status": payload.status,
                         "result": payload.result,
                         "notify": payload.notify,
@@ -508,7 +522,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                         ],
                     }
                 ),
-                terminal_run=True,
+                terminal_run=outcome.finish_run,
             )
 
         return make_tool(

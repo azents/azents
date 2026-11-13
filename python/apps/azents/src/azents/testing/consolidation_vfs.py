@@ -15,6 +15,7 @@ from azents.core.historical_memory_consolidation import (
 )
 from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.engine.run.types import FunctionTool, FunctionToolResult
 from azents.engine.tooling.execution_context import (
     client_tool_execution_context,
@@ -69,6 +70,7 @@ async def create_memory_test_principal(
         run_id = uuid7().hex
         await session.write_session.execute(
             sa.insert(RDBAgentRun).values(
+                work_context=WorkContext.empty().model_dump(mode="json"),
                 id=run_id,
                 session_id=binding.session_id,
                 run_index=1,

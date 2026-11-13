@@ -20,6 +20,7 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.mailbox_data import MailboxItem
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session_capabilities import ReadSession
 from azents.repos.subagent_terminal_result import SubagentTerminalResultRepository
@@ -76,7 +77,7 @@ def _run(
     return AgentRunState(
         id=run_id,
         session_id=session_id,
-        scheduled_task_cycle_id=None,
+        work_context=WorkContext.empty(),
         run_index=run_index,
         phase=AgentRunPhase.IDLE,
         status=status,

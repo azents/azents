@@ -55,7 +55,10 @@ def format_plain_system_reminder(text: str) -> str:
     return f"<system-reminder>\n{escape(text)}\n</system-reminder>"
 
 
-def format_goal_continuation_reminder(goal_objective: str | None) -> str:
+def format_goal_continuation_reminder(
+    goal_objective: str | None,
+    goal_id: str | None,
+) -> str:
     """Render goal_continuation event as model input prompt."""
     parts = [
         "Continue pursuing the active session goal.",
@@ -68,18 +71,22 @@ def format_goal_continuation_reminder(goal_objective: str | None) -> str:
         "condition has repeated and you cannot make meaningful progress without",
         "user input or an external-state change.",
     ]
+    data = []
     if goal_objective:
-        data = (SystemReminderDataItem(name="goal_objective", value=goal_objective),)
-    else:
-        data = ()
+        data.append(SystemReminderDataItem(name="goal_objective", value=goal_objective))
+    if goal_id:
+        data.append(SystemReminderDataItem(name="goal_id", value=goal_id))
     return format_system_reminder(
         reminder_type="goal_continuation",
         instruction="\n".join(parts),
-        data=data,
+        data=tuple(data),
     )
 
 
-def format_goal_updated_reminder(goal_objective: str | None) -> str:
+def format_goal_updated_reminder(
+    goal_objective: str | None,
+    goal_id: str | None,
+) -> str:
     """Render goal_updated event as model input prompt."""
     parts = [
         "The active session goal was updated by the user.",
@@ -87,14 +94,15 @@ def format_goal_updated_reminder(goal_objective: str | None) -> str:
         "Do not treat the previous goal wording as authoritative if it conflicts "
         "with this update.",
     ]
+    data = []
     if goal_objective:
-        data = (SystemReminderDataItem(name="goal_objective", value=goal_objective),)
-    else:
-        data = ()
+        data.append(SystemReminderDataItem(name="goal_objective", value=goal_objective))
+    if goal_id:
+        data.append(SystemReminderDataItem(name="goal_id", value=goal_id))
     return format_system_reminder(
         reminder_type="goal_updated",
         instruction="\n".join(parts),
-        data=data,
+        data=tuple(data),
     )
 
 
@@ -103,11 +111,12 @@ def format_external_channel_continuation_reminder(
 ) -> str:
     """Render an External Channel continuation as model input prompt."""
     handles = metadata.get("active_bindings")
-    data = (
-        ()
-        if not handles
-        else (SystemReminderDataItem(name="active_bindings", value=handles),)
-    )
+    data = []
+    if handles:
+        data.append(SystemReminderDataItem(name="active_bindings", value=handles))
+    cycles = metadata.get("active_work_cycles")
+    if cycles:
+        data.append(SystemReminderDataItem(name="active_work_cycles", value=cycles))
     return format_system_reminder(
         reminder_type="external_channel_continuation",
         instruction=(
@@ -115,16 +124,19 @@ def format_external_channel_continuation_reminder(
             "handles and existing conversation or compacted context to choose the "
             "work to advance. Use `channel_action` for any external publication. "
             "If a binding has no unfinished work, call `channel_action` with "
-            '`mode="ignore"` and that binding handle. Do not include a message, '
+            '`mode="ignore"` and the exact work_cycle_id for that binding. '
+            "Use get_channel_work when the selector is unavailable. "
+            "Do not include a message, "
             "title, task update, or files. Successful ignore silently finishes "
             "the Channel Work so it does not schedule another continuation."
         ),
-        data=data,
+        data=tuple(data),
     )
 
 
 def format_goal_resumed_reminder(
     *,
+    goal_id: str | None,
     goal_objective: str | None,
     previous_goal_status: str | None,
     resume_hint: str | None,
@@ -142,6 +154,8 @@ def format_goal_resumed_reminder(
         "blocking condition repeats and meaningful progress is impossible.",
     ]
     data: list[SystemReminderDataItem] = []
+    if goal_id:
+        data.append(SystemReminderDataItem(name="goal_id", value=goal_id))
     if goal_objective:
         data.append(SystemReminderDataItem(name="goal_objective", value=goal_objective))
     if previous_goal_status:

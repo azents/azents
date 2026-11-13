@@ -473,11 +473,20 @@ class ChatWriteOperationsRepository:
                     session,
                     session_id,
                 )
+                retry_context = await self.routine_execution_repository.retry_context(
+                    session,
+                    scope=RoutineScope(
+                        workspace_id=locked.workspace_id,
+                        agent_id=locked.agent_id,
+                        session_id=session_id,
+                    ),
+                    context=original_run.work_context,
+                )
                 retry_run = await self.agent_run_repository.create_pending(
                     session,
                     session_id=session_id,
                     parent_agent_run_id=None,
-                    scheduled_task_cycle_id=None,
+                    work_context=retry_context,
                 )
                 await self.agent_run_repository.copy_requested_inference_profile(
                     session,
@@ -488,16 +497,6 @@ class ChatWriteOperationsRepository:
                     session,
                     run_id=retry_run.id,
                     event_ids=original_input_event_ids,
-                )
-                await self.routine_execution_repository.bind_retry(
-                    session,
-                    scope=RoutineScope(
-                        workspace_id=locked.workspace_id,
-                        agent_id=locked.agent_id,
-                        session_id=session_id,
-                    ),
-                    source=original_run,
-                    target=retry_run,
                 )
                 await self.agent_session_repository.mark_running(session, session_id)
 

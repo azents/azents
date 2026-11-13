@@ -6,6 +6,7 @@ import enum
 import logging
 from typing import Annotated, Literal, Protocol, assert_never
 
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from pydantic import TypeAdapter
 
@@ -346,7 +347,9 @@ class TurnActionCapabilityRegistry:
         if not objective:
             return _handled_failure("Goal objective is required.")
         updated_at = datetime.datetime.now(datetime.UTC).isoformat()
+        goal_id = uuid7().hex
         updated = GoalState(
+            goal_id=goal_id,
             objective=objective,
             status="active",
             created_at=updated_at,
@@ -357,7 +360,9 @@ class TurnActionCapabilityRegistry:
             events=[
                 TurnActionPreparedEvent(
                     kind=EventKind.GOAL_UPDATED,
-                    payload=_goal_updated_payload(snapshot, action="create"),
+                    payload=_goal_updated_payload(
+                        snapshot, goal_id=goal_id, action="create"
+                    ),
                     external_id_suffix="goal_updated",
                 )
             ],
@@ -366,6 +371,7 @@ class TurnActionCapabilityRegistry:
             handled_failure=None,
             operation_action=None,
             goal_create=MailboxGoalCreate(
+                goal_id=goal_id,
                 objective=objective,
                 updated_at=updated_at,
             ),
@@ -483,6 +489,7 @@ def _skill_definition(item: SkillProjectionItem) -> TurnActionDefinition:
 def _goal_updated_payload(
     snapshot: GoalStateSnapshot,
     *,
+    goal_id: str,
     action: str,
 ) -> dict[str, JSONValue]:
     """Return goal_updated event payload for a Goal side effect."""
@@ -495,6 +502,7 @@ def _goal_updated_payload(
                 "source": "goal",
                 "provider_slug": "goal",
                 "goal_control_action": action,
+                "goal_id": goal_id,
                 "goal_objective": snapshot.objective or "",
                 "goal_status": snapshot.status or "",
                 "goal_created_at": snapshot.created_at or "",

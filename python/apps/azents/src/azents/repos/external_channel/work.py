@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import Callable, Sequence
 from typing import Literal, assert_never
+from uuid import NAMESPACE_URL, uuid5
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -1200,6 +1201,7 @@ class ExternalChannelWorkRepository:
         return [
             ChannelWorkSnapshot(
                 binding_id=binding.id,
+                work_cycle_id=work.work_cycle_id,
                 provider=connection.provider,
                 resource_label=_resource_label(resource.labels, binding.id),
                 title=work.title,
@@ -1223,6 +1225,7 @@ class ExternalChannelWorkRepository:
         run_id: str | None,
         client_tool_call_id: str,
         binding_id: str,
+        expected_work_cycle_id: str | None,
         mode: ExternalChannelActionMode,
         message: str | None,
         title: str | None,
@@ -1231,7 +1234,11 @@ class ExternalChannelWorkRepository:
         now: datetime.datetime,
     ) -> ChannelActionTransition:
         """Commit canonical Work and return process-local provider effects."""
-        del run_id
+        creation_id = uuid5(
+            NAMESPACE_URL,
+            f"azents-channel-work:{session_id}:{binding_id}:{run_id}:"
+            f"{client_tool_call_id}",
+        ).hex
         requested_tasks = list(tasks) if tasks is not None else None
         if mode is ExternalChannelActionMode.FINISH and message is None:
             raise ValueError("Finish requires a final External Channel reply.")
@@ -1314,7 +1321,7 @@ class ExternalChannelWorkRepository:
             return ChannelWorkState(
                 schema_version=5,
                 binding_id=binding.id,
-                work_cycle_id=uuid7().hex,
+                work_cycle_id=creation_id,
                 status=ExternalChannelWorkStatus.ACTIVE,
                 tracker_visibility=tracker_visibility,
                 slack_presence_thread_ts=_slack_resource_thread_ts(
@@ -1332,20 +1339,50 @@ class ExternalChannelWorkRepository:
                 projection_parts=[],
             )
 
+        initial: ChannelWorkState | None = None
+
         def default_work() -> ChannelWorkState:
-            return new_work("visible")
+            nonlocal initial
+            if mode is ExternalChannelActionMode.IGNORE:
+                raise ValueError("Ignore requires an exact active work_cycle_id.")
+            if expected_work_cycle_id is not None:
+                raise ValueError("The selected Channel Work is no longer active.")
+            initial = new_work("visible")
+            return initial
 
         def transition(
             current: ChannelWorkState,
         ) -> ChannelWorkStateMutation[ChannelActionTransition]:
-            if mode is ExternalChannelActionMode.IGNORE:
-                if current.status is not ExternalChannelWorkStatus.ACTIVE:
-                    raise ValueError("Ignore requires active Channel Work.")
-            work = (
-                new_work(current.tracker_visibility)
-                if current.status is ExternalChannelWorkStatus.FINISHED
-                else current.model_copy(deep=True)
-            )
+            if current is initial:
+                work = current.model_copy(deep=True)
+            elif expected_work_cycle_id is None:
+                if mode is ExternalChannelActionMode.IGNORE:
+                    raise ValueError("Ignore requires an exact active work_cycle_id.")
+                if current.work_cycle_id == creation_id:
+                    return ChannelWorkStateMutation(
+                        state=current,
+                        result=ChannelActionTransition(
+                            binding_id=binding.id,
+                            work_id=current.work_cycle_id,
+                            work_status=current.status,
+                            state_revision=current.state_revision,
+                            effects=(),
+                        ),
+                        changed=False,
+                    )
+                if current.status is ExternalChannelWorkStatus.ACTIVE:
+                    raise ValueError(
+                        "Active Channel Work requires its exact work_cycle_id; "
+                        "use get_channel_work to inspect it."
+                    )
+                work = new_work(current.tracker_visibility)
+            else:
+                if (
+                    current.status is not ExternalChannelWorkStatus.ACTIVE
+                    or current.work_cycle_id != expected_work_cycle_id
+                ):
+                    raise ValueError("The selected Channel Work is no longer active.")
+                work = current.model_copy(deep=True)
             effects: list[ChannelActionEffectPlan] = []
 
             def append_effect(

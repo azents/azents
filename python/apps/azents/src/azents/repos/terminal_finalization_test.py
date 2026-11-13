@@ -18,6 +18,7 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.mailbox_data import MailboxItem, MailboxItemCreate
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
@@ -374,7 +375,7 @@ def _fixture(
         run=AgentRunState(
             id=_RUN_ID,
             session_id=source.agent_session_id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
             run_index=1,
             phase=AgentRunPhase.IDLE,
             status=status,

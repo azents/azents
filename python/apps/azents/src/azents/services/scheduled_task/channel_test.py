@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.config import Config
 from azents.core.enums import (
+    AgentRunStatus,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
@@ -35,6 +36,7 @@ from azents.core.external_channel_provider_effect import (
     ProviderTarget,
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.core.work_context import WorkContext
 from azents.rdb.session_capabilities import (
     ReadWriteSession,
     WriteSession,
@@ -80,6 +82,15 @@ _SESSION_ID = "s" * 32
 _CYCLE_ID = "c" * 32
 _BINDING_ID = "b" * 32
 _RUN_ID = "r" * 32
+_AUTHORITY = SessionResourceAuthority(
+    workspace_id="w" * 32,
+    agent_id=_AGENT_ID,
+    session_id=_SESSION_ID,
+    root_session_id=_SESSION_ID,
+    run_id=_RUN_ID,
+    run_index=1,
+    owner_generation=1,
+)
 
 
 @asynccontextmanager
@@ -143,7 +154,6 @@ def _cycle(
             cron_expression=None,
             timezone=None,
             scheduled_for=_NOW,
-            current_run_id=_RUN_ID,
             started_at=_NOW,
             progress_title=None,
             tracker_desired_revision=desired_revision,
@@ -419,6 +429,7 @@ async def test_scheduled_continue_updates_and_settles_tracker() -> None:
     )
 
     execution = await service.execute_progress(
+        cycle_id=_CYCLE_ID,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -430,7 +441,7 @@ async def test_scheduled_continue_updates_and_settles_tracker() -> None:
         tasks=[task],
         files=(),
         file_storage=None,
-        authority=None,
+        authority=_AUTHORITY,
         provider_delivery_service=None,
         resolve_runtime_target=None,
     )
@@ -455,7 +466,7 @@ async def test_scheduled_continue_updates_and_settles_tracker() -> None:
             file_storage=None,
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
-            authority=None,
+            authority=_AUTHORITY,
             provider_delivery_service=None,
             resolve_runtime_target=None,
         ),
@@ -464,7 +475,13 @@ async def test_scheduled_continue_updates_and_settles_tracker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_external_effects_observe_zero_active_database_transactions() -> None:
+async def test_external_effects_observe_zero_active_database_transactions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "azents.repos.scheduled_task_cycle.progress.fence_owned_session_mutation",
+        AsyncMock(return_value=SimpleNamespace(stop_requested_at=None)),
+    )
     transaction_tracker = _TransactionTracker()
     run_repository = AsyncMock(spec=AgentRunRepository)
     cycle_repository = AsyncMock(spec=ScheduledTaskCycleRepository)
@@ -485,7 +502,12 @@ async def test_external_effects_observe_zero_active_database_transactions() -> N
     )
     run_repository.get_by_id.return_value = SimpleNamespace(
         session_id=_SESSION_ID,
-        scheduled_task_cycle_id=_CYCLE_ID,
+        status=AgentRunStatus.RUNNING,
+        work_context=WorkContext(
+            scheduled_cycle_ids=(_CYCLE_ID,),
+            routine_executions=(),
+            unrelated_input=False,
+        ),
     )
     cycle_repository.lock.side_effect = [initial, claimed]
     cycle_repository.update_progress.return_value = updated
@@ -547,6 +569,7 @@ async def test_external_effects_observe_zero_active_database_transactions() -> N
     )
 
     execution = await service.execute_progress(
+        cycle_id=_CYCLE_ID,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -567,7 +590,7 @@ async def test_external_effects_observe_zero_active_database_transactions() -> N
         ],
         files=(),
         file_storage=None,
-        authority=None,
+        authority=_AUTHORITY,
         provider_delivery_service=None,
         resolve_runtime_target=None,
     )
@@ -597,6 +620,7 @@ async def test_terminalization_winning_after_progress_commit_suppresses_effects(
     )
 
     execution = await service.execute_progress(
+        cycle_id=_CYCLE_ID,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -608,7 +632,7 @@ async def test_terminalization_winning_after_progress_commit_suppresses_effects(
         tasks=None,
         files=(),
         file_storage=None,
-        authority=None,
+        authority=_AUTHORITY,
         provider_delivery_service=None,
         resolve_runtime_target=None,
     )
@@ -655,6 +679,7 @@ async def test_newer_progress_revision_suppresses_prepared_reply_and_tracker() -
 
     execution_task = asyncio.create_task(
         service.execute_progress(
+            cycle_id=_CYCLE_ID,
             links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
@@ -666,7 +691,7 @@ async def test_newer_progress_revision_suppresses_prepared_reply_and_tracker() -
             tasks=[task],
             files=(),
             file_storage=None,
-            authority=None,
+            authority=_AUTHORITY,
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
@@ -704,6 +729,7 @@ async def test_newer_progress_revision_suppresses_message_only_reply() -> None:
     )
 
     execution = await service.execute_progress(
+        cycle_id=_CYCLE_ID,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -715,7 +741,7 @@ async def test_newer_progress_revision_suppresses_message_only_reply() -> None:
         tasks=None,
         files=(),
         file_storage=None,
-        authority=None,
+        authority=_AUTHORITY,
         provider_delivery_service=None,
         resolve_runtime_target=None,
     )
@@ -751,6 +777,7 @@ async def test_tracker_desired_revision_check_preserves_admitted_reply() -> None
     )
 
     execution = await service.execute_progress(
+        cycle_id=_CYCLE_ID,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -771,7 +798,7 @@ async def test_tracker_desired_revision_check_preserves_admitted_reply() -> None
         ],
         files=(),
         file_storage=None,
-        authority=None,
+        authority=_AUTHORITY,
         provider_delivery_service=None,
         resolve_runtime_target=None,
     )
@@ -837,6 +864,7 @@ async def test_tracker_outcomes_settle_without_retry(
     action_service.execute_binding_effect.return_value = provider_outcome
 
     execution = await service.execute_progress(
+        cycle_id=_CYCLE_ID,
         links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
@@ -857,7 +885,7 @@ async def test_tracker_outcomes_settle_without_retry(
         ],
         files=(),
         file_storage=None,
-        authority=None,
+        authority=_AUTHORITY,
         provider_delivery_service=None,
         resolve_runtime_target=None,
     )
@@ -906,6 +934,7 @@ async def test_cancellation_after_provider_return_does_not_replay_or_settle() ->
     progress_repository.settle_tracker.side_effect = settle_tracker
     execution_task = asyncio.create_task(
         service.execute_progress(
+            cycle_id=_CYCLE_ID,
             links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
@@ -926,7 +955,7 @@ async def test_cancellation_after_provider_return_does_not_replay_or_settle() ->
             ],
             files=(),
             file_storage=None,
-            authority=None,
+            authority=_AUTHORITY,
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
@@ -959,6 +988,7 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
 
     with pytest.raises(ValueError, match="only supports continue"):
         await service.execute_progress(
+            cycle_id=_CYCLE_ID,
             links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
@@ -970,7 +1000,7 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
             tasks=None,
             files=(),
             file_storage=None,
-            authority=None,
+            authority=_AUTHORITY,
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
@@ -979,6 +1009,7 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
     )
     with pytest.raises(ValueError, match="exact current Binding"):
         await service.execute_progress(
+            cycle_id=_CYCLE_ID,
             links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
@@ -990,7 +1021,7 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
             tasks=None,
             files=(),
             file_storage=None,
-            authority=None,
+            authority=_AUTHORITY,
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
@@ -1018,7 +1049,7 @@ async def test_quiet_terminal_prepares_no_reply_or_unavailable_delivery() -> Non
         snapshot,
         files=(),
         file_storage=None,
-        authority=None,
+        authority=_AUTHORITY,
         provider_delivery_service=None,
         resolve_runtime_target=None,
     )
@@ -1219,7 +1250,7 @@ async def test_native_presentation_preparation_closes_before_provider_io(
             snapshot,
             files=(),
             file_storage=None,
-            authority=None,
+            authority=_AUTHORITY,
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
@@ -1278,7 +1309,7 @@ async def test_native_terminal_preparation_rolls_back_entire_group_on_cleanup_er
             snapshot,
             files=(),
             file_storage=None,
-            authority=None,
+            authority=_AUTHORITY,
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )

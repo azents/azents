@@ -44,6 +44,7 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.mailbox_data import MailboxItemCreate
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.tools import PublishEventFn, ToolkitStatus, TurnContext
+from azents.core.work_context import WorkContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
 from azents.engine.run.emit import PublishedEvent
@@ -564,7 +565,7 @@ class _AgentRunRepository:
         self.parent_run = AgentRunState(
             id=_PARENT_RUN_ID,
             session_id="root-session",
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
             run_index=1,
             phase=AgentRunPhase.EXECUTING_TOOLS,
             status=AgentRunStatus.RUNNING,
@@ -589,7 +590,7 @@ class _AgentRunRepository:
             "child-session": AgentRunState(
                 id="run".rjust(32, "0"),
                 session_id="child-session",
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 run_index=1,
                 phase=AgentRunPhase.IDLE,
                 status=AgentRunStatus.COMPLETED,
@@ -1470,7 +1471,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         {
             "session_id": child.agent_session_id,
             "parent_agent_run_id": _PARENT_RUN_ID,
-            "scheduled_task_cycle_id": None,
+            "work_context": WorkContext.empty(),
         }
     ]
     assert repo.inference_states == [
@@ -1547,7 +1548,7 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
     assert run_repo.pending_creates[0] == {
         "session_id": "researcher-session",
         "parent_agent_run_id": _PARENT_RUN_ID,
-        "scheduled_task_cycle_id": None,
+        "work_context": WorkContext.empty(),
     }
     child_state = repo.inference_states[0]
     assert child_state[0] == "researcher-session"
@@ -1958,7 +1959,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
     run_repo.latest_by_session_id["child-session"] = AgentRunState(
         id="running-run".rjust(32, "0"),
         session_id="child-session",
-        scheduled_task_cycle_id=None,
+        work_context=WorkContext.empty(),
         run_index=2,
         phase=AgentRunPhase.EXECUTING_TOOLS,
         status=AgentRunStatus.RUNNING,

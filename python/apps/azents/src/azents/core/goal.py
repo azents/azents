@@ -14,6 +14,7 @@ GoalUpdateStatus = Literal["complete", "blocked"]
 class GoalState(ToolkitStateModel):
     """Session-scoped Goal Toolkit State payload."""
 
+    goal_id: str | None
     schema_version: int = GOAL_STATE_SCHEMA_VERSION
     objective: str | None = None
     status: GoalStatus | None = None

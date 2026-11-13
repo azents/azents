@@ -95,7 +95,6 @@ class RoutineExecutionState(BaseModel):
 
     context: RoutineAdmittedContext
     phase: Literal["admitted", "started", "completed", "cancelled"]
-    current_run_id: str | None
     started_at: datetime.datetime | None
     completed_at: datetime.datetime | None
     work: RoutineWorkResult | None
@@ -111,18 +110,16 @@ class RoutineExecutionState(BaseModel):
 
     @model_validator(mode="after")
     def validate_phase(self) -> Self:
-        if (self.current_run_id is None) != (self.started_at is None):
-            raise ValueError("Routine started time and current Run must agree.")
         match self.phase:
             case "admitted":
-                if self.current_run_id is not None or self.completed_at is not None:
+                if self.started_at is not None or self.completed_at is not None:
                     raise ValueError("Admitted Routine work has not started.")
             case "started":
-                if self.current_run_id is None or self.completed_at is not None:
-                    raise ValueError("Started Routine work requires its current Run.")
+                if self.started_at is None or self.completed_at is not None:
+                    raise ValueError("Started Routine work requires its start time.")
             case "completed":
                 if (
-                    self.current_run_id is None
+                    self.started_at is None
                     or self.completed_at is None
                     or self.work is None
                     or self.delivery_status is None

@@ -20,6 +20,7 @@ def build_external_channel_mailbox_payload(
     *,
     context_omitted: bool,
     initial_title_eligible: bool,
+    work_cycle_id: str | None,
 ) -> ExternalChannelMessageMailboxPayload:
     """Materialize one immutable External Channel message at admission."""
     if not item.provider_tenant_id:
@@ -36,6 +37,7 @@ def build_external_channel_mailbox_payload(
         resource_type=item.resource_type,
         binding_id=item.binding_id,
         invocation_batch_id=item.invocation_id,
+        work_cycle_id=work_cycle_id,
         external_message_id=item.provider_message_key,
         projection_root_id=(
             f"external-channel:{item.binding_id}:{item.provider_message_key}"

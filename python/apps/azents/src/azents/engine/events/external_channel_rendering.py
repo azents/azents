@@ -30,6 +30,7 @@ def external_channel_message_visible_value(
             "type": payload.resource_type.value,
         },
         "binding_id": payload.binding_id,
+        "work_cycle_id": payload.work_cycle_id,
         "invocation_batch_id": payload.invocation_batch_id,
         "external_message_id": payload.external_message_id,
         "projection_root_id": payload.projection_root_id,
@@ -104,6 +105,15 @@ def render_external_channel_turn(
         f"Resource: {first.resource_label}",
         f"Binding: {first.binding_id}",
     ]
+    work_ids = list(
+        dict.fromkeys(
+            payload.work_cycle_id
+            for payload in payloads
+            if payload.work_cycle_id is not None
+        )
+    )
+    if work_ids:
+        lines.append(f"Work cycle IDs: {', '.join(work_ids)}")
     if first.truncated_context_message_count or first.truncated_context_size:
         lines.append(
             "Truncated Context: "

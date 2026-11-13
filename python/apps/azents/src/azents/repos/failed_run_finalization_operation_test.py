@@ -28,6 +28,7 @@ from azents.core.model_operation import (
     mark_current_candidate_active,
     mark_current_candidate_quota_and_advance,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import (
     AgentRunState,
     Event,
@@ -220,7 +221,7 @@ async def _fixture(
             AgentRunCreate(
                 session_id=child.agent_session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             ),
         )
     trace: list[str] = []

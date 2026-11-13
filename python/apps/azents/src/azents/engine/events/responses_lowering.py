@@ -131,11 +131,14 @@ def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
     """Render model-visible reminder for goal_updated event metadata."""
     if payload.metadata.get("goal_control_action") == "resume":
         return format_goal_resumed_reminder(
+            goal_id=payload.metadata.get("goal_id"),
             goal_objective=payload.metadata.get("goal_objective"),
             previous_goal_status=payload.metadata.get("previous_goal_status"),
             resume_hint=payload.metadata.get("resume_hint"),
         )
-    return format_goal_updated_reminder(payload.metadata.get("goal_objective"))
+    return format_goal_updated_reminder(
+        payload.metadata.get("goal_objective"), payload.metadata.get("goal_id")
+    )
 
 
 def _format_agent_message(payload: AgentMessagePayload) -> str:
@@ -716,7 +719,8 @@ class ResponsesRequestLowerer:
             return {
                 "role": "user",
                 "content": format_goal_continuation_reminder(
-                    event.payload.metadata.get("goal_objective")
+                    event.payload.metadata.get("goal_objective"),
+                    event.payload.metadata.get("goal_id"),
                 ),
             }
         if event.kind == EventKind.EXTERNAL_CHANNEL_CONTINUATION and isinstance(

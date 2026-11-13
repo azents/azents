@@ -63,6 +63,7 @@ from azents.core.skill_projection import (
     SkillProjectionSnapshot,
 )
 from azents.core.vfs import VfsProjection, make_vfs_projection, make_vfs_source_revision
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.action_messages import (
     AgentRemoveGitWorktreeAction,
@@ -297,7 +298,7 @@ async def _create_active_run(
             session,
             session_id=session_id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
 
 
@@ -523,7 +524,7 @@ async def _create_terminal_child_run(
             session,
             session_id=child.agent_session_id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         completed = await run_repository.mark_terminal(
             session,
@@ -1735,6 +1736,25 @@ class TestMailboxService:
             "external-channel-continuation-promote",
         )
         async with rdb_session_manager() as session:
+            runs = AgentRunRepository()
+            source = await runs.create_pending(
+                session,
+                session_id=session_id,
+                parent_agent_run_id=None,
+                work_context=WorkContext.empty(),
+            )
+            await runs.mark_terminal(
+                session,
+                source.id,
+                AgentRunStatus.COMPLETED,
+                ended_at=tznow(),
+            )
+            target = await runs.create_pending(
+                session,
+                session_id=session_id,
+                parent_agent_run_id=None,
+                work_context=WorkContext.empty(),
+            )
             buffer = await MailboxRepository().create(
                 session,
                 MailboxItemCreate(
@@ -1747,10 +1767,13 @@ class TestMailboxService:
                     order_group=None,
                     order_sequence=0,
                     content="",
-                    idempotency_key=("idle_continuation:run-001:external_channel:0"),
+                    idempotency_key=(
+                        f"idle_continuation:{source.id}:external_channel:0"
+                    ),
                     metadata={
                         "source": "external_channel",
                         "active_bindings": "binding-handle",
+                        "continuation_source_run_id": source.id,
                     },
                     action=None,
                     attachments=[],
@@ -1773,7 +1796,7 @@ class TestMailboxService:
             expected_buffer_id=buffer.id,
             prepared_inference_state=None,
             profile_resolution_failure=None,
-            active_run_id=None,
+            active_run_id=target.id,
         )
 
         assert result.claimed_count == 1
@@ -1803,7 +1826,7 @@ class TestMailboxService:
                 session,
                 session_id=session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             )
             predecessor = await run_repository.activate_pending(
                 session,
@@ -1840,7 +1863,7 @@ class TestMailboxService:
                         ],
                         bridge_identity="bridge-001",
                         action_execution_id="execution-001",
-                        originating_run_id="originating-run-001",
+                        originating_run_id=predecessor.id,
                         predecessor_run_id=predecessor.id,
                         terminal_status=ActionExecutionStatus.COMPLETED,
                         reason_code=None,
@@ -1880,8 +1903,14 @@ class TestMailboxService:
             await run_repository.mark_terminal(
                 session,
                 predecessor.id,
-                AgentRunStatus.CANCELLED,
+                AgentRunStatus.COMPLETED,
                 ended_at=tznow(),
+            )
+            successor = await run_repository.create_pending(
+                session,
+                session_id=session_id,
+                parent_agent_run_id=None,
+                work_context=WorkContext.empty(),
             )
 
         promoted = await service.flush_session_mailbox_items(
@@ -1892,7 +1921,7 @@ class TestMailboxService:
             expected_buffer_id=buffer.id,
             prepared_inference_state=None,
             profile_resolution_failure=None,
-            active_run_id=None,
+            active_run_id=successor.id,
         )
 
         assert promoted.complete_run is False
@@ -2202,7 +2231,7 @@ class TestMailboxService:
                 session,
                 session_id=session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             )
 
         result = await _mailbox_item_service(
@@ -2757,7 +2786,7 @@ class TestMailboxService:
                 session,
                 session_id=session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             )
         uri = "azents://skills/azents/review/SKILL.md"
         buffer_id = await _create_action_buffer(
@@ -3153,6 +3182,7 @@ def test_external_projection_rejects_malformed_resource_identity(
     with pytest.raises(ValueError, match="External Channel message"):
         build_external_channel_mailbox_payload(
             _external_projection_item(**updates),
+            work_cycle_id=None,
             context_omitted=False,
             initial_title_eligible=False,
         )
@@ -3161,6 +3191,7 @@ def test_external_projection_rejects_malformed_resource_identity(
 def test_external_projection_builds_one_message_payload() -> None:
     payload = build_external_channel_mailbox_payload(
         _external_projection_item(sequence=7),
+        work_cycle_id=None,
         context_omitted=True,
         initial_title_eligible=True,
     )
@@ -3263,6 +3294,7 @@ async def test_external_channel_message_projection() -> None:
             metadata={},
             payload=build_external_channel_mailbox_payload(
                 item,
+                work_cycle_id=None,
                 context_omitted=item.sequence == 0 and item.context_omitted,
                 initial_title_eligible=initial_title_eligible,
             ),
