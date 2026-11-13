@@ -1905,6 +1905,7 @@ class _ExternalChannelResponseContext(NamedTuple):
     """Safe association for one locally emitted Responses tool call."""
 
     binding: str
+    work_cycle_id: str | None
     turn: str
     flow: str
     call_id: str
@@ -2031,6 +2032,11 @@ class _ExternalChannelResponseRegistry:
                 turn = context.turn
                 reference_tokens = context.reference_tokens
                 references = "\n".join(reference_tokens)
+                work_selector = (
+                    ""
+                    if context.work_cycle_id is None
+                    else f"Work cycle IDs: {context.work_cycle_id}\n"
+                )
                 marker = {
                     "setup": _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_MARKER,
                     "progress": _EXTERNAL_CHANNEL_PROGRESS_MARKER,
@@ -2042,7 +2048,8 @@ class _ExternalChannelResponseRegistry:
                             "role": "user",
                             "content": (
                                 "Message Type: EXTERNAL_CHANNEL_TURN\n"
-                                f"Binding: {binding}\n\n{marker}\n{references}"
+                                f"Binding: {binding}\n{work_selector}\n"
+                                f"{marker}\n{references}"
                             ),
                         }
                     ),
@@ -2175,11 +2182,21 @@ class _ExternalChannelResponseRegistry:
                 and token in matcher.reference_tokens
             )
             context = _ExternalChannelResponseContext(
-                binding,
-                turn,
-                flow,
-                call_id,
-                canonical_stage,
+                binding=binding,
+                work_cycle_id=(
+                    matches[-1]
+                    if (
+                        matches := re.findall(
+                            r"Work cycle IDs?: ([0-9a-f]{32})",
+                            request.matching_text,
+                        )
+                    )
+                    else None
+                ),
+                turn=turn,
+                flow=flow,
+                call_id=call_id,
+                stage=canonical_stage,
                 reference_tokens=reference_tokens,
             )
             self._responses[response_id] = context
