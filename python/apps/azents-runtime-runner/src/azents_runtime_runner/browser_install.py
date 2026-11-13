@@ -19,22 +19,21 @@ from azents_runtime_runner.browser_camoufox import (
     require_camoufox_model,
 )
 
-CAMOUFOX_VERSION = "0.5.8"
-# The SDK bundles an older default pin. The product pairs its interface-1 SDK
-# with the audited interface-1 Firefox 158 build instead, including newer
-# upstream security fixes. Native contract tests validate this exact pairing.
-SDK_BROWSER_TAG = "v156.0.1-beta.36"
-BROWSER_TAG = "v158.0-beta.40"
+CAMOUFOX_VERSION = "0.5.9"
+# Keep the SDK's official native pair immutable and validate it with the
+# Runner's profile, input, capture and proxy contracts.
+SDK_BROWSER_TAG = "v158.0.1-beta.41"
+BROWSER_TAG = "v158.0.1-beta.41"
 MODEL_SHA256 = "6530b8322cdaa4ec042921c8d9a0369a0e6e0269ba636c01a7203e4a2f109936"
 # Official GitHub release-asset SHA256 digests, not unverified download metadata.
 LINUX_ASSETS = {
     "x86_64": (
-        "camoufox-158.0-beta.40-lin.x86_64.zip",
-        "2ead498d4765394addd3278d6a663962f3f99b189a99d3f966de56656cefc823",
+        "camoufox-158.0.1-beta.41-lin.x86_64.zip",
+        "3f2eb1d0451fa58e45e43e55f5e6181565069791ae60c0574f0ceb1f01341c33",
     ),
     "aarch64": (
-        "camoufox-158.0-beta.40-lin.arm64.zip",
-        "8a4dfdd85dfb5212dae716b4aa8e30041634edbbba6f6177a566a3ee6b1efe8c",
+        "camoufox-158.0.1-beta.41-lin.arm64.zip",
+        "60e25f6eb95e13d9ec655bc02913d51057e669cb31542e6ace9d2190ab5380af",
     ),
 }
 

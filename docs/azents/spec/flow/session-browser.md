@@ -111,7 +111,9 @@ geometry/editing scripts remain separate browser functionality.
 
 Experimental Camoufox contexts use the pinned Camoufox SDK and official
 Firefox-based distribution through the native Playwright boundary, including the
-SDK's packaged fingerprint-generation model. Explicit viewport/window geometry
+SDK's packaged fingerprint-generation model. Both availability and Session launches
+explicitly enable the SDK's canvas-readback protection, suppressing automatic host-GPU
+probing outside the Runner-owned proxy route. Explicit viewport/window geometry
 matches the viewer coordinate plane. This backend does not run the Chromium GPU
 startup query. Both backends use native opener-scoped popup events. The product
 does not add page-world interception, infer popup ownership from URLs or promise
