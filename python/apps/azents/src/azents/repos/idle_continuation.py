@@ -46,7 +46,7 @@ class IdleBoundaryEligibility:
     """True-idle admission plus archived Scheduled exception identity."""
 
     eligible: bool
-    archived_cycle_id: str | None
+    archived_cycle_ids: tuple[str, ...] | None
     archived_routine_refs: tuple[RoutineExecutionRef, ...] | None
 
 
@@ -152,11 +152,12 @@ class IdleContinuationRepository:
                         continuation_count=0,
                     )
                 accepted = list(inputs)
-                if eligibility.archived_cycle_id is not None:
+                if eligibility.archived_cycle_ids is not None:
                     accepted = [
                         candidate
                         for candidate in inputs
-                        if candidate.scheduled_cycle_id == eligibility.archived_cycle_id
+                        if candidate.scheduled_cycle_id
+                        in eligibility.archived_cycle_ids
                     ]
                 elif eligibility.archived_routine_refs is not None:
                     accepted = [
@@ -181,7 +182,7 @@ class IdleContinuationRepository:
                     run_id=run_id,
                     continue_running=bool(accepted),
                     allow_archived_work_continuation=(
-                        eligibility.archived_cycle_id is not None
+                        eligibility.archived_cycle_ids is not None
                         or eligibility.archived_routine_refs is not None
                     ),
                 )
@@ -214,16 +215,25 @@ class IdleContinuationRepository:
         )
         if conversation is None:
             return IdleBoundaryEligibility(False, None, None)
-        archived_cycle_id: str | None = None
+        archived_cycle_ids: tuple[str, ...] | None = None
         archived_routine_refs: tuple[RoutineExecutionRef, ...] | None = None
         if locked.status is not AgentSessionStatus.ACTIVE:
             if locked.status is not AgentSessionStatus.ARCHIVED:
                 return IdleBoundaryEligibility(False, None, None)
             run = await self.agent_run_repository.get_by_id(session, run_id)
-            cycle_id = None if run is None else run.scheduled_task_cycle_id
-            if cycle_id is None:
-                if run is None or run.status is not AgentRunStatus.COMPLETED:
-                    return IdleBoundaryEligibility(False, None, None)
+            if run is None or run.status is not AgentRunStatus.COMPLETED:
+                return IdleBoundaryEligibility(False, None, None)
+            started_cycle_ids: list[str] = []
+            for cycle_id in run.work_context.scheduled_cycle_ids:
+                cycle = await self.scheduled_task_cycle_repository.get_started(
+                    session,
+                    agent_id=locked.agent_id,
+                    session_id=session_id,
+                    cycle_id=cycle_id,
+                )
+                if cycle is not None:
+                    started_cycle_ids.append(cycle_id)
+            if not started_cycle_ids:
                 scope = RoutineScope(
                     workspace_id=locked.workspace_id,
                     agent_id=locked.agent_id,
@@ -235,7 +245,10 @@ class IdleContinuationRepository:
                         session, scope=scope
                     )
                     if item.state.phase in {"started", "completed"}
-                    and item.state.current_run_id == run_id
+                    and run.work_context.contains_routine(
+                        routine_id=item.state.context.candidate.routine_id,
+                        execution_id=item.state.context.execution_id,
+                    )
                 ]
                 if not preserved:
                     return IdleBoundaryEligibility(False, None, None)
@@ -245,15 +258,7 @@ class IdleContinuationRepository:
                     if state.phase == "started"
                 )
             else:
-                cycle = await self.scheduled_task_cycle_repository.get_started(
-                    session,
-                    agent_id=locked.agent_id,
-                    session_id=session_id,
-                    cycle_id=cycle_id,
-                )
-                if cycle is None or cycle.state.current_run_id != run_id:
-                    return IdleBoundaryEligibility(False, None, None)
-                archived_cycle_id = cycle_id
+                archived_cycle_ids = tuple(started_cycle_ids)
         if conversation.pending_idle_continuation_run_id != run_id:
             return IdleBoundaryEligibility(False, None, None)
         if conversation.pending_command_id is not None:
@@ -273,7 +278,7 @@ class IdleContinuationRepository:
         )
         if active_run is not None:
             return IdleBoundaryEligibility(False, None, None)
-        return IdleBoundaryEligibility(True, archived_cycle_id, archived_routine_refs)
+        return IdleBoundaryEligibility(True, archived_cycle_ids, archived_routine_refs)
 
     async def _enqueue(
         self,

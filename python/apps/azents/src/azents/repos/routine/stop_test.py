@@ -45,9 +45,7 @@ async def test_explicit_stop_closes_attempts_and_preserves_definitions_and_resul
         await f.repository.states.save_execution(
             session,
             scope=f.scope,
-            state=second.model_copy(
-                update={"phase": "admitted", "current_run_id": None, "started_at": None}
-            ),
+            state=second.model_copy(update={"phase": "admitted", "started_at": None}),
             expected_version=record.version,
         )
         await dependencies.sessions.request_stop(

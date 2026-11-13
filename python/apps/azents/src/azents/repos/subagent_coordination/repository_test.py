@@ -16,6 +16,7 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -169,7 +170,7 @@ def _add_run(
     session.write_session.add(
         RDBAgentRun(
             session_id=session_id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty().model_dump(mode="json"),
             run_index=run_index,
             parent_agent_run_id=None,
             requested_model_target_label=None,

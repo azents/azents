@@ -20,6 +20,7 @@ from azents.repos.session_execution.ownership import (
     validate_session_execution_owner,
 )
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
+from azents.repos.work_context import has_unfinished_work
 
 
 class TerminalModelOperationRepository(Protocol):
@@ -215,7 +216,7 @@ class EngineRunFinalizationOperationRepository:
             if (
                 run is None
                 or run.status is not AgentRunStatus.RUNNING
-                or run.scheduled_task_cycle_id is None
+                or not run.work_context.scheduled_cycle_ids
                 or run.terminal_result_event_id is None
                 or run.terminal_result_message is None
             ):
@@ -226,11 +227,15 @@ class EngineRunFinalizationOperationRepository:
                 if (
                     run is None
                     or run.status is not AgentRunStatus.RUNNING
-                    or run.scheduled_task_cycle_id is None
+                    or not run.work_context.scheduled_cycle_ids
                     or run.terminal_result_event_id is None
                     or run.terminal_result_message is None
                 ):
                     return None
+            if await has_unfinished_work(
+                session, session_id=session_id, context=run.work_context
+            ):
+                return None
             marker = await self.event_mutation_repository.append_run_marker(
                 session, session_id=session_id, run_id=run_id, status="completed"
             )

@@ -189,6 +189,7 @@ async def test_route_agent_fence_allows_binding_owned_work_commit(
                 session = ReadWriteSession(raw)
                 await work.commit_direct_action(
                     session,
+                    expected_work_cycle_id=None,
                     links=[],
                     session_id=seeded.owner_session_id,
                     agent_id=seeded.owner_agent_id,

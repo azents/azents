@@ -15,6 +15,7 @@ from azents.core.enums import (
     AgentRunStatus,
     EventKind,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
@@ -501,7 +502,7 @@ def running_run() -> AgentRunState:
     return AgentRunState(
         id=RUN_ID,
         session_id=SESSION_ID,
-        scheduled_task_cycle_id=None,
+        work_context=WorkContext.empty(),
         run_index=1,
         phase=AgentRunPhase.APPENDING_EVENTS,
         status=AgentRunStatus.RUNNING,

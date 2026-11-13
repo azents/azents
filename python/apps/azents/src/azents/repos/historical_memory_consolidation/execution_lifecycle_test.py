@@ -28,6 +28,7 @@ from azents.core.historical_memory_consolidation import (
 from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import UserMessagePayload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -173,7 +174,7 @@ async def _principal(
             session,
             AgentRunCreate(
                 session_id=binding.session_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )

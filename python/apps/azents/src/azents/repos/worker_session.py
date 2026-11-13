@@ -16,6 +16,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
@@ -380,7 +381,7 @@ class WorkerSessionOperationRepository:
                 session,
                 session_id=session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             )
             await self.agent_run_repository.associate_input_events(
                 session, run_id=pending.id, event_ids=input_event_ids

@@ -1,6 +1,7 @@
 """SQL admission for work already preserved by the canonical archive transaction."""
 
 import sqlalchemy as sa
+from sqlalchemy.orm import aliased
 
 from azents.core.enums import AgentRunStatus, AgentSessionStatus, MailboxItemKind
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -13,14 +14,40 @@ from azents.repos.routine.state import ROUTINE_STATE_NAMESPACE
 
 def preserved_routine_work_exists() -> sa.ColumnElement[bool]:
     """Correlate exact started context and ordinary active/idle continuation work."""
+    newer = aliased(RDBAgentRun)
+    exact_ref = sa.func.jsonb_build_array(
+        sa.func.jsonb_build_object(
+            "routine_id",
+            RDBToolkitState.state_json["context"]["candidate"]["routine_id"].astext,
+            "execution_id",
+            RDBToolkitState.state_json["context"]["execution_id"].astext,
+        )
+    )
+    newer_execution = sa.exists(
+        sa.select(1).where(
+            newer.session_id == RDBAgentRun.session_id,
+            newer.run_index > RDBAgentRun.run_index,
+            newer.work_context["routine_executions"].contains(exact_ref),
+        )
+    ).correlate(RDBAgentRun, RDBToolkitState)
     continuation = sa.exists(
         sa.select(1)
         .select_from(RDBMailboxItem)
         .where(
             RDBMailboxItem.session_id == RDBAgentSession.id,
-            RDBMailboxItem.kind == MailboxItemKind.ROUTINE_CONTINUATION,
+            sa.or_(
+                sa.and_(
+                    RDBMailboxItem.kind == MailboxItemKind.ROUTINE_CONTINUATION,
+                    RDBMailboxItem.payload["source_run_id"].astext == RDBAgentRun.id,
+                ),
+                sa.and_(
+                    RDBMailboxItem.kind == MailboxItemKind.TURN_ACTION_CONTINUATION,
+                    RDBMailboxItem.payload["predecessor_run_id"].astext
+                    == RDBAgentRun.id,
+                ),
+            ),
         )
-    ).correlate(RDBAgentSession)
+    ).correlate(RDBAgentSession, RDBAgentRun)
     idle = sa.exists(
         sa.select(1)
         .select_from(RDBConversation)
@@ -34,7 +61,7 @@ def preserved_routine_work_exists() -> sa.ColumnElement[bool]:
         .select_from(RDBToolkitState)
         .join(
             RDBAgentRun,
-            RDBAgentRun.id == RDBToolkitState.state_json["current_run_id"].astext,
+            RDBAgentRun.work_context["routine_executions"].contains(exact_ref),
         )
         .where(
             RDBToolkitState.session_id == RDBAgentSession.id,
@@ -49,7 +76,10 @@ def preserved_routine_work_exists() -> sa.ColumnElement[bool]:
             RDBToolkitState.state_json["context"]["scope"]["workspace_id"].astext
             == RDBAgentSession.workspace_id,
             RDBAgentRun.session_id == RDBAgentSession.id,
-            RDBAgentRun.scheduled_task_cycle_id.is_(None),
+            sa.func.jsonb_array_length(RDBAgentRun.work_context["scheduled_cycle_ids"])
+            == 0,
+            RDBAgentRun.work_context["unrelated_input"].as_boolean().is_(False),
+            ~newer_execution,
             sa.or_(
                 RDBAgentRun.status.in_(
                     (AgentRunStatus.PENDING, AgentRunStatus.RUNNING)

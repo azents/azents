@@ -482,6 +482,7 @@ class ExternalChannelIngressDrainRepository:
                                     action=None,
                                     payload=build_external_channel_mailbox_payload(
                                         projection,
+                                        work_cycle_id=None,
                                         context_omitted=(
                                             message_index == 0
                                             and success.history.context_omitted
@@ -623,6 +624,16 @@ class ExternalChannelIngressDrainRepository:
                     raise RuntimeError(
                         "External Channel Work disappeared after mailbox admission."
                     )
+                await self.mailbox_admission_repository.freeze_channel_work(
+                    session,
+                    session_id=batch.session_id,
+                    mailbox_item_ids=[
+                        result.mailbox_item.id
+                        for result in mailbox_results
+                        if result.created
+                    ],
+                    work_cycle_id=work.work_cycle_id,
+                )
                 progress_plan = await self.work_repository.prepare_initial_progress(
                     session,
                     agent_id=target_session.agent_id,

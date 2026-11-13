@@ -28,6 +28,22 @@ class MailboxAdmissionRepository:
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
 
+    async def freeze_channel_work(
+        self,
+        session: WriteSession,
+        *,
+        session_id: str,
+        mailbox_item_ids: Sequence[str],
+        work_cycle_id: str,
+    ) -> None:
+        """Complete new message admission with its atomically created Work ID."""
+        await self.mailbox_item_repository.freeze_channel_work(
+            session,
+            session_id=session_id,
+            mailbox_item_ids=mailbox_item_ids,
+            work_cycle_id=work_cycle_id,
+        )
+
     async def enqueue_in_session(
         self,
         session: WriteSession,

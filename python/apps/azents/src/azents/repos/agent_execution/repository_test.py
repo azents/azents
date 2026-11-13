@@ -42,6 +42,7 @@ from azents.core.model_operation import (
     ModelOperationState,
 )
 from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.filters import EventCompactor
@@ -1121,7 +1122,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         await repo.associate_input_events(
             rdb_session,
@@ -1171,7 +1172,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         await repo.activate_pending(
             rdb_session,
@@ -1191,7 +1192,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         copied = await repo.copy_requested_inference_profile(
             rdb_session,
@@ -1261,7 +1262,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=parent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1269,7 +1270,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=child_session.id,
             parent_agent_run_id=parent.id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         activated = await repo.activate_pending(
             rdb_session,
@@ -1333,7 +1334,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=run_session.id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
 
         with pytest.raises(
@@ -1372,7 +1373,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         first = make_vfs_projection(
             [
@@ -1450,7 +1451,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         projection = make_vfs_projection([])
 
@@ -1483,7 +1484,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1573,7 +1574,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1583,7 +1584,7 @@ class TestEventExecutionRepositories:
                 rdb_session,
                 AgentRunCreate(
                     session_id=session.id,
-                    scheduled_task_cycle_id=None,
+                    work_context=WorkContext.empty(),
                     parent_agent_run_id=None,
                 ),
             )
@@ -1616,7 +1617,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1633,7 +1634,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
             terminal_finalization=finalize,
@@ -1680,7 +1681,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1732,7 +1733,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1759,7 +1760,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=agent_session.id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         await repo.activate_pending(
             rdb_session,
@@ -1798,7 +1799,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1842,7 +1843,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1919,7 +1920,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -1991,7 +1992,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
                 model_operation_state=operation_state,
             ),
@@ -2076,7 +2077,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2110,7 +2111,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
                 phase=AgentRunPhase.WAITING_FOR_MODEL,
             ),
@@ -2119,7 +2120,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
             terminal_finalization=_noop_terminal_finalization,
@@ -2157,7 +2158,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2199,7 +2200,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2244,7 +2245,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2284,7 +2285,11 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id="c" * 32,
+                work_context=WorkContext(
+                    scheduled_cycle_ids=("c" * 32,),
+                    routine_executions=(),
+                    unrelated_input=False,
+                ),
                 parent_agent_run_id=None,
             ),
         )
@@ -2339,7 +2344,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2405,7 +2410,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2419,7 +2424,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2482,7 +2487,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=first_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -2490,7 +2495,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=first_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
             terminal_finalization=_noop_terminal_finalization,
@@ -2499,7 +2504,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=second_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )

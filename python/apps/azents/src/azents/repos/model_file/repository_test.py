@@ -14,6 +14,7 @@ from azents.core.enums import (
     LLMProvider,
     ModelFileStatus,
 )
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -129,7 +130,7 @@ async def _create_agent_session(session: WriteSession) -> _ModelFileFixture:
         session,
         AgentRunCreate(
             session_id=agent_session.id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
             parent_agent_run_id=None,
         ),
     )
@@ -314,7 +315,7 @@ async def test_release_terminal_run_pins_preserves_pending(
         rdb_session,
         AgentRunCreate(
             session_id=session_id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
             parent_agent_run_id=None,
         ),
         terminal_finalization=_noop_terminal_finalization,
@@ -329,7 +330,7 @@ async def test_release_terminal_run_pins_preserves_pending(
         rdb_session,
         session_id=session_id,
         parent_agent_run_id=None,
-        scheduled_task_cycle_id=None,
+        work_context=WorkContext.empty(),
     )
     pin_repo = ModelFilePinRepository()
     await pin_repo.pin_many(

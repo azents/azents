@@ -1334,12 +1334,14 @@ class ChatOperationsRepository:
         session_id: str,
         snapshot: GoalStateSnapshot,
         *,
+        goal_id: str | None,
         metadata: dict[str, str] | None = None,
     ) -> Event:
         """Store Goal update control event and transition runtime to wake-up state."""
         event_metadata: dict[str, JSONValue] = {
             "source": "goal",
             "provider_slug": "goal",
+            "goal_id": goal_id,
             "goal_objective": snapshot.objective or "",
             "goal_status": snapshot.status or "",
             "goal_created_at": snapshot.created_at or "",
@@ -1420,7 +1422,11 @@ class ChatOperationsRepository:
             and snapshot.status == "active"
         )
         event = (
-            await self._append_goal_updated_event(session_id, snapshot)
+            await self._append_goal_updated_event(
+                session_id,
+                snapshot,
+                goal_id=objective_update.updated.goal_id,
+            )
             if wake_up
             else None
         )
@@ -1482,6 +1488,7 @@ class ChatOperationsRepository:
             await self._append_goal_updated_event(
                 session_id,
                 snapshot,
+                goal_id=status_update.updated.goal_id,
                 metadata=event_metadata,
             )
             if wake_up

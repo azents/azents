@@ -24,6 +24,7 @@ from azents.core.vfs import (
     make_vfs_projection,
     make_vfs_source_revision,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.tools.routine import RoutineToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
@@ -603,7 +604,7 @@ async def test_run_projection_commit_rejects_owner_takeover_after_build_starts(
             session,
             AgentRunCreate(
                 session_id=agent_session.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )

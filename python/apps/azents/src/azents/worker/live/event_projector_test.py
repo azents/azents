@@ -16,6 +16,7 @@ from azents.core.chat_data import (
 )
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
+from azents.core.work_context import WorkContext
 from azents.engine.events.engine_events import (
     ContentDelta,
     ProviderToolActivityChanged,
@@ -187,7 +188,7 @@ def _running_run(run_id: str) -> AgentRunState:
     return AgentRunState(
         id=run_id,
         session_id="session-001",
-        scheduled_task_cycle_id=None,
+        work_context=WorkContext.empty(),
         run_index=1,
         phase=AgentRunPhase.WAITING_FOR_MODEL,
         status=AgentRunStatus.RUNNING,

@@ -92,7 +92,6 @@ def _cycle(
             cron_expression=None,
             timezone=None,
             scheduled_for=scheduled_for,
-            current_run_id=run_id,
             started_at=_NOW,
             progress_title=None,
             allow_silent=False,
@@ -143,6 +142,9 @@ def _toolkit(
     channel_service.execute_terminal.return_value = ()
     transfer_service = file_transfer_service or AsyncMock()
     operations.active_cycle.return_value = active_cycle
+    operations.active_cycles.return_value = (
+        [] if active_cycle is None else [active_cycle]
+    )
     operations.list_started_cycle_states.return_value = []
     toolkit = ScheduledToolkit(
         operations=operations,
@@ -244,6 +246,7 @@ async def test_always_visible_terminal_tool_preserves_submission_rejection(
         await terminal_tool.handler(
             json.dumps(
                 {
+                    "cycle_id": _CYCLE_ID,
                     "status": "finished",
                     "result": "Completed.",
                     "files": None,
@@ -254,6 +257,7 @@ async def test_always_visible_terminal_tool_preserves_submission_rejection(
         )
 
     terminal_service.submit.assert_awaited_once_with(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -416,6 +420,7 @@ async def test_quiet_terminal_rejects_files_before_preparing_transfer() -> None:
         await state.tools[-1].handler(
             json.dumps(
                 {
+                    "cycle_id": _CYCLE_ID,
                     "status": "finished",
                     "result": "No changes.",
                     "notify": False,
@@ -540,6 +545,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
         created_at=_NOW,
     )
     terminal_service.submit.return_value = ScheduledTaskTerminalOutcome(
+        finish_run=True,
         event=event,
         created=True,
         effect_snapshot=None,
@@ -550,6 +556,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     result = await terminal_tool.handler(
         json.dumps(
             {
+                "cycle_id": _CYCLE_ID,
                 "status": "finished",
                 "result": "Completed.",
                 "files": None,
@@ -563,6 +570,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     assert result.terminal_run is True
     assert isinstance(result.output, str)
     assert json.loads(result.output) == {
+        "cycle_id": _CYCLE_ID,
         "outcomes": [],
         "recovered": False,
         "result": "Completed.",
@@ -572,6 +580,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     }
     publish_event.assert_awaited_once_with(event)
     terminal_service.submit.assert_awaited_once_with(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -645,6 +654,7 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
         created_at=_NOW,
     )
     terminal_service.submit.return_value = ScheduledTaskTerminalOutcome(
+        finish_run=True,
         event=event,
         created=True,
         effect_snapshot=snapshot,
@@ -655,6 +665,7 @@ async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> 
     await state.tools[-1].handler(
         json.dumps(
             {
+                "cycle_id": _CYCLE_ID,
                 "status": "finished",
                 "result": "Completed.",
                 "files": ["/workspace/agent/report.png"],
@@ -691,6 +702,7 @@ async def test_terminal_tool_rejects_files_for_session_only_cycle() -> None:
         await state.tools[-1].handler(
             json.dumps(
                 {
+                    "cycle_id": _CYCLE_ID,
                     "status": "finished",
                     "result": "Completed.",
                     "files": ["/workspace/agent/report.png"],
@@ -726,6 +738,7 @@ async def test_recovered_terminal_result_does_not_replay_requested_files() -> No
         created_at=_NOW,
     )
     terminal_service.submit.return_value = ScheduledTaskTerminalOutcome(
+        finish_run=True,
         event=event,
         created=False,
         effect_snapshot=None,
@@ -736,6 +749,7 @@ async def test_recovered_terminal_result_does_not_replay_requested_files() -> No
     result = await state.tools[-1].handler(
         json.dumps(
             {
+                "cycle_id": _CYCLE_ID,
                 "status": "finished",
                 "result": "Replayed value.",
                 "files": ["/workspace/agent/new-report.png"],
@@ -803,8 +817,8 @@ async def test_idle_and_compaction_hooks_use_all_started_cycles_in_order() -> No
         "a" * 32,
         "b" * 32,
     ]
-    assert all("cycle_id" not in item.content for item in idle.continuations)
+    assert all(item.cycle_id in item.content for item in scheduled_continuations)
     assert isinstance(compaction, CompactionSummaryReplace)
     assert compaction.summary.count("### Cycle ") == 2
-    assert "a" * 32 not in compaction.summary
-    assert "b" * 32 not in compaction.summary
+    assert "a" * 32 in compaction.summary
+    assert "b" * 32 in compaction.summary

@@ -41,7 +41,6 @@ def _state(
         cron_expression="0 9 * * *",
         timezone="America/New_York",
         scheduled_for=_NOW,
-        current_run_id="r" * 32,
         started_at=_NOW,
         progress_title=progress_title,
         ordered_tasks=ordered_tasks or [],
@@ -67,7 +66,7 @@ def test_cycle_guidance_distinguishes_session_and_channel_execution() -> None:
     assert "`submit_scheduled_task_result`" in session_guidance
     assert "exact same bound conversation" in channel_guidance
     assert "another Slack or Discord channel" in channel_guidance
-    assert "Title: Daily report" not in session_guidance
+    assert "Title: Daily report" in session_guidance
     assert "Schedule: Every day" not in session_guidance
 
 
@@ -92,6 +91,8 @@ def test_runtime_message_keeps_exact_prompt_after_structured_schedule() -> None:
     objective = "Prepare the report.\nKeep this second line exactly."
 
     message = render_scheduled_task_runtime_message(
+        binding_id=None,
+        cycle_id="c" * 32,
         title="Daily report",
         objective=objective,
         schedule_type=ScheduledTaskScheduleType.ONCE,
@@ -117,8 +118,8 @@ def test_runtime_message_keeps_exact_prompt_after_structured_schedule() -> None:
     assert message.endswith(f"Prompt:\n{objective}")
 
 
-def test_compaction_snapshot_is_bounded_sanitized_and_identifier_free() -> None:
-    """The canonical summary includes active work without internal identities."""
+def test_compaction_snapshot_exposes_selector_and_redacts_internal_identity() -> None:
+    """The canonical summary includes only the necessary model-facing selector."""
     state = _state(
         title="Daily\n## injected\x00 report",
         objective="Prepare\r\nall\tsections.",
@@ -136,13 +137,11 @@ def test_compaction_snapshot_is_bounded_sanitized_and_identifier_free() -> None:
     assert "Progress title: Draft ready" in snapshot
     assert "1. Collect metrics" in snapshot
     assert "2. Write briefing" in snapshot
-    assert state.cycle_id not in snapshot
+    assert state.cycle_id in snapshot
     assert state.task_id not in snapshot
     assert state.workspace_id not in snapshot
     assert state.agent_id not in snapshot
     assert state.session_id not in snapshot
-    assert state.current_run_id is not None
-    assert state.current_run_id not in snapshot
 
 
 def test_compaction_snapshot_replaces_stale_section_deterministically() -> None:

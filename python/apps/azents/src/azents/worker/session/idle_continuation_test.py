@@ -126,7 +126,7 @@ class _AgentSessionRepository:
         status: AgentSessionStatus = AgentSessionStatus.ACTIVE,
         consume_result: bool = True,
     ) -> None:
-        self.boundary_run_id: str | None = "run-001"
+        self.boundary_run_id: str | None = "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
         self.workspace_id = workspace_id
         self.status = status
         self.owner_generation = owner_generation
@@ -196,7 +196,7 @@ class _AgentRunRepository:
         del session
         return SimpleNamespace(
             id=run_id,
-            scheduled_task_cycle_id="c" * 32,
+            work_context=SimpleNamespace(scheduled_cycle_ids=("c" * 32,)),
         )
 
 
@@ -214,7 +214,9 @@ class _CycleRepository:
         """Return the exact started cycle."""
         del session, agent_id, session_id
         assert cycle_id == "c" * 32
-        return SimpleNamespace(state=SimpleNamespace(current_run_id="run-001"))
+        return SimpleNamespace(
+            state=SimpleNamespace(current_run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr")
+        )
 
 
 class _MailboxRepository:
@@ -289,11 +291,11 @@ class _IdleContinuationRepository:
         if not eligibility.eligible:
             return IdleContinuationFinalization(False, [], 0)
         accepted = inputs
-        if eligibility.archived_cycle_id is not None:
+        if eligibility.archived_cycle_ids is not None:
             accepted = [
                 input
                 for input in inputs
-                if input.scheduled_cycle_id == eligibility.archived_cycle_id
+                if input.scheduled_cycle_id in eligibility.archived_cycle_ids
             ]
         consumed = (
             await self.agent_session_repository.consume_pending_idle_continuation(
@@ -302,7 +304,7 @@ class _IdleContinuationRepository:
                 run_id=run_id,
                 continue_running=bool(accepted),
                 allow_archived_work_continuation=(
-                    eligibility.archived_cycle_id is not None
+                    eligibility.archived_cycle_ids is not None
                 ),
             )
         )
@@ -332,21 +334,25 @@ class _IdleContinuationRepository:
             raise CanonicalExecutionOwnerGenerationStaleError(
                 "Session owner generation is stale during idle continuation"
             )
-        archived_cycle_id = None
+        archived_cycle_ids = None
         if locked.status is not AgentSessionStatus.ACTIVE:
             if locked.status is not AgentSessionStatus.ARCHIVED:
                 return IdleBoundaryEligibility(False, None, None)
             run = await self.agent_run_repository.get_by_id(session, run_id)
-            cycle_id = run.scheduled_task_cycle_id
-            cycle = await self.scheduled_task_cycle_repository.get_started(
-                session,
-                agent_id=locked.agent_id,
-                session_id=session_id,
-                cycle_id=cycle_id,
-            )
-            if cycle is None or cycle.state.current_run_id != run_id:
+            cycle_ids = run.work_context.scheduled_cycle_ids
+            started = []
+            for cycle_id in cycle_ids:
+                cycle = await self.scheduled_task_cycle_repository.get_started(
+                    session,
+                    agent_id=locked.agent_id,
+                    session_id=session_id,
+                    cycle_id=cycle_id,
+                )
+                if cycle is not None:
+                    started.append(cycle_id)
+            if not started:
                 return IdleBoundaryEligibility(False, None, None)
-            archived_cycle_id = cycle_id
+            archived_cycle_ids = tuple(started)
         if locked.pending_idle_continuation_run_id != run_id:
             return IdleBoundaryEligibility(False, None, None)
         if locked.pending_command_id is not None:
@@ -365,7 +371,7 @@ class _IdleContinuationRepository:
             is not None
         ):
             return IdleBoundaryEligibility(False, None, None)
-        return IdleBoundaryEligibility(True, archived_cycle_id, None)
+        return IdleBoundaryEligibility(True, archived_cycle_ids, None)
 
 
 class _EventPublisher:
@@ -445,7 +451,7 @@ def _snapshot(
         pending_command=None,
         recoverable_run_id=None,
         recoverable_run_status=None,
-        pending_idle_continuation_run_id="run-001",
+        pending_idle_continuation_run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
 
@@ -490,12 +496,14 @@ async def test_consume_admits_both_idle_transactions_through_execution_tree() ->
     ).consume(
         _snapshot(),
         toolkits=[],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is True
     assert repository.execution_admissions == ["session-001", "session-001"]
-    assert repository.consumed == [("session-001", "run-001", False)]
+    assert repository.consumed == [
+        ("session-001", "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr", False)
+    ]
 
 
 @pytest.mark.asyncio
@@ -517,7 +525,7 @@ async def test_consume_failure_publishes_no_event_or_wakeup() -> None:
     ).consume(
         _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is False
@@ -544,7 +552,7 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
     ).consume(
         _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is False
@@ -574,7 +582,7 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
         ).consume(
             _snapshot(),
             toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
-            run_id="run-001",
+            run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
         )
 
     assert toolkit.contexts == []
@@ -607,7 +615,7 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     ).consume(
         snapshot := _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is True
@@ -616,7 +624,7 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     assert context.workspace_id == "workspace-001"
     assert context.agent_id == "agent-001"
     assert context.session_id == "session-001"
-    assert context.run_id == "run-001"
+    assert context.run_id == "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
     assert context.reason == "completed"
 
     assert len(continuation_recorder.enqueued_batches) == 1
@@ -624,13 +632,19 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     assert enqueue.session_id == "session-001"
     assert enqueue.kind == MailboxItemKind.GOAL_CONTINUATION
     assert enqueue.metadata == {
+        "continuation_source_run_id": "r" * 32,
         "source": "goal",
         "goal_objective": "Ship",
         "provider_slug": "goal",
     }
     assert enqueue.content == "ignored"
-    assert enqueue.idempotency_key == "idle_continuation:run-001:goal:0"
-    assert repository.consumed == [("session-001", "run-001", True)]
+    assert (
+        enqueue.idempotency_key
+        == "idle_continuation:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr:goal:0"
+    )
+    assert repository.consumed == [
+        ("session-001", "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr", True)
+    ]
     assert len(event_publisher.dispatched) == 1
     assert event_publisher.dispatched[0][0] == "session-001"
     assert event_publisher.dispatched[0][1].kind == EventKind.GOAL_CONTINUATION
@@ -671,22 +685,27 @@ async def test_consume_stores_external_channel_continuation_separately() -> None
                 False,
             )
         ],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is True
     [enqueue] = continuation_recorder.enqueued_batches[0]
     assert enqueue.kind == MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
     assert enqueue.metadata == {
+        "continuation_source_run_id": "r" * 32,
         "source": "external_channel",
         "active_bindings": "binding-handle",
         "provider_slug": "external_channel",
     }
-    assert enqueue.idempotency_key == ("idle_continuation:run-001:external_channel:0")
+    assert enqueue.idempotency_key == (
+        "idle_continuation:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr:external_channel:0"
+    )
     assert event_publisher.dispatched[0][1].kind == (
         EventKind.EXTERNAL_CHANNEL_CONTINUATION
     )
-    assert repository.consumed == [("session-001", "run-001", True)]
+    assert repository.consumed == [
+        ("session-001", "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr", True)
+    ]
     assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
 
 
@@ -716,19 +735,23 @@ async def test_consume_stores_typed_scheduled_task_continuation() -> None:
     ).consume(
         snapshot := _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "scheduled", "scheduled", False)],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is True
     [enqueue] = continuation_recorder.enqueued_batches[0]
     assert enqueue.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION
     assert enqueue.metadata == {
+        "continuation_source_run_id": "r" * 32,
         "source": "scheduled_task",
         "provider_slug": "scheduled",
         "cycle_id": "c" * 32,
         "title": "Daily report",
     }
-    assert enqueue.idempotency_key == "idle_continuation:run-001:scheduled:0"
+    assert (
+        enqueue.idempotency_key
+        == "idle_continuation:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr:scheduled:0"
+    )
     assert isinstance(enqueue.payload, ScheduledTaskContinuationMailboxPayload)
     assert enqueue.payload.cycle_id == "c" * 32
     assert enqueue.payload.items[0].content == "Continue the Scheduled Task."
@@ -773,7 +796,7 @@ async def test_archived_session_keeps_only_matching_scheduled_continuation() -> 
     ).consume(
         snapshot := _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "scheduled", "scheduled", False)],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is True
@@ -781,7 +804,9 @@ async def test_archived_session_keeps_only_matching_scheduled_continuation() -> 
     assert enqueue.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION
     assert isinstance(enqueue.payload, ScheduledTaskContinuationMailboxPayload)
     assert enqueue.payload.cycle_id == "c" * 32
-    assert repository.consumed == [("session-001", "run-001", True)]
+    assert repository.consumed == [
+        ("session-001", "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr", True)
+    ]
     assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
 
 
@@ -802,7 +827,7 @@ async def test_consume_uses_snapshot_workspace_for_idle_hook() -> None:
     ).consume(
         _snapshot(workspace_id="workspace-snapshot"),
         toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
-        run_id="run-001",
+        run_id="rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     )
 
     assert result is True

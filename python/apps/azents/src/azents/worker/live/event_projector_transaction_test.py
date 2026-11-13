@@ -13,6 +13,7 @@ from azents.core.agent_session_data import AgentSession
 from azents.core.chat_data import ChatLiveRunState
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
+from azents.core.work_context import WorkContext
 from azents.engine.events.engine_events import (
     ContentDelta,
     ProviderToolActivityChanged,
@@ -394,7 +395,7 @@ async def test_restart_and_local_run_mismatch_preserve_current_durable_projectio
             session,
             AgentRunCreate(
                 session_id=session_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )

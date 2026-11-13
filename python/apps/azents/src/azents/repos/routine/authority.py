@@ -6,21 +6,34 @@ from typing import Annotated
 import sqlalchemy as sa
 from fastapi import Depends
 
-from azents.core.enums import AgentLifecycleStatus, AgentSessionStatus, EventKind
+from azents.core.enums import AgentLifecycleStatus, AgentSessionStatus
 from azents.core.routine import RoutineScope, RoutineUnavailable
-from azents.core.routine_execution import RoutineExecutionRef
+from azents.core.routine_execution import RoutineExecutionRef, RoutineExecutionState
 from azents.core.routine_presentation import routine_execution_ref
 from azents.core.session_resource_authority import SessionResourceAuthority
-from azents.engine.events.types import RoutineInputPayload
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
-from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import RDBEvent
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.routine.scope import require_routine_scope
 from azents.repos.routine.state import RoutineStateRepository
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
+from azents.repos.work_context import latest_work_execution, routine_work_predicate
+
+
+async def latest_routine_execution(
+    session: ReadSession, *, state: RoutineExecutionState
+) -> RDBAgentRun | None:
+    """Resolve actual execution from admitted identity without a domain host ID."""
+    return await latest_work_execution(
+        session,
+        session_id=state.context.scope.session_id,
+        predicate=routine_work_predicate(
+            routine_id=state.context.candidate.routine_id,
+            execution_id=state.context.execution_id,
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -28,6 +41,23 @@ class RoutineExecutionAuthorityRepository:
     """Read existing provenance; a Routine identifier alone grants no exemption."""
 
     states: Annotated[RoutineStateRepository, Depends()]
+
+    async def run_carries_execution(
+        self,
+        session: ReadSession,
+        *,
+        scope: RoutineScope,
+        run_id: str,
+        state: RoutineExecutionState,
+    ) -> bool:
+        """Require exact admitted context, independent of the original host."""
+        run = await session.read_session.get(RDBAgentRun, run_id)
+        if run is None or run.session_id != scope.session_id:
+            return False
+        return WorkContext.model_validate(run.work_context).contains_routine(
+            routine_id=state.context.candidate.routine_id,
+            execution_id=state.context.execution_id,
+        )
 
     async def run_is_routine_only(
         self,
@@ -38,40 +68,22 @@ class RoutineExecutionAuthorityRepository:
     ) -> bool:
         """Require every associated input to be valid Routine execution input."""
         run = await session.read_session.get(RDBAgentRun, run_id)
-        if (
-            run is None
-            or run.session_id != scope.session_id
-            or run.scheduled_task_cycle_id is not None
-        ):
+        if run is None or run.session_id != scope.session_id:
             return False
-        rows = (
-            await session.read_session.execute(
-                sa.select(RDBEvent.kind, RDBEvent.payload, RDBEvent.session_id)
-                .join(
-                    RDBAgentRunInputEvent, RDBAgentRunInputEvent.event_id == RDBEvent.id
-                )
-                .where(RDBAgentRunInputEvent.agent_run_id == run_id)
-                .order_by(RDBAgentRunInputEvent.input_order)
-            )
-        ).all()
-        if not rows:
+        context = WorkContext.model_validate(run.work_context)
+        if not context.routine_only:
             return False
-        input_refs: set[tuple[str, str]] = set()
-        for row in rows:
-            if row.session_id != scope.session_id or row.kind not in {
-                EventKind.ROUTINE_TRIGGER,
-                EventKind.ROUTINE_CONTINUATION,
-            }:
-                return False
-            payload = RoutineInputPayload.model_validate(row.payload)
-            input_refs.update(
-                (ref.routine_id, ref.execution_id) for ref in payload.executions
-            )
         current_refs = {
             (item.state.context.candidate.routine_id, item.state.context.execution_id)
             for item in await self.states.list_executions(session, scope=scope)
-            if item.state.current_run_id == run_id
-            and item.state.phase in {"started", "completed"}
+            if item.state.phase in {"started", "completed"}
+            and context.contains_routine(
+                routine_id=item.state.context.candidate.routine_id,
+                execution_id=item.state.context.execution_id,
+            )
+        }
+        input_refs = {
+            (ref.routine_id, ref.execution_id) for ref in context.routine_executions
         }
         return bool(current_refs) and current_refs.issubset(input_refs)
 
@@ -134,9 +146,13 @@ class RoutineExecutionAuthorityRepository:
             or target.lifecycle_status
             not in {AgentLifecycleStatus.ACTIVE, AgentLifecycleStatus.DECOMMISSIONING}
             or not any(
-                item.state.phase in {"started", "completed"}
-                and item.state.current_run_id == run_id
-                for item in await self.states.list_executions(session, scope=scope)
+                [
+                    item.state.phase in {"started", "completed"}
+                    and await self.run_carries_execution(
+                        session, scope=scope, run_id=run_id, state=item.state
+                    )
+                    for item in await self.states.list_executions(session, scope=scope)
+                ]
             )
         ):
             raise RoutineUnavailable(

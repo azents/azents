@@ -34,6 +34,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.core.session_working_folder import build_session_working_folder_path
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -335,7 +336,11 @@ async def _start_scheduled_cycle(
         )
         run = RDBAgentRun(
             session_id=session_id,
-            scheduled_task_cycle_id=cycle_id,
+            work_context=WorkContext(
+                scheduled_cycle_ids=(cycle_id,),
+                routine_executions=(),
+                unrelated_input=False,
+            ).model_dump(mode="json"),
             run_index=1,
             parent_agent_run_id=None,
             requested_model_target_label=None,
@@ -348,7 +353,6 @@ async def _start_scheduled_cycle(
         await cycle_repository.start(
             session,
             record=cycle,
-            run_id=run.id,
             started_at=now,
         )
         agent_session.run_state = AgentSessionRunState.RUNNING
@@ -2584,7 +2588,9 @@ class TestChatSessionTeamSessions:
                 cycle_id=cycle_id,
             )
             assert cycle is not None
-            assert cycle.state.current_run_id == run_id
+            assert WorkContext.model_validate(run.work_context).scheduled_cycle_ids == (
+                cycle_id,
+            )
 
     async def test_auto_archive_uses_current_agent_ttl(
         self,

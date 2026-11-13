@@ -177,7 +177,11 @@ def test_agent_run_state_decodes_historical_missing_operation_state() -> None:
         {
             "id": "1" * 32,
             "session_id": "session-1",
-            "scheduled_task_cycle_id": None,
+            "work_context": {
+                "scheduled_cycle_ids": [],
+                "routine_executions": [],
+                "unrelated_input": False,
+            },
             "run_index": 1,
             "phase": "idle",
             "status": "completed",

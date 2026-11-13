@@ -70,6 +70,11 @@ class UpdateGoalInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    goal_id: str = Field(
+        min_length=32,
+        max_length=32,
+        description="Exact Goal identity from get_goal or the current Goal snapshot.",
+    )
     status: GoalUpdateStatus = Field(description="New goal status")
 
 
@@ -192,6 +197,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
                         "provider_slug": GOAL_TOOLKIT_NAMESPACE,
                         "last_run_id": context.run_id,
                         "goal_objective": goal_state.objective,
+                        "goal_id": goal_state.goal_id or "",
                         "goal_status": goal_state.status,
                         "goal_created_at": goal_state.created_at or "",
                         "goal_updated_at": goal_state.updated_at or "",
@@ -232,6 +238,7 @@ def render_goal_snapshot(state: GoalState) -> str | None:
         "## Goal Snapshot",
         "",
         "Session Goal state at compaction time:",
+        f"- Goal ID: {state.goal_id}",
         f"- Objective: {state.objective}",
         f"- Status: {state.status}",
     ]
@@ -339,6 +346,7 @@ def make_update_goal_tool(
         completed_at = _now_iso()
         try:
             result = await store.set_status(
+                goal_id=args.goal_id,
                 agent_id=agent_id,
                 session_id=session_id,
                 status=args.status,

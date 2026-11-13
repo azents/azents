@@ -112,6 +112,7 @@ def test_mailbox_item_rejects_kind_payload_discriminator_mismatch() -> None:
 def test_external_channel_continuation_payload_is_distinct_from_goal() -> None:
     payload = ExternalChannelContinuationMailboxPayload(
         type="external_channel_continuation",
+        source_run_id="r" * 32,
         items=[
             MailboxPresentationItem(
                 item_key="external_channel_continuation:0",
@@ -142,6 +143,11 @@ def test_scheduled_payload_requires_titled_canonical_presentation(
             {
                 "type": payload_type,
                 "cycle_id": "c" * 32,
+                **(
+                    {"source_run_id": "r" * 32}
+                    if payload_type == "scheduled_task_continuation"
+                    else {}
+                ),
                 "items": [
                     {
                         "item_key": f"{payload_type}:0",

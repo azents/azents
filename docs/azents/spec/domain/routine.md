@@ -147,8 +147,13 @@ Compaction preserves all started, unfinished Routine occurrences in the exact
 Session, including work associated with earlier Runs. Each entry contains its
 immutable objective, source/prior context and occurrence identity in deterministic
 order. Registered future definitions, unstarted admissions and terminal work are
-not added. This read-only snapshot does not rebind a host Run or grant context,
-completion or idle-continuation authority for another Run's work.
+not added. This read-only snapshot does not grant new context, completion or
+idle-continuation authority. Exact admitted refs are carried through the common
+[Run work context](../execution/runs.md#logical-work-context), independently of
+action, Goal, Scheduled, Routine or Channel continuation boundaries. Domain state
+has no mutable current-host Run. Context reads and completion require exact carried
+refs plus canonical state and current execution ownership; a visible snapshot alone
+cannot authorize unrelated Session work.
 
 `record_routine_result` requires the admitted, started, current-owner identity.
 Its input is flat: `slug`, `execution_id`, `objective_outcome` (`finished` or
@@ -271,7 +276,10 @@ Public Routine inspection authorizes the requested active Session and exact
 Agent/Workspace/member boundary, returning 404 without cross-Session fallback.
 Archive removes definitions, retained records and pre-start work. Preserved
 started Routine-only work may finish without recreating removed data; unrelated
-active work still blocks archive. Restore does not reconstruct Routine state.
+active work still blocks archive. Active Runs, completed pending-idle sources and
+typed continuation sources must retain Routine-only provenance. A different
+pre-start trigger cannot turn a mixed source into an archive exception, including
+through fallback between Scheduled and Routine lifecycle participants. Restore does not reconstruct Routine state.
 Purge waits for preserved work and verifies namespace absence. Team Primary
 archive protection is unchanged.
 

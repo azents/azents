@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
     ScheduledTaskScheduleType,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import Event, ScheduledTaskResultPayload
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -44,7 +45,9 @@ _CYCLE_ID = "c" * 32
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[WriteSession]:
     """Yield one transaction-shaped session double."""
-    yield ReadWriteSession(require_instance(AsyncMock(spec=AsyncSession), AsyncSession))
+    session = AsyncMock(spec=AsyncSession)
+    session.scalar.return_value = False
+    yield ReadWriteSession(require_instance(session, AsyncSession))
 
 
 def _cycle(*, binding_id: str | None = None) -> ScheduledTaskCycleRecord:
@@ -65,7 +68,6 @@ def _cycle(*, binding_id: str | None = None) -> ScheduledTaskCycleRecord:
             cron_expression=None,
             timezone=None,
             scheduled_for=_NOW,
-            current_run_id=_RUN_ID,
             started_at=_NOW,
             progress_title="Preparing report…",
             ordered_tasks=["Collect data", "Write summary"],
@@ -125,7 +127,11 @@ class _RunRepository:
         self.run = SimpleNamespace(
             session_id="s" * 32,
             status=AgentRunStatus.RUNNING,
-            scheduled_task_cycle_id=_CYCLE_ID,
+            work_context=WorkContext(
+                scheduled_cycle_ids=(_CYCLE_ID,),
+                routine_executions=(),
+                unrelated_input=False,
+            ),
             terminal_result_event_id=None,
             terminal_result_message=None,
         )
@@ -341,10 +347,11 @@ async def test_submit_rejects_unbound_run_before_any_terminal_mutation() -> None
     service, run_repository, event_repository, cycle_repository, task_repository = (
         _service(order=order, task=_task())
     )
-    run_repository.run.scheduled_task_cycle_id = None
+    run_repository.run.work_context = WorkContext.empty()
 
     with pytest.raises(ValueError, match="not an active Scheduled Task cycle"):
         await service.submit(
+            cycle_id=_CYCLE_ID,
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,
@@ -363,8 +370,8 @@ async def test_submit_rejects_unbound_run_before_any_terminal_mutation() -> None
     assert task_repository.released is False
 
 
-async def test_submit_rejects_cycle_owned_by_another_run_without_mutation() -> None:
-    """Visible terminal tools cannot settle a cycle bound to another Run."""
+async def test_submit_rejects_cycle_from_another_session_without_mutation() -> None:
+    """Carried selectors do not authorize another Session's canonical cycle."""
     order: list[str] = []
     service, run_repository, event_repository, cycle_repository, task_repository = (
         _service(order=order, task=_task())
@@ -372,13 +379,14 @@ async def test_submit_rejects_cycle_owned_by_another_run_without_mutation() -> N
     cycle_repository.record = cycle_repository.record.model_copy(
         update={
             "state": cycle_repository.record.state.model_copy(
-                update={"current_run_id": "o" * 32}
+                update={"session_id": "o" * 32}
             )
         }
     )
 
     with pytest.raises(ValueError, match="no matching started Scheduled Task cycle"):
         await service.submit(
+            cycle_id=_CYCLE_ID,
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,
@@ -405,6 +413,7 @@ async def test_submit_commits_event_cycle_and_once_task_before_run_completion() 
     )
 
     outcome = await service.submit(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -454,6 +463,7 @@ async def test_submit_releases_recurring_task_for_pending_or_future_work() -> No
     )
 
     await service.submit(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -479,6 +489,7 @@ async def test_submit_captures_channel_effect_snapshot_before_cycle_deletion() -
     )
 
     outcome = await service.submit(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -535,6 +546,7 @@ async def test_submit_recovers_existing_canonical_event_without_retransition() -
     )
 
     outcome = await service.submit(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -564,6 +576,7 @@ async def test_empty_result_does_not_enter_terminal_transaction(result: str) -> 
     fixture = _service(order=order, task=_task())
     with pytest.raises(ValueError, match="result must not be empty"):
         await fixture.service.submit(
+            cycle_id=_CYCLE_ID,
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,
@@ -591,6 +604,7 @@ async def test_transaction_completion_precedes_caller_dispatch() -> None:
 
     fixture.service.operations.session_manager = manager
     outcome = await fixture.service.submit(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -621,6 +635,7 @@ async def test_quiet_completion_rejects_missing_permission_or_prior_progress(
     )
     with pytest.raises(ValueError, match="does not allow|reported progress"):
         await fixture.service.submit(
+            cycle_id=_CYCLE_ID,
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,
@@ -643,6 +658,7 @@ async def test_quiet_completion_keeps_result_and_releases_recurring_task() -> No
         update={"state": record.state.model_copy(update={"allow_silent": True})}
     )
     outcome = await fixture.service.submit(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -663,6 +679,7 @@ async def test_quiet_completion_keeps_result_and_releases_recurring_task() -> No
     assert len(fixture.cycle_repository.deleted) == 1
     fixture.event_repository.existing = outcome.event
     recovered = await fixture.service.submit(
+        cycle_id=_CYCLE_ID,
         workspace_id="w" * 32,
         agent_id="a" * 32,
         session_id="s" * 32,
@@ -687,6 +704,7 @@ async def test_quiet_completion_requires_success_and_a_reason(
     fixture = _service(order=[], task=_task())
     with pytest.raises(ValueError, match="requires success"):
         await fixture.service.submit(
+            cycle_id=_CYCLE_ID,
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,

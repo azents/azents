@@ -20,6 +20,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -145,7 +146,11 @@ async def _archive_with_scheduled_continuation(
     cycle_id = uuid7().hex
     run = RDBAgentRun(
         session_id=agent_session.id,
-        scheduled_task_cycle_id=cycle_id,
+        work_context=WorkContext(
+            scheduled_cycle_ids=(cycle_id,),
+            routine_executions=(),
+            unrelated_input=False,
+        ).model_dump(mode="json"),
         run_index=1,
         parent_agent_run_id=None,
         requested_model_target_label=None,
@@ -170,7 +175,6 @@ async def _archive_with_scheduled_continuation(
         cron_expression=None,
         timezone=None,
         scheduled_for=datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC),
-        current_run_id=run.id if phase == "started" else None,
         started_at=(
             datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
             if phase == "started"
@@ -209,7 +213,11 @@ async def _archive_with_scheduled_continuation(
             order_sequence=0,
             content="Continue the Scheduled Task.",
             idempotency_key=f"idle_continuation:{run.id}:scheduled:0",
-            metadata={"cycle_id": cycle_id, "title": "Daily report"},
+            metadata={
+                "cycle_id": cycle_id,
+                "title": "Daily report",
+                "continuation_source_run_id": run.id,
+            },
             action=None,
             attachments=[],
             file_parts=[],
@@ -304,7 +312,7 @@ class TestSessionExecutionRepository:
         )
         run = RDBAgentRun(
             session_id=agent_session.id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty().model_dump(mode="json"),
             run_index=1,
             parent_agent_run_id=None,
             requested_model_target_label=None,

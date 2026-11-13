@@ -60,7 +60,7 @@ occurrences.
 An active cycle is stored in Session-scoped Toolkit State, not in another product
 table. Its immutable snapshot retains the Task, Session, optional Binding,
 schedule, and `scheduled_for` values that were admitted. Mutable state records
-`admitted` or `started`, current Run identity, progress title and ordered work
+`admitted` or `started`, progress title and ordered work
 items, and current provider Tracker projection parts.
 
 ## Authority and Management
@@ -114,12 +114,16 @@ receives all four tools independently of its current cycle binding:
 - `delete_scheduled_task`
 - `submit_scheduled_task_result`
 
-`submit_scheduled_task_result` accepts `finished` or `failed` and a non-empty
-result. Submission validates the current Run's cycle and execution authority;
+`submit_scheduled_task_result` requires the exact server-issued `cycle_id`,
+`finished` or `failed`, and a non-empty result. Submission validates membership
+in the current Run's [work context](../execution/runs.md#logical-work-context)
+and current canonical cycle and execution authority;
 visibility does not grant permission to settle an unrelated or unbound cycle.
-Dynamic cycle guidance remains limited to the current Run's valid started cycle.
-A Scheduled-bound `channel_action` may report progress only with
-`continue`; terminal completion must use `submit_scheduled_task_result`.
+Dynamic cycle guidance lists every valid started cycle carried by the current Run.
+Several occurrences may be admitted into one Run. Scheduled progress explicitly
+selects `channel_action.scheduled_cycle_id` with `work_cycle_id=null` and permits
+only `continue`; terminal completion uses `submit_scheduled_task_result`.
+An invalid explicit Scheduled selector fails without falling back to Channel Work.
 
 ### Reporting permission and occurrence choice
 
@@ -216,7 +220,8 @@ An already-active recurring Task coalesces later due work into at most one
 scheduling work rather than choosing another target.
 
 Mailbox promotion is the exact start boundary. Promotion changes the cycle from
-`admitted` to `started`, binds the consuming AgentRun to that cycle, and appends a typed
+`admitted` to `started`, adds that exact cycle to the consuming AgentRun work context,
+and appends a typed
 `scheduled_task_trigger` Event. Deleting a Task or removing its owner before this
 boundary removes the trigger and admitted cycle. After this boundary, Task
 deletion does not interrupt the already-started AgentRun or its canonical Session
@@ -238,8 +243,11 @@ normal Session idle-hook boundary. `ScheduledToolkit` returns one typed
 order. The worker atomically consumes the pending idle-continuation pointer,
 enqueues the continuation Mailbox items, and keeps the Session running.
 
-The continuation promotes to a dedicated Event and binds the consuming AgentRun
-back to the same cycle. An idle Session creates its Run through the ordinary
+The continuation promotes to a dedicated Event and carries the same exact cycle
+into the consuming AgentRun. The typed envelope records its completed source Run;
+Goal, Routine, Channel and durable-action continuations preserve the source's
+admitted work through the same merge operation. Domain state does not track a
+current host Run. An idle Session creates its Run through the ordinary
 execution path. The Session and cycle identity remain stable across any number
 of Runs.
 
@@ -254,8 +262,10 @@ without inferring completion deadlines or execution budgets from them. Delayed
 dispatch and later continuations remain valid after those instants solely despite
 their being in the past. Explicit objective constraints and authoritative
 deadlines or validity windows discovered during execution remain applicable. The
-dynamic Toolkit prompt repeats these timing and lifecycle semantics without
-duplicating the complete runtime message.
+dynamic Toolkit prompt repeats the timing and lifecycle semantics together with
+the exact cycle selector, title, scheduled instant and delivery Binding. Initial,
+continuation and compaction snapshots include model-facing cycle selectors;
+Run, lease and provider-message identities remain internal.
 
 ## Terminal Result
 
@@ -265,10 +275,15 @@ duplicating the complete runtime message.
 2. append one `scheduled_task_result` Event using a cycle-derived external ID;
 3. delete the cycle Toolkit State;
 4. delete a completed one-time Task or release/advance a recurring Task;
-5. store the terminal result identity and message on the AgentRun; and
+5. store the terminal result identity and message on the AgentRun only when no
+   independent admitted Scheduled/Routine or active Goal/Channel work remains; and
 6. commit before any provider effect.
 
-The tool result terminalizes the current AgentRun without another model turn. The
+The tool result terminalizes the current AgentRun without another model turn only
+when that does not abandon independent unfinished work. Completing one cycle
+never settles a Routine, Goal, Channel Work or another cycle. Recovery matches
+each unresolved terminal call's decoded selector to its own durable cycle-derived
+result Event, rather than acknowledging all calls from one Run-level pointer. The
 Session history API retains the typed Scheduled Task Event payload. Web chat
 projects trigger and continuation controls as dedicated collapsible Scheduled Task
 messages: the collapsed row shows the Task title, while expanded content shows a
@@ -356,7 +371,7 @@ terminalize in the Session.
 
 Session archive removes all Task definitions and pre-start Scheduled work in the
 archived tree. Archive is allowed with active Runs only when every such Run is a
-preservable started Scheduled cycle; unrelated active work still blocks archive.
+preservable started Scheduled-only work context; carried Routine refs or ordinary-input provenance block this exception even when a Scheduled cycle is present. Exact continuation sources and pending idle boundaries apply the same unmixed-work test. Unrelated active work still blocks archive.
 Archived Sessions accept only the internal continuation required to finish those
 preserved cycles. Restore does not recreate deleted Tasks.
 
@@ -441,9 +456,9 @@ The closed Mailbox and Event contracts include
 
 Trigger and continuation Mailbox items are internal wake-producing Session input.
 Promotion appends their dedicated Event kinds and preserves their source identity;
-they are not editable user-authored chat messages. A trigger promotion also binds
-the new AgentRun to the exact admitted Scheduled Task cycle. Continuation starts a
-fresh Run for an already-started cycle.
+they are not editable user-authored chat messages. A trigger promotion also adds
+the exact admitted cycle to the consuming AgentRun's work context. Continuation
+may join an existing Run or start a fresh one without changing occurrence identity.
 
 `scheduled_task_result` is the canonical durable terminal result. Its payload
 contains title, scheduled instant, `finished` or `failed` status, and result text.
@@ -463,11 +478,11 @@ root Runs:
 - `delete_scheduled_task`
 - `submit_scheduled_task_result`
 
-`submit_scheduled_task_result` validates the current Run's cycle and execution
-authority when invoked, independently of its unconditional visibility. Dynamic
-cycle guidance still requires an exact valid started cycle. The terminal tool
-commits the canonical Session result and returns a terminal Tool result so execution ends without
-another model turn.
+`submit_scheduled_task_result` validates the explicitly selected carried cycle and
+execution authority when invoked, independently of its unconditional visibility.
+Dynamic guidance lists exact valid started cycles carried by the Run.
+The terminal tool commits that occurrence's canonical result and ends execution
+without another model turn only when no independent unfinished work remains.
 
 Scheduled occurrence state uses Session-scoped Toolkit State with namespace
 `scheduled` and one cycle-specific state identity. It remains distinct from Todo,

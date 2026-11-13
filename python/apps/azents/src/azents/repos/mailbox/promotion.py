@@ -19,6 +19,7 @@ from azents.core.enums import (
 )
 from azents.core.json_value import JSONValue
 from azents.core.mailbox_data import (
+    ContinuationMailboxPayload,
     MailboxItem,
     RoutineMailboxPayload,
     ScheduledTaskContinuationMailboxPayload,
@@ -32,13 +33,14 @@ from azents.core.routine_presentation import (
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.skill_projection import SkillProjectionItem, resolve_active_skill
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentMessagePayload, Event, RoutineInputPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
+from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.goal.store import (
     GoalAlreadyExistsError,
@@ -88,6 +90,7 @@ class MailboxPromotionEvent:
 class MailboxGoalCreate:
     """Typed Goal mutation performed with Mailbox promotion."""
 
+    goal_id: str
     objective: str
     updated_at: str
 
@@ -250,6 +253,39 @@ class MailboxPromotionRepository:
 
             handled_failure = False
             prepared_events = plan.success_events
+            source_run_id = plan.continuation_predecessor_run_id
+            if isinstance(buffer.payload, ContinuationMailboxPayload):
+                source_run_id = buffer.payload.source_run_id
+            if source_run_id is not None:
+                if plan.active_run_id is None:
+                    raise ValueError("Continuation requires a consuming execution.")
+                source = await self.run_repository.get_by_id(session, source_run_id)
+                if (
+                    source is None
+                    or source.session_id != plan.session_id
+                    or source.status is not AgentRunStatus.COMPLETED
+                ):
+                    raise ValueError("Continuation work source is not completed.")
+                carried = source.work_context
+                active_cycle_ids: list[str] = []
+                for carried_cycle_id in carried.scheduled_cycle_ids:
+                    cycle = await self.scheduled_task_cycle_repository.get_started(
+                        session,
+                        agent_id=agent_session.agent_id,
+                        session_id=plan.session_id,
+                        cycle_id=carried_cycle_id,
+                    )
+                    if cycle is not None:
+                        active_cycle_ids.append(carried_cycle_id)
+                carried = carried.model_copy(
+                    update={"scheduled_cycle_ids": tuple(active_cycle_ids)}
+                )
+                await self.run_repository.merge_work_context(
+                    session,
+                    session_id=plan.session_id,
+                    run_id=plan.active_run_id,
+                    context=carried,
+                )
             if isinstance(
                 buffer.payload,
                 ScheduledTaskTriggerMailboxPayload
@@ -276,6 +312,20 @@ class MailboxPromotionRepository:
                 if not bound:
                     prepared_events = []
                 else:
+                    if plan.active_run_id is None:
+                        raise ValueError("Routine input requires an execution.")
+                    await self.run_repository.merge_work_context(
+                        session,
+                        session_id=plan.session_id,
+                        run_id=plan.active_run_id,
+                        context=WorkContext(
+                            scheduled_cycle_ids=(),
+                            routine_executions=tuple(
+                                routine_execution_ref(item) for item in bound
+                            ),
+                            unrelated_input=False,
+                        ),
+                    )
                     content = render_routine_execution_input(
                         bound,
                         continuation=buffer.kind
@@ -317,6 +367,7 @@ class MailboxPromotionRepository:
                 try:
                     await self.goal_store.create_in_session(
                         session,
+                        goal_id=plan.goal_create.goal_id,
                         agent_id=agent_session.agent_id,
                         session_id=plan.session_id,
                         objective=plan.goal_create.objective,
@@ -432,7 +483,6 @@ class MailboxPromotionRepository:
             session,
             scope=scope,
             refs=buffer.payload.executions,
-            run_id=run_id,
             continuation=buffer.kind is MailboxItemKind.ROUTINE_CONTINUATION,
             session_status=session_status,
             now=datetime.datetime.now(datetime.UTC),
@@ -494,17 +544,20 @@ class MailboxPromotionRepository:
             await self.scheduled_task_cycle_repository.start(
                 session,
                 record=cycle,
-                run_id=run_id,
                 started_at=datetime.datetime.now(datetime.UTC),
             )
         else:
             if cycle.state.phase != "started":
                 return False
-            await self.scheduled_task_cycle_repository.bind_run(
-                session, record=cycle, run_id=run_id
-            )
-        await self.run_repository.update(
-            session, run_id, AgentRunPatch(scheduled_task_cycle_id=payload.cycle_id)
+        await self.run_repository.merge_work_context(
+            session,
+            session_id=buffer.session_id,
+            run_id=run_id,
+            context=WorkContext(
+                scheduled_cycle_ids=(payload.cycle_id,),
+                routine_executions=(),
+                unrelated_input=False,
+            ),
         )
         return True
 

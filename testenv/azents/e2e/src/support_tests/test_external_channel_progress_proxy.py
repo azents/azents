@@ -708,6 +708,8 @@ def test_dispatcher_holds_work_through_sparse_retries_and_late_turn(
         assert identity not in emitted
         emitted.add(identity)
         assert json.loads(str(item["arguments"])) == {
+            "work_cycle_id": None,
+            "scheduled_cycle_id": None,
             "mode": "continue",
             "binding": "binding-quiet-123",
             "title": "Investigating error logs…",
@@ -1419,3 +1421,26 @@ def test_nonhuman_user_item_does_not_become_a_canonical_reference_origin() -> No
     )
     assert identity is not None
     assert registry._responses[identity[1]].reference_tokens == ()
+
+
+@pytest.mark.usefixtures("isolated_progress_proxy")
+def test_sparse_continuation_retains_observed_exact_work_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider context compaction cannot turn an active Work call into null/null."""
+    request = _quiet_request()
+    request["input"] = [
+        {
+            "role": "user",
+            "content": (
+                "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                "Binding: binding-quiet-123\n"
+                "Work cycle IDs: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\n"
+                "Discord quiet work presence E2E"
+            ),
+        }
+    ]
+    first = _dispatch(request, monkeypatch)
+    second = _dispatch(_sparse(first), monkeypatch)
+    assert json.loads(str(_tool_item(first)["arguments"]))["work_cycle_id"] == "a" * 32
+    assert json.loads(str(_tool_item(second)["arguments"]))["work_cycle_id"] == "a" * 32

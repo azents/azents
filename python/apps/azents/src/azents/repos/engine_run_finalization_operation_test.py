@@ -4,6 +4,7 @@ import asyncio
 import copy
 import dataclasses
 from typing import Literal
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -13,6 +14,7 @@ from azents.core.enums import (
     EventKind,
 )
 from azents.core.model_operation import ModelOperationKind
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import RunMarkerPayload
 from azents.repos.engine_operation_test_support import (
     RUN_ID,
@@ -341,7 +343,11 @@ async def test_scheduled_completion_preserves_all_existing_eligibility_predicate
     """A recovery check cannot terminalize an ineligible or incomplete Run."""
     run = running_run().model_copy(
         update={
-            "scheduled_task_cycle_id": "c" * 32,
+            "work_context": WorkContext(
+                scheduled_cycle_ids=("c" * 32,),
+                routine_executions=(),
+                unrelated_input=False,
+            ),
             "terminal_result_event_id": "e" * 32,
             "terminal_result_message": "scheduled result",
         }
@@ -351,7 +357,7 @@ async def test_scheduled_completion_preserves_all_existing_eligibility_predicate
     elif invalid == "status":
         run = run.model_copy(update={"status": AgentRunStatus.COMPLETED})
     elif invalid == "cycle":
-        run = run.model_copy(update={"scheduled_task_cycle_id": None})
+        run = run.model_copy(update={"work_context": WorkContext.empty()})
     elif invalid == "event":
         run = run.model_copy(update={"terminal_result_event_id": None})
     else:
@@ -382,12 +388,21 @@ async def test_scheduled_completion_preserves_all_existing_eligibility_predicate
 @pytest.mark.parametrize("completion", [None, _completion()])
 async def test_scheduled_completion_uses_committed_result_and_nullable_success(
     completion: ModelOperationCompletion | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Recover the exact durable scheduled result with no new model work."""
+    monkeypatch.setattr(
+        "azents.repos.engine_run_finalization_operation.has_unfinished_work",
+        AsyncMock(return_value=False),
+    )
     fixture = operation_fixture(
         run=running_run().model_copy(
             update={
-                "scheduled_task_cycle_id": "c" * 32,
+                "work_context": WorkContext(
+                    scheduled_cycle_ids=("c" * 32,),
+                    routine_executions=(),
+                    unrelated_input=False,
+                ),
                 "terminal_result_event_id": "e" * 32,
                 "terminal_result_message": "scheduled result",
             }

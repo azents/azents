@@ -29,6 +29,8 @@ def test_channel_nested_unknown_fields_are_rejected(level: str) -> None:
     with pytest.raises(ValidationError, match="extra_forbidden") as caught:
         ChannelActionInput.model_validate(
             {
+                "work_cycle_id": "c" * 32,
+                "scheduled_cycle_id": None,
                 "mode": "finish",
                 "binding": "active",
                 "message": "Done",

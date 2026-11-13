@@ -32,7 +32,6 @@ class ScheduledTaskCycleState(BaseModel):
     cron_expression: str | None = None
     timezone: str | None = None
     scheduled_for: datetime.datetime
-    current_run_id: str | None = Field(min_length=32, max_length=32)
     started_at: datetime.datetime | None
     progress_title: str | None
     progress_reported: bool

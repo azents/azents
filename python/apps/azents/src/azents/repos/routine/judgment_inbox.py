@@ -348,7 +348,6 @@ class RoutineJudgmentInboxRepository:
                         admitted_at=now,
                     ),
                     phase="admitted",
-                    current_run_id=None,
                     started_at=None,
                     completed_at=None,
                     work=None,

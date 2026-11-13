@@ -66,6 +66,7 @@ from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
+from azents.core.work_context import WorkContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
     compute_summary_budget,
@@ -429,7 +430,7 @@ class _RunRepo:
         self._state: AgentRunState | None = AgentRunState(
             id="0" * 32,
             session_id="session-1",
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
             run_index=1,
             phase=AgentRunPhase.IDLE,
             status=AgentRunStatus.RUNNING,
@@ -507,7 +508,7 @@ class _RunRepo:
         self._state = AgentRunState(
             id=create.id or "0" * 32,
             session_id=create.session_id,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
             run_index=1,
             phase=create.phase,
             status=create.status,

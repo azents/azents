@@ -11,6 +11,7 @@ from azents.core.enums import AgentRunStatus, EventKind, MailboxItemKind
 from azents.core.mailbox_data import RoutineContinuationMailboxPayload
 from azents.core.routine import RoutineObjectiveOutcome, RoutineUnavailable
 from azents.core.routine_presentation import routine_execution_ref
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import RoutineInputPayload
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
@@ -123,7 +124,7 @@ async def test_normal_idle_continuation_rebinds_original_context_to_next_run(
             session,
             AgentRunCreate(
                 session_id=f.scope.session_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -165,7 +166,12 @@ async def test_normal_idle_continuation_rebinds_original_context_to_next_run(
             )
             assert state is not None
             assert state.state.context == original.context
-            assert state.state.current_run_id == next_run.id
+            continued = await f.repository.runs.get_by_id(session, next_run.id)
+            assert continued is not None
+            assert continued.work_context.contains_routine(
+                routine_id=original.context.candidate.routine_id,
+                execution_id=original.context.execution_id,
+            )
             assert state.state.started_at == original.started_at
     assert isinstance(promoted.events[0].payload, RoutineInputPayload)
     assert promoted.events[0].payload.content.count('"objective"') == 1
@@ -267,7 +273,7 @@ async def test_compaction_includes_prior_run_work_without_granting_execution_aut
             session,
             AgentRunCreate(
                 session_id=f.scope.session_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )

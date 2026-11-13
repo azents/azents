@@ -22,6 +22,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.mailbox_data import MailboxItem, MailboxItemCreate
+from azents.core.work_context import WorkContext
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
@@ -176,7 +177,7 @@ async def test_idle_consumption_preserves_child_root_fk_and_parent_mailbox(
             setup,
             AgentRunCreate(
                 session_id=root.id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -215,7 +216,7 @@ async def test_idle_consumption_preserves_child_root_fk_and_parent_mailbox(
                     session,
                     AgentRunCreate(
                         session_id=child.id,
-                        scheduled_task_cycle_id=None,
+                        work_context=WorkContext.empty(),
                         parent_agent_run_id=run.id,
                     ),
                 )

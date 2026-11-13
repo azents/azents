@@ -107,6 +107,7 @@ def test_external_channel_continuation_has_dedicated_live_projections() -> None:
         metadata={
             "source": "external_channel",
             "active_bindings": "binding-handle",
+            "continuation_source_run_id": "r" * 32,
         },
         action=None,
         attachments=[],

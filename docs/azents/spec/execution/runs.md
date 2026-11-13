@@ -118,6 +118,44 @@ is treated as authoritative. `wait` is a pure observer and later source-session 
 to repair or complete parent delivery. Delivery failure therefore does not leave terminal state
 committed without its corresponding mailbox envelope and delivery marker.
 
+## Logical work context
+
+`agent_runs.work_context` is required JSONB containing exact
+`scheduled_cycle_ids`, exact `routine_executions` (definition and occurrence
+identity with presentation labels), and `unrelated_input` provenance. One Run may
+carry several independent occurrences. Initial admission and validated continuation
+promotion merge these references without overwriting other work. Ordinary input
+records mixed-work provenance durably when input Events are associated, so archive
+eligibility does not depend on later retention of those Events.
+
+Work identity is independent of Run segmentation. Typed idle envelopes retain the
+completed `source_run_id`; durable-action envelopes retain their exact predecessor.
+Promotion validates same-Session completed source and current domain state before
+merging context. Explicit retry filters terminal occurrences from the failed
+Run's context. Worker takeover reuses the persisted context under its new ordinary
+Session owner. Child result messages never import the child's work authority.
+
+The context is an execution association, not an independent work lifecycle or
+permission grant. Domain operations validate exact selectors, Session/Agent scope,
+domain phase, current execution, Stop and captured owner generation at their existing
+mutation boundaries. Goal and Channel Work remain in their Session/Binding-owned
+state rather than mirroring mutable lifecycle in this JSON. Archive/purge resolve
+the latest actual execution association of preserved work instead of a domain
+`current_run_id`; the Routine-only archive exception also checks provenance.
+
+Occurrence references are lifecycle-significant non-FK links to Session Toolkit
+State. Terminalization removes or closes the owning domain state; historical Run
+references remain and cannot revive it. Existing Session/Run deletion owns context
+cleanup, with preserved-work completion gates checked before purge.
+Migration replaces the scalar Scheduled binding and domain current-host fields,
+seeds retained canonical data and bridge lineage, and refuses an unresolved active
+bridge when required canonical provenance is gone. Its transaction rolls back
+completely on refusal. A lossy downgrade to one host binding is rejected.
+
+Compaction does not rewrite this authority. See [compaction continuity](../flow/context-compaction.md)
+and [Scheduled completion](../domain/scheduled-task.md#terminal-result) for context
+reconstruction and independent completion behavior.
+
 ## Execution state and terminal boundaries
 
 ### Archived-session execution fence

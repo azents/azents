@@ -93,9 +93,9 @@ class RDBAgentRun(RDBModel):
         sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    scheduled_task_cycle_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        nullable=True,
+    work_context: Mapped[dict[str, JSONValue]] = mapped_column(
+        JSONB,
+        nullable=False,
     )
     run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     parent_agent_run_id: Mapped[str | None] = mapped_column(

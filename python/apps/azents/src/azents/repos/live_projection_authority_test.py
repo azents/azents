@@ -11,6 +11,7 @@ from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionRunState,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentRunState
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -134,7 +135,7 @@ async def test_terminal_read_uses_only_running_run_from_the_requested_session(
             session,
             AgentRunCreate(
                 session_id=foreign_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -143,7 +144,7 @@ async def test_terminal_read_uses_only_running_run_from_the_requested_session(
             AgentRunCreate(
                 session_id=current_id,
                 status=AgentRunStatus.PENDING,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )

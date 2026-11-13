@@ -45,12 +45,11 @@ async def test_scheduled_tool_operations_close_every_transaction() -> None:
     cycle = SimpleNamespace(
         state=SimpleNamespace(
             workspace_id="workspace-1",
-            current_run_id="run-1",
         )
     )
     runs.get_by_id.return_value = SimpleNamespace(
         session_id="session-1",
-        scheduled_task_cycle_id="cycle-1",
+        work_context=SimpleNamespace(scheduled_cycle_ids=("cycle-1",)),
     )
     cycles.get_started.return_value = cycle
     cycles.list_started.return_value = [
@@ -71,6 +70,7 @@ async def test_scheduled_tool_operations_close_every_transaction() -> None:
 
     assert (
         await operations.active_cycle(
+            cycle_id="cycle-1",
             workspace_id="workspace-1",
             agent_id="agent-1",
             session_id="session-1",

@@ -41,6 +41,7 @@ from azents.core.inference_profile import (
 from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.mailbox_data import MailboxItem, UserMessageMailboxPayload
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.types import (
     RunMarkerPayload,
@@ -1460,7 +1461,7 @@ class TestChatWriteService:
                 session,
                 AgentRunCreate(
                     session_id=agent_session.id,
-                    scheduled_task_cycle_id=None,
+                    work_context=WorkContext.empty(),
                     parent_agent_run_id=None,
                 ),
             )

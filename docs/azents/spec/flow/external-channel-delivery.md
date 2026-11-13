@@ -22,10 +22,10 @@ Explicit publication, Channel Work, provider presentation, attachments and notif
 
 Normal model output is never relayed to a provider. The only model-facing publication
 path is the unprefixed `channel_action` tool. Eligible root Runs expose
-`channel_action` and `download_external_file` independently of current bindings
+`channel_action`, `get_channel_work`, and `download_external_file` independently of current bindings
 or Runtime file storage. Invocation still validates binding, execution and file
 authority, and missing Runtime storage produces a Tool error. When Tool Search is
-enabled, `channel_action` and `download_external_file` are deferred discovery targets;
+enabled, these tools are deferred discovery targets;
 when disabled, the complete catalog exposes them directly.
 
 The active Toolkit contributes a minimal static prompt stating that ordinary assistant
@@ -53,6 +53,22 @@ model input boundary exposes four atomic modes:
   one deletion effect for each current `PRESENT` Activity Tracker on only the selected
   binding and executes those effects without a final reply. No reply, progress
   create/update, file, or unrelated provider request occurs.
+
+`channel_action` requires two nullable, mutually exclusive selectors.
+`work_cycle_id` selects existing active Channel Work; `scheduled_cycle_id` selects
+Scheduled progress and may never fall back to ordinary Work on rejection. Both null
+explicitly request a new ordinary publication, allowed only without active Work.
+`ignore` always requires an exact existing active Work selector. Exact-ID and phase
+checks repeat inside every Work CAS attempt, so a stale input cannot mutate a
+replacement. A both-null publication uses stable client-call identity to avoid a
+second cycle/effect when its committed response is lost.
+
+Read-only `get_channel_work(binding)` exposes the current scoped active selector,
+including awaiting-input Work; it does not admit work or publish. Ingress freezes
+the Work selector with the newly admitted message in the same transaction as Work
+creation. Old input is not rehydrated with a replacement's ID. Continuation metadata,
+compaction snapshots and action results expose the exact selector while retaining
+existing single-active-per-binding policy and execution authority checks.
 
 `channel_action` may use the same binding and mode in consecutive model turns.
 Publication frequency is determined by the Agent's work and communication needs
@@ -204,7 +220,8 @@ The Tool result contains one identifier-free outcome for each ordered effect:
   effect did not complete.
 
 The result includes only the operation, ordered part, status, and sanitized reason or
-detail, plus the final Work revision and whether awaiting input was established.
+detail, plus the selected Work/Scheduled identity, final Work revision and whether
+awaiting input was established.
 Normal Session client-tool call/result events are the only durable
 Agent-requested execution history. No Channel Action, delivery attempt, pending
 provider work item, retry, replay, recovery, or compensation record is created.
@@ -688,10 +705,9 @@ required; the Routine cannot choose a new destination or complete ordinary Work.
 
 ## Channel action tool contract
 
-`channel_action` is a conditional auto-bound tool, not a Workspace
-`ToolkitConfig` and not an automatic assistant-output relay. Runtime includes its
-unprefixed executable entry only when the current root AgentSession has an active
-External Channel binding. Tool Search defers its model-visible schema when enabled;
+`channel_action` is an auto-bound root tool, not a Workspace
+`ToolkitConfig` and not an automatic assistant-output relay. Its executable catalog
+entry is independent of current Binding availability. Tool Search defers its model-visible schema when enabled;
 otherwise the complete catalog exposes it directly. A minimal static prompt always
 states that ordinary assistant output is not delivered externally and that external
 publication, participant-input requests, continuation, and silent completion use
@@ -704,7 +720,7 @@ External Channel turn or continuation and for an ordinary user who explicitly as
 for external publication. Active bindings or prior External Channel history alone do
 not classify the current ordinary user input as an External Channel request.
 Compaction preserves only unfinished work continuity: binding, provider, resource
-label, current title, ordered tasks, and a provider-neutral awaiting-participant-input
+label, exact work selector, current title, ordered tasks, and a provider-neutral awaiting-participant-input
 indicator. It omits state revisions, requesting Run identity, provider projection
 diagnostics, and provider-effect outcomes.
 

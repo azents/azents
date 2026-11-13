@@ -103,30 +103,50 @@ class ScheduledTaskToolOperationRepository:
         agent_id: str,
         session_id: str,
         run_id: str,
+        cycle_id: str,
     ) -> ScheduledTaskCycleRecord | None:
-        """Resolve the current Run's exact started cycle in one transaction."""
+        """Resolve one explicitly selected occurrence from admitted context."""
         async with self.session_manager() as session:
             await self._validate_owner(session)
             run = await self.run_repository.get_by_id(session, run_id)
             if (
                 run is None
                 or run.session_id != session_id
-                or run.scheduled_task_cycle_id is None
+                or cycle_id not in run.work_context.scheduled_cycle_ids
             ):
                 return None
             cycle = await self.cycle_repository.get_started(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
-                cycle_id=run.scheduled_task_cycle_id,
+                cycle_id=cycle_id,
             )
-            if (
-                cycle is None
-                or cycle.state.workspace_id != workspace_id
-                or cycle.state.current_run_id != run_id
-            ):
+            if cycle is None or cycle.state.workspace_id != workspace_id:
                 return None
             return cycle
+
+    async def active_cycles(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        run_id: str,
+    ) -> list[ScheduledTaskCycleRecord]:
+        """List the exact still-started occurrences carried by this execution."""
+        async with self.session_manager() as session:
+            await self._validate_owner(session)
+            run = await self.run_repository.get_by_id(session, run_id)
+            if run is None or run.session_id != session_id:
+                return []
+            return [
+                cycle
+                for cycle in await self.cycle_repository.list_started(
+                    session, agent_id=agent_id, session_id=session_id
+                )
+                if cycle.state.workspace_id == workspace_id
+                and cycle.state.cycle_id in run.work_context.scheduled_cycle_ids
+            ]
 
     async def list_started_cycle_states(
         self,

@@ -227,8 +227,12 @@ Do not describe replacement as an in-place update.
 
 ## Completing scheduled work
 
-Use `submit_scheduled_task_result` to finish or fail the active Scheduled Task
-cycle. Always supply `notify`, `suppression_reason`, and `files` explicitly:
+Use `submit_scheduled_task_result` to finish or fail one exact Scheduled Task
+cycle. Supply the server-issued `cycle_id` from its initial message, continuation,
+current active-cycle guidance, or compaction snapshot. Several occurrences may
+share one Run; completing one does not settle the others or unrelated Goal,
+Routine or Channel Work. Never infer identity from a title or execution Run.
+Always supply `notify`, `suppression_reason`, and `files` explicitly:
 
 - use `notify=true` and `suppression_reason=null` for normal reports;
 - use `notify=false` only when captured permission allows it, all required checks
@@ -250,4 +254,6 @@ another channel, reconstruct a provider identifier, or describe the result as
 having been separately sent to another Slack or Discord channel.
 
 Use `channel_action` only for interim progress while the Scheduled Task remains
-active. It does not replace terminal result submission.
+active, with `scheduled_cycle_id` set to that exact occurrence, `work_cycle_id=null`,
+and `mode="continue"`. It does not replace terminal result submission and must not
+select or finish ordinary Channel Work.

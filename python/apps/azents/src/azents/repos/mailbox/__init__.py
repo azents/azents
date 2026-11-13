@@ -26,6 +26,44 @@ _ACTION_ADAPTER = TypeAdapter(dict[str, JSONValue] | None)
 class MailboxRepository:
     """MailboxItem CRUD repository."""
 
+    async def freeze_channel_work(
+        self,
+        session: WriteSession,
+        *,
+        session_id: str,
+        mailbox_item_ids: Sequence[str],
+        work_cycle_id: str,
+    ) -> None:
+        """Freeze ingress Work identity on newly admitted message payloads."""
+        if not mailbox_item_ids:
+            return
+        await session.write_session.execute(
+            sa.update(RDBMailboxItem)
+            .where(
+                RDBMailboxItem.id.in_(mailbox_item_ids),
+                RDBMailboxItem.session_id == session_id,
+                RDBMailboxItem.kind == MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
+            )
+            .values(
+                payload=sa.func.jsonb_set(
+                    RDBMailboxItem.payload,
+                    sa.cast(
+                        sa.literal(
+                            [
+                                "items",
+                                "0",
+                                "metadata",
+                                "external_channel_message",
+                                "work_cycle_id",
+                            ]
+                        ),
+                        sa.ARRAY(sa.Text),
+                    ),
+                    sa.func.to_jsonb(sa.cast(sa.literal(work_cycle_id), sa.Text)),
+                )
+            )
+        )
+
     async def create(
         self,
         session: WriteSession,

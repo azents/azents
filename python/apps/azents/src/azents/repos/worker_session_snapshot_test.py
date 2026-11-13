@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionKind,
     AgentSessionRunState,
 )
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -187,7 +188,7 @@ def _run(session_id: str, index: int, status: AgentRunStatus) -> RDBAgentRun:
         session_id=session_id,
         run_index=index,
         status=status,
-        scheduled_task_cycle_id=None,
+        work_context=WorkContext.empty().model_dump(mode="json"),
         parent_agent_run_id=None,
         requested_model_target_label=None,
         requested_reasoning_effort=None,

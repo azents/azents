@@ -569,7 +569,8 @@ class PydanticAILowerer:
             if event.kind == EventKind.GOAL_CONTINUATION:
                 return self._prompt(
                     format_goal_continuation_reminder(
-                        payload.metadata.get("goal_objective")
+                        payload.metadata.get("goal_objective"),
+                        payload.metadata.get("goal_id"),
                     )
                 )
             if event.kind == EventKind.EXTERNAL_CHANNEL_CONTINUATION:
@@ -580,6 +581,7 @@ class PydanticAILowerer:
                 if payload.metadata.get("goal_control_action") == "resume":
                     return self._prompt(
                         format_goal_resumed_reminder(
+                            goal_id=payload.metadata.get("goal_id"),
                             goal_objective=payload.metadata.get("goal_objective"),
                             previous_goal_status=payload.metadata.get(
                                 "previous_goal_status"
@@ -588,7 +590,10 @@ class PydanticAILowerer:
                         )
                     )
                 return self._prompt(
-                    format_goal_updated_reminder(payload.metadata.get("goal_objective"))
+                    format_goal_updated_reminder(
+                        payload.metadata.get("goal_objective"),
+                        payload.metadata.get("goal_id"),
+                    )
                 )
             content: list[UserContent] = []
             if isinstance(payload.content, str):

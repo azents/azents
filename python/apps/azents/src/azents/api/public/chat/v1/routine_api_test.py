@@ -159,7 +159,10 @@ async def test_incomplete_read_remains_truthful_after_host_failure_and_retry_reb
                 execution_id=state.context.execution_id,
             )
             assert rebound is not None
-            assert rebound.state.current_run_id == runs[1].id
+            assert runs[1].work_context.contains_routine(
+                routine_id=state.context.candidate.routine_id,
+                execution_id=state.context.execution_id,
+            )
             assert rebound.state.phase == "started"
         pending = await client.get(path)
         assert pending.status_code == 200 and pending.json() == body

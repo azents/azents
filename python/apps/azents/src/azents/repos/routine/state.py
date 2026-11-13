@@ -230,7 +230,6 @@ class RoutineStateRepository:
                 state=RoutineExecutionState(
                     context=item.state.context,
                     phase="cancelled",
-                    current_run_id=item.state.current_run_id,
                     started_at=item.state.started_at,
                     completed_at=now,
                     work=None,

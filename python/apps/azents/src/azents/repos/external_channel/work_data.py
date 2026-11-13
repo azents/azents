@@ -28,6 +28,7 @@ class ChannelWorkSnapshot(_Record):
     """Bounded model-visible state for one active External Channel binding."""
 
     binding_id: str
+    work_cycle_id: str
     provider: ExternalChannelProvider
     resource_label: str
     title: str | None
@@ -71,6 +72,7 @@ class ChannelActionResult:
     """Canonical Work result with ordered identifier-free provider outcomes."""
 
     binding_id: str
+    work_id: str
     work_status: ExternalChannelWorkStatus
     state_revision: int
     awaiting_input: bool

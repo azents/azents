@@ -13,6 +13,7 @@ from azents.core.enums import (
 )
 from azents.core.json_value import JSONValue
 from azents.core.model_operation import ModelOperationState
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import ActiveToolCall
 from azents.engine.run.failure import FailedRunRetryState
 
@@ -36,11 +37,7 @@ class AgentRunCreate(BaseModel):
 
     id: str | None = Field(default=None, description="AgentRun ID")
     session_id: str = Field(description="AgentSession ID")
-    scheduled_task_cycle_id: str | None = Field(
-        min_length=32,
-        max_length=32,
-        description="Scheduled Task cycle binding",
-    )
+    work_context: WorkContext
     parent_agent_run_id: str | None
     run_index: int | None = Field(
         default=None,
@@ -63,7 +60,7 @@ class AgentRunCreate(BaseModel):
 class AgentRunPatch(TypedDict, total=False):
     """Presence-aware run updates; omitted fields retain their current values."""
 
-    scheduled_task_cycle_id: str | None
+    work_context: WorkContext
     phase: AgentRunPhase | None
     status: AgentRunStatus | None
     parent_agent_run_id: str | None

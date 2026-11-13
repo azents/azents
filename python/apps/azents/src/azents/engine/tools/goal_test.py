@@ -44,7 +44,11 @@ def _compaction_context(
 async def test_goal_toolkit_exposes_goal_tools() -> None:
     """GoalToolkit exposes goal tools without prefix."""
     store = AsyncMock()
-    store.load.return_value = GoalState(objective="Ship goal", status="active")
+    store.load.return_value = GoalState(
+        goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        objective="Ship goal",
+        status="active",
+    )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
 
     context = TurnContext(
@@ -95,6 +99,7 @@ def test_goal_snapshot_renders_unfinished_goal() -> None:
     """Goal compaction snapshot renders unfinished Goal state."""
     snapshot = render_goal_snapshot(
         GoalState(
+            goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             objective="Finish stacked PRs",
             status="active",
             created_at="2026-07-01T00:00:00+00:00",
@@ -106,6 +111,7 @@ def test_goal_snapshot_renders_unfinished_goal() -> None:
         "## Goal Snapshot\n"
         "\n"
         "Session Goal state at compaction time:\n"
+        "- Goal ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "- Objective: Finish stacked PRs\n"
         "- Status: active\n"
         "- Created at: 2026-07-01T00:00:00+00:00\n"
@@ -116,8 +122,12 @@ def test_goal_snapshot_renders_unfinished_goal() -> None:
 @pytest.mark.parametrize(
     "state",
     [
-        GoalState(),
-        GoalState(objective="Done", status="complete"),
+        GoalState(goal_id=None),
+        GoalState(
+            goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            objective="Done",
+            status="complete",
+        ),
     ],
 )
 def test_goal_snapshot_omits_empty_or_complete_goal(state: GoalState) -> None:
@@ -129,6 +139,7 @@ async def test_goal_compaction_summary_hook_appends_snapshot() -> None:
     """Goal hook appends unfinished Goal snapshot to the generated summary."""
     store = AsyncMock()
     store.load.return_value = GoalState(
+        goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         objective="Finish stacked PRs",
         status="active",
     )
@@ -145,6 +156,7 @@ async def test_goal_compaction_summary_hook_appends_snapshot() -> None:
         "## Goal Snapshot\n"
         "\n"
         "Session Goal state at compaction time:\n"
+        "- Goal ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "- Objective: Finish stacked PRs\n"
         "- Status: active"
     )
@@ -154,7 +166,9 @@ async def test_goal_compaction_summary_hook_appends_snapshot() -> None:
 async def test_goal_compaction_summary_hook_omits_complete_goal() -> None:
     """Goal hook leaves summary unchanged when Goal is complete."""
     store = AsyncMock()
-    store.load.return_value = GoalState(objective="Done", status="complete")
+    store.load.return_value = GoalState(
+        goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", objective="Done", status="complete"
+    )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     hook = toolkit.hooks().get("on_compaction_summary")
     assert hook is not None
@@ -167,18 +181,30 @@ async def test_goal_compaction_summary_hook_omits_complete_goal() -> None:
 
 def test_goal_prompt_is_stable_across_state() -> None:
     """Current Goal state does not change the toolkit prompt."""
-    assert render_goal_prompt(GoalState()) == render_goal_prompt(
-        GoalState(objective="Ship goal", status="active")
+    assert render_goal_prompt(GoalState(goal_id=None)) == render_goal_prompt(
+        GoalState(
+            goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            objective="Ship goal",
+            status="active",
+        )
     )
-    assert render_goal_prompt(GoalState()) == render_goal_prompt(
-        GoalState(objective="Done goal", status="complete")
+    assert render_goal_prompt(GoalState(goal_id=None)) == render_goal_prompt(
+        GoalState(
+            goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            objective="Done goal",
+            status="complete",
+        )
     )
 
 
 async def test_goal_idle_hook_returns_continuation_for_active_goal() -> None:
     """Active Goal returns session idle continuation."""
     store = AsyncMock()
-    store.load.return_value = GoalState(objective="Finish the feature", status="active")
+    store.load.return_value = GoalState(
+        goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        objective="Finish the feature",
+        status="active",
+    )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
 
     idle_hook = toolkit.hooks().get("on_session_idle")
@@ -200,6 +226,7 @@ async def test_goal_idle_hook_returns_continuation_for_active_goal() -> None:
         "source": "goal",
         "provider_slug": "goal",
         "last_run_id": "run-1",
+        "goal_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "goal_objective": "Finish the feature",
         "goal_status": "active",
         "goal_created_at": "",
@@ -211,7 +238,9 @@ async def test_goal_idle_hook_returns_continuation_for_active_goal() -> None:
 async def test_goal_idle_hook_skips_inactive_goal(status: GoalStatus) -> None:
     """Non-active Goal does not create continuation."""
     store = AsyncMock()
-    store.load.return_value = GoalState(objective="Done", status=status)
+    store.load.return_value = GoalState(
+        goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", objective="Done", status=status
+    )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
 
     idle_hook = toolkit.hooks().get("on_session_idle")
@@ -256,6 +285,7 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
     store = AsyncMock()
 
     previous = GoalState(
+        goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         objective="Ship the feature",
         status="active",
         created_at="2026-06-15T12:00:00+00:00",
@@ -282,7 +312,9 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
     )
     update_goal = state.tools[2]
 
-    await update_goal.handler('{"status":"complete"}')
+    await update_goal.handler(
+        '{"goal_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"complete"}'
+    )
 
     store.append_briefing_event.assert_awaited_once()
     _, kwargs = store.append_briefing_event.await_args
@@ -296,10 +328,16 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
     """Blocked Goal does not store completion briefing event."""
     store = AsyncMock()
 
-    previous = GoalState(objective="Blocked goal", status="active")
+    previous = GoalState(
+        goal_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        objective="Blocked goal",
+        status="active",
+    )
     store.set_status.return_value = GoalStatusUpdate(
         previous=previous,
-        updated=previous.model_copy(update={"status": "blocked"}),
+        updated=previous.model_copy(
+            update={"goal_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "status": "blocked"}
+        ),
     )
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
@@ -313,6 +351,8 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
     )
     update_goal = state.tools[2]
 
-    await update_goal.handler('{"status":"blocked"}')
+    await update_goal.handler(
+        '{"goal_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"blocked"}'
+    )
 
     store.append_briefing_event.assert_not_awaited()

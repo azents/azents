@@ -22,6 +22,7 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_operation import ModelOperationState
 from azents.core.vfs import VfsProjection
+from azents.core.work_context import WorkContext
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -498,6 +499,28 @@ class EventTranscriptRepository:
 class AgentRunRepository:
     """Event agent_runs repository."""
 
+    async def merge_work_context(
+        self,
+        session: WriteSession,
+        *,
+        session_id: str,
+        run_id: str,
+        context: WorkContext,
+    ) -> AgentRunState:
+        """Add server-admitted work without rebinding its domain to this Run."""
+        run = await self.lock_by_id(session, run_id)
+        if (
+            run is None
+            or run.session_id != session_id
+            or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+        ):
+            raise ValueError("Work context requires an active consuming execution.")
+        return await self.update(
+            session,
+            run_id,
+            AgentRunPatch(work_context=run.work_context.merge(context)),
+        )
+
     async def create(
         self,
         session: WriteSession,
@@ -549,7 +572,9 @@ class AgentRunRepository:
             run_index = (max_run_index or 0) + 1
         rdb = RDBAgentRun(
             session_id=create.session_id,
-            scheduled_task_cycle_id=create.scheduled_task_cycle_id,
+            work_context=_JSON_OBJECT_ADAPTER.validate_python(
+                create.work_context.model_dump(mode="json")
+            ),
             run_index=run_index,
             parent_agent_run_id=create.parent_agent_run_id,
             requested_model_target_label=None,
@@ -580,7 +605,7 @@ class AgentRunRepository:
         *,
         session_id: str,
         parent_agent_run_id: str | None,
-        scheduled_task_cycle_id: str | None,
+        work_context: WorkContext,
     ) -> AgentRunState:
         """Create a model-independent pending run without cancelling an active run."""
         locked_session_id = await session.write_session.scalar(
@@ -593,7 +618,9 @@ class AgentRunRepository:
         run_index = await self.next_run_index(session, session_id=session_id)
         rdb = RDBAgentRun(
             session_id=session_id,
-            scheduled_task_cycle_id=scheduled_task_cycle_id,
+            work_context=_JSON_OBJECT_ADAPTER.validate_python(
+                work_context.model_dump(mode="json")
+            ),
             run_index=run_index,
             parent_agent_run_id=parent_agent_run_id,
             requested_model_target_label=None,
@@ -753,13 +780,17 @@ class AgentRunRepository:
             return
         event_rows = (
             await session.write_session.execute(
-                sa.select(RDBEvent.id, RDBEvent.session_id).where(
-                    RDBEvent.id.in_(new_event_ids)
-                )
+                sa.select(
+                    RDBEvent.id,
+                    RDBEvent.session_id,
+                    RDBEvent.kind,
+                    RDBEvent.external_id,
+                ).where(RDBEvent.id.in_(new_event_ids))
             )
         ).all()
         if len(event_rows) != len(new_event_ids) or any(
-            event_session_id != run_session_id for _, event_session_id in event_rows
+            event_session_id != run_session_id
+            for _, event_session_id, _, _ in event_rows
         ):
             raise ValueError("Input events must belong to the AgentRun session")
         max_input_order = await session.write_session.scalar(
@@ -780,6 +811,37 @@ class AgentRunRepository:
                 ]
             )
         )
+        unrelated = any(
+            kind
+            not in {
+                EventKind.ROUTINE_TRIGGER,
+                EventKind.ROUTINE_CONTINUATION,
+                EventKind.SCHEDULED_TASK_TRIGGER,
+                EventKind.SCHEDULED_TASK_CONTINUATION,
+            }
+            and not (
+                kind is EventKind.SYSTEM_REMINDER
+                and external_id is not None
+                and external_id.startswith("turn_action_continuation:")
+            )
+            for _, _, kind, external_id in event_rows
+        )
+        run = await self.get_by_id(session, run_id)
+        if run is None:
+            raise ValueError("Input work context execution is missing.")
+        patch: AgentRunPatch = {}
+        if unrelated:
+            patch["work_context"] = run.work_context.model_copy(
+                update={"unrelated_input": True}
+            )
+        if (
+            run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+            and run.terminal_result_event_id is not None
+        ):
+            patch["terminal_result_event_id"] = None
+            patch["terminal_result_message"] = None
+        if patch:
+            await self.update(session, run_id, patch)
         await session.write_session.flush()
 
     async def list_input_event_ids(
@@ -1106,6 +1168,10 @@ class AgentRunRepository:
             raise ValueError("Agent run not found")
 
         values = dict(patch)
+        if "work_context" in patch:
+            values["work_context"] = _JSON_OBJECT_ADAPTER.validate_python(
+                patch["work_context"].model_dump(mode="json")
+            )
         if "active_tool_calls" in patch:
             values["active_tool_calls"] = [
                 call.model_dump(mode="json", exclude_none=True)
@@ -1423,7 +1489,7 @@ class AgentRunRepository:
         return AgentRunState(
             id=rdb.id,
             session_id=rdb.session_id,
-            scheduled_task_cycle_id=rdb.scheduled_task_cycle_id,
+            work_context=WorkContext.model_validate(rdb.work_context),
             run_index=rdb.run_index,
             phase=rdb.phase,
             status=rdb.status,

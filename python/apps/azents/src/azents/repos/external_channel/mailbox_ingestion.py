@@ -766,6 +766,7 @@ class ExternalChannelMailboxIngestionRepository:
                         action=None,
                         payload=build_external_channel_mailbox_payload(
                             item,
+                            work_cycle_id=work.work_cycle_id,
                             context_omitted=(
                                 item.sequence == 0 and item.context_omitted
                             ),

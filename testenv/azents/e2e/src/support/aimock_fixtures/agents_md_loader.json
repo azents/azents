@@ -2994,28 +2994,6 @@
       "response": {
         "content": "XAI_IMAGE_GENERATION_DISABLED_COMPLETED"
       }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "userMessage": "A Scheduled Task occurrence has started.\nTitle: Scheduled Task E2E once\nSchedule: January 2, 2099 at 3:04 AM UTC\nSchedule details: 2099-01-02T03:04:05Z\nScheduled for: January 2, 2099 at 3:04 AM UTC\nScheduled for details: 2099-01-02T03:04:05Z\nTiming semantics: The schedule and scheduled-for timestamp are occurrence start triggers. Do not infer a completion deadline or execution time budget from them. Work may start or continue after those timestamps without failing solely because they are past. Honor completion deadlines or validity windows explicitly stated in the objective or authoritatively discovered during execution.\nExecution guidance: Continue autonomously across Agent runs until the objective is complete. If required information, authority, user choice, or another prerequisite is unavailable after reasonable attempts, submit a failed result explaining what is missing. Submit a finished or failed Scheduled Task result explicitly.\nReporting policy: This occurrence permits quiet completion only after successful checks clearly satisfy the objective's omission condition and there is nothing to report. Avoid routine start/progress messages and Trackers. Use notify=false, a nonblank suppression_reason and files=null only then. Report failures, incomplete checks, uncertainty, meaningful external changes (including PRs, data changes or messages), required files and results after explicit progress with notify=true and suppression_reason=null. Internal bookkeeping alone is not a report. When uncertain, report. Keep a nonblank result for Session history.\nPrompt:\nSubmit the deterministic Scheduled Task E2E result.",
-        "hasToolResult": false
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_scheduled_task_e2e_terminal",
-            "name": "submit_scheduled_task_result",
-            "arguments": {
-              "status": "finished",
-              "result": "SCHEDULED_TASK_E2E_FINISHED",
-              "files": null,
-              "notify": false,
-              "suppression_reason": "All checks completed; nothing to report."
-            }
-          }
-        ]
-      }
     }
   ]
 }

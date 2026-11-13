@@ -46,6 +46,7 @@ from azents.core.model_operation import (
     ModelOperationState,
     ModelOperationTerminalReason,
 )
+from azents.core.work_context import WorkContext
 from azents.core.worker_model_profile import (
     ModelCandidateChainExhausted,
     ModelTargetNotFound,
@@ -495,7 +496,7 @@ async def model_fixture(
             AgentRunCreate(
                 session_id=root.id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 phase=AgentRunPhase.STREAMING_MODEL,
                 status=AgentRunStatus.RUNNING,
             ),

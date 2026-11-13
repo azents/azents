@@ -21,7 +21,9 @@ from azents.core.routine_execution import (
     RoutineExecutionState,
 )
 from azents.core.routine_judgment import RoutineJudgmentCandidate, RoutineSourceEvent
+from azents.core.routine_presentation import routine_execution_ref
 from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
@@ -69,7 +71,7 @@ async def fixture(manager: SessionManager[WriteSession]) -> Fixture:
             session,
             AgentRunCreate(
                 session_id=scope.session_id,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
                 parent_agent_run_id=None,
             ),
         )
@@ -92,7 +94,6 @@ async def fixture(manager: SessionManager[WriteSession]) -> Fixture:
                     ),
                 ),
                 phase="started",
-                current_run_id=run.id,
                 started_at=NOW,
                 completed_at=None,
                 work=None,
@@ -103,6 +104,18 @@ async def fixture(manager: SessionManager[WriteSession]) -> Fixture:
                 session, scope=scope, state=state, expected_version=None
             )
             admitted.append(state)
+        await runs.merge_work_context(
+            session,
+            session_id=scope.session_id,
+            run_id=run.id,
+            context=WorkContext(
+                scheduled_cycle_ids=(),
+                routine_executions=tuple(
+                    routine_execution_ref(state) for state in admitted
+                ),
+                unrelated_input=False,
+            ),
+        )
         await states.save_check(
             session,
             scope=scope,
@@ -385,7 +398,7 @@ async def test_compaction_snapshot_only_lists_started_work(
     values = original.model_dump()
     values["phase"] = phase
     if phase == "admitted":
-        values.update(current_run_id=None, started_at=None)
+        values.update(started_at=None)
     else:
         values["completed_at"] = NOW
         if phase == "completed":
@@ -417,7 +430,6 @@ async def test_pre_start_admission_is_not_completion_authority(
     admitted = RoutineExecutionState(
         context=current.context,
         phase="admitted",
-        current_run_id=None,
         started_at=None,
         completed_at=None,
         work=None,

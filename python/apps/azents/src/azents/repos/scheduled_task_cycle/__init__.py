@@ -98,7 +98,6 @@ class ScheduledTaskCycleRepository:
             cron_expression=snapshot.cron_expression,
             timezone=snapshot.timezone,
             scheduled_for=snapshot.scheduled_for,
-            current_run_id=None,
             started_at=None,
             progress_title=None,
             progress_reported=False,
@@ -125,7 +124,6 @@ class ScheduledTaskCycleRepository:
         session: WriteSession,
         *,
         record: ScheduledTaskCycleRecord,
-        run_id: str,
         started_at: datetime.datetime,
     ) -> ScheduledTaskCycleRecord:
         """Transition an admitted cycle to started exactly once."""
@@ -134,7 +132,6 @@ class ScheduledTaskCycleRepository:
         state = record.state.model_copy(
             update={
                 "phase": "started",
-                "current_run_id": run_id,
                 "started_at": started_at,
             }
         )
@@ -175,31 +172,6 @@ class ScheduledTaskCycleRepository:
             .returning(RDBToolkitState.id)
         )
         return result.scalar_one_or_none() is not None
-
-    async def bind_run(
-        self,
-        session: WriteSession,
-        *,
-        record: ScheduledTaskCycleRecord,
-        run_id: str,
-    ) -> ScheduledTaskCycleRecord:
-        """Record the latest continuation Run while preserving started state."""
-        if record.state.phase != "started":
-            raise ValueError("Scheduled Task cycle is not started")
-        state = record.state.model_copy(update={"current_run_id": run_id})
-        updated = await self.toolkit_state_repository.save(
-            session,
-            ToolkitStateUpsert(
-                agent_id=state.agent_id,
-                session_id=state.session_id,
-                toolkit_namespace=self.NAMESPACE,
-                state_name=self.state_name(state.cycle_id),
-                state_json=state.model_dump(mode="json"),
-                schema_version=1,
-                expected_version=record.version,
-            ),
-        )
-        return self._build(updated)
 
     async def mark_progress_reported(
         self,

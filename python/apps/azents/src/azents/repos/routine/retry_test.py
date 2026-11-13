@@ -13,7 +13,7 @@ from azents.core.routine import (
     RoutineScope,
     RoutineUnavailable,
 )
-from azents.core.routine_execution import RoutineExecutionState
+from azents.core.work_context import WorkContext
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
@@ -23,7 +23,6 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.routine.completion_test import NOW, Fixture, fixture, work
 from azents.repos.routine.execution import RoutineExecutionRepository
 from azents.repos.routine.lifecycle_test import _attach_routine_input
-from azents.repos.routine.state import RoutineStateRecord, RoutineStateRepository
 from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.services.chat_write_test import (
     _create_user,
@@ -130,9 +129,15 @@ async def test_explicit_retry_rebinds_only_incomplete_occurrences_and_keeps_prof
             for state in f.states
         ]
         assert first is not None and first.state.phase == "completed"
-        assert first.state.current_run_id == original.id
+        assert original.work_context.contains_routine(
+            routine_id=first.state.context.candidate.routine_id,
+            execution_id=first.state.context.execution_id,
+        )
         assert second is not None and second.state.phase == "started"
-        assert second.state.current_run_id == retry.id
+        assert retry.work_context.contains_routine(
+            routine_id=second.state.context.candidate.routine_id,
+            execution_id=second.state.context.execution_id,
+        )
         assert second.state.context == f.states[1].context
         assert second.state.started_at == f.states[1].started_at
         await f.repository.runs.activate_pending(
@@ -176,19 +181,18 @@ async def test_explicit_retry_rebinds_only_incomplete_occurrences_and_keeps_prof
     assert completed.created
 
 
-class _FailingRebind(RoutineStateRepository):
-    async def save_execution(
+class _FailingRetryContext(RoutineExecutionRepository):
+    async def retry_context(
         self,
         session: WriteSession,
         *,
         scope: RoutineScope,
-        state: RoutineExecutionState,
-        expected_version: int | None,
-    ) -> RoutineStateRecord[RoutineExecutionState]:
+        context: WorkContext,
+    ) -> WorkContext:
         raise RuntimeError("Injected Routine retry rollback")
 
 
-async def test_retry_run_profile_input_record_and_routine_binding_rollback_together(
+async def test_retry_run_profile_input_record_and_work_context_rollback_together(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     seeded = await _seed(rdb_session_manager)
@@ -196,9 +200,7 @@ async def test_retry_run_profile_input_record_and_routine_binding_rollback_toget
     service = _service(rdb_session_manager)
     service.operations = dataclasses.replace(
         service.operations,
-        routine_execution_repository=RoutineExecutionRepository(
-            states=_FailingRebind(toolkit_states=f.repository.states.toolkit_states),
-        ),
+        routine_execution_repository=_FailingRetryContext(states=f.repository.states),
     )
     with pytest.raises(RuntimeError, match="retry rollback"):
         await service.create_idempotent_failed_run_retry(

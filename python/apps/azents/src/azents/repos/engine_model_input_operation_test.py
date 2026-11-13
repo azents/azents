@@ -2,10 +2,12 @@
 
 import asyncio
 import datetime
+import json
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +19,7 @@ from azents.core.enums import (
     ExchangeFileStatus,
     ModelFileStatus,
 )
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
@@ -29,6 +32,7 @@ from azents.engine.events.types import (
     InputTextPart,
     NativeArtifact,
     OutputTextPart,
+    ScheduledTaskResultPayload,
     UserMessagePayload,
     build_native_compat_key,
     validate_event_payload,
@@ -283,7 +287,7 @@ def _run(*, active_calls: list[ActiveToolCall]) -> AgentRunState:
     return AgentRunState(
         id=_RUN_ID,
         session_id=_SESSION_ID,
-        scheduled_task_cycle_id=None,
+        work_context=WorkContext.empty(),
         run_index=1,
         phase=AgentRunPhase.EXECUTING_TOOLS,
         status=AgentRunStatus.RUNNING,
@@ -601,39 +605,88 @@ async def test_input_preserves_existing_result_and_removes_stale_active_entry() 
     assert state.manager.commit_count == 1
 
 
-async def test_scheduled_terminal_recovery_completes_once_without_replay() -> None:
-    """A committed scheduled result is recovered as completed, not cancelled."""
-    run = _run(active_calls=[_active("call-1", generation=1)]).model_copy(
+@pytest.mark.parametrize("other_cycle_pending", [False, True])
+async def test_scheduled_terminal_recovery_matches_each_exact_call(
+    monkeypatch: pytest.MonkeyPatch,
+    other_cycle_pending: bool,
+) -> None:
+    """A durable result cannot acknowledge another unresolved occurrence call."""
+    cycle_ids = ("c" * 32, "d" * 32) if other_cycle_pending else ("c" * 32,)
+    events = []
+    active = []
+    for index, cycle_id in enumerate(cycle_ids, start=1):
+        call = _call_event(name="submit_scheduled_task_result")
+        assert isinstance(call.payload, ClientToolCallPayload)
+        events.append(
+            call.model_copy(
+                update={
+                    "id": f"{19 + index:032d}",
+                    "payload": call.payload.model_copy(
+                        update={
+                            "call_id": f"call-{index}",
+                            "arguments": json.dumps({"cycle_id": cycle_id}),
+                        }
+                    ),
+                }
+            )
+        )
+        active.append(_active(f"call-{index}", generation=1))
+    run = _run(active_calls=active).model_copy(
         update={
-            "scheduled_task_cycle_id": "c" * 32,
+            "work_context": WorkContext(
+                scheduled_cycle_ids=cycle_ids,
+                routine_executions=(),
+                unrelated_input=False,
+            ),
             "terminal_result_event_id": "e" * 32,
         }
     )
-    state = _operation(
-        run=run,
-        events=[_call_event(name="submit_scheduled_task_result")],
-        head=None,
-        failure_at=None,
+    saved = ScheduledTaskResultPayload(
+        title="Verified occurrence",
+        scheduled_for=_NOW,
+        status="finished",
+        result="Verified result",
+        notify=True,
+        suppression_reason=None,
     )
-
+    results = [saved.model_dump(mode="json")]
+    if other_cycle_pending:
+        results.append(None)
+    results.append(other_cycle_pending)
+    scalar = AsyncMock(side_effect=results)
+    monkeypatch.setattr(AsyncSession, "scalar", scalar)
+    state = _operation(run=run, events=events, head=None, failure_at=None)
     prepared = await state.repository.prepare_input(
-        run_id=_RUN_ID, session_id=_SESSION_ID, owner_generation=1
+        run_id=_RUN_ID,
+        session_id=_SESSION_ID,
+        owner_generation=1,
     )
     payload = prepared.repaired_events[0].payload
     assert isinstance(payload, ClientToolResultPayload)
+    assert payload.call_id == "call-1"
     assert payload.status == "completed"
-    assert payload.output == [
-        OutputTextPart(text="The Scheduled Task result was already committed.")
-    ]
+    # The transient terminal flag is intentionally excluded from durable Events.
+    assert not payload.terminal_run
+    assert isinstance(payload.output[0], OutputTextPart)
+    recovered = json.loads(payload.output[0].text)
+    assert recovered["cycle_id"] == "c" * 32
+    assert recovered["result"] == "Verified result"
+    if other_cycle_pending:
+        other = prepared.repaired_events[1].payload
+        assert isinstance(other, ClientToolResultPayload)
+        assert other.call_id == "call-2"
+        assert other.status == "cancelled"
+        assert not other.terminal_run
     assert state.database.run is not None
     assert state.database.run.active_tool_calls == []
     assert not state.manager.active
-
     repeated = await state.repository.prepare_input(
-        run_id=_RUN_ID, session_id=_SESSION_ID, owner_generation=1
+        run_id=_RUN_ID,
+        session_id=_SESSION_ID,
+        owner_generation=1,
     )
-
     assert repeated.repaired_events == []
     assert repeated.transcript == prepared.transcript
-    assert len(state.database.events) == 2
+    assert len(state.database.events) == 2 * len(cycle_ids)
+    assert scalar.await_count == len(results)
     assert state.manager.commit_count == 2

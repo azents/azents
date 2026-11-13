@@ -29,6 +29,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.work_context import WorkContext
 from azents.engine.events.types import AgentRunState, SystemErrorPayload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -326,7 +327,7 @@ async def test_input_and_running_recovery_ignore_held_session_writer(
             AgentRunCreate(
                 session_id=owner.session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             ),
         )
     async with writes() as held:
@@ -394,7 +395,7 @@ async def test_competing_terminal_deliveries_commit_one_mailbox_and_disposition(
             AgentRunCreate(
                 session_id=child.agent_session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             ),
         )
         await runs.mark_terminal(
@@ -482,7 +483,7 @@ async def test_parent_archive_before_terminal_admission_commits_suppression(
             AgentRunCreate(
                 session_id=child.agent_session_id,
                 parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
+                work_context=WorkContext.empty(),
             ),
         )
         await runs.mark_terminal(
@@ -571,7 +572,7 @@ async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery
             setup,
             session_id=child.agent_session_id,
             parent_agent_run_id=None,
-            scheduled_task_cycle_id=None,
+            work_context=WorkContext.empty(),
         )
         for session_id in (owned_session.session_id, child.agent_session_id):
             await AgentSessionRepository().mark_running(setup, session_id)

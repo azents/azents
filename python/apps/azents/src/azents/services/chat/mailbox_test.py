@@ -29,6 +29,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.work_context import WorkContext
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -515,7 +516,7 @@ class TestChatSessionMailboxItem:
                 session,
                 AgentRunCreate(
                     session_id=session_id,
-                    scheduled_task_cycle_id=None,
+                    work_context=WorkContext.empty(),
                     parent_agent_run_id=None,
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                 ),
@@ -643,7 +644,7 @@ class TestChatSessionMailboxItem:
                 session,
                 AgentRunCreate(
                     session_id=session_id,
-                    scheduled_task_cycle_id=None,
+                    work_context=WorkContext.empty(),
                     parent_agent_run_id=None,
                     phase=AgentRunPhase.COMPACTING,
                 ),
