@@ -213,11 +213,20 @@ async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
     )
     port = server.add_insecure_port("localhost:0")
     await server.start()
-    client = GrpcBrowserSourceClient.from_endpoint(
-        f"localhost:{port}",
+    channel = grpc.aio.insecure_channel(f"localhost:{port}")
+    try:
+        async with asyncio.timeout(4):
+            await channel.channel_ready()
+    except BaseException:
+        await channel.close()
+        await server.stop(None)
+        await plane.close()
+        raise
+    # This test measures authority/open setup, not cold transport establishment.
+    # Issue the short-lived authority only after the channel is connected.
+    client = GrpcBrowserSourceClient(
+        channel=channel,
         credential_supplier=RuntimeBrowserSourceCredentialSupplier(verifier),
-        tls=None,
-        allow_insecure=True,
     )
     authority = decode_stream_authority(
         source_request(datetime.now(UTC)).open_envelope.open.authority

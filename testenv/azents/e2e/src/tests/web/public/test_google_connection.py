@@ -17,6 +17,7 @@ from azentspublicclient.models.google_connect_output import GoogleConnectOutput
 from azentspublicclient.models.google_published_output import GooglePublishedOutput
 from azentspublicclient.models.google_review import GoogleReview
 from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
@@ -65,17 +66,23 @@ def disclose(driver: WebDriver, label: str, index: int = 0) -> None:
             else False
         )
 
-    element = _wait(driver).until(summary)
-    if element.find_element(By.XPATH, "..").get_dom_attribute("open") is None:
-        element.click()
-
     def opened(current: WebDriver) -> bool:
-        element = summary(current)
-        return (
-            element is not False
-            and element.find_element(By.XPATH, "..").get_dom_attribute("open")
-            is not None
-        )
+        try:
+            element = summary(current)
+            if element is False:
+                return False
+            if element.find_element(By.XPATH, "..").get_dom_attribute("open") is None:
+                element.click()
+            # A render can replace the clicked disclosure. Observe the current DOM,
+            # then repeat only the closed-state UI action on the next bounded poll.
+            element = summary(current)
+            return (
+                element is not False
+                and element.find_element(By.XPATH, "..").get_dom_attribute("open")
+                is not None
+            )
+        except StaleElementReferenceException:
+            return False
 
     _wait(driver).until(opened)
 

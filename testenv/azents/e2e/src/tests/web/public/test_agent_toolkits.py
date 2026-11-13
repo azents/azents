@@ -37,7 +37,10 @@ from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
-from selenium.common.exceptions import StaleElementReferenceException
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    StaleElementReferenceException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -121,10 +124,22 @@ def _visible_text(driver: WebDriver, text: str) -> bool:
 
 
 def _click_button(driver: WebDriver, text: str) -> None:
-    """Click one visible button by exact text."""
-    _wait(driver).until(
-        ec.element_to_be_clickable((By.XPATH, f"//button[normalize-space()={text!r}]"))
-    ).click()
+    """Wait through layout movement before one successful native button click."""
+
+    def click(current: WebDriver) -> bool:
+        try:
+            element = ec.element_to_be_clickable(
+                (By.XPATH, f"//button[normalize-space()={text!r}]")
+            )(current)
+            if not element:
+                return False
+            element.click()
+            return True
+        except ElementClickInterceptedException, StaleElementReferenceException:
+            # WebDriver rejected the click before dispatch; no UI action ran.
+            return False
+
+    _wait(driver).until(click)
 
 
 def _fill_text_input(driver: WebDriver, label: str, value: str) -> None:
