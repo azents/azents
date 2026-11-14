@@ -349,9 +349,11 @@ class _BlockingEnterContainer(_TrackedContainer):
 
     def __init__(self) -> None:
         super().__init__()
+        self.enter_started = asyncio.Event()
         self.enter_cancelled = asyncio.Event()
 
     async def __aenter__(self) -> "_BlockingEnterContainer":
+        self.enter_started.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -361,7 +363,9 @@ class _BlockingEnterContainer(_TrackedContainer):
 
 
 @pytest.mark.asyncio
-async def test_deadline_cancels_task_local_container_startup() -> None:
+async def test_deadline_cancels_task_local_container_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Task-local async container entry cannot outlive the job deadline."""
     handler_started = asyncio.Event()
     container = _BlockingEnterContainer()
@@ -373,14 +377,35 @@ async def test_deadline_cancels_task_local_container_startup() -> None:
         handler,
         container_factory=lambda: container,
     )
-    handle = await runtime.submit(_request("container-start", timeout=0.01))
+    startup_budget = 0.01
 
-    outcome = await asyncio.wait_for(handle.wait(), timeout=0.2)
+    def remaining_startup_budget(request: JobRequest) -> float:
+        # Keep pre-entry accounting out of this startup-cancellation test.
+        # The real wait_for still enforces the 10ms budget around __aenter__.
+        del request
+        return startup_budget
 
-    assert outcome.status is JobOutcomeStatus.TIMED_OUT
-    assert container.enter_cancelled.is_set()
-    assert not handler_started.is_set()
-    assert runtime.active_count == 0
+    monkeypatch.setattr(runtime, "_remaining_seconds", remaining_startup_budget)
+    handle: LocalJobHandle | None = None
+    try:
+        async with asyncio.timeout(5):
+            submitted = await runtime.submit(
+                _request("container-start", timeout=startup_budget)
+            )
+            assert isinstance(submitted, LocalJobHandle)
+            handle = submitted
+            await container.enter_started.wait()
+            outcome = await handle.wait()
+
+        assert outcome.status is JobOutcomeStatus.TIMED_OUT
+        assert container.enter_cancelled.is_set()
+        assert not handler_started.is_set()
+        assert runtime.active_count == 0
+    finally:
+        if handle is not None and not handle.task.done():
+            handle.task.cancel()
+            await asyncio.gather(handle.task, return_exceptions=True)
+        await runtime.close()
 
 
 @pytest.mark.asyncio
