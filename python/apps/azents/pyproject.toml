@@ -65,7 +65,7 @@ dependencies = [
     # Supported direct Google Workspace API SDK and authorization transport
     "google-api-python-client==2.201.0",
     "google-auth-httplib2==0.4.4",
-    "httplib2==0.32.0",
+    "httplib2==0.32.1",
     "croniter==6.2.4",
     "google-analytics-data==0.23.3",
     "google-analytics-admin==0.30.2",
