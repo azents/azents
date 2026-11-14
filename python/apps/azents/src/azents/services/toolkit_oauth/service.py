@@ -1,5 +1,6 @@
 """Sequence completed Toolkit OAuth operations and external provider effects."""
 
+import asyncio
 import dataclasses
 import json
 from typing import Annotated, Any, assert_never
@@ -105,6 +106,8 @@ async def exchange_platform_installations(
             code,
             client_factory=client_factory,
         )
+    except asyncio.CancelledError:
+        raise
     except ValueError as exc:
         raise ToolkitOAuthError(
             ToolkitOAuthFailureReason.INVALID_REQUEST, str(exc)
@@ -115,6 +118,8 @@ async def exchange_platform_installations(
         ) from exc
     try:
         raw = await list_user_installations(token, client_factory=client_factory)
+    except asyncio.CancelledError:
+        raise
     except httpx.HTTPStatusError as exc:
         raise RuntimeError(
             f"Failed to fetch user installations: HTTP {exc.response.status_code}"
@@ -451,6 +456,8 @@ async def platform_install_url(
     try:
         jwt_token = create_github_app_jwt(platform.app_id, platform.private_key)
         slug = await get_app_slug(jwt_token)
+    except asyncio.CancelledError:
+        raise
     except httpx.HTTPStatusError as exc:
         raise RuntimeError(
             f"Failed to fetch GitHub App info: HTTP {exc.response.status_code}"
@@ -500,6 +507,8 @@ async def agent_platform_install_url(
     try:
         jwt_token = create_github_app_jwt(platform.app_id, platform.private_key)
         slug = await get_app_slug(jwt_token)
+    except asyncio.CancelledError:
+        raise
     except httpx.HTTPStatusError as exc:
         raise RuntimeError(
             f"Failed to fetch GitHub App info: HTTP {exc.response.status_code}"
@@ -595,6 +604,8 @@ async def agent_platform_installations(
             code,
             client_factory=client_factory,
         )
+    except asyncio.CancelledError:
+        raise
     except ValueError as exc:
         raise ToolkitOAuthError(
             ToolkitOAuthFailureReason.INVALID_REQUEST, str(exc)
@@ -608,6 +619,8 @@ async def agent_platform_installations(
             raw_installations = await list_user_installations(
                 user_token, client_factory=client_factory
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
                 f"Failed to fetch user installations: HTTP {exc.response.status_code}"
@@ -689,6 +702,8 @@ async def connect_agent(
                     redirect_uri,
                     proxy_url=config.mcp_proxy_url,
                 )
+            except asyncio.CancelledError:
+                raise
             except DcrError as exc:
                 raise ToolkitOAuthError(
                     ToolkitOAuthFailureReason.INVALID_REQUEST,

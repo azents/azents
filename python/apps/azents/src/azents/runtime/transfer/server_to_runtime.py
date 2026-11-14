@@ -87,6 +87,8 @@ async def _await_coordinator(
     """Translate coordinator transport failures at the transfer boundary."""
     try:
         return await operation
+    except asyncio.CancelledError:
+        raise
     except grpc.aio.AioRpcError as error:
         raise ServerToRuntimeCoordinatorError(
             "Runtime transfer coordinator request failed",
@@ -394,6 +396,8 @@ class ServerToRuntimeTransferService:
         if request.overwrite and request.conflict_precondition is None:
             try:
                 await self._transfer_once(replace(request, overwrite=False))
+            except asyncio.CancelledError:
+                raise
             except ServerToRuntimeTransferError as error:
                 conflict = error.destination_conflict
                 if (
@@ -421,6 +425,8 @@ class ServerToRuntimeTransferService:
         except ServerToRuntimeTransferError as error:
             try:
                 await self.cancel(handle)
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 if error.failure is CoordinatorTransferFailure.EXPIRED:
                     raise error from None
@@ -551,6 +557,8 @@ class ServerToRuntimeTransferService:
                     else expected_revision,
                     request.deadline_at,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 if error.failure is CoordinatorTransferFailure.EXPIRED:
                     raise error from None
@@ -634,6 +642,8 @@ class ServerToRuntimeTransferService:
                     self.coordinator.admit_transfer(request),
                     phase="admission",
                 )
+            except asyncio.CancelledError:
+                raise
             except ServerToRuntimeTransferError as error:
                 if error.failure not in {
                     CoordinatorTransferFailure.ADMISSION,
@@ -681,6 +691,8 @@ class ServerToRuntimeTransferService:
                     ),
                     phase="cancel",
                 )
+            except asyncio.CancelledError:
+                raise
             except ServerToRuntimeTransferError:
                 status = await _await_coordinator(
                     self.coordinator.get_transfer_status(

@@ -1,5 +1,6 @@
 """Slack HTTP primitives for External Channel admission."""
 
+import asyncio
 import datetime
 import hashlib
 import json
@@ -766,6 +767,8 @@ class SlackWebAPIClient:
         """Validate a bot token and return only sanitized identity state."""
         try:
             response = await self.web_client.auth_test(token=bot_token)
+        except asyncio.CancelledError:
+            raise
         except SlackApiError as error:
             response = error.response
             if isinstance(response, AsyncSlackResponse) and (
@@ -843,6 +846,8 @@ class SlackWebAPIClient:
                 bot=bot_id,
                 token=bot_token,
             )
+        except asyncio.CancelledError:
+            raise
         except SlackApiError as error:
             response = error.response
             if isinstance(response, AsyncSlackResponse) and (

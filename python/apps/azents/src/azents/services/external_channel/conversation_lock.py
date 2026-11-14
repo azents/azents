@@ -175,6 +175,8 @@ class _RedisLease:
                 lambda: self.redis.eval(_ASSERT_SCRIPT, 1, self.key, self.owner),
                 deadline=self.deadline,
             )
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelConversationLockTimeout:
             raise
         except (RedisError, OSError) as error:
@@ -200,6 +202,8 @@ class _RedisLease:
                         self.owner,
                         self.ttl_milliseconds,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except RedisError, OSError:
                     return
                 if not bool(result):
@@ -221,6 +225,8 @@ class _RedisLease:
                 self.key,
                 self.owner,
             )
+        except asyncio.CancelledError:
+            raise
         except (RedisError, OSError) as error:
             raise ExternalChannelConversationLockUnavailable(
                 "External Channel conversation lock backend is unavailable."
@@ -292,6 +298,8 @@ class RedisExternalChannelConversationLock(ExternalChannelConversationLock):
                     lambda: self.redis.set(key, owner, nx=True, px=ttl_milliseconds),
                     deadline=deadline,
                 )
+            except asyncio.CancelledError:
+                raise
             except ExternalChannelConversationLockTimeout:
                 raise
             except (RedisError, OSError) as error:

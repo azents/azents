@@ -232,6 +232,8 @@ class AgentRuntimeService:
                     idempotency_key=idempotency_key,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except AgentRuntimeAdditionUnavailable as error:
             return Failure(
                 AgentRuntimeActionUnavailable(
@@ -304,6 +306,8 @@ class AgentRuntimeService:
                     ),
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except AgentRuntimeRemovalUnavailable as error:
             return Failure(
                 AgentRuntimeActionUnavailable(
@@ -474,6 +478,8 @@ class AgentRuntimeService:
             publisher = self.terminal_invalidation_publisher
             await publisher.publish_runtime_terminal_invalidation(command.runtime.id)
             resolution = await self._ensure_runtime_for_agent(agent_id)
+        except asyncio.CancelledError:
+            raise
         except RuntimeProfileResolutionUnavailable as error:
             return Failure(
                 RuntimeProviderUnavailable(
@@ -599,6 +605,8 @@ class AgentRuntimeService:
             )
             try:
                 resolution = await self._ensure_runtime_for_agent(agent_id)
+            except asyncio.CancelledError:
+                raise
             except RuntimeProfileResolutionUnavailable as error:
                 raise RuntimeStorageError(
                     f"Runtime Profile is unavailable: {error.code}"
@@ -867,6 +875,8 @@ class AgentRuntimeService:
 
         try:
             resolution = await self._ensure_runtime_for_agent(agent_id)
+        except asyncio.CancelledError:
+            raise
         except RuntimeProfileResolutionUnavailable as error:
             if command_type is not RuntimeLifecycleCommandType.STOP:
                 return Failure(
@@ -936,6 +946,8 @@ class AgentRuntimeService:
             await publisher.publish_runtime_terminal_invalidation(command.runtime.id)
         try:
             resolution = await self._ensure_runtime_for_agent(agent_id)
+        except asyncio.CancelledError:
+            raise
         except RuntimeProfileResolutionUnavailable as error:
             if command_type is not RuntimeLifecycleCommandType.STOP:
                 return Failure(
@@ -1177,6 +1189,8 @@ class AgentRuntimeService:
                 agent.workspace_id,
                 agent.runtime_profile_id,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeProfileWorkspaceUnavailable as error:
             return _RuntimeProfileProjection(
                 status="unavailable",

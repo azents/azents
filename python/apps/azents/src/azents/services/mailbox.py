@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Protocol, assert_never
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
 from pydantic import TypeAdapter
 
@@ -352,6 +353,8 @@ class MailboxService:
                         continuation_predecessor_run_id=predecessor_run_id,
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except MailboxPromotionConflictError as exc:
                 if exc.conflict is MailboxPromotionConflict.OWNER_GENERATION:
                     raise MailboxOwnerGenerationStaleError(
@@ -624,6 +627,9 @@ class MailboxService:
         prepared_files: PreparedMailboxFiles,
     ) -> AsyncIterator[None]:
         """Discard newly created ModelFiles if FIFO promotion fails."""
+        L = bind_extra(
+            logger, {"model_file_ids": prepared_files.created_model_file_ids}
+        )
         try:
             yield
         except asyncio.CancelledError:
@@ -634,12 +640,12 @@ class MailboxService:
                             model_file_ids=prepared_files.created_model_file_ids,
                         )
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
-                    logger.exception(
+                    L.exception(
                         "Failed to discard prepared ModelFiles after cancellation",
-                        extra={
-                            "model_file_ids": prepared_files.created_model_file_ids,
-                        },
+                        extra={},
                     )
             raise
         except Exception:
@@ -648,12 +654,12 @@ class MailboxService:
                     await self.model_file_service.discard_pending_input(
                         model_file_ids=prepared_files.created_model_file_ids,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
-                    logger.exception(
+                    L.exception(
                         "Failed to discard prepared ModelFiles after promotion failure",
-                        extra={
-                            "model_file_ids": prepared_files.created_model_file_ids,
-                        },
+                        extra={},
                     )
             raise
 

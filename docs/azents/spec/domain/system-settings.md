@@ -206,6 +206,15 @@ The App ID must contain ASCII digits. The private key must be an unencrypted RSA
 validation verifies the App identity and OAuth client credentials. The redacted detail status is
 `not_configured`, `incomplete`, `invalid`, `ready`, `unavailable`, or `reconnect_required`.
 
+Validation uses GitHubKit's public authenticated-App operation and OAuth web-token
+exchange with a deliberately invalid randomized authorization code.
+`bad_verification_code` confirms the OAuth client credentials; malformed or rejected
+credential responses remain sanitized invalid results, while transport failures,
+rate limits and provider outages remain unavailable. Injected endpoints and timeout
+are preserved, retries/cache are disabled, and no JWT, client secret or raw provider
+body enters the result. See [GitHub identity](../tools/github.md) for connection
+and installation authority.
+
 A Platform App identity is mandatory for every persisted installation row and Platform Toolkit
 credential. The database enforces `github_user_installations.platform_app_id NOT NULL` and unique
 `(user_id, platform_app_id, installation_id)` ownership. The application does not normalize retired

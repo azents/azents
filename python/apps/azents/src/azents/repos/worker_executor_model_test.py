@@ -192,6 +192,9 @@ class ModelManager:
                     yield session
                 finally:
                     self.active.remove(session)
+        except asyncio.CancelledError:
+            self.failures += 1
+            raise
         except BaseException:
             self.failures += 1
             raise

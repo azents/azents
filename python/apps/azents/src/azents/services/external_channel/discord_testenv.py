@@ -9,10 +9,6 @@ from contextlib import AbstractAsyncContextManager
 import httpx
 from pydantic import BaseModel, StrictInt, ValidationError
 
-from azents.core.external_channel_projection import (
-    is_external_channel_projection,
-    is_external_channel_projection_list,
-)
 from azents.repos.external_channel.data import DiscordGatewayTypingTarget
 from azents.services.external_channel.discord_events import (
     DiscordGatewayMessageEvent,
@@ -41,6 +37,22 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKSession,
     DiscordSDKThread,
     DiscordSDKUnavailable,
+)
+from azents.services.external_channel.discord_testenv_wire import (
+    ApplicationResult,
+    AttachmentResult,
+    CommandResult,
+    CommandsResult,
+    FixtureResult,
+    GatewayAttempt,
+    GatewayGuild,
+    GatewayMessage,
+    HistoryResult,
+    LoginResult,
+    MessageResult,
+    ProjectionResult,
+    ThreadLookupResult,
+    ThreadResult,
 )
 from azents.utils.logging import sanitized_exception_info
 
@@ -113,13 +125,13 @@ class _DiscordTestenvSDKSession:
 
     async def initialize(self) -> None:
         """Model the public SDK login that populates the current Bot user."""
-        result = await self._call("login")
-        self._bot_user_id = _required_string(result, "bot_user_id")
+        result = await self._call("login", LoginResult)
+        self._bot_user_id = result.bot_user_id
 
     async def fetch_application(self) -> DiscordSDKApplication:
-        result = await self._call("fetch_application")
-        application_id = _required_string(result, "application_id")
-        verify_key = _required_string(result, "verify_key")
+        result = await self._call("fetch_application", ApplicationResult)
+        application_id = result.application_id
+        verify_key = result.verify_key
         self._application_id = application_id
         return DiscordSDKApplication(
             application_id=application_id,
@@ -139,9 +151,10 @@ class _DiscordTestenvSDKSession:
     ) -> tuple[DiscordSDKCommand, ...]:
         result = await self._call(
             "list_guild_commands",
+            CommandsResult,
             {"application_id": application_id, "guild_id": guild_id},
         )
-        return tuple(_command(item) for item in _object_list(result, "commands"))
+        return tuple(_command(item) for item in result.commands)
 
     async def update_guild_command(
         self,
@@ -153,6 +166,7 @@ class _DiscordTestenvSDKSession:
     ) -> DiscordSDKCommand:
         result = await self._call(
             "update_guild_command",
+            CommandResult,
             {
                 "command_id": command_id,
                 "name": name,
@@ -163,7 +177,9 @@ class _DiscordTestenvSDKSession:
         return _command(result)
 
     async def delete_guild_command(self, *, command_id: str) -> None:
-        await self._call("delete_guild_command", {"command_id": command_id})
+        await self._call(
+            "delete_guild_command", FixtureResult, {"command_id": command_id}
+        )
 
     async def fetch_root_thread(
         self,
@@ -174,15 +190,16 @@ class _DiscordTestenvSDKSession:
     ) -> DiscordSDKThread | None:
         result = await self._call(
             "fetch_root_thread",
+            ThreadLookupResult,
             {
                 "guild_id": guild_id,
                 "parent_channel_id": parent_channel_id,
                 "root_message_id": root_message_id,
             },
         )
-        if result.get("thread") is None:
+        if result.thread is None:
             return None
-        return _thread(_required_object(result, "thread"))
+        return _thread(result.thread)
 
     async def create_thread(
         self,
@@ -195,6 +212,7 @@ class _DiscordTestenvSDKSession:
     ) -> DiscordSDKThread:
         result = await self._call(
             "create_thread",
+            ThreadResult,
             {
                 "guild_id": guild_id,
                 "parent_channel_id": parent_channel_id,
@@ -214,6 +232,7 @@ class _DiscordTestenvSDKSession:
         return _thread(
             await self._call(
                 "fetch_thread",
+                ThreadResult,
                 {"guild_id": guild_id, "channel_id": channel_id},
             )
         )
@@ -228,6 +247,7 @@ class _DiscordTestenvSDKSession:
         return _thread(
             await self._call(
                 "update_thread_name",
+                ThreadResult,
                 {"guild_id": guild_id, "channel_id": channel_id, "name": name},
             )
         )
@@ -247,6 +267,7 @@ class _DiscordTestenvSDKSession:
         return _message(
             await self._call(
                 "create_message",
+                MessageResult,
                 {
                     "guild_id": guild_id,
                     "channel_id": channel_id,
@@ -274,6 +295,7 @@ class _DiscordTestenvSDKSession:
         return _message(
             await self._call(
                 "update_message",
+                MessageResult,
                 {
                     "guild_id": guild_id,
                     "channel_id": channel_id,
@@ -295,6 +317,7 @@ class _DiscordTestenvSDKSession:
     ) -> None:
         await self._call(
             "delete_message",
+            FixtureResult,
             {
                 "guild_id": guild_id,
                 "channel_id": channel_id,
@@ -312,6 +335,7 @@ class _DiscordTestenvSDKSession:
     ) -> DiscordSDKAttachment:
         result = await self._call(
             "fetch_attachment",
+            AttachmentResult,
             {
                 "guild_id": guild_id,
                 "channel_id": channel_id,
@@ -319,16 +343,12 @@ class _DiscordTestenvSDKSession:
                 "attachment_id": attachment_id,
             },
         )
-        size = result.get("size")
-        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
-            raise DiscordSDKUnavailable("Discord SDK fixture attachment is invalid.")
-        content_type = result.get("content_type")
         return DiscordSDKAttachment(
-            attachment_id=_required_string(result, "attachment_id"),
-            filename=_required_string(result, "filename"),
-            size=size,
-            content_type=content_type if isinstance(content_type, str) else None,
-            download_url=_required_string(result, "download_url"),
+            attachment_id=result.attachment_id,
+            filename=result.filename,
+            size=result.size,
+            content_type=result.content_type,
+            download_url=result.download_url,
         )
 
     async def fetch_message_projection(
@@ -341,6 +361,7 @@ class _DiscordTestenvSDKSession:
     ) -> dict[str, object]:
         result = await self._call(
             "fetch_message_projection",
+            ProjectionResult,
             {
                 "guild_id": guild_id,
                 "source_channel_id": source_channel_id,
@@ -349,7 +370,7 @@ class _DiscordTestenvSDKSession:
             },
         )
         return _history_projection(
-            result,
+            result.root,
             guild_id=guild_id,
             source_channel_id=source_channel_id,
             channel_id=channel_id,
@@ -366,6 +387,7 @@ class _DiscordTestenvSDKSession:
     ) -> tuple[dict[str, object], ...]:
         result = await self._call(
             "fetch_history_projections",
+            HistoryResult,
             {
                 "guild_id": guild_id,
                 "source_channel_id": source_channel_id,
@@ -381,30 +403,30 @@ class _DiscordTestenvSDKSession:
                 source_channel_id=source_channel_id,
                 channel_id=channel_id,
             )
-            for item in _object_list(result, "messages")
+            for item in result.messages
         )
 
-    async def _call(
+    async def _call[ResultT: BaseModel](
         self,
         operation: str,
+        result_type: type[ResultT],
         arguments: Mapping[str, object] | None = None,
-    ) -> dict[str, object]:
+    ) -> ResultT:
         try:
             response = await self.client.post(
                 self._url,
                 json={"operation": operation, "arguments": dict(arguments or {})},
             )
+        except asyncio.CancelledError:
+            raise
         except (httpx.HTTPError, OSError) as error:
             raise DiscordSDKUnavailable from error
         if response.status_code >= 400:
             raise _fixture_sdk_error(response)
         try:
-            payload: object = response.json()
+            return result_type.model_validate_json(response.content)
         except ValueError as error:
             raise DiscordSDKUnavailable from error
-        if not is_external_channel_projection(payload):
-            raise DiscordSDKUnavailable("Discord SDK fixture response is invalid.")
-        return payload
 
 
 class DiscordTestenvGatewayRunner:
@@ -443,7 +465,7 @@ class DiscordTestenvGatewayRunner:
                     target_guild_id=target_guild_id,
                     resumed=resumed,
                 )
-                scenario = _required_string(payload, "scenario")
+                scenario = payload.scenario
                 if scenario == "reconnect":
                     await handle_lifecycle("disconnected")
                     resumed = True
@@ -469,29 +491,24 @@ class DiscordTestenvGatewayRunner:
                         "Discord Gateway typing target authority is unavailable."
                     )
                 await handle_lifecycle("resumed" if resumed else "ready")
-                for dispatch in _object_list(payload, "dispatches"):
-                    event_type = _required_string(dispatch, "event_type")
-                    event_payload = _required_object(dispatch, "payload")
-                    if event_type == "GUILD_CREATE":
-                        _capture_gateway_guild(
-                            event_payload,
-                            channel_names=channel_names,
-                            managed_roles=managed_roles,
-                        )
+                for dispatch in payload.dispatches:
+                    if isinstance(dispatch, GatewayGuild):
+                        channel_names.update(dispatch.channels)
+                        managed_roles.update(dispatch.managed_roles)
                         continue
-                    if event_type != "MESSAGE_CREATE":
+                    if not isinstance(dispatch, GatewayMessage):
                         continue
-                    projection_source = dict(event_payload)
-                    channel_id = _required_string(projection_source, "channel_id")
+                    projection_source = dict(dispatch.raw)
+                    channel_id = dispatch.channel_id
                     channel_name = channel_names.get(channel_id)
                     if channel_name is not None:
                         projection_source["channel_name"] = channel_name
-                    role_mentions = projection_source.get("mention_roles")
-                    if isinstance(role_mentions, list):
+                    role_mentions = dispatch.mention_roles
+                    if role_mentions:
                         projected_roles = [
                             {"id": role_id, "bot_user_id": managed_roles[role_id]}
                             for role_id in role_mentions
-                            if isinstance(role_id, str) and role_id in managed_roles
+                            if role_id in managed_roles
                         ]
                         if connected_bot_user_id is not None:
                             projected_roles = [
@@ -530,12 +547,14 @@ async def _gateway_attempt(
     *,
     target_guild_id: str,
     resumed: bool,
-) -> dict[str, object]:
+) -> GatewayAttempt:
     try:
         response = await client.post(
             url,
             json={"target_guild_id": target_guild_id, "resumed": resumed},
         )
+    except asyncio.CancelledError:
+        raise
     except (httpx.HTTPError, OSError) as error:
         raise DiscordGatewayError(
             "Discord deterministic Gateway fixture is unavailable."
@@ -549,16 +568,11 @@ async def _gateway_attempt(
             "Discord deterministic Gateway fixture is unavailable."
         )
     try:
-        payload: object = response.json()
+        return GatewayAttempt.decode(response.json())
     except ValueError as error:
         raise DiscordGatewayError(
             "Discord deterministic Gateway fixture response is invalid."
         ) from error
-    if not is_external_channel_projection(payload):
-        raise DiscordGatewayError(
-            "Discord deterministic Gateway fixture response is invalid."
-        )
-    return payload
 
 
 async def _run_typing_snapshots(
@@ -671,60 +685,29 @@ def _fixture_sdk_error(response: httpx.Response) -> DiscordSDKError:
     return DiscordSDKRequestRejected()
 
 
-def _required_string(payload: Mapping[str, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise DiscordSDKUnavailable(f"Discord SDK fixture field '{key}' is invalid.")
-    return value
-
-
-def _required_object(
-    payload: Mapping[str, object],
-    key: str,
-) -> dict[str, object]:
-    value = payload.get(key)
-    if not is_external_channel_projection(value):
-        raise DiscordSDKUnavailable(f"Discord SDK fixture field '{key}' is invalid.")
-    return value
-
-
-def _object_list(
-    payload: Mapping[str, object],
-    key: str,
-) -> list[dict[str, object]]:
-    value = payload.get(key)
-    if not is_external_channel_projection_list(value):
-        raise DiscordSDKUnavailable(f"Discord SDK fixture field '{key}' is invalid.")
-    return value
-
-
-def _command(payload: Mapping[str, object]) -> DiscordSDKCommand:
-    command_type = payload.get("type")
-    description = payload.get("description")
-    if not isinstance(command_type, int) or isinstance(command_type, bool):
-        raise DiscordSDKUnavailable("Discord SDK fixture command is invalid.")
+def _command(payload: CommandResult) -> DiscordSDKCommand:
     return DiscordSDKCommand(
-        command_id=_required_string(payload, "id"),
-        name=_required_string(payload, "name"),
-        command_type=command_type,
-        description=description if isinstance(description, str) else None,
+        command_id=payload.id,
+        name=payload.name,
+        command_type=payload.type,
+        description=payload.description,
     )
 
 
-def _thread(payload: Mapping[str, object]) -> DiscordSDKThread:
+def _thread(payload: ThreadResult) -> DiscordSDKThread:
     return DiscordSDKThread(
-        thread_id=_required_string(payload, "id"),
-        parent_id=_required_string(payload, "parent_id"),
-        guild_id=_required_string(payload, "guild_id"),
-        name=_required_string(payload, "name"),
+        thread_id=payload.id,
+        parent_id=payload.parent_id,
+        guild_id=payload.guild_id,
+        name=payload.name,
     )
 
 
-def _message(payload: Mapping[str, object]) -> DiscordSDKMessage:
+def _message(payload: MessageResult) -> DiscordSDKMessage:
     return DiscordSDKMessage(
-        message_id=_required_string(payload, "id"),
-        channel_id=_required_string(payload, "channel_id"),
-        guild_id=_required_string(payload, "guild_id"),
+        message_id=payload.id,
+        channel_id=payload.channel_id,
+        guild_id=payload.guild_id,
     )
 
 
@@ -739,32 +722,3 @@ def _history_projection(
     if channel_id != source_channel_id:
         source["thread"] = {"id": channel_id, "parent_id": source_channel_id}
     return project_discord_message(message=source, guild_id=guild_id)
-
-
-def _capture_gateway_guild(
-    payload: Mapping[str, object],
-    *,
-    channel_names: dict[str, str],
-    managed_roles: dict[str, str],
-) -> None:
-    channels = payload.get("channels")
-    if isinstance(channels, list):
-        for raw_channel in channels:
-            if not is_external_channel_projection(raw_channel):
-                continue
-            channel_id = raw_channel.get("id")
-            name = raw_channel.get("name")
-            if isinstance(channel_id, str) and isinstance(name, str):
-                channel_names[channel_id] = name
-    roles = payload.get("roles")
-    if isinstance(roles, list):
-        for raw_role in roles:
-            if not is_external_channel_projection(raw_role):
-                continue
-            role_id = raw_role.get("id")
-            tags = raw_role.get("tags")
-            if not isinstance(role_id, str) or not is_external_channel_projection(tags):
-                continue
-            bot_id = tags.get("bot_id")
-            if isinstance(bot_id, str):
-                managed_roles[role_id] = bot_id

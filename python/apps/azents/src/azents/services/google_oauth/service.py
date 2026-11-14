@@ -92,6 +92,8 @@ class GoogleOAuthService:
     async def _registration(self) -> GoogleApplicationRegistration:
         try:
             return await self.application.resolve()
+        except asyncio.CancelledError:
+            raise
         except GoogleApplicationUnavailable, ValidationError:
             raise GoogleOAuthError(
                 "operator_setup_required", "Google operator preparation is required."
@@ -102,6 +104,8 @@ class GoogleOAuthService:
         await self.repository.authorize(subject)
         try:
             return await self.application.preparation()
+        except asyncio.CancelledError:
+            raise
         except GoogleApplicationUnavailable:
             raise GoogleOAuthError(
                 "operator_setup_required", "Verify the operator Google configuration."
@@ -420,6 +424,8 @@ class GoogleOAuthService:
         else:
             try:
                 registration = await self._registration()
+            except asyncio.CancelledError:
+                raise
             except GoogleOAuthError:
                 status = "operator_setup_required"
             else:

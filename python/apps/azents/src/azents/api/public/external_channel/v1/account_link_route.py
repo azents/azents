@@ -1,5 +1,6 @@
 """External account link public API routes."""
 
+import asyncio
 import datetime
 from typing import Annotated
 
@@ -55,6 +56,8 @@ async def list_account_links(
             user_id=current_user.user_id,
             now=_utcnow(),
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalAccountLinkError as error:
         _translate_error(error)
     return GlobalAccountLinkListResponse(
@@ -96,6 +99,8 @@ async def start_account_link_oauth(
             auth_session_id=current_user.session_id,
             provider=provider,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalAccountLinkError as error:
         _translate_error(error)
     response.headers["Cache-Control"] = "no-store"
@@ -122,6 +127,8 @@ async def exchange_account_link_oauth(
             code=body.code,
             state=body.state,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalAccountLinkError as error:
         _translate_error(error)
     response.headers["Cache-Control"] = "no-store"
@@ -143,6 +150,8 @@ async def unlink_account_link(
             link_id=link_id,
             now=_utcnow(),
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalAccountLinkError as error:
         _translate_error(error)
     return GlobalAccountLinkUnlinkResponse.from_view(link)

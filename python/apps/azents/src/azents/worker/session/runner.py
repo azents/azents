@@ -40,6 +40,7 @@ from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 from azents.repos.worker_session import WorkerSessionOperationRepository
 from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.services.mailbox import MailboxService
+from azents.utils.logging import content_safe_exception_diagnostic
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.memory_execution import MemoryRunExecutor
@@ -456,6 +457,8 @@ class SessionRunner:
             while state is not None:
                 try:
                     state = await self._tick(state)
+                except asyncio.CancelledError:
+                    raise
                 except CanonicalExecutionSnapshotError as exc:
                     session_id = self.running_session_id
                     if session_id is None:
@@ -636,10 +639,14 @@ class SessionRunner:
                     assert_never(message)
         except asyncio.CancelledError:
             raise
-        except MemoryExecutionAuthorityError:
+        except MemoryExecutionAuthorityError as error:
+            diagnostic = content_safe_exception_diagnostic(
+                error, message="Memory execution admission unavailable"
+            )
             logger.info(
                 "Memory execution admission is unavailable",
-                extra={"session_id": message.session_id},
+                exc_info=diagnostic.exc_info,
+                extra={"session_id": message.session_id, **diagnostic.log_fields()},
             )
             self.runner_shutdown.set()
             return RunExecutionResult(
@@ -663,6 +670,8 @@ class SessionRunner:
                         ),
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except CanonicalExecutionOwnerGenerationStaleError as stale:
                 return await self._handle_canonical_execution_error(message, stale)
             if finalized_run_id is not None:
@@ -703,6 +712,8 @@ class SessionRunner:
                         ),
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except CanonicalExecutionOwnerGenerationStaleError as stale:
                 return await self._handle_canonical_execution_error(message, stale)
             if finalized_run_id is not None:

@@ -20,6 +20,7 @@ from azents.services.external_channel.ingress_queue import (
 from azents.services.external_channel.setup_preparation import (
     ExternalChannelSetupPreparationService,
 )
+from azents.utils.logging import content_safe_exception_diagnostic
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +70,19 @@ class ExternalChannelIngressRecoveryService:
                         now=now,
                     )
                 )
-            except JobRuntimeClosedError:
+            except asyncio.CancelledError:
+                raise
+            except JobRuntimeClosedError as error:
+                diagnostic = content_safe_exception_diagnostic(
+                    error, message="External Channel recovery Runtime unavailable"
+                )
                 logger.warning(
                     "External Channel ingress recovery Runtime is unavailable",
-                    extra={"external_channel_ingress_owner_id": owner.id},
+                    exc_info=diagnostic.exc_info,
+                    extra={
+                        "external_channel_ingress_owner_id": owner.id,
+                        **diagnostic.log_fields(),
+                    },
                 )
                 break
             submitted.append(owner.id)

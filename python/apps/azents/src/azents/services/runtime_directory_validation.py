@@ -1,5 +1,6 @@
 """Shared Runtime directory validation boundary."""
 
+import asyncio
 import dataclasses
 from datetime import UTC, datetime, timedelta
 from typing import assert_never
@@ -78,6 +79,8 @@ async def validate_runtime_directory(
             deadline_at=_runtime_directory_validation_deadline(),
             admission_authority=None,
         )
+    except asyncio.CancelledError:
+        raise
     except (
         RuntimeRunnerOperationUnavailable,
         RuntimeRunnerOperationGenerationError,

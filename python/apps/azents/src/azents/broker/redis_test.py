@@ -1,7 +1,6 @@
 """RedisBroker integration tests."""
 
 from collections.abc import AsyncGenerator
-from typing import Any, cast
 from unittest.mock import AsyncMock, call
 
 import pytest
@@ -237,14 +236,18 @@ async def test_session_activity_replaces_legacy_string_with_generation_fence(
     )
 
 
-async def test_purge_session_state_avoids_cross_slot_delete() -> None:
+async def test_purge_session_state_avoids_cross_slot_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Cluster-incompatible key groups are deleted in separate commands."""
-    redis = AsyncMock()
-    broker = RedisBroker(cast(Redis, redis))
+    delete = AsyncMock()
+    redis = Redis()
+    monkeypatch.setattr(redis, "delete", delete)
+    broker = RedisBroker(redis)
 
     await broker.purge_session_state("session-1")
 
-    assert redis.delete.await_args_list == [
+    assert delete.await_args_list == [
         call("azents:session:session-1:messages"),
         call(
             "azents:session:{session-1}:lock",
@@ -252,6 +255,7 @@ async def test_purge_session_state_avoids_cross_slot_delete() -> None:
         ),
         call("azents:session:session-1:activity"),
     ]
+    await redis.aclose()
 
 
 class TestRedisBrokerMessages:
@@ -319,16 +323,14 @@ class TestRedisBrokerMessages:
         """Workers cannot acquire Session ownership during replay fencing."""
         operator = RedisBroker(redis)
         worker = RedisBroker(redis, worker_id="worker-1")
-        worker_any = cast(Any, worker)
-
         token = await operator.acquire_cutover_replay_barrier(("session-1",))
-        blocked = await worker_any._acquire_or_find_owner("session-1")
+        blocked = await worker._acquire_or_find_owner("session-1")
         assert await operator.renew_cutover_replay_barrier(
             ("session-1",),
             token,
         )
         await operator.release_cutover_replay_barrier(("session-1",), token)
-        acquired = await worker_any._acquire_or_find_owner("session-1")
+        acquired = await worker._acquire_or_find_owner("session-1")
 
         assert blocked.status == "cutover"
         assert acquired.status == "acquired"

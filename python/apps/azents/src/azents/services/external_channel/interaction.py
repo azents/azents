@@ -1,5 +1,6 @@
 """Transient, scoped Slack selector-modal interaction processing."""
 
+import asyncio
 import base64
 import datetime
 import hashlib
@@ -572,6 +573,8 @@ class ExternalChannelInteractionProcessor:
                     interaction_id=interaction.id,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelParticipationError:
             settings = None
             view = private_notice(
@@ -792,6 +795,8 @@ class ExternalChannelInteractionProcessor:
             for plan in cleanup_plans:
                 await self.provider_control.attempt(plan, preparation_boundary=None)
             view = _settings_confirmation_view(settings)
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelParticipationError as error:
             view = _settings_notice_view(str(error))
         if handoff.trigger_id is None:
@@ -897,6 +902,8 @@ class ExternalChannelInteractionProcessor:
                     if result.action == "edit"
                     else "Scheduled Task cancelled."
                 )
+        except asyncio.CancelledError:
+            raise
         except (ScheduledTaskProviderControlError, ValueError) as error:
             view = _scheduled_task_notice_view(str(error))
         if handoff.trigger_id is not None:

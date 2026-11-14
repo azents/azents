@@ -1,5 +1,6 @@
 """Idle continuation repository atomicity tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -42,6 +43,9 @@ async def test_failed_boundary_consume_rolls_back_new_admissions(
     async def session_manager() -> AsyncIterator[WriteSession]:
         try:
             yield session
+        except asyncio.CancelledError:
+            staged.clear()
+            raise
         except BaseException:
             staged.clear()
             raise

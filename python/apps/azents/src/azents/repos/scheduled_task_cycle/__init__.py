@@ -1,5 +1,6 @@
 """Scheduled Task cycle Toolkit State repository."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -283,6 +284,8 @@ class ScheduledTaskCycleRepository:
                     state=state,
                     expected_version=record.version,
                 )
+            except asyncio.CancelledError:
+                raise
             except ToolkitStateConflictError:
                 continue
         raise ToolkitStateConflictError(
@@ -364,6 +367,8 @@ class ScheduledTaskCycleRepository:
                     state=state,
                     expected_version=record.version,
                 )
+            except asyncio.CancelledError:
+                raise
             except ToolkitStateConflictError:
                 continue
             return True

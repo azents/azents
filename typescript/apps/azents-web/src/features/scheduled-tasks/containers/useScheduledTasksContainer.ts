@@ -228,13 +228,13 @@ export function useScheduledTasksContainer({
       ),
   });
   const deleteMutation = trpc.scheduledTask.delete.useMutation({
-    onSuccess: async () => {
-      const taskId = cancelTarget?.id;
+    onSuccess: async (_result, variables) => {
+      const taskId = variables.taskId;
       setCancelTarget(null);
       if (selectedTaskId === taskId) {
         setSelectedTaskId(null);
       }
-      await refresh();
+      await refresh(taskId);
     },
     onError: (error) =>
       setActionError(
@@ -260,13 +260,19 @@ export function useScheduledTasksContainer({
             : {
                 type: "LOADED",
                 task: detailQuery.data,
-                cycle: cycleQuery.data?.current_cycle ?? null,
-                cycleLoading: cycleQuery.isPending,
-                cycleError: cycleQuery.error?.message ?? null,
+                cycleState: cycleQuery.isPending
+                  ? { type: "LOADING" }
+                  : cycleQuery.isError
+                    ? { type: "ERROR", message: cycleQuery.error.message }
+                    : {
+                        type: "LOADED",
+                        cycle: cycleQuery.data.current_cycle,
+                      },
               },
     [
       cycleQuery.data,
       cycleQuery.error,
+      cycleQuery.isError,
       cycleQuery.isPending,
       detailQuery.data,
       detailQuery.error,
@@ -280,14 +286,20 @@ export function useScheduledTasksContainer({
     bindingsQuery.data?.items.filter(
       (binding) => binding.disconnected_at === null,
     ) ?? [];
-  const effectiveForm =
+  const effectiveForm: ScheduledTaskFormState =
     form.type === "CLOSED"
       ? form
       : {
           ...form,
-          bindings,
-          bindingsLoading: bindingsQuery.isPending,
-          bindingsError: bindingsQuery.error?.message ?? null,
+          bindingsState: bindingsQuery.isPending
+            ? { type: "LOADING" }
+            : bindingsQuery.isError
+              ? {
+                  type: "ERROR",
+                  message: bindingsQuery.error.message,
+                  bindings,
+                }
+              : { type: "LOADED", bindings },
         };
   const mutationBusy =
     createMutation.isPending ||
@@ -309,9 +321,7 @@ export function useScheduledTasksContainer({
       type: "EDIT",
       taskId: detail.task.id,
       draft: taskDraft(detail.task),
-      bindings: [],
-      bindingsLoading: false,
-      bindingsError: null,
+      bindingsState: { type: "LOADED", bindings: [] },
       error: null,
     });
   }, [detail, initialTaskId, openInitialTaskForEdit]);
@@ -342,9 +352,7 @@ export function useScheduledTasksContainer({
         type: "CREATE",
         taskId: null,
         draft: emptyDraft(sessionId),
-        bindings: [],
-        bindingsLoading: false,
-        bindingsError: null,
+        bindingsState: { type: "LOADED", bindings: [] },
         error: null,
       });
     },
@@ -357,9 +365,7 @@ export function useScheduledTasksContainer({
         type: "EDIT",
         taskId: task.id,
         draft: taskDraft(task),
-        bindings: [],
-        bindingsLoading: false,
-        bindingsError: null,
+        bindingsState: { type: "LOADED", bindings: [] },
         error: null,
       });
     },

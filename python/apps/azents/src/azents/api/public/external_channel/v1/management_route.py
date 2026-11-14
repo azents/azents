@@ -1,5 +1,6 @@
 """Authenticated External Channel management API."""
 
+import asyncio
 import datetime
 import logging
 from typing import Annotated, NamedTuple
@@ -258,6 +259,8 @@ async def setup_multi_slack_connection(
             transport=request_body.transport,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -283,6 +286,8 @@ async def setup_multi_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except DiscordAPIError as error:
         raise _discord_activation_error(
             error,
@@ -313,6 +318,8 @@ async def get_multi_slack_connection(
             provider=ExternalChannelProvider.SLACK,
             include_disconnected=True,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -332,6 +339,8 @@ async def get_multi_slack_connection_impact(
             connection_id=connection_id,
             provider=ExternalChannelProvider.SLACK,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -354,6 +363,8 @@ async def update_multi_slack_connection(
             transport=request_body.transport,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelConnectionStateChanged as error:
@@ -380,6 +391,8 @@ async def update_multi_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except DiscordAPIError as error:
         raise _discord_activation_error(
             error,
@@ -418,6 +431,8 @@ async def set_multi_discord_thread_duration(
             expected_generation=request_body.expected_generation,
             setting=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -444,6 +459,8 @@ async def set_multi_discord_url_previews(
             expected_generation=request_body.expected_generation,
             setting=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -467,6 +484,8 @@ async def validate_multi_slack_connection(
             connection_id=connection_id,
             provider=ExternalChannelProvider.SLACK,
         )
+    except asyncio.CancelledError:
+        raise
     except DiscordAPIError as error:
         raise _discord_activation_error(
             error,
@@ -502,6 +521,8 @@ async def disconnect_multi_slack_connection(
             provider=ExternalChannelProvider.SLACK,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -529,6 +550,8 @@ async def list_multi_slack_routes(
                 limit=limit,
             )
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -555,6 +578,8 @@ async def add_multi_slack_route(
             provider=ExternalChannelProvider.SLACK,
             agent_id=request_body.agent_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ValueError as error:
@@ -581,6 +606,8 @@ async def get_multi_slack_route_impact(
             provider=ExternalChannelProvider.SLACK,
             route_id=route_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -608,6 +635,8 @@ async def remove_multi_slack_route(
             user_id=member.user_id,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -636,6 +665,8 @@ async def reenable_multi_slack_route(
             provider=ExternalChannelProvider.SLACK,
             route_id=route_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -664,6 +695,8 @@ async def list_multi_slack_channel_defaults(
                 limit=limit,
             )
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -692,6 +725,8 @@ async def replace_multi_slack_channel_default(
             user_id=member.user_id,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -720,6 +755,8 @@ async def clear_multi_slack_channel_default(
             provider_channel_id=provider_channel_id,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -742,6 +779,8 @@ async def get_multi_discord_connection(
             provider=ExternalChannelProvider.DISCORD,
             include_disconnected=True,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -763,6 +802,8 @@ async def get_multi_discord_connection_impact(
             connection_id=connection_id,
             provider=ExternalChannelProvider.DISCORD,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -784,6 +825,8 @@ async def validate_multi_discord_connection(
             connection_id=connection_id,
             provider=ExternalChannelProvider.DISCORD,
         )
+    except asyncio.CancelledError:
+        raise
     except DiscordAPIError as error:
         raise _discord_activation_error(
             error,
@@ -819,6 +862,8 @@ async def disconnect_multi_discord_connection(
             provider=ExternalChannelProvider.DISCORD,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -848,6 +893,8 @@ async def list_multi_discord_routes(
                 limit=limit,
             )
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -872,6 +919,8 @@ async def add_multi_discord_route(
             provider=ExternalChannelProvider.DISCORD,
             agent_id=request_body.agent_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ValueError as error:
@@ -898,6 +947,8 @@ async def get_multi_discord_route_impact(
             provider=ExternalChannelProvider.DISCORD,
             route_id=route_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -925,6 +976,8 @@ async def remove_multi_discord_route(
             user_id=member.user_id,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -951,6 +1004,8 @@ async def reenable_multi_discord_route(
             provider=ExternalChannelProvider.DISCORD,
             route_id=route_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -979,6 +1034,8 @@ async def list_multi_discord_channel_defaults(
                 limit=limit,
             )
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1007,6 +1064,8 @@ async def replace_multi_discord_channel_default(
             user_id=member.user_id,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -1035,6 +1094,8 @@ async def clear_multi_discord_channel_default(
             provider_channel_id=provider_channel_id,
             expected_generation=request_body.expected_generation,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelManagementGenerationChanged as error:
@@ -1058,6 +1119,8 @@ async def load_multi_slack_management_handoff(
             workspace_id=member.workspace_id,
             interaction_id=interaction_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1081,6 +1144,8 @@ async def get_manifest_guidance(
             agent_id=agent_id,
             workspace_user_id=member.workspace_user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     callback_url = config.external_channel_slack_callback_url
@@ -1123,6 +1188,8 @@ async def list_connections(
                 )
             ).response_mode,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1145,6 +1212,8 @@ async def update_default_response_mode(
             workspace_user_id=member.workspace_user_id,
             setting=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1170,6 +1239,8 @@ async def setup_slack_connection(
             transport=request_body.transport,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ValueError as error:
@@ -1200,6 +1271,8 @@ async def setup_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except DiscordAPIError as error:
         raise _discord_activation_error(
             error,
@@ -1234,6 +1307,8 @@ async def validate_connection(
             workspace_user_id=member.workspace_user_id,
             connection_id=connection_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelConnectionStateChanged as error:
@@ -1277,6 +1352,8 @@ async def update_slack_connection(
             transport=request_body.transport,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelConnectionStateChanged as error:
@@ -1310,6 +1387,8 @@ async def update_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except asyncio.CancelledError:
+        raise
     except DiscordAPIError as error:
         raise _discord_activation_error(
             error,
@@ -1352,6 +1431,8 @@ async def set_discord_thread_duration(
             connection_id=connection_id,
             setting=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1377,6 +1458,8 @@ async def set_discord_url_previews(
             connection_id=connection_id,
             setting=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1399,6 +1482,8 @@ async def disconnect_connection(
             workspace_user_id=member.workspace_user_id,
             connection_id=connection_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1423,6 +1508,8 @@ async def update_connection_access_policy(
             connection_id=connection_id,
             policy=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1441,6 +1528,8 @@ async def list_agent_access(
             agent_id=agent_id,
             workspace_user_id=member.workspace_user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     return ManagedAccessResponse(grants=grants, blocks=blocks)
@@ -1466,6 +1555,8 @@ async def revoke_access_grant(
             user_id=member.user_id,
             grant_id=grant_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1490,6 +1581,8 @@ async def remove_access_block(
             user_id=member.user_id,
             block_id=block_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1540,6 +1633,8 @@ async def disconnect_session_channel(
             agent_session_id=session_id,
             binding_id=binding_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     return ManagedBindingListResponse(
@@ -1577,6 +1672,8 @@ async def update_session_channel_response_mode(
             binding_id=binding_id,
             setting=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
 
@@ -1594,6 +1691,8 @@ async def get_approval_request(
             access_request_id=access_request_id,
             user_id=current_user.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelManagementNotFound as error:
         raise _not_found("Approval request not found.") from error
 
@@ -1613,6 +1712,8 @@ async def decide_approval_request(
             user_id=current_user.user_id,
             decision=request_body,
         )
+    except asyncio.CancelledError:
+        raise
     except (
         ExternalChannelManagementNotFound,
         ExternalChannelAccessRequestNotFound,

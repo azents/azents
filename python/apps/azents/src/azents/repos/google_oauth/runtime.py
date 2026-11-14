@@ -1,5 +1,6 @@
 """Canonical Session admission and exact owner-fenced Google renewal persistence."""
 
+import asyncio
 import dataclasses
 import secrets
 from typing import Annotated
@@ -200,6 +201,8 @@ class GoogleRuntimeRepository:
             )
             try:
                 await self._admit_parent(session, owner, snapshot.connection.toolkit_id)
+            except asyncio.CancelledError:
+                raise
             except GoogleOAuthError as error:
                 if error.code == "authorization_unavailable":
                     return False
@@ -232,6 +235,8 @@ class GoogleRuntimeRepository:
                     snapshot.connection.toolkit_id,
                     snapshot.registration,
                 )
+            except asyncio.CancelledError:
+                raise
             except GoogleApplicationUnavailable:
                 return False
             except GoogleOAuthError as error:
@@ -293,6 +298,8 @@ class PersonalGoogleRuntimeRepository(GoogleRuntimeRepository):
             )
         try:
             return await self.personal.admit_in_session(session, self.target)
+        except asyncio.CancelledError:
+            raise
         except PersonalToolkitExecutionDenied:
             raise GoogleOAuthError(
                 "authorization_unavailable",

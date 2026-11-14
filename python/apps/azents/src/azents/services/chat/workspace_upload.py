@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import dataclasses
@@ -323,6 +324,8 @@ class WorkspaceUploadService:
                 identity=identity,
                 expected_revision=status.revision,
             )
+        except asyncio.CancelledError:
+            raise
         except grpc.aio.AioRpcError as error:
             return Failure(_map_rpc_error(error))
         scoped = _validate_status_scope(
@@ -357,10 +360,14 @@ class WorkspaceUploadService:
                 user_id=user_id,
                 upload_id=upload_id,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             return Failure(WorkspaceUploadRuntimeUnavailable(detail=error.detail))
         try:
             status = await self.coordinator.get(identity)
+        except asyncio.CancelledError:
+            raise
         except grpc.aio.AioRpcError as error:
             return Failure(_map_rpc_error(error))
         return _validate_status_scope(
@@ -398,10 +405,14 @@ class WorkspaceUploadService:
                 user_id=user_id,
                 upload_id=upload_id,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             return Failure(WorkspaceUploadRuntimeUnavailable(detail=error.detail))
         try:
             current = await self.coordinator.get(lookup_identity)
+        except asyncio.CancelledError:
+            raise
         except grpc.aio.AioRpcError as error:
             return Failure(_map_rpc_error(error))
         scoped = _validate_status_scope(
@@ -431,6 +442,8 @@ class WorkspaceUploadService:
                 identity=scoped.value.identity,
                 expected_revision=expected_revision,
             )
+        except asyncio.CancelledError:
+            raise
         except grpc.aio.AioRpcError as error:
             return Failure(_map_rpc_error(error))
         return _validate_status_scope(
@@ -484,6 +497,8 @@ class WorkspaceUploadService:
                     current_delivery_number=current_delivery_number,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except grpc.aio.AioRpcError as error:
             return Failure(_map_rpc_error(error))
         return _validate_status_scope(
@@ -549,6 +564,8 @@ class WorkspaceUploadService:
                     conflict_precondition=token_result.value,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except grpc.aio.AioRpcError as error:
             return Failure(_map_rpc_error(error))
         return _validate_status_scope(
@@ -617,6 +634,8 @@ class WorkspaceUploadService:
                 deadline_at=self._now() + _RUNNER_OPERATION_TIMEOUT,
                 admission_authority=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -657,6 +676,8 @@ class WorkspaceUploadService:
                     start_if_stopped=False,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             return Failure(WorkspaceUploadRuntimeUnavailable(detail=str(error)))
 
@@ -678,10 +699,14 @@ class WorkspaceUploadService:
                 user_id=user_id,
                 upload_id=upload_id,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             return Failure(WorkspaceUploadRuntimeUnavailable(detail=error.detail))
         try:
             status = await self.coordinator.get(identity)
+        except asyncio.CancelledError:
+            raise
         except grpc.aio.AioRpcError as error:
             return Failure(_map_rpc_error(error))
         return _validate_status_scope(

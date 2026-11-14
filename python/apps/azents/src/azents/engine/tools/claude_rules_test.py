@@ -7,7 +7,7 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import List
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -762,29 +762,25 @@ class TestClaudeRulesToolkit:
         assert second is not None
 
     async def test_runtime_storage_failure_logs_and_keeps_output_unchanged(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Runtime/FileStorage communication failure logs and returns unchanged."""
         toolkit = _make_toolkit(_FailingListStorage())
-        log_exception = Mock()
-        monkeypatch.setattr(
-            "azents.engine.tools.claude_rules.logger.exception", log_exception
-        )
-
         result = await _run_after_tool_call_hook(
             toolkit,
             _make_after_read_context("/runtime/home/project/src/app.py"),
         )
 
         assert result is None
-        log_exception.assert_called_once()
-        assert log_exception.call_args.args == (
-            "Failed to load Claude rules appendix candidates",
-        )
-        assert log_exception.call_args.kwargs["extra"] == {
-            "agent_id": "agent-1",
-            "session_id": "session-1",
-        }
+        records = [
+            record
+            for record in caplog.records
+            if record.message == "Failed to load Claude rules appendix candidates"
+        ]
+        assert len(records) == 1
+        assert records[0].exc_info is not None
+        assert records[0].__dict__["agent_id"] == "agent-1"
+        assert records[0].__dict__["session_id"] == "session-1"
 
     async def test_update_context_exposes_no_tools(self) -> None:
         """Toolkit stays hook-active without exposing model-visible tools."""

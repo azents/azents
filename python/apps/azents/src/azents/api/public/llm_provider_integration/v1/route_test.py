@@ -1,5 +1,6 @@
 """Tests for LLM provider integration catalog sync routing."""
 
+import asyncio
 import datetime
 from unittest.mock import AsyncMock
 
@@ -319,6 +320,8 @@ async def test_explicit_sync_formats_pytz_retry_time_as_http_date() -> None:
             service=service,
             integration_id="integration",
         )
+    except asyncio.CancelledError:
+        raise
     except HTTPException as exc:
         assert exc.status_code == 429
         assert exc.headers == {"Retry-After": "Thu, 16 Jul 2026 12:00:30 GMT"}

@@ -14,6 +14,7 @@ from typing import Any, Literal, Protocol
 
 import frontmatter
 import yaml
+from azcommon.logging import bind_extra
 from pydantic import BaseModel
 
 from azents.core.engine_tool_state import (
@@ -282,6 +283,13 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
     ) -> ToolOutputReplace | None:
         """Discover and append Claude rules while holding the Session lock."""
         started_at = time.perf_counter()
+        L = bind_extra(
+            logger,
+            {
+                "agent_id": self._runtime_agent_id,
+                "session_id": self._runtime_session_id,
+            },
+        )
         try:
             result = await self._matching_not_yet_appended_rules(
                 instruction_context,
@@ -290,12 +298,9 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         except asyncio.CancelledError:
             raise
         except RuntimeStorageError:
-            logger.exception(
+            L.exception(
                 "Failed to load Claude rules appendix candidates",
-                extra={
-                    "agent_id": self._runtime_agent_id,
-                    "session_id": self._runtime_session_id,
-                },
+                extra={},
             )
             return None
         files = result.files
@@ -305,11 +310,9 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
                 self._runtime_session_id,
                 [rule.path for rule in files],
             )
-        logger.info(
+        L.info(
             "Processed Claude rules read appendix",
             extra={
-                "agent_id": self._runtime_agent_id,
-                "session_id": self._runtime_session_id,
                 "appendix_duration_ms": (time.perf_counter() - started_at) * 1000,
                 "root_list_operation_count": result.root_list_count,
                 "discovered_path_count": result.discovered_path_count,

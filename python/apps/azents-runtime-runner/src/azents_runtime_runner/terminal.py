@@ -2,6 +2,7 @@
 
 import asyncio
 import errno
+import logging
 import os
 import signal
 import sys
@@ -24,6 +25,7 @@ MAX_TERMINAL_CHUNK_BYTES = 16 * 1024
 MAX_TERMINAL_OUTPUT_WINDOW_BYTES = 256 * 1024
 TERMINATE_GRACE_SECONDS = 2.0
 KILL_GRACE_SECONDS = 2.0
+logger = logging.getLogger(__name__)
 
 
 class TerminalError(RuntimeError):
@@ -723,6 +725,7 @@ class RunnerTerminalRegistry:
         self.utc_clock = utc_clock
         self._terminals: dict[str, RunnerTerminal] = {}
         self._reservations: dict[str, _TerminalReservation] = {}
+        self._uninstalled_cleanup_tasks: set[asyncio.Task[None]] = set()
         self._lock = asyncio.Lock()
 
     async def open(self, spec: TerminalSpec) -> RunnerTerminal:
@@ -776,12 +779,45 @@ class RunnerTerminalRegistry:
                     self._terminals[spec.terminal_id] = terminal
         except asyncio.CancelledError:
             await self._remove_reservation(reservation)
-            asyncio.create_task(_cleanup_uninstalled_process(process))
+            self._start_uninstalled_cleanup(process)
             raise
         if stale:
-            asyncio.create_task(_cleanup_uninstalled_process(process))
+            self._start_uninstalled_cleanup(process)
             raise TerminalInvalidatedError("Terminal open authority was invalidated.")
         return terminal
+
+    def _start_uninstalled_cleanup(self, process: PtyTerminalProcess) -> None:
+        """Retain orphan-allocation cleanup without delaying admission failure."""
+        task = asyncio.create_task(_cleanup_uninstalled_process(process))
+        self._uninstalled_cleanup_tasks.add(task)
+        task.add_done_callback(self._uninstalled_cleanup_done)
+
+    def _uninstalled_cleanup_done(self, task: asyncio.Task[None]) -> None:
+        """Observe a handled cleanup failure without leaking PTY exception values."""
+        self._uninstalled_cleanup_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is None:
+            return
+        frames: list[dict[str, object]] = []
+        traceback = error.__traceback__
+        while traceback is not None:
+            code = traceback.tb_frame.f_code
+            frames.append(
+                {
+                    "file": Path(code.co_filename).name,
+                    "function": code.co_name,
+                    "line": traceback.tb_lineno,
+                }
+            )
+            traceback = traceback.tb_next
+        message = "Uninstalled Terminal process cleanup failed"
+        logger.error(
+            message,
+            exc_info=(RuntimeError, RuntimeError(message), None),
+            extra={"error_type": type(error).__name__, "error_frames": frames},
+        )
 
     async def get(self, *, terminal_id: str) -> RunnerTerminal | None:
         """Return the active Terminal by independent ID."""
@@ -856,7 +892,15 @@ class RunnerTerminalRegistry:
         async with self._lock:
             terminals = tuple(self._terminals.values())
             self._terminals.clear()
-        exits = await asyncio.gather(*(terminal.terminate() for terminal in terminals))
+        try:
+            exits = await asyncio.gather(
+                *(terminal.terminate() for terminal in terminals)
+            )
+        finally:
+            while self._uninstalled_cleanup_tasks:
+                await asyncio.gather(
+                    *self._uninstalled_cleanup_tasks, return_exceptions=True
+                )
         return tuple(exits)
 
     def _enforce_admission(self, spec: TerminalSpec) -> None:

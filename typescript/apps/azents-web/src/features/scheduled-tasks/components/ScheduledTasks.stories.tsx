@@ -175,9 +175,7 @@ const meta = {
     detail: {
       type: "LOADED",
       task: recurringTask,
-      cycle,
-      cycleLoading: false,
-      cycleError: null,
+      cycleState: { type: "LOADED", cycle },
     },
     form: { type: "CLOSED" },
     selectedTaskId: recurringTask.id,
@@ -211,9 +209,7 @@ export const QuietPermission = {
     detail: {
       type: "LOADED",
       task: { ...recurringTask, allow_silent: true },
-      cycle,
-      cycleLoading: false,
-      cycleError: null,
+      cycleState: { type: "LOADED", cycle },
     },
   },
   play: async ({ canvasElement }) => {
@@ -242,9 +238,7 @@ export const OneTime = {
     detail: {
       type: "LOADED",
       task: oneTimeTask,
-      cycle: null,
-      cycleLoading: false,
-      cycleError: null,
+      cycleState: { type: "LOADED", cycle: null },
     },
   },
 } satisfies Story;
@@ -290,9 +284,7 @@ export const CycleLoading = {
     detail: {
       type: "LOADED",
       task: recurringTask,
-      cycle: null,
-      cycleLoading: true,
-      cycleError: null,
+      cycleState: { type: "LOADING" },
     },
   },
 } satisfies Story;
@@ -315,9 +307,7 @@ export const CreateOneTime = {
         timezone: "America/Los_Angeles",
         channelId: null,
       },
-      bindings: [binding],
-      bindingsLoading: false,
-      bindingsError: null,
+      bindingsState: { type: "LOADED", bindings: [binding] },
       error: null,
     },
   },
@@ -339,9 +329,7 @@ export const EditRecurring = {
         timezone: recurringTask.timezone ?? "UTC",
         channelId: binding.id,
       },
-      bindings: [binding],
-      bindingsLoading: false,
-      bindingsError: null,
+      bindingsState: { type: "LOADED", bindings: [binding] },
       error: null,
     },
   },
@@ -363,9 +351,7 @@ export const BindingLoading = {
         timezone: "America/Los_Angeles",
         channelId: null,
       },
-      bindings: [],
-      bindingsLoading: true,
-      bindingsError: null,
+      bindingsState: { type: "LOADING" },
       error: null,
     },
   },
@@ -387,9 +373,7 @@ export const ValidationError = {
         timezone: "UTC",
         channelId: null,
       },
-      bindings: [],
-      bindingsLoading: false,
-      bindingsError: null,
+      bindingsState: { type: "LOADED", bindings: [] },
       error: "titleRequired",
     },
   },
@@ -438,5 +422,53 @@ export const CreateQuietSelected = {
   play: async ({ canvasElement }) => {
     const modal = within(canvasElement.ownerDocument.body);
     await expect(modal.getByRole("checkbox")).toBeChecked();
+  },
+} satisfies Story;
+
+export const CycleError = {
+  tags: ["ci-contract"],
+  args: {
+    detail: {
+      type: "LOADED",
+      task: recurringTask,
+      cycleState: {
+        type: "ERROR",
+        message: "Current execution could not be loaded.",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText("Current execution could not be loaded."),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const CachedBindingsError = {
+  tags: ["ci-contract"],
+  args: {
+    ...CreateOneTime.args,
+    form: {
+      ...CreateOneTime.args.form,
+      bindingsState: {
+        type: "ERROR",
+        message: "Channel targets could not be refreshed.",
+        bindings: [binding],
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const modal = within(canvasElement.ownerDocument.body);
+    await expect(
+      modal.getByText("Channel targets could not be refreshed."),
+    ).toBeVisible();
+    const target = modal.getByRole("combobox", {
+      name: "External Channel target (optional)",
+    });
+    await expect(target).toBeEnabled();
+    await userEvent.click(target);
+    await expect(
+      modal.getByRole("option", { name: /#release · weekly status thread/ }),
+    ).toBeVisible();
   },
 } satisfies Story;

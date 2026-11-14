@@ -40,7 +40,7 @@
   flex-shrink: 0;
 }
 .service {
-  border-top: 1px solid var(--mantine-color-default-border);
+  border-top: rem(1px) solid var(--mantine-color-default-border);
   padding-top: var(--mantine-spacing-sm);
 }
 .permission {
@@ -56,12 +56,12 @@
   margin-bottom: var(--mantine-spacing-sm);
 }
 .advanced {
-  border-top: 1px solid var(--mantine-color-default-border);
+  border-top: rem(1px) solid var(--mantine-color-default-border);
   padding-top: var(--mantine-spacing-md);
 }
 .footer {
   flex-shrink: 0;
   background: var(--mantine-color-body);
-  border-top: 1px solid var(--mantine-color-default-border);
+  border-top: rem(1px) solid var(--mantine-color-default-border);
   padding-block: var(--mantine-spacing-md);
 }

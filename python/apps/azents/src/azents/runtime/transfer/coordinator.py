@@ -95,9 +95,9 @@ class RuntimeTransferCoordinator:
         :param clock: timezone-aware clock for operation metadata and replies
         """
         self._state_store = state_store
-        self._coordination_store = coordination_store
-        self._cleanup = cleanup
-        self._clock = clock
+        self.coordination_store = coordination_store
+        self.cleanup = cleanup
+        self.clock = clock
 
     @property
     def state_store(self) -> RuntimeTransferStateStore:
@@ -483,10 +483,10 @@ class RuntimeTransferCoordinator:
         safe_at = cleanup_safe_at(marked)
         if safe_at is not None and self._now() < safe_at:
             return marked
-        if self._cleanup is None:
+        if self.cleanup is None:
             return marked
         try:
-            await self._cleanup.cleanup(marked)
+            await self.cleanup.cleanup(marked)
         except asyncio.CancelledError:
             raise
         except RuntimeTransferCleanupDeferred:
@@ -916,7 +916,7 @@ class RuntimeTransferCoordinator:
             raise RuntimeTransferDispatchError("Transfer dispatch is not deliverable")
         if deliverable.dispatch_status.value == "deliverable":
             append_request = (
-                self._coordination_store.append_operation_request_if_connection_current
+                self.coordination_store.append_operation_request_if_connection_current
             )
             appended = await append_request(
                 connection_kind=RuntimeConnectionKind.RUNNER,
@@ -973,7 +973,7 @@ class RuntimeTransferCoordinator:
         self,
         record: RuntimeTransferRecord,
     ) -> RuntimeConnectionRecord | None:
-        return await self._coordination_store.get_connection(
+        return await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=record.admission.runtime_id,
         )
@@ -998,7 +998,7 @@ class RuntimeTransferCoordinator:
         record: RuntimeTransferRecord,
         reason: RuntimeTransferCancellationReason,
     ) -> None:
-        operation = await self._coordination_store.get_operation(
+        operation = await self.coordination_store.get_operation(
             record.admission.operation_id
         )
         if (
@@ -1009,7 +1009,7 @@ class RuntimeTransferCoordinator:
             or record.accepted_runner_generation is None
         ):
             return
-        await self._coordination_store.request_operation_cancel_if_connection_current(
+        await self.coordination_store.request_operation_cancel_if_connection_current(
             connection_kind=RuntimeConnectionKind.RUNNER,
             connection_subject_id=record.admission.runtime_id,
             connection_generation=record.accepted_runner_generation,
@@ -1033,7 +1033,7 @@ class RuntimeTransferCoordinator:
         operation = await self._correlated_operation(record)
         if operation is None:
             return
-        await self._coordination_store.append_reply_for_operation(
+        await self.coordination_store.append_reply_for_operation(
             operation.reply_stream_id,
             RuntimeReplyEvent(
                 request_id=record.dispatch_request_id or record.admission.operation_id,
@@ -1062,7 +1062,7 @@ class RuntimeTransferCoordinator:
         if operation is None:
             return
         success = record.terminal_outcome is RuntimeTransferOutcome.SUCCEEDED
-        await self._coordination_store.append_reply_for_operation(
+        await self.coordination_store.append_reply_for_operation(
             operation.reply_stream_id,
             RuntimeReplyEvent(
                 request_id=record.dispatch_request_id or record.admission.operation_id,
@@ -1091,7 +1091,7 @@ class RuntimeTransferCoordinator:
         record: RuntimeTransferRecord,
     ) -> RuntimeOperationMetadata | None:
         """Return only the durable operation owned by this transfer attempt."""
-        operation = await self._coordination_store.get_operation(
+        operation = await self.coordination_store.get_operation(
             record.admission.operation_id
         )
         if (
@@ -1135,7 +1135,7 @@ class RuntimeTransferCoordinator:
             cursor = page.cursor
 
     def _now(self) -> datetime:
-        now = self._clock()
+        now = self.clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError(
                 "Runtime transfer coordinator clock must be timezone-aware"

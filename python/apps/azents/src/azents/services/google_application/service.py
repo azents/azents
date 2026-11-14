@@ -1,5 +1,6 @@
 """Google operator configuration without Toolkit-service dependency cycles."""
 
+import asyncio
 import dataclasses
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -71,6 +72,8 @@ class GoogleApplicationService:
     async def _current(self) -> ResolvedSystemSetting:
         try:
             return await self.settings.resolve(SystemSettingSection.GOOGLE_OAUTH)
+        except asyncio.CancelledError:
+            raise
         except ValidationError:
             raise GoogleApplicationUnavailable(
                 "Google operator configuration is invalid. Verify operator settings."
@@ -89,6 +92,8 @@ class GoogleApplicationService:
         """Expose Google creation only when local operator preparation is complete."""
         try:
             preparation = await self.preparation()
+        except asyncio.CancelledError:
+            raise
         except GoogleApplicationUnavailable:
             return False
         return preparation.status == "configured_unverified"

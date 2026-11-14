@@ -2,6 +2,7 @@
 
 # ruff: noqa: E501
 
+import asyncio
 import dataclasses
 import datetime
 import json
@@ -328,6 +329,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     parent_run_id=parent_run_id,
                     settings=self.subagent_settings,
                 )
+            except asyncio.CancelledError:
+                raise
             except SubagentToolOperationError as exc:
                 raise FunctionToolError(str(exc)) from None
             parent_state = preparation.parent_session.inference_state
@@ -361,6 +364,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     profile=profile.state,
                     forked_events=forked,
                 )
+            except asyncio.CancelledError:
+                raise
             except SubagentToolOperationError as exc:
                 raise FunctionToolError(str(exc)) from None
 
@@ -539,6 +544,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     agent_name=input.agent_name,
                     content=input.message,
                 )
+            except asyncio.CancelledError:
+                raise
             except SubagentToolOperationError as exc:
                 raise FunctionToolError(str(exc)) from None
             target = result.target
@@ -568,6 +575,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     content=input.task,
                     max_subagents=self.subagent_settings.max_subagents,
                 )
+            except asyncio.CancelledError:
+                raise
             except SubagentToolOperationError as exc:
                 raise FunctionToolError(str(exc)) from None
             target = result.target
@@ -596,6 +605,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     session_id=self._current_session_id(),
                     agent_name=input.agent_name,
                 )
+            except asyncio.CancelledError:
+                raise
             except SubagentToolOperationError as exc:
                 raise FunctionToolError(str(exc)) from None
             target = result.target

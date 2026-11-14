@@ -1,5 +1,6 @@
 """Native Brave Search Toolkit exposing five direct, key-backed search functions."""
 
+import asyncio
 from typing import ClassVar, Literal
 
 import httpx
@@ -149,7 +150,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
         config: BraveSearchToolkitConfig,
         client: BraveSearchApi,
     ) -> None:
-        self._config = config
+        self.config = config
         self.client = client
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
@@ -158,7 +159,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
 
         async def search_web(query: _PagedQuery) -> str:
             """Search Brave Web for ranked pages and source links; not LLM context."""
-            params = _params(query, self._config)
+            params = _params(query, self.config)
             if params["country"] == "ALL":
                 params.pop("country")
             params.update({"count": query.count, "offset": query.offset})
@@ -168,7 +169,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
 
         async def search_context(query: _ContextQuery) -> str:
             """Search Brave LLM Context for extracted snippets with source URLs."""
-            params = _params(query, self._config)
+            params = _params(query, self.config)
             if params["country"] == "ALL":
                 params.pop("country")
             params.update(
@@ -184,7 +185,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
 
         async def search_news(query: _PagedQuery) -> str:
             """Search Brave News for articles with source pages and date metadata."""
-            params = _params(query, self._config)
+            params = _params(query, self.config)
             params.update({"count": query.count, "offset": query.offset})
             if query.freshness is not None:
                 params["freshness"] = query.freshness
@@ -192,7 +193,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
 
         async def search_videos(query: _PagedQuery) -> str:
             """Search Brave Videos for attributable video links and descriptions."""
-            params = _params(query, self._config)
+            params = _params(query, self.config)
             params.update({"count": query.count, "offset": query.offset})
             if query.freshness is not None:
                 params["freshness"] = query.freshness
@@ -200,7 +201,7 @@ class BraveSearchToolkit(Toolkit[BraveSearchToolkitConfig]):
 
         async def search_images(query: _ImageQuery) -> FunctionToolResult:
             """Search Brave Images; attach bounded thumbnails in this same result."""
-            params = _params(query, self._config)
+            params = _params(query, self.config)
             params["count"] = query.count
             if params["safesearch"] == "moderate":
                 params["safesearch"] = "strict"
@@ -295,6 +296,8 @@ class BraveSearchToolkitProvider(ToolkitProvider[BraveSearchToolkitConfig]):
                 params["country"] = config.country
             await client.search("web", params)
             success, message = True, "Brave Search Web connection succeeded."
+        except asyncio.CancelledError:
+            raise
         except ValidationError:
             success, message = False, "Brave Search API key is invalid."
         except FunctionToolError as exc:

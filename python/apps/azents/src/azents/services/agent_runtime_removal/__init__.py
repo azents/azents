@@ -247,6 +247,8 @@ class AgentRuntimeRemovalService:
         for session_id in interrupted.stop_session_ids:
             try:
                 await self.broker.send_message(SessionStopSignal(session_id=session_id))
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 logger.exception(
                     "Agent Runtime removal stop wake-up failed",

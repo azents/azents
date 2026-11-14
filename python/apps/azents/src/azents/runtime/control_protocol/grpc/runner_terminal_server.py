@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import grpc
+from azcommon.logging import bind_extra
 from azents_runtime_control.grpc_runner_terminal_client import (
     runner_terminal_control_to_message,
     runner_terminal_event_from_message,
@@ -118,8 +119,8 @@ class RuntimeRunnerTerminalGrpcServicer(
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
     ) -> None:
         """Initialize the Terminal stream servicer."""
-        self._broker = broker
-        self._runner_authenticator = runner_authenticator
+        self.broker = broker
+        self.runner_authenticator = runner_authenticator
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
 
     async def ConnectTerminal(
@@ -151,7 +152,7 @@ class RuntimeRunnerTerminalGrpcServicer(
                 "Terminal Runtime identity does not match its credential",
             )
             raise AssertionError("unreachable")
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
                 "Runner credential is no longer authorized",
@@ -159,26 +160,32 @@ class RuntimeRunnerTerminalGrpcServicer(
             raise AssertionError("unreachable")
         authority = _authority(credential, registration)
         try:
-            stream = await self._broker.connect(
+            stream = await self.broker.connect(
                 registration,
                 authority=authority,
                 connected_at=datetime.now(UTC),
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerTerminalAdmissionError as error:
             await context.abort(
                 _admission_status(error.code),
                 _admission_message(error.code),
             )
             raise AssertionError("unreachable") from None
-        _LOGGER.info(
-            "Runtime Runner Terminal stream registered",
-            extra={
+        L = bind_extra(
+            _LOGGER,
+            {
                 "terminal_id": registration.identity.terminal_id,
                 "runtime_id": registration.identity.runtime_id,
                 "desired_generation": credential.desired_generation,
                 "runner_generation": registration.identity.runner_generation,
                 "stream_generation": registration.stream_generation,
             },
+        )
+        L.info(
+            "Runtime Runner Terminal stream registered",
+            extra={},
         )
         inbound_task = asyncio.create_task(
             self._consume_runner_frames(
@@ -198,15 +205,9 @@ class RuntimeRunnerTerminalGrpcServicer(
             with contextlib.suppress(asyncio.CancelledError):
                 await inbound_task
             await stream.close()
-            _LOGGER.info(
+            L.info(
                 "Runtime Runner Terminal stream closed",
-                extra={
-                    "terminal_id": registration.identity.terminal_id,
-                    "runtime_id": registration.identity.runtime_id,
-                    "desired_generation": credential.desired_generation,
-                    "runner_generation": registration.identity.runner_generation,
-                    "stream_generation": registration.stream_generation,
-                },
+                extra={},
             )
 
     async def _consume_runner_frames(
@@ -223,7 +224,7 @@ class RuntimeRunnerTerminalGrpcServicer(
         credential: RuntimeRunnerCredential,
     ) -> None:
         async for message in request_iterator:
-            if not await self._runner_authenticator.authorize_runner(credential):
+            if not await self.runner_authenticator.authorize_runner(credential):
                 await context.abort(
                     grpc.StatusCode.UNAUTHENTICATED,
                     "Runner credential is no longer authorized",

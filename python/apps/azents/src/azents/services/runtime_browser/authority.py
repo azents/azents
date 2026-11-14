@@ -192,6 +192,8 @@ class DatabaseRuntimeBrowserAuthorityResolver:
                     runtime_target=target,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except SessionWorkingFolderBindingError:
             return RuntimeBrowserUnavailable("working_folder_unavailable")
         path = PurePosixPath(folder.working_folder_path)
@@ -335,6 +337,8 @@ class DatabaseRuntimeBrowserStreamScopeValidator:
                 authentication_session_id=authority.authentication_session_id,
                 resolved_at=now,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeBrowserRequestError:
             return BrowserScopeState.REVOKED
         if isinstance(current, RuntimeBrowserUnavailable):

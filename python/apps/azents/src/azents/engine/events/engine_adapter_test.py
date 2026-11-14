@@ -2560,8 +2560,29 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
     assert isinstance(_events(rest)[-1], RunComplete)
 
 
-async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
+async def test_adapter_forwards_user_stop_cancellation_to_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Propagate adapter consumer user stop cancellation to execution task."""
+    second_get_started = asyncio.Event()
+    second_get_finished = asyncio.Event()
+    getter_tasks: list[asyncio.Task[object]] = []
+    original_get = engine_adapter_module._AsyncEventEmitQueue.get
+
+    async def observe_get(self: engine_adapter_module._AsyncEventEmitQueue) -> Emit:
+        task = asyncio.current_task()
+        assert task is not None
+        getter_tasks.append(task)
+        second = len(getter_tasks) == 2
+        if second:
+            second_get_started.set()
+        try:
+            return await original_get(self)
+        finally:
+            if second:
+                second_get_finished.set()
+
+    monkeypatch.setattr(engine_adapter_module._AsyncEventEmitQueue, "get", observe_get)
     done = asyncio.Event()
     execution = _StreamingExecution(done)
     adapter = _agent_engine_adapter(
@@ -2614,13 +2635,25 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
             emitted.set()
 
     task = asyncio.create_task(consume())
-    await asyncio.wait_for(emitted.wait(), timeout=1)
-    task.cancel(USER_STOP_CANCEL_MESSAGE)
-
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    assert execution.cancel_args == (USER_STOP_CANCEL_MESSAGE,)
+    try:
+        await asyncio.wait_for(second_get_started.wait(), timeout=1)
+        assert len(getter_tasks) == 2
+        assert not second_get_finished.is_set()
+        task.cancel(USER_STOP_CANCEL_MESSAGE)
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await task
+        assert raised.value.args == (USER_STOP_CANCEL_MESSAGE,)
+        assert execution.cancel_args == (USER_STOP_CANCEL_MESSAGE,)
+        assert second_get_finished.is_set()
+        assert all(getter.done() for getter in getter_tasks)
+    finally:
+        if not task.done():
+            task.cancel(USER_STOP_CANCEL_MESSAGE)
+        await asyncio.gather(task, return_exceptions=True)
+        for getter in getter_tasks:
+            if not getter.done():
+                getter.cancel()
+        await asyncio.gather(*getter_tasks, return_exceptions=True)
 
 
 async def test_adapter_drains_run_task_on_stream_close() -> None:

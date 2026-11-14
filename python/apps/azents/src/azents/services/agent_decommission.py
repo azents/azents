@@ -7,6 +7,7 @@ import logging
 from typing import Annotated, Protocol
 
 from azcommon.infra.s3.service import S3Service
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.broker.deps import get_broker
@@ -107,17 +108,21 @@ class AgentDecommissionService:
             if job is None:
                 break
             claimed_count += 1
+            L = bind_extra(
+                logger,
+                {
+                    "agent_decommission_job_id": job.id,
+                    "attempt_count": job.attempt_count,
+                },
+            )
             try:
                 result = await self._advance(job=job, lease_owner=lease_owner)
             except asyncio.CancelledError:
                 raise
             except AgentDeletionOwnershipLost:
-                logger.info(
+                L.info(
                     "Agent decommission attempt lost ownership",
-                    extra={
-                        "agent_decommission_job_id": job.id,
-                        "attempt_count": job.attempt_count,
-                    },
+                    extra={},
                 )
                 continue
             except Exception as error:
@@ -136,21 +141,16 @@ class AgentDecommissionService:
                 except asyncio.CancelledError:
                     raise
                 except AgentDeletionOwnershipLost:
-                    logger.info(
+                    L.info(
                         "Agent decommission retry lost ownership",
-                        extra={
-                            "agent_decommission_job_id": job.id,
-                            "attempt_count": job.attempt_count,
-                        },
+                        extra={},
                     )
                     continue
                 retry_scheduled_count += 1
-                logger.exception(
+                L.exception(
                     "Agent decommission job failed; retry scheduled",
                     extra={
-                        "agent_decommission_job_id": job.id,
                         "agent_id": job.agent_id,
-                        "attempt_count": job.attempt_count,
                         "participant_key": error.participant_key
                         if isinstance(error, AgentDeletionParticipantFailure)
                         else None,

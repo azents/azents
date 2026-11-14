@@ -19,6 +19,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import Tool as McpBaseTool
 
 from azents.core.tools import TestConnectionResult
+from azents.utils.logging import content_safe_exception_diagnostic
 
 logger = logging.getLogger(__name__)
 
@@ -201,9 +202,17 @@ async def list_tools(
             # Do not retry earlier than Retry-After or wait without a bound.
             if not math.isfinite(delay) or not 0 <= delay <= _DISCOVERY_MAX_RETRY_DELAY:
                 raise
+            diagnostic = content_safe_exception_diagnostic(
+                exc, message="MCP discovery rate limited"
+            )
             logger.warning(
                 "MCP discovery rate limited, retrying",
-                extra={"attempt": attempt + 1, "retry_after_secs": delay},
+                exc_info=diagnostic.exc_info,
+                extra={
+                    "attempt": attempt + 1,
+                    "retry_after_secs": delay,
+                    **diagnostic.log_fields(),
+                },
             )
             await asyncio.sleep(delay)
     raise AssertionError("unreachable")  # pragma: no cover
@@ -236,9 +245,13 @@ async def _list_tools_once(
     except Exception as exc:
         if not _is_http_405(exc):
             raise
+        diagnostic = content_safe_exception_diagnostic(
+            exc, message="MCP Streamable HTTP unavailable"
+        )
         logger.info(
             "Streamable HTTP failed, falling back to SSE",
-            extra={"server_url": server_url, "error_type": type(exc).__name__},
+            exc_info=diagnostic.exc_info,
+            extra={"server_url": server_url, **diagnostic.log_fields()},
         )
 
     async with _mcp_session(

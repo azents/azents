@@ -565,8 +565,8 @@ def _mount_canonical_publisher_evidence(
     ) -> StreamingResponse:
         assert isinstance(runtime, CoordinatedRuntimeTerminalInvalidationPublisher)
         assert isinstance(policy, RuntimeTerminalPolicyInvalidationPublisher)
-        assert runtime._store is policy._store is store is expected_store
-        assert runtime._dispatcher is policy._dispatcher is dispatcher
+        assert runtime.store is policy.store is store is expected_store
+        assert runtime.dispatcher is policy.dispatcher is dispatcher
         if expected_dispatcher is not None:
             assert dispatcher is expected_dispatcher
         value = request.headers["x-evidence"]
@@ -625,8 +625,8 @@ async def test_offline_publishers_retain_canonical_container_composition(
         policy = await container.solve(get_terminal_policy_invalidation_publisher)
         assert isinstance(runtime, CoordinatedRuntimeTerminalInvalidationPublisher)
         assert isinstance(policy, RuntimeTerminalPolicyInvalidationPublisher)
-        assert runtime._store is policy._store is store
-        assert runtime._dispatcher is policy._dispatcher is dispatcher
+        assert runtime.store is policy.store is store
+        assert runtime.dispatcher is policy.dispatcher is dispatcher
 
 
 @pytest.mark.asyncio

@@ -547,6 +547,8 @@ async def _preflight_directory(
     """Reject known directory and manifest conflicts before target execution."""
     try:
         metadata = await storage.stat(directory, agent_id=agent_id)
+    except asyncio.CancelledError:
+        raise
     except FileNotFoundError:
         metadata = None
     except RuntimeStorageError as exc:
@@ -558,6 +560,8 @@ async def _preflight_directory(
     manifest = posixpath.join(directory, _MANIFEST_NAME)
     try:
         manifest_exists = await storage.exists(manifest, agent_id=agent_id)
+    except asyncio.CancelledError:
+        raise
     except PermissionError:
         raise FunctionToolError(
             f"Cannot inspect Runtime output directory: {directory}"

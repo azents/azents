@@ -1,5 +1,6 @@
 """Session-scoped Goal Toolkit State tools."""
 
+import asyncio
 import datetime
 import json
 
@@ -323,6 +324,8 @@ def make_create_goal_tool(
                 objective=args.objective,
                 updated_at=_now_iso(),
             )
+        except asyncio.CancelledError:
+            raise
         except GoalAlreadyExistsError as exc:
             raise FunctionToolError(str(exc)) from exc
         return json.dumps(updated.model_dump(mode="json"), ensure_ascii=False)
@@ -352,6 +355,8 @@ def make_update_goal_tool(
                 status=args.status,
                 updated_at=completed_at,
             )
+        except asyncio.CancelledError:
+            raise
         except GoalNotActiveError as exc:
             raise FunctionToolError(str(exc)) from exc
         previous = result.previous

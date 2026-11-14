@@ -263,6 +263,8 @@ async def test_concurrent_owner_creation_keeps_single_owner(
             session = ReadWriteSession(_raw_session)
             try:
                 yield session
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 await session.write_session.rollback()
                 raise

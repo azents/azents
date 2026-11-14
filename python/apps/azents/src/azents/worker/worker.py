@@ -9,7 +9,6 @@ then releases session lock and exits.
 """
 
 import asyncio
-import contextlib
 import dataclasses
 import logging
 from typing import Annotated
@@ -102,6 +101,8 @@ class AgentWorker:
             while not shutdown_event.is_set():
                 try:
                     messages = await self._receive_or_shutdown(shutdown_event)
+                except asyncio.CancelledError:
+                    raise
                 except _ShutdownRequested:
                     break
                 except Exception:
@@ -180,20 +181,17 @@ class AgentWorker:
 
         receive_task = asyncio.ensure_future(self.broker.receive_messages())
         shutdown_task = asyncio.ensure_future(shutdown_event.wait())
-        done, _ = await asyncio.wait(
-            [receive_task, shutdown_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
         transient_tasks = (receive_task, shutdown_task)
-        for task in transient_tasks:
-            if task not in done:
-                task.cancel()
-        for task in transient_tasks:
-            if task not in done:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-
-        if shutdown_task in done:
-            raise _ShutdownRequested
-
-        return receive_task.result()
+        try:
+            done, _ = await asyncio.wait(
+                transient_tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if shutdown_task in done:
+                raise _ShutdownRequested
+            return receive_task.result()
+        finally:
+            for task in transient_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*transient_tasks, return_exceptions=True)

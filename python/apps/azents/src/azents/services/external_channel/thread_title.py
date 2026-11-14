@@ -1,5 +1,6 @@
 """One-shot best-effort Discord thread title projection."""
 
+import asyncio
 import dataclasses
 import logging
 from typing import Annotated
@@ -107,6 +108,8 @@ class ExternalChannelThreadTitleService:
                     channel_id=authority.channel_id,
                     name=normalized_title,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError, TimeoutError:
             return
         if result.status != "delivered":

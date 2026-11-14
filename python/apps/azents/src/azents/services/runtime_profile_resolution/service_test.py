@@ -790,6 +790,8 @@ async def test_runtime_resolution_lock_allows_session_context_fk_reference(
             session = ReadWriteSession(raw_session)
             try:
                 yield session
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 await session.write_session.rollback()
                 raise
@@ -847,6 +849,8 @@ async def test_runtime_reconciliation_lock_allows_session_context_fk_reference(
             session = ReadWriteSession(raw_session)
             try:
                 yield session
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 await session.write_session.rollback()
                 raise
@@ -904,6 +908,8 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
             session = ReadWriteSession(raw_session)
             try:
                 yield session
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 await session.write_session.rollback()
                 raise

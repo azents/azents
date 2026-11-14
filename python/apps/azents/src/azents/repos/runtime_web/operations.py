@@ -1,5 +1,6 @@
 """Completed database-only Runtime Web authorization and service operations."""
 
+import asyncio
 import datetime
 from collections.abc import Awaitable, Callable
 from typing import Annotated
@@ -116,6 +117,8 @@ class RuntimeWebOperationsRepository:
                     service_limit=_SERVICE_LIMIT,
                     active_agent_limit=_ACTIVE_AGENT_LIMIT,
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebRepositoryQuotaExceeded as error:
                 return Failure(
                     RuntimeWebOperationError(
@@ -162,6 +165,8 @@ class RuntimeWebOperationsRepository:
                     operation=_receipt_identity(operation),
                     service_limit=_SERVICE_LIMIT,
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebRepositoryQuotaExceeded as error:
                 return Failure(
                     RuntimeWebOperationError(
@@ -346,6 +351,8 @@ class RuntimeWebOperationsRepository:
                     expected_revision=expected_revision,
                     operation=_receipt_identity(operation),
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebRepositoryConflict:
                 return Failure(
                     RuntimeWebOperationError(
@@ -388,6 +395,8 @@ class RuntimeWebOperationsRepository:
                     service_id=service_id,
                     operation=_receipt_identity(operation),
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebRepositoryConflict:
                 return Failure(
                     RuntimeWebOperationError(
@@ -649,6 +658,8 @@ class RuntimeWebOperationsRepository:
         await require_active_agent(session, agent_id=agent_id)
         try:
             result = await mutate(session)
+        except asyncio.CancelledError:
+            raise
         except RuntimeWebRepositoryQuotaExceeded as error:
             return Failure(
                 RuntimeWebOperationError(

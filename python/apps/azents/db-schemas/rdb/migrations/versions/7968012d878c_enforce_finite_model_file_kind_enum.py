@@ -1,10 +1,4 @@
-"""enforce finite model file kind enum
-
-Revision ID: 7968012d878c
-Revises: 3ac042ea72bd
-Create Date: 2026-11-07 22:12:37.953959
-
-"""
+"""Enforce the finite model file kind enum."""
 
 from typing import Sequence
 
@@ -12,7 +6,6 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import ENUM
 
-# revision identifiers, used by Alembic.
 revision: str = "7968012d878c"
 down_revision: str | Sequence[str] | None = "3ac042ea72bd"
 branch_labels: str | Sequence[str] | None = None

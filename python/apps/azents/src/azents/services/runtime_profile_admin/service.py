@@ -1,5 +1,6 @@
 """System-Admin orchestration for completed infrastructure Profile operations."""
 
+import asyncio
 import dataclasses
 import logging
 from typing import Annotated
@@ -126,6 +127,8 @@ class RuntimeProfileAdminService:
                 profile_kind=profile_kind,
                 include_disabled=include_disabled,
             )
+        except asyncio.CancelledError:
+            raise
         except ProfileAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return [_projection(snapshot) for snapshot in snapshots]
@@ -142,6 +145,8 @@ class RuntimeProfileAdminService:
             snapshot = await self.repository.get_profile(
                 provider_logical_id, profile_id, profile_kind=profile_kind
             )
+        except asyncio.CancelledError:
+            raise
         except ProfileAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return _projection(snapshot)
@@ -170,6 +175,8 @@ class RuntimeProfileAdminService:
                 terminal_enabled=terminal_enabled,
                 actor_user_id=actor_user_id,
             )
+        except asyncio.CancelledError:
+            raise
         except ProfileAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return _projection(snapshot)
@@ -202,6 +209,8 @@ class RuntimeProfileAdminService:
                 terminal_enabled=terminal_enabled,
                 actor_user_id=actor_user_id,
             )
+        except asyncio.CancelledError:
+            raise
         except ProfileAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         if outcome.terminal_changed:
@@ -234,6 +243,8 @@ class RuntimeProfileAdminService:
                 offset=offset,
                 limit=limit,
             )
+        except asyncio.CancelledError:
+            raise
         except ProfileAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         logger.info(
@@ -271,6 +282,8 @@ class RuntimeProfileAdminService:
                 expected_version=expected_version,
                 actor_user_id=actor_user_id,
             )
+        except asyncio.CancelledError:
+            raise
         except ProfileAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         logger.info(
@@ -297,6 +310,8 @@ class RuntimeProfileAdminService:
             snapshot = await self.repository.get_workspace_profile_admin_detail(
                 workspace_handle, profile_id
             )
+        except asyncio.CancelledError:
+            raise
         except ProfileAdminOperationUnavailable as error:
             raise _unavailable(error) from error
         return AdminWorkspaceRuntimeProfileDetailProjection(
