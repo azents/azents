@@ -68,6 +68,8 @@ class StuckSessionRecovery:
                     timeout=self.interval.total_seconds(),
                 )
                 return
+            except asyncio.CancelledError:
+                raise
             except asyncio.TimeoutError:
                 continue
 

@@ -460,6 +460,8 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         snapshot = _build_gcp_tool_snapshot(items=merged, project_id=self._project_id)
         try:
             await self._save_tool_snapshot(snapshot)
+        except asyncio.CancelledError:
+            raise
         except FunctionToolError:
             return
         except CanonicalExecutionOwnerGenerationStaleError:

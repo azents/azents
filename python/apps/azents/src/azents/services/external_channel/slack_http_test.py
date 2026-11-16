@@ -1,5 +1,6 @@
 """Slack HTTP signature, parsing, and identity validation tests."""
 
+import asyncio
 import datetime
 import hashlib
 import hmac
@@ -112,6 +113,8 @@ class _MockSlackWebClient(AsyncWebClient):
                 data=request_data,
                 headers=request_headers,
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.RequestError as error:
             raise aiohttp.ClientError("Slack test transport failed.") from error
         try:

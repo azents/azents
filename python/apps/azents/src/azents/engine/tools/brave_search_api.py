@@ -175,6 +175,8 @@ class BraveSearchApi:
                             )
                         body = await _bounded_body(response, _MAX_RESPONSE_BYTES)
             return json.loads(body)
+        except asyncio.CancelledError:
+            raise
         except (TimeoutError, httpx.TimeoutException, httpx.TransportError) as exc:
             failure = "network"
             raise FunctionToolError("Brave Search is temporarily unreachable.") from exc
@@ -317,6 +319,8 @@ class BraveSearchApi:
                         if total_bytes > _MAX_TOTAL_THUMBNAIL_BYTES:
                             attachment = None
                             reason = "Thumbnail aggregate size limit exceeded."
+                    except asyncio.CancelledError:
+                        raise
                     except FunctionToolError, ModelCallError, httpx.HTTPError:
                         reason = "Thumbnail was unavailable or unsafe."
                 else:
@@ -372,6 +376,8 @@ class BraveSearchApi:
                 f"data:{media_type};base64,{base64.b64encode(body).decode('ascii')}",
                 output_index=rank,
             )
+        except asyncio.CancelledError:
+            raise
         except (TimeoutError, httpx.TimeoutException, httpx.TransportError) as exc:
             raise FunctionToolError("Thumbnail fetch failed.") from exc
 

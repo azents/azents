@@ -618,6 +618,8 @@ async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery
                         {"value": "500ms" if role == victim else "5s"},
                     )
                     yield scope
+            except asyncio.CancelledError:
+                raise
             except OperationalError as error:
                 if isinstance(error.orig, DeadlockDetected):
                     aborts.append(role)

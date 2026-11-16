@@ -493,6 +493,8 @@ def make_browser_tools(
                     ),
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeImageReadError as exc:
             raise FunctionToolError(
                 "Browser capture was saved, but model image materialization failed.",

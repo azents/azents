@@ -3,6 +3,7 @@
 # Protobuf generated modules expose dynamic message/RPC attributes.
 # ruff: noqa: E501
 
+import asyncio
 from datetime import UTC, datetime
 from typing import NoReturn
 
@@ -69,8 +70,8 @@ class RuntimeTransferCoordinatorGrpcServicer(
         :param coordinator: trusted state and dispatch coordinator
         :param credential_auth: exact metadata credential verifier
         """
-        self._coordinator = coordinator
-        self._credential_auth = credential_auth
+        self.coordinator = coordinator
+        self.credential_auth = credential_auth
 
     async def AdmitTransfer(
         self,
@@ -89,7 +90,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             _bounded(request.lease_id, "lease_id", 128)
         except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        record = await self._coordinator.admit(admission, lease_id=request.lease_id)
+        record = await self.coordinator.admit(admission, lease_id=request.lease_id)
         if record is None:
             await _abort(
                 context,
@@ -129,13 +130,15 @@ class RuntimeTransferCoordinatorGrpcServicer(
                 and not manifest.HasField("sha256")
             ):
                 raise ValueError("Download object manifest SHA-256 is required")
-            updated = await self._coordinator.mark_ready(
+            updated = await self.coordinator.mark_ready(
                 record,
                 expected_revision=request.expected_revision,
                 object_handle=request.object_handle.value,
                 size=manifest.size,
                 sha256=(manifest.sha256 if manifest.HasField("sha256") else None),
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
         return await _status_response_or_abort(context, updated)
@@ -158,11 +161,13 @@ class RuntimeTransferCoordinatorGrpcServicer(
         try:
             _positive_revision(request.expected_revision)
             _bounded(request.dispatch_id, "dispatch_id", 128)
-            dispatch = await self._coordinator.dispatch(
+            dispatch = await self.coordinator.dispatch(
                 record,
                 expected_revision=request.expected_revision,
                 dispatch_id=request.dispatch_id,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeTransferDispatchError as exc:
             await _abort(context, grpc.StatusCode.FAILED_PRECONDITION, str(exc))
         return pb.TransferStatusResponse(status=_status_message(dispatch.record))
@@ -189,7 +194,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             )
         except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        updated = await self._coordinator.cancel(
+        updated = await self.coordinator.cancel(
             record,
             expected_revision=request.expected_revision,
             reason=reason,
@@ -216,7 +221,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             _bounded(request.consumer_claim_id, "consumer_claim_id", 128)
         except ValueError as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        verified = await self._coordinator.state_store.get_verified_object(
+        verified = await self.coordinator.state_store.get_verified_object(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -253,7 +258,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         await _validate_consumer_request(context, request)
-        updated = await self._coordinator.state_store.claim_consumer(
+        updated = await self.coordinator.state_store.claim_consumer(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -275,7 +280,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         await _validate_consumer_request(context, request)
-        updated = await self._coordinator.state_store.renew_consumer_lease(
+        updated = await self.coordinator.state_store.renew_consumer_lease(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -299,7 +304,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         await _validate_consumer_request(context, request)
-        updated = await self._coordinator.state_store.acknowledge_consumer(
+        updated = await self.coordinator.state_store.acknowledge_consumer(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -323,7 +328,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         await _validate_consumer_request(context, request)
-        updated = await self._coordinator.state_store.abandon_consumer(
+        updated = await self.coordinator.state_store.abandon_consumer(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -353,7 +358,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
         if record.revision != request.expected_revision:
             updated = None
         else:
-            updated = await self._coordinator.settle_terminal(
+            updated = await self.coordinator.settle_terminal(
                 record,
                 outcome=outcome,
                 failure=failure,
@@ -382,7 +387,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             )
         except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        updated = await self._coordinator.state_store.record_cleanup(
+        updated = await self.coordinator.state_store.record_cleanup(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -424,7 +429,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             )
         except ValueError as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        updated = await self._coordinator.state_store.register_preparation_cleanup(
+        updated = await self.coordinator.state_store.register_preparation_cleanup(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             runtime_id=record.admission.runtime_id,
@@ -459,7 +464,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             )
         except ValueError as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        updated = await self._coordinator.state_store.promote_preparation_cleanup(
+        updated = await self.coordinator.state_store.promote_preparation_cleanup(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             runtime_id=record.admission.runtime_id,
@@ -488,7 +493,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             _positive_revision(request.expected_revision)
         except ValueError as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        updated = await self._coordinator.state_store.clear_preparation_cleanup(
+        updated = await self.coordinator.state_store.clear_preparation_cleanup(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -518,7 +523,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
         operation: str,
         request: CoordinatorRequestMessage,
     ) -> None:
-        await self._credential_auth.authenticate(
+        await self.credential_auth.authenticate(
             context,
             operation=operation,
             request=request,
@@ -534,7 +539,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             _validate_identity(requested)
         except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        record = await self._coordinator.state_store.get(requested.transfer_id)
+        record = await self.coordinator.state_store.get(requested.transfer_id)
         if record is None:
             await _abort(
                 context, grpc.StatusCode.NOT_FOUND, "Transfer attempt is unavailable"

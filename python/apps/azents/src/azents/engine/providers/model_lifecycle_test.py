@@ -257,6 +257,8 @@ class RecoverOnceModel(Model):
         )
         try:
             stream = await first.__aenter__()
+        except asyncio.CancelledError:
+            raise
         except ModelAPIError:
             async with self.stock.request_stream(
                 messages, model_settings, model_request_parameters, run_context

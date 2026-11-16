@@ -1,5 +1,6 @@
 """Historical Memory source preparation through the Agent Lightweight chain."""
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -169,6 +170,8 @@ class HistoricalMemoryPreparationService:
             attempted += 1
             try:
                 summary = await self._prepare_source(source)
+            except asyncio.CancelledError:
+                raise
             except ModelProviderFailure as exc:
                 if exc.category is ModelProviderFailureCategory.QUOTA_OR_BILLING:
                     advanced = await self.preparation_repository.advance_after_quota(
@@ -362,6 +365,8 @@ async def generate_historical_memory_with_model(
             call_context=call_context,
             transport_state=None,
         )
+    except asyncio.CancelledError:
+        raise
     except ModelProviderFailure:
         raise
     except ModelStreamTimeoutError:

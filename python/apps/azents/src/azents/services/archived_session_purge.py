@@ -7,6 +7,7 @@ import logging
 from typing import Annotated
 
 from azcommon.infra.s3.service import S3Service
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.broker.deps import get_broker
@@ -117,6 +118,14 @@ class ArchivedSessionPurgeService:
                 break
             claimed_count += 1
 
+            L = bind_extra(
+                logger,
+                {
+                    "purge_job_id": job.id,
+                    "root_session_id": job.root_session_id,
+                    "attempt_count": job.attempt_count,
+                },
+            )
             try:
                 if materialization_error is not None:
                     raise materialization_error
@@ -138,16 +147,10 @@ class ArchivedSessionPurgeService:
                 )
                 failed_count += 1
                 retry_scheduled_count += 1
-                logger.exception(
+                L.exception(
                     "Archived-session purge participant snapshot is invalid; "
                     "retry scheduled",
-                    extra={
-                        "purge_job_id": job.id,
-                        "root_session_id": job.root_session_id,
-                        "participant_key": exc.participant_key,
-                        "phase": exc.phase,
-                        "attempt_count": job.attempt_count,
-                    },
+                    extra={"participant_key": exc.participant_key, "phase": exc.phase},
                 )
                 continue
             except SessionLifecyclePurgeParticipantFailure as exc:
@@ -162,15 +165,9 @@ class ArchivedSessionPurgeService:
                 )
                 failed_count += 1
                 retry_scheduled_count += 1
-                logger.exception(
+                L.exception(
                     "Archived-session purge job failed; retry scheduled",
-                    extra={
-                        "purge_job_id": job.id,
-                        "root_session_id": job.root_session_id,
-                        "participant_key": exc.participant_key,
-                        "phase": exc.phase,
-                        "attempt_count": job.attempt_count,
-                    },
+                    extra={"participant_key": exc.participant_key, "phase": exc.phase},
                 )
                 continue
             except Exception as exc:
@@ -185,13 +182,9 @@ class ArchivedSessionPurgeService:
                 )
                 failed_count += 1
                 retry_scheduled_count += 1
-                logger.exception(
+                L.exception(
                     "Archived-session purge job failed; retry scheduled",
-                    extra={
-                        "purge_job_id": job.id,
-                        "root_session_id": job.root_session_id,
-                        "attempt_count": job.attempt_count,
-                    },
+                    extra={},
                 )
                 continue
 

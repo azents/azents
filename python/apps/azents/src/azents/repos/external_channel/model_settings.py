@@ -1,5 +1,6 @@
 """Repository-owned private shared-model settings transactions."""
 
+import asyncio
 import datetime
 import hashlib
 import json
@@ -847,6 +848,8 @@ class ExternalModelSettingsRepository:
                         sa.text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'")
                     )
                     return await operation(session)
+            except asyncio.CancelledError:
+                raise
             except DBAPIError as error:
                 if not self._retryable(error):
                     raise
@@ -1071,6 +1074,8 @@ class ExternalModelSettingsRepository:
                     user_id=link.user_id,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as error:
             if "session access" in str(error):
                 return self._rejected(

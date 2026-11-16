@@ -923,6 +923,8 @@ class RedisWorkspaceUploadStore:
                 pipeline.zrem(self.keys.active_index(), key)
             try:
                 await pipeline.execute()
+            except asyncio.CancelledError:
+                raise
             except WatchError as error:
                 raise RuntimeError(
                     "Workspace upload mutation lock changed before commit"
@@ -948,6 +950,9 @@ class RedisWorkspaceUploadStore:
         operation_failed = False
         try:
             yield token
+        except asyncio.CancelledError:
+            operation_failed = True
+            raise
         except BaseException:
             operation_failed = True
             raise

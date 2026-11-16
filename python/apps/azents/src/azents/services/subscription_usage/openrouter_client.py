@@ -1,5 +1,6 @@
 """OpenRouter API-key credit usage adapter."""
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -8,6 +9,8 @@ from collections.abc import Mapping
 from typing import Final, TypeGuard
 
 import httpx
+from openrouter import OpenRouter
+from openrouter.errors import OpenRouterError
 
 from azents.core.credentials import ApiKeySecrets
 
@@ -22,6 +25,8 @@ from .data import (
 )
 
 logger = logging.getLogger(__name__)
+_SDK_LOGGER = logging.Logger("azents.openrouter.usage.sdk", level=logging.CRITICAL + 1)
+_SDK_LOGGER.disabled = True
 
 OPENROUTER_USAGE_CONTRACT_VERSION: Final = "openrouter-current-key-v1"
 
@@ -56,52 +61,72 @@ class OpenRouterSubscriptionUsageClient:
         secrets: ApiKeySecrets,
     ) -> OpenRouterUsageAdapterOutcome:
         """Read one OpenRouter key-credit snapshot without exposing credentials."""
+        transport = _UsageTransport(self.http_client)
         try:
-            response = await self.http_client.get(
-                f"{self.api_base_url}/key",
-                headers={"Authorization": f"Bearer {secrets.api_key}"},
-            )
+            async with httpx.AsyncClient(transport=transport) as client:
+                async with OpenRouter(
+                    api_key=secrets.api_key,
+                    async_client=client,
+                    server_url=self.api_base_url,
+                    retry_config=None,
+                    debug_logger=_SDK_LOGGER,
+                ) as sdk:
+                    await sdk.api_keys.get_current_key_metadata_async(retries=None)
+            response = transport.response
+            assert response is not None
+            # Preserve strict source presence/types before SDK display coercion.
+            body: object = response.json()
+            status_code = response.status_code
+        except asyncio.CancelledError:
+            raise
         except httpx.TimeoutException, httpx.TransportError:
             return OpenRouterUsageUnavailable(
                 reason=SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE,
                 retryable=True,
                 http_status=None,
             )
+        except json.JSONDecodeError, UnicodeDecodeError:
+            return self._invalid_response(http_status=200)
+        except OpenRouterError as exc:
+            status_code = exc.status_code
+            if 200 <= status_code < 300:
+                # SDK display fields exceed the existing bounded usage contract.
+                try:
+                    body = exc.raw_response.json()
+                except json.JSONDecodeError, UnicodeDecodeError:
+                    return self._invalid_response(http_status=status_code)
+            else:
+                body = None
 
-        if response.status_code in {401, 403}:
+        if status_code in {401, 403}:
             return OpenRouterUsageUnavailable(
                 reason=SubscriptionUsageUnavailableReason.PERMISSION_DENIED,
                 retryable=False,
-                http_status=response.status_code,
+                http_status=status_code,
             )
-        if response.status_code == 429:
+        if status_code == 429:
             return OpenRouterUsageUnavailable(
                 reason=SubscriptionUsageUnavailableReason.RATE_LIMITED,
                 retryable=True,
-                http_status=response.status_code,
+                http_status=status_code,
             )
-        if response.status_code >= 500:
+        if status_code >= 500:
             return OpenRouterUsageUnavailable(
                 reason=SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE,
                 retryable=True,
-                http_status=response.status_code,
+                http_status=status_code,
             )
-        if not 200 <= response.status_code < 300:
+        if not 200 <= status_code < 300:
             return OpenRouterUsageUnavailable(
                 reason=SubscriptionUsageUnavailableReason.UNSUPPORTED_ACCOUNT,
                 retryable=False,
-                http_status=response.status_code,
+                http_status=status_code,
             )
-
-        try:
-            body = response.json()
-        except json.JSONDecodeError, UnicodeDecodeError:
-            return self._invalid_response(http_status=response.status_code)
 
         try:
             return _normalize_usage_payload(body)
         except _InvalidOpenRouterUsagePayload:
-            return self._invalid_response(http_status=response.status_code)
+            return self._invalid_response(http_status=status_code)
 
     def _invalid_response(self, *, http_status: int) -> OpenRouterUsageUnavailable:
         """Record safe contract-drift telemetry and return a typed outcome."""
@@ -248,3 +273,16 @@ def _optional_string(value: object, field: str) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise _InvalidOpenRouterUsagePayload(f"{field} must be a non-empty string")
     return value.strip()
+
+
+class _UsageTransport(httpx.AsyncBaseTransport):
+    """Retain injected timeout and raw wire evidence without owning the client."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self.client = client
+        self.response: httpx.Response | None = None
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        request.extensions["timeout"] = self.client.timeout.as_dict()
+        self.response = await self.client.send(request, stream=True)
+        return self.response

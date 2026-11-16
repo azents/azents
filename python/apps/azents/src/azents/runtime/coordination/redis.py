@@ -1,5 +1,6 @@
 """Redis-backed Agent Runtime coordination store."""
 
+import asyncio
 import base64
 import dataclasses
 import inspect
@@ -516,7 +517,7 @@ class RedisRuntimeCoordinationStore:
         stream_ttl_seconds: int = _DEFAULT_STREAM_TTL_SECONDS,
     ) -> None:
         """Initialize the Redis coordination store."""
-        self._redis = redis
+        self.redis = redis
         self._key_prefix = key_prefix
         self._stream_ttl_seconds = stream_ttl_seconds
 
@@ -714,7 +715,7 @@ class RedisRuntimeCoordinationStore:
     ) -> str:
         """Append a request envelope and return its cursor."""
         stream_key = self._stream_key("request", stream_id)
-        cursor = await self._redis.xadd(
+        cursor = await self.redis.xadd(
             stream_key,
             {_PAYLOAD_FIELD: _envelope_to_json(envelope)},
         )
@@ -736,7 +737,7 @@ class RedisRuntimeCoordinationStore:
         await self._ensure_group(stream_key, consumer_group)
         await self._refresh_stream_ttl(stream_key)
         if reclaim_idle_seconds is not None:
-            reclaimed = await self._redis.xautoclaim(
+            reclaimed = await self.redis.xautoclaim(
                 stream_key,
                 consumer_group,
                 consumer_id,
@@ -749,7 +750,7 @@ class RedisRuntimeCoordinationStore:
                 await self._refresh_stream_ttl(stream_key)
                 return record
         block = block_ms if block_ms > 0 else None
-        result = await self._redis.xreadgroup(
+        result = await self.redis.xreadgroup(
             consumer_group,
             consumer_id,
             {stream_key: ">"},
@@ -767,7 +768,7 @@ class RedisRuntimeCoordinationStore:
     ) -> None:
         """Acknowledge a claimed request."""
         stream_key = self._stream_key("request", stream_id)
-        await self._redis.xack(stream_key, consumer_group, cursor)
+        await self.redis.xack(stream_key, consumer_group, cursor)
         await self._refresh_stream_ttl(stream_key)
 
     async def append_reply(
@@ -777,7 +778,7 @@ class RedisRuntimeCoordinationStore:
     ) -> str:
         """Append a reply event and return its cursor."""
         stream_key = self._stream_key("reply", stream_id)
-        cursor = await self._redis.xadd(
+        cursor = await self.redis.xadd(
             stream_key,
             {_PAYLOAD_FIELD: _reply_event_to_json(event)},
         )
@@ -825,7 +826,7 @@ class RedisRuntimeCoordinationStore:
         if records or limit <= 0 or block_ms == 0:
             return records
         stream_key = self._stream_key("reply", stream_id)
-        await self._redis.xread(
+        await self.redis.xread(
             {stream_key: after_cursor or "0-0"},
             block=block_ms,
             count=1,
@@ -843,7 +844,7 @@ class RedisRuntimeCoordinationStore:
     ) -> str:
         """Append a request body chunk and return its cursor."""
         stream_key = self._stream_key("body", stream_id)
-        cursor = await self._redis.xadd(
+        cursor = await self.redis.xadd(
             stream_key,
             {_PAYLOAD_FIELD: _body_chunk_to_json(chunk)},
         )
@@ -880,7 +881,7 @@ class RedisRuntimeCoordinationStore:
         ttl_seconds: int | None,
     ) -> None:
         """Create or replace operation metadata."""
-        await self._redis.set(
+        await self.redis.set(
             self._operation_key(metadata.operation_id),
             _operation_to_json(metadata),
             ex=ttl_seconds,
@@ -893,7 +894,7 @@ class RedisRuntimeCoordinationStore:
         ttl_seconds: int | None,
     ) -> RuntimeOperationMetadata | None:
         """Create metadata once or return an exactly compatible existing record."""
-        raw = self._redis.eval(  # redis-py stub omits EVAL
+        raw = self.redis.eval(  # redis-py stub omits EVAL
             _ENSURE_OPERATION_METADATA_SCRIPT,
             1,
             self._operation_key(metadata.operation_id),
@@ -911,7 +912,7 @@ class RedisRuntimeCoordinationStore:
         operation_id: str,
     ) -> RuntimeOperationMetadata | None:
         """Get operation metadata."""
-        raw = await self._redis.get(self._operation_key(operation_id))
+        raw = await self.redis.get(self._operation_key(operation_id))
         if raw is None:
             return None
         return _operation_from_json(_decode_text(raw))
@@ -926,7 +927,7 @@ class RedisRuntimeCoordinationStore:
     ) -> RuntimeOperationMetadata | None:
         """Update operation status if the operation exists and is not final."""
         key = self._operation_key(operation_id)
-        raw = self._redis.eval(  # redis-py stub omits EVAL
+        raw = self.redis.eval(  # redis-py stub omits EVAL
             _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
             1,
             key,
@@ -950,7 +951,7 @@ class RedisRuntimeCoordinationStore:
     ) -> RuntimeOperationMetadata | None:
         """Atomically transition an operation from ACTIVE to RUNNING."""
         key = self._operation_key(operation_id)
-        raw = self._redis.eval(  # redis-py stub omits EVAL
+        raw = self.redis.eval(  # redis-py stub omits EVAL
             _TRY_START_OPERATION_SCRIPT,
             1,
             key,
@@ -978,7 +979,7 @@ class RedisRuntimeCoordinationStore:
         else:
             next_status = ""
             mark_final = ""
-        raw = self._redis.eval(  # redis-py stub omits EVAL
+        raw = self.redis.eval(  # redis-py stub omits EVAL
             _APPEND_REPLY_FOR_OPERATION_SCRIPT,
             2,
             operation_key,
@@ -1012,7 +1013,7 @@ class RedisRuntimeCoordinationStore:
             return None
         if metadata.status is RuntimeOperationStatus.FINAL:
             return metadata
-        raw = self._redis.eval(  # redis-py stub omits EVAL
+        raw = self.redis.eval(  # redis-py stub omits EVAL
             _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
             1,
             key,
@@ -1030,7 +1031,7 @@ class RedisRuntimeCoordinationStore:
 
     async def delete_operation(self, operation_id: str) -> None:
         """Delete operation metadata."""
-        await self._redis.delete(self._operation_key(operation_id))
+        await self.redis.delete(self._operation_key(operation_id))
 
     async def stage_connection_candidate(
         self,
@@ -1042,7 +1043,7 @@ class RedisRuntimeCoordinationStore:
         """Stage one invisible connection publication candidate once."""
         if not publication_token:
             raise ValueError("Connection publication token is required")
-        result = await self._redis.set(
+        result = await self.redis.set(
             self._connection_candidate_key(
                 record.kind,
                 record.subject_id,
@@ -1117,7 +1118,7 @@ class RedisRuntimeCoordinationStore:
     ) -> RuntimeConnectionRecord | None:
         """Get the current non-expired connection."""
         key = self._connection_key(kind, subject_id)
-        raw = await self._redis.get(key)
+        raw = await self.redis.get(key)
         if raw is None:
             return None
         record = _connection_from_json(_decode_text(raw))
@@ -1193,7 +1194,7 @@ class RedisRuntimeCoordinationStore:
         current_time: datetime,
     ) -> list[RuntimeSystemMetricsSample]:
         """Read at most one hour and 60 samples for one Runner generation."""
-        result = self._redis.lrange(
+        result = self.redis.lrange(
             self._system_metrics_key(runtime_id, generation),
             -_SYSTEM_METRICS_MAX_SAMPLES,
             -1,
@@ -1247,12 +1248,14 @@ class RedisRuntimeCoordinationStore:
 
     async def _ensure_group(self, stream_key: str, group_name: str) -> None:
         try:
-            await self._redis.xgroup_create(
+            await self.redis.xgroup_create(
                 stream_key,
                 group_name,
                 id="0",
                 mkstream=True,
             )
+        except asyncio.CancelledError:
+            raise
         except ResponseError as exc:
             if not str(exc).startswith(_BUSYGROUP_PREFIX):
                 raise
@@ -1267,7 +1270,7 @@ class RedisRuntimeCoordinationStore:
         if limit <= 0:
             return []
         min_cursor = "-" if after_cursor is None else f"({after_cursor}"
-        rows = await self._redis.xrange(  # redis-py stub omits XRANGE
+        rows = await self.redis.xrange(  # redis-py stub omits XRANGE
             key, min=min_cursor, max="+", count=limit
         )
         return [
@@ -1285,17 +1288,17 @@ class RedisRuntimeCoordinationStore:
         *values: str | float,
     ) -> object:
         """Run one Redis script across redis-py typing variants."""
-        result = self._redis.eval(script, key_count, *values)
+        result = self.redis.eval(script, key_count, *values)
         return await result if inspect.isawaitable(result) else result
 
     async def _positive_ttl(self, key: str) -> int | None:
-        ttl = int(await self._redis.ttl(key))
+        ttl = int(await self.redis.ttl(key))
         if ttl > 0:
             return ttl
         return None
 
     async def _refresh_stream_ttl(self, key: str) -> None:
-        await self._redis.expire(key, self._stream_ttl_seconds)
+        await self.redis.expire(key, self._stream_ttl_seconds)
 
     def _stream_key(self, stream_kind: str, stream_id: str) -> str:
         return f"{self._key_prefix}:stream:{stream_kind}:{stream_id}"

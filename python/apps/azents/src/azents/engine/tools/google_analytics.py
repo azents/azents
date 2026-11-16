@@ -328,12 +328,12 @@ class GoogleAnalyticsToolkit(Toolkit[GoogleAnalyticsToolkitConfig]):
         config: GoogleAnalyticsToolkitConfig,
         api_client: GoogleAnalyticsApiClient,
     ) -> None:
-        self._config = config
+        self.config = config
         self.api = api_client
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return seven GA4 native tools."""
-        default_pid = self._config.default_property_id
+        default_pid = self.config.default_property_id
 
         tools: list[FunctionTool] = [
             _make_run_report_tool(self.api, default_pid),
@@ -350,7 +350,7 @@ class GoogleAnalyticsToolkit(Toolkit[GoogleAnalyticsToolkitConfig]):
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return static Google Analytics prompt for the current run."""
         del context
-        default_pid = self._config.default_property_id
+        default_pid = self.config.default_property_id
         if not default_pid:
             return ""
         return f"Default GA4 Property: {default_pid}"

@@ -1,5 +1,6 @@
 """Discord callback configuration and fenced connection activation."""
 
+import asyncio
 import datetime
 import hashlib
 import logging
@@ -189,6 +190,8 @@ class DiscordConnectionActivationService:
             raise ValueError("Discord connection is not configured.")
         try:
             return await self._activate_configured_connection(connection_id, connection)
+        except asyncio.CancelledError:
+            raise
         except (DiscordAPIError, DiscordActivationConfigurationError) as error:
             return await self._record_failure(
                 connection_id=connection_id,
@@ -262,6 +265,8 @@ class DiscordConnectionActivationService:
                     application_id=metadata.application_id,
                     guild_id=target_guild_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except DiscordAPIError as error:
                 cleared = await self._clear_prepared_callback(
                     connection_id=connection_id,
@@ -295,6 +300,8 @@ class DiscordConnectionActivationService:
                 callback_selector_hash=selector_hash,
                 checked_at=datetime.datetime.now(datetime.UTC),
             )
+        except asyncio.CancelledError:
+            raise
         except AgentMutationReadOnly, AgentMutationTargetMissing:
             await self._clear_prepared_callback(
                 connection_id=connection_id,

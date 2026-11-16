@@ -317,6 +317,8 @@ class SessionGitWorktreeService:
                 source_project_path,
                 workspace_root=workspace_root,
             )
+        except asyncio.CancelledError:
+            raise
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             raise ValueError(str(error)) from None
         except ValueError as error:
@@ -381,6 +383,8 @@ class SessionGitWorktreeService:
                 worktree_project_path,
                 workspace_root=workspace_root,
             )
+        except asyncio.CancelledError:
+            raise
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             raise ValueError(str(error)) from None
         except ValueError as error:
@@ -432,6 +436,8 @@ class SessionGitWorktreeService:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as error:
             return Failure(GitRefPreviewRuntimeUnavailable(reason=str(error)))
         if self.runner_operations is None:
@@ -461,6 +467,8 @@ class SessionGitWorktreeService:
                 deadline_at=_git_operation_deadline(),
                 text_output_callback=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -736,6 +744,8 @@ class SessionGitWorktreeService:
                 session_id=session_id,
                 runtime_target=runtime,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError:
             await self._mark_session_working_folder_action_failed(
                 execution=execution,
@@ -787,6 +797,8 @@ class SessionGitWorktreeService:
                 deadline_at=_git_operation_deadline(),
                 admission_authority=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -1000,6 +1012,8 @@ class SessionGitWorktreeService:
                 agent_id,
                 start_if_stopped=False,
             )
+        except asyncio.CancelledError:
+            raise
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
@@ -1088,6 +1102,8 @@ class SessionGitWorktreeService:
                 owner_session_id=session_id,
                 deadline_at=_git_operation_deadline(),
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -1103,7 +1119,6 @@ class SessionGitWorktreeService:
             )
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
-                exc_info=True,
                 extra=_cleanup_log_summary(
                     stage="terminal",
                     reason_code="runtime_unavailable",
@@ -1134,7 +1149,6 @@ class SessionGitWorktreeService:
             )
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
-                exc_info=True,
                 extra=_cleanup_log_summary(
                     stage="terminal",
                     reason_code="runner_operation_failed",
@@ -1323,6 +1337,8 @@ class SessionGitWorktreeService:
                             deadline_at=_git_operation_deadline(),
                         )
                     )
+                except asyncio.CancelledError:
+                    raise
                 except (
                     RuntimeRunnerOperationUnavailable,
                     RuntimeRunnerOperationGenerationError,
@@ -1783,6 +1799,8 @@ class SessionGitWorktreeService:
                 action.worktree_path,
                 workspace_root=workspace_root,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeStorageError,
             SessionWorkingFolderBindingError,
@@ -1834,6 +1852,8 @@ class SessionGitWorktreeService:
             )
             allocation = intent.allocation
             project = intent.project
+        except asyncio.CancelledError:
+            raise
         except RemovalClaimConflict as error:
             allocation = error.allocation
             await self._fail_agent_remove_git_worktree(
@@ -2273,6 +2293,8 @@ class SessionGitWorktreeService:
                 action.source_project_path,
                 workspace_root=workspace_root,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeStorageError,
             SessionWorkingFolderBindingError,
@@ -2324,6 +2346,8 @@ class SessionGitWorktreeService:
                 deadline_at=_git_operation_deadline(),
                 text_output_callback=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -2379,6 +2403,8 @@ class SessionGitWorktreeService:
                 starting_ref=starting_ref,
                 requested_branch_name=action.branch_name,
             )
+        except asyncio.CancelledError:
+            raise
         except (SessionWorkingFolderBindingError, ValueError) as error:
             await self._fail_agent_create_git_worktree(
                 execution=execution,
@@ -2582,6 +2608,8 @@ class SessionGitWorktreeService:
                 session_id=session_id,
                 runtime_target=runtime,
             )
+        except asyncio.CancelledError:
+            raise
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             await self._mark_action_execution_failed(
                 execution=execution,
@@ -2630,6 +2658,8 @@ class SessionGitWorktreeService:
                 source_project_path=normalized_source_path,
                 starting_ref=action.starting_ref.strip(),
             )
+        except asyncio.CancelledError:
+            raise
         except SessionWorkingFolderBindingError as error:
             await self._mark_action_execution_failed(
                 execution=execution,
@@ -2834,6 +2864,8 @@ class SessionGitWorktreeService:
                         on_projection_updated=on_projection_updated,
                     ),
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeRunnerOperationFailedError as error:
                 collision = error.code or _collision_kind(str(error))
                 if collision in {"branch", "branch_exists"} and generated_branch:
@@ -3013,6 +3045,8 @@ class SessionGitWorktreeService:
                         on_projection_updated=on_projection_updated,
                     ),
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeRunnerOperationFailedError as exc:
                 collision = _collision_kind(str(exc))
                 if collision == "branch":
@@ -3932,6 +3966,8 @@ class SessionGitWorktreeService:
                 agent_id,
                 start_if_stopped=False,
             )
+        except asyncio.CancelledError:
+            raise
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             await self._mark_cleanup_targets_failed(
                 allocations=cleanup_targets,
@@ -4034,6 +4070,8 @@ class SessionGitWorktreeService:
                             start_if_stopped=False,
                         )
                     )
+                except asyncio.CancelledError:
+                    raise
                 except (
                     RuntimeStorageError,
                     SessionWorkingFolderBindingError,
@@ -4130,6 +4168,8 @@ class SessionGitWorktreeService:
                 session_id=allocation.session_id,
                 runtime_target=runtime,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError:
             await self._mark_cleanup_failed(
                 worktree_id=allocation.id,
@@ -4206,6 +4246,8 @@ class SessionGitWorktreeService:
                 ),
             )
             return cleaned
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationCanceledError,
             RuntimeRunnerOperationFailedError,
@@ -4274,6 +4316,8 @@ class SessionGitWorktreeService:
                 deadline_at=_git_operation_deadline(),
                 admission_authority=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationCanceledError,
             RuntimeRunnerOperationFailedError,

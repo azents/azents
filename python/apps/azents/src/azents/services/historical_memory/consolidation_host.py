@@ -239,6 +239,8 @@ class ConsolidationIterationHost:
     async def execute(self, call: ConsolidationAdmittedTool) -> ClientToolResultPayload:
         try:
             return await call.execute()
+        except asyncio.CancelledError:
+            raise
         except MemorySubmissionUncertainError:
             if call.call.name != "submit_memory":
                 raise

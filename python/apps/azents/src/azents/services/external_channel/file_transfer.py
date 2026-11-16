@@ -986,6 +986,8 @@ class ExternalChannelFileTransferService:
     ) -> bool:
         try:
             return await file_storage.exists(path, agent_id=agent_id)
+        except asyncio.CancelledError:
+            raise
         except PermissionError:
             raise ExternalChannelFileTransferError(
                 f"Runtime destination is not accessible: {path}."
@@ -1010,6 +1012,8 @@ class ExternalChannelFileTransferService:
     ) -> dict[str, object]:
         try:
             return await file_storage.stat(path, agent_id=agent_id)
+        except asyncio.CancelledError:
+            raise
         except FileNotFoundError:
             raise ExternalChannelFileTransferError(
                 f"Outbound Runtime file does not exist: {path}."
@@ -1295,6 +1299,8 @@ async def _read_outbound_range(
             offset=offset,
             max_bytes=max_bytes,
         )
+    except asyncio.CancelledError:
+        raise
     except ExternalChannelFileTransferError:
         raise
     except FileNotFoundError:

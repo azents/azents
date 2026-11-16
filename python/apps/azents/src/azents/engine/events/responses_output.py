@@ -36,6 +36,11 @@ from azents.engine.events.provider_tool_semantics import (
     normalize_responses_provider_tool_item,
 )
 from azents.engine.events.responses_continuation import sanitize_responses_native_item
+from azents.engine.events.responses_wire import (
+    CompletedResponse,
+    ResponseOutputItem,
+    ResponseStreamFrame,
+)
 from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolCallPayload,
@@ -158,17 +163,15 @@ class ResponsesOutputNormalizer:
         completed_output_items: Sequence[dict[str, object]],
     ) -> CompletedAdapterOutput[MessageT]:
         """Share semantic parsing while the host owns envelope construction."""
-        output = response.get("output")
-        output_items: Sequence[object] = (
-            output if isinstance(output, list) and output else completed_output_items
-        )
+        output = CompletedResponse.decode(response).output
+        output_items: Sequence[object] = output if output else completed_output_items
         events = self.normalize_output_items_for(make_message, output_items)
         pending_provider_files = [
-            pending_image_generation_output(raw_item, output_index=output_index)
+            pending_image_generation_output(item.raw, output_index=output_index)
             for output_index, output_item in enumerate(output_items)
-            if (raw_item := response_item_dict(output_item)).get("type")
+            if (item := ResponseOutputItem.decode(output_item)).type
             == "image_generation_call"
-            and _durable_provider_tool_status(raw_item)
+            and _durable_provider_tool_status(item.raw)
             not in {"failed", "cancelled", "interrupted"}
         ]
         return CompletedAdapterOutput[MessageT](
@@ -193,13 +196,13 @@ class ResponsesOutputNormalizer:
     ) -> list[MessageT]:
         events: list[MessageT] = []
         for fallback_output_index, output_item in enumerate(output_items):
-            raw_item = response_item_dict(output_item)
-            if has_response_output_item_type(raw_item):
-                output_index = _int_or_none(raw_item.get("output_index"))
+            item = ResponseOutputItem.decode(output_item)
+            if item.has_type:
+                output_index = item.output_index
                 events.append(
                     self.normalize_output_item_for(
                         make_message,
-                        raw_item,
+                        item.raw,
                         output_index=(
                             output_index
                             if output_index is not None
@@ -230,43 +233,38 @@ class ResponsesOutputNormalizer:
         *,
         output_index: int,
     ) -> MessageT:
-        item_type = str(output_item.get("type") or "")
+        item = ResponseOutputItem.decode(output_item)
+        item_type = item.type
         artifact = self._artifact(output_item, output_index=output_index)
 
         if item_type == "message":
             payload = AssistantMessagePayload(
-                content=_extract_message_text(output_item),
+                content=item.text,
                 attachments=[],
                 native_artifact=artifact,
             )
             return make_message(EventKind.ASSISTANT_MESSAGE, payload)
         if item_type == "reasoning":
             payload = ReasoningPayload(
-                text=_extract_reasoning_part_text(output_item, "content") or None,
-                summary=_extract_reasoning_part_text(output_item, "summary") or None,
+                text=item.reasoning_text,
+                summary=item.reasoning_summary,
                 native_artifact=artifact,
             )
             return make_message(EventKind.REASONING, payload)
         if item_type == "function_call":
             payload = ClientToolCallPayload(
-                call_id=str(output_item.get("call_id") or output_item.get("id") or ""),
-                name=str(output_item.get("name") or ""),
-                arguments=str(output_item.get("arguments") or ""),
+                call_id=item.call_id,
+                name=item.name,
+                arguments=item.arguments,
                 wire_dialect="json_function",
                 native_artifact=artifact,
             )
             return make_message(EventKind.CLIENT_TOOL_CALL, payload)
         if item_type == "custom_tool_call":
-            call_id = output_item.get("call_id") or output_item.get("id")
-            name = output_item.get("name")
-            input_value = output_item.get("input")
-            if not (
-                isinstance(call_id, str)
-                and call_id
-                and isinstance(name, str)
-                and name
-                and isinstance(input_value, str)
-            ):
+            call_id = item.custom_call_id
+            name = item.custom_name
+            input_value = item.custom_input
+            if call_id is None or name is None or input_value is None:
                 return make_message(
                     EventKind.UNKNOWN_ADAPTER_OUTPUT,
                     UnknownAdapterOutputPayload(
@@ -284,7 +282,7 @@ class ResponsesOutputNormalizer:
             return make_message(EventKind.CLIENT_TOOL_CALL, payload)
         provider_tool = normalize_responses_provider_tool_item(output_item)
         if provider_tool is not None:
-            call_id = str(output_item.get("call_id") or output_item.get("id") or "")
+            call_id = item.call_id
             if not call_id:
                 return make_message(
                     EventKind.UNKNOWN_ADAPTER_OUTPUT,
@@ -378,8 +376,8 @@ def responses_need_follow_up(
     events: Sequence[ModelTranscriptMessage],
 ) -> bool:
     """Resolve dialect continuation before the standard client-tool fallback."""
-    end_turn = response.get("end_turn")
-    if isinstance(end_turn, bool):
+    end_turn = CompletedResponse.decode(response).end_turn
+    if end_turn is not None:
         return not end_turn
     return any(isinstance(event.payload, ClientToolCallPayload) for event in events)
 
@@ -398,7 +396,7 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
         self.make_message = make_message
         self._tool_refs: dict[int, tuple[str, str]] = {}
         self._completed_output_items: list[dict[str, object]] = []
-        self._completed_response: dict[str, object] | None = None
+        self._completed_response: CompletedResponse | None = None
         self._completed_response_seen = False
         self._terminal_error: ModelProviderFailure | None = None
         self._usage: TokenUsagePayload | None = None
@@ -414,6 +412,7 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
         """Update stream state and return projections for one native event."""
         event_type = native_event.type
         item = native_event.item
+        frame = ResponseStreamFrame.decode(item)
         projections: list[StreamProjection] = []
         observation = _responses_provider_tool_observation(event_type, item)
         if observation is not None:
@@ -422,15 +421,15 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
                 projections.append(activity)
 
         if event_type in {"OutputTextDeltaEvent", "ResponseTextDeltaEvent"}:
-            delta = str(item.get("delta", ""))
+            delta = frame.delta
             self._partial_text.append(delta)
             projections.append(ContentDeltaProjection(delta=delta))
         elif event_type in {"OutputItemAddedEvent", "ResponseOutputItemAddedEvent"}:
-            output_index = _int_or_none(item.get("output_index"))
-            raw_item = response_item_dict(item.get("item"))
-            if raw_item.get("type") == "function_call" and output_index is not None:
-                call_id = str(raw_item.get("call_id") or raw_item.get("id") or "")
-                name = str(raw_item.get("name") or "")
+            output_index = frame.output_index
+            output_item = frame.output_item
+            if output_item.type == "function_call" and output_index is not None:
+                call_id = output_item.call_id
+                name = output_item.name
                 self._tool_refs[output_index] = (call_id, name)
                 projections.append(
                     FunctionCallDeltaProjection(
@@ -441,16 +440,16 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
                     )
                 )
         elif event_type in {"OutputItemDoneEvent", "ResponseOutputItemDoneEvent"}:
-            raw_item = response_item_dict(item.get("item"))
-            if has_response_output_item_type(raw_item):
-                output_index = _int_or_none(item.get("output_index"))
+            output_item = frame.output_item
+            if output_item.has_type:
+                output_index = frame.output_index
                 self._completed_output_items.append(
                     {
-                        **raw_item,
+                        **output_item.raw,
                         **(
                             {"output_index": output_index}
                             if output_index is not None
-                            and raw_item.get("type") == "reasoning"
+                            and output_item.type == "reasoning"
                             else {}
                         ),
                     }
@@ -459,7 +458,7 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
             "FunctionCallArgumentsDeltaEvent",
             "ResponseFunctionCallArgumentsDeltaEvent",
         }:
-            output_index = _int_or_none(item.get("output_index"))
+            output_index = frame.output_index
             ref_index = output_index if output_index is not None else -1
             call_id, name = self._tool_refs.get(ref_index, (None, None))
             projections.append(
@@ -467,25 +466,24 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
                     index=ref_index,
                     call_id=call_id,
                     name=name,
-                    delta=str(item.get("delta", "")),
+                    delta=frame.delta,
                 )
             )
         elif event_type in {
             "ReasoningSummaryTextDeltaEvent",
             "ResponseReasoningSummaryTextDeltaEvent",
         }:
-            item_id = item.get("item_id")
             projections.append(
                 ReasoningDeltaProjection(
-                    delta=str(item.get("delta", "")),
-                    item_id=item_id if isinstance(item_id, str) else None,
-                    output_index=_int_or_none(item.get("output_index")),
-                    summary_index=_int_or_none(item.get("summary_index")),
+                    delta=frame.delta,
+                    item_id=frame.item_id,
+                    output_index=frame.output_index,
+                    summary_index=frame.summary_index,
                 )
             )
         elif event_type == "ResponseIncompleteEvent":
             self._terminal_error = _incomplete_response_model_error(
-                response_item_dict(item.get("response")),
+                frame.response.raw,
                 operation=self.normalizer.operation,
                 provider=self.normalizer.provider,
                 model=self.normalizer.model,
@@ -493,7 +491,7 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
             )
         elif event_type == "ResponseFailedEvent":
             self._terminal_error = _failed_response_model_error(
-                response_item_dict(item.get("response")),
+                frame.response.raw,
                 operation=self.normalizer.operation,
                 provider=self.normalizer.provider,
                 model=self.normalizer.model,
@@ -509,13 +507,13 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
             )
         elif event_type == "ResponseCompletedEvent":
             self._completed_response_seen = True
-            self._completed_response = response_item_dict(item.get("response"))
-            raw_usage = response_item_dict(self._completed_response.get("usage"))
+            self._completed_response = frame.response
+            raw_usage = frame.response.usage
             if _response_usage_has_totals(raw_usage):
                 self._raw_usage = raw_usage
                 billing_response = dict(self._usage_billing_response or {})
-                output = self._completed_response.get("output")
-                if isinstance(output, list) and output:
+                output = frame.response.output
+                if output:
                     billing_response["output"] = [
                         {"type": item_type}
                         for raw_item in output
@@ -524,12 +522,12 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
                             str,
                         )
                     ]
-                hidden_params = self._completed_response.get("_hidden_params")
+                hidden_params = frame.response.hidden_params
                 if hidden_params is not None:
                     billing_response["_hidden_params"] = hidden_params
                 self._usage_billing_response = billing_response
-            service_tier = self._completed_response.get("service_tier")
-            if isinstance(service_tier, str) and service_tier != "auto":
+            service_tier = frame.response.service_tier
+            if service_tier is not None and service_tier != "auto":
                 if self._usage_billing_response is None:
                     self._usage_billing_response = {}
                 self._usage_billing_response["service_tier"] = service_tier
@@ -563,7 +561,7 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
         if self._completed_response is not None:
             self._usage = _normalize_response_usage(
                 {
-                    **(self._usage_billing_response or self._completed_response),
+                    **(self._usage_billing_response or self._completed_response.raw),
                     "usage": self._raw_usage,
                 },
                 provider=self.normalizer.provider,
@@ -574,12 +572,12 @@ class _ResponsesOutputStream[MessageT: Event | TransientModelMessage]:
             )
         completed = self.normalizer.normalize_completed_output_for(
             self.make_message,
-            self._completed_response or {},
+            self._completed_response.raw if self._completed_response else {},
             self._completed_output_items,
         )
         return NormalizedAdapterOutput[MessageT](
             needs_follow_up=responses_need_follow_up(
-                self._completed_response or {},
+                self._completed_response.raw if self._completed_response else {},
                 completed.events,
             ),
             events=completed.events,
@@ -1107,33 +1105,6 @@ def _first_int(*values: int | None) -> int | None:
         if value is not None:
             return value
     return None
-
-
-def _extract_message_text(item: dict[str, object]) -> str:
-    """Extract text from Responses message item."""
-    content = item.get("content")
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for part in content:
-        partresponse_item_dict = response_item_dict(part)
-        text = partresponse_item_dict.get("text")
-        if isinstance(text, str) and text:
-            parts.append(text)
-    return "\n".join(parts)
-
-
-def _extract_reasoning_part_text(item: dict[str, object], key: str) -> str:
-    """Extract text from specified part list of Responses reasoning item."""
-    raw_parts = item.get(key)
-    if not isinstance(raw_parts, list):
-        return ""
-    parts: list[str] = []
-    for part in raw_parts:
-        text = response_item_dict(part).get("text")
-        if isinstance(text, str) and text:
-            parts.append(text)
-    return "\n".join(parts)
 
 
 def response_item_dict(value: object) -> dict[str, object]:

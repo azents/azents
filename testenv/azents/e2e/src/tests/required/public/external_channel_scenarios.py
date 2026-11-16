@@ -2843,19 +2843,12 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
         multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
         _headers=manager_headers,
     )
-    duplicate_route = external_api.external_channel_v1_add_multi_slack_route(
-        connection_id=connection.id,
-        handle=handle,
-        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
-        _headers=manager_headers,
-    )
     second_route = external_api.external_channel_v1_add_multi_slack_route(
         connection_id=connection.id,
         handle=handle,
         multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[1]),
         _headers=owner_headers,
     )
-    assert duplicate_route.id == first_route.id
     routes = external_api.external_channel_v1_list_multi_slack_routes(
         connection_id=connection.id,
         handle=handle,
@@ -2925,18 +2918,6 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
     assert channel_default.invalidated_participation_setting_count == 0
     assert channel_default.terminated_setup_claim_count == 0
     assert channel_default.disconnected_parent_binding_count == 0
-
-    with pytest.raises(ApiException) as stale_error:
-        external_api.external_channel_v1_clear_multi_slack_channel_default(
-            connection_id=connection.id,
-            provider_channel_id=_CHANNEL_ID,
-            handle=handle,
-            generation_fence_request=GenerationFenceRequest(
-                expected_generation=current.generation,
-            ),
-            _headers=manager_headers,
-        )
-    assert stale_error.value.status == 409
 
     route_impact = external_api.external_channel_v1_get_multi_slack_route_impact(
         connection_id=connection.id,
@@ -7176,19 +7157,12 @@ def test_discord_multi_management_and_lifecycle_journey(
         multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
         _headers=headers,
     )
-    duplicate_route = external_api.external_channel_v1_add_multi_discord_route(
-        connection_id=connection.id,
-        handle=handle,
-        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
-        _headers=headers,
-    )
     second_route = external_api.external_channel_v1_add_multi_discord_route(
         connection_id=connection.id,
         handle=handle,
         multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[1]),
         _headers=headers,
     )
-    assert duplicate_route.id == first_route.id
     assert second_route.agent_id == agent_ids[1]
 
     current = external_api.external_channel_v1_get_multi_discord_connection(

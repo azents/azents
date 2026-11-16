@@ -243,6 +243,8 @@ class RuntimeRunnerControlGrpcServicer(
                 authentication=authentication,
                 registered_at=datetime.now(UTC),
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
             raise AssertionError("unreachable") from exc

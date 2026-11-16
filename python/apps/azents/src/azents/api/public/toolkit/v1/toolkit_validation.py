@@ -1,5 +1,6 @@
 """Credential-safe request validation for Toolkit management and OAuth routes."""
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -19,6 +20,8 @@ class ToolkitSensitiveInputRoute(APIRoute):
         async def safe_handler(request: Request) -> Response:
             try:
                 return await handler(request)
+            except asyncio.CancelledError:
+                raise
             except RequestValidationError:
                 raise HTTPException(
                     status_code=422,

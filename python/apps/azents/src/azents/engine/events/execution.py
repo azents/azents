@@ -7,6 +7,8 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from azcommon.logging import bind_extra
+
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.iteration import (
@@ -449,13 +451,14 @@ class AgentRunExecution[
     ) -> Event:
         """Append one terminal result and remove only its active ownership entry."""
         prepared: PreparedClientToolOutputProtocol | None = None
+        L = bind_extra(logger, {"call_id": call.call_id, "tool_name": call.name})
         if (
             result.pending_generated_files
             and self.client_tool_output_materializer is None
         ):
-            logger.error(
+            L.error(
                 "Client generated-file materializer is unavailable",
-                extra={"call_id": call.call_id, "tool_name": call.name},
+                extra={},
             )
             result = ClientToolResultPayload(
                 call_id=call.call_id,
@@ -482,6 +485,8 @@ class AgentRunExecution[
                         result=prepared.result,
                         metadata_admission=prepared.metadata_admission,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except ProviderOutputOperationError as exc:
                     raise ModelCallError(str(exc)) from None
                 prepared.admitted = True
@@ -496,13 +501,9 @@ class AgentRunExecution[
             except Exception as exc:
                 if prepared is not None:
                     await prepared.cleanup()
-                logger.exception(
+                L.exception(
                     "Client generated-file admission failed",
-                    extra={
-                        "call_id": call.call_id,
-                        "tool_name": call.name,
-                        "error_type": exc.__class__.__name__,
-                    },
+                    extra={"error_type": exc.__class__.__name__},
                 )
                 failed = ClientToolResultPayload(
                     call_id=call.call_id,
@@ -845,6 +846,8 @@ class ForegroundIterationHost[
                 )
                 normalized = stream.complete()
                 break
+            except asyncio.CancelledError:
+                raise
             except _ModelStreamUserInterrupted as exc:
                 await self.finish_turn(prepared, "cancelled")
                 status = await execution._complete_user_interrupted_model_stream(
@@ -942,6 +945,8 @@ class ForegroundIterationHost[
                         ),
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except ProviderOutputOperationError as exc:
                 raise ModelCallError(str(exc)) from None
             appended = admitted.events
@@ -1009,6 +1014,8 @@ class ForegroundIterationHost[
                 admission.tool_calls,
                 tool_executor=prepared.call.tool_executor,
             )
+        except asyncio.CancelledError:
+            raise
         except _ToolExecutionUserInterrupted:
             marker = await execution.terminal.interrupt_after_tool_stop_if_running(
                 session_id=request.session_id, run_id=request.run_id
@@ -1104,28 +1111,27 @@ def _log_model_token_usage(
     usage: TokenUsagePayload | None,
 ) -> None:
     """Log per-turn token usage, including prompt cache counters."""
+    L = bind_extra(
+        logger,
+        {
+            "session_id": request.session_id,
+            "run_id": request.run_id,
+            "run_index": request.run_index,
+            "model": request.model,
+        },
+    )
     if usage is None:
-        logger.info(
+        L.info(
             "Model token usage",
-            extra={
-                "session_id": request.session_id,
-                "run_id": request.run_id,
-                "run_index": request.run_index,
-                "model": request.model,
-                "usage_present": False,
-            },
+            extra={"usage_present": False},
         )
         return
     cached_tokens = usage.cached_tokens or 0
     prompt_tokens = usage.prompt_tokens
     cached_ratio = cached_tokens / prompt_tokens if prompt_tokens > 0 else None
-    logger.info(
+    L.info(
         "Model token usage",
         extra={
-            "session_id": request.session_id,
-            "run_id": request.run_id,
-            "run_index": request.run_index,
-            "model": request.model,
             "usage_present": True,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": usage.completion_tokens,
@@ -1134,9 +1140,9 @@ def _log_model_token_usage(
             "cache_creation_tokens": usage.cache_creation_tokens,
             "reasoning_tokens": usage.reasoning_tokens,
             "cost_usd": usage.cost_usd,
-            "cached_token_ratio": (
-                round(cached_ratio, 4) if cached_ratio is not None else None
-            ),
+            "cached_token_ratio": round(cached_ratio, 4)
+            if cached_ratio is not None
+            else None,
         },
     )
 

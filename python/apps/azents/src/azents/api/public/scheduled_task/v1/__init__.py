@@ -1,5 +1,6 @@
 """Scheduled Task v1 Public API."""
 
+import asyncio
 from textwrap import dedent
 from typing import Annotated, NoReturn
 
@@ -44,6 +45,8 @@ async def list_scheduled_tasks(
             user_id=member.user_id,
             session_id=session_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ScheduledTaskManagementUnavailable as error:
         _raise_unavailable(error)
     return ScheduledTaskListResponse(
@@ -80,6 +83,8 @@ async def create_scheduled_task(
             timezone=request_body.timezone,
             channel_id=request_body.channel_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ScheduledTaskManagementUnavailable as error:
         _raise_unavailable(error)
     return ScheduledTaskResponse.convert_from(task)
@@ -104,6 +109,8 @@ async def get_scheduled_task(
             user_id=member.user_id,
             task_id=task_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ScheduledTaskManagementUnavailable as error:
         _raise_unavailable(error)
     return ScheduledTaskResponse.convert_from(task)
@@ -136,6 +143,8 @@ async def replace_scheduled_task(
             timezone=request_body.timezone,
             channel_id=request_body.channel_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ScheduledTaskManagementUnavailable as error:
         _raise_unavailable(error)
     return ScheduledTaskResponse.convert_from(task)
@@ -163,6 +172,8 @@ async def delete_scheduled_task(
             user_id=member.user_id,
             task_id=task_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ScheduledTaskManagementUnavailable as error:
         _raise_unavailable(error)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -189,6 +200,8 @@ async def get_scheduled_task_cycle(
             user_id=member.user_id,
             task_id=task_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ScheduledTaskManagementUnavailable as error:
         _raise_unavailable(error)
     return ScheduledTaskCurrentCycleEnvelope(

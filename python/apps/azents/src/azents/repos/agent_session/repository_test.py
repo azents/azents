@@ -511,6 +511,8 @@ class TestAgentSessionRepository:
                             title=None,
                         ),
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     await create_session.write_session.rollback()
                     raise

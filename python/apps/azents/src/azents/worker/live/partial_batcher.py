@@ -74,7 +74,7 @@ class LivePartialBatcher:
         max_delay_seconds: float = LIVE_PARTIAL_BATCH_MAX_DELAY_SECONDS,
         max_chars: int = LIVE_PARTIAL_BATCH_MAX_CHARS,
     ) -> None:
-        self._flush = flush
+        self.flush = flush
         self._max_delay_seconds = max_delay_seconds
         self._max_chars = max_chars
         self._buffers: dict[
@@ -207,7 +207,7 @@ class LivePartialBatcher:
         if not session_buffers:
             return
         for buffer in session_buffers.values():
-            await self._flush(buffer.to_flush(session_id))
+            await self.flush(buffer.to_flush(session_id))
 
     def _cancel_timer(self, session_id: str) -> None:
         """Cancel a pending timer without cancelling its current task."""

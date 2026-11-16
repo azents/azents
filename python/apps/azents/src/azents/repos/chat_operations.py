@@ -1,5 +1,6 @@
 """Completed Chat database reads and coherent atomic mutations."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated, assert_never
@@ -1470,6 +1471,8 @@ class ChatOperationsRepository:
                 status=input.status,
                 updated_at=updated_at,
             )
+        except asyncio.CancelledError:
+            raise
         except GoalInvalidStatusTransitionError:
             return Failure(InvalidGoalStatusTransition())
         snapshot = GoalStateSnapshot.from_state(status_update.updated)

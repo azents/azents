@@ -104,6 +104,11 @@ surface later.
 Terminal shell-exit waits own their shielded waiter through success, timeout,
 child failure and owner cancellation, joining it before returning or propagating
 the original outcome. This does not change POSIX session signals or grace periods.
+If allocation finishes after admission authority is lost, the registry retains
+the uninstalled process's cleanup task and observes its failure without exposing
+command, environment or exception-body content. Admission cancellation and stale
+authority still return promptly with their original outcomes; Runner shutdown joins
+these cleanup tails as well as installed Terminals.
 
 Terminal coordination is separate from ordinary Runtime operation coordination while
 sharing the Redis-or-memory deployment choice. It stores bounded volatile attachment,

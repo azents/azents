@@ -3,13 +3,12 @@
 import asyncio
 import dataclasses
 import logging
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from fastapi import Depends
 
-from azents.broker.broadcast import BaseWebSocketBroadcast
 from azents.broker.serialization import serialize_event
-from azents.broker.types import PublishedEvent, SessionBroker
+from azents.broker.types import PublishedEvent
 from azents.engine.events.engine_events import (
     AccountLinkNudgeEvent,
     AuthorizationRequestEvent,
@@ -50,13 +49,48 @@ PUBLIC_CHAT_CONTROL_EVENT_TYPES = (
 )
 
 
+class SessionTTLRenewer(Protocol):
+    """Only session liveness renewal belongs to the publisher's broker boundary."""
+
+    async def renew_session_ttl(self, session_id: str) -> None: ...
+
+
+class HistoryFramePublisher(Protocol):
+    """Publish canonical history without requiring subscription operations."""
+
+    async def publish(self, session_id: str, event: dict[str, object], /) -> None: ...
+
+
+class EventProjectionPublisher(Protocol):
+    """The publisher coordinates projections, not projector storage internals."""
+
+    async def flush_session(
+        self, session_id: str, *, owner_generation: int
+    ) -> None: ...
+
+    async def update(
+        self, session_id: str, event: PublishedEvent, /, *, owner_generation: int
+    ) -> None: ...
+
+    async def publish_control_event(
+        self,
+        session_id: str,
+        event: dict[str, object],
+        /,
+        *,
+        owner_generation: int,
+    ) -> None: ...
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkerEventPublisher:
     """Publish Worker runtime event to live projection and WebSocket."""
 
-    broker: Annotated[SessionBroker, Depends(get_worker_broker)]
-    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_broadcast)]
-    live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
+    broker: Annotated[SessionTTLRenewer, Depends(get_worker_broker)]
+    broadcast: Annotated[HistoryFramePublisher, Depends(get_broadcast)]
+    live_event_projector: Annotated[
+        EventProjectionPublisher, Depends(LiveEventProjector)
+    ]
 
     async def dispatch_event(
         self,

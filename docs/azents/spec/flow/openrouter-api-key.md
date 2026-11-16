@@ -57,12 +57,22 @@ privacy contract. The usage-client call runs only after that read closes. Usage
 remains read-through; financial-field authorization, provider transport and
 provider/secrets redaction retain their existing contracts.
 
-For an enabled OpenRouter integration, the shared subscription-usage route reads the current key at the fixed provider endpoint:
+For an enabled OpenRouter integration, the shared subscription-usage route uses the
+official SDK public `api_keys.get_current_key_metadata_async` operation to read the
+current key at the fixed provider endpoint:
 
 ```text
 GET https://openrouter.ai/api/v1/key
 Authorization: Bearer <integration API key>
 ```
+
+The SDK owns request construction; the injected HTTP client's timeout remains
+authoritative and SDK retries are disabled. Application normalization validates
+the original response's consumed field types and presence, before SDK display
+coercion can relax them. Sparse compatible responses rejected only for unrelated
+SDK display fields still enter that same bounded decoder. One read dispatches one
+provider request, cancellation propagates, and the caller retains HTTP-client
+ownership. SDK debug output is disabled.
 
 A bounded key is normalized into one primary credit-limit window. Its consumed percentage is calculated from `limit` and `limit_remaining`; known daily and weekly reset policies retain their approximate window length, while the provider does not supply an exact reset timestamp. Workspace members with integration-write permission can expand financial details for the exact limit, remaining credits, cumulative usage, daily usage, weekly usage, monthly usage, reset policy, and whether BYOK usage counts toward the limit. Read-only members and composer surfaces receive only operational percentage data.
 

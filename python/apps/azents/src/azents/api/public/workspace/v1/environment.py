@@ -1,5 +1,6 @@
 """Workspace common environment and per-Agent selection HTTP endpoints."""
 
+import asyncio
 from typing import Annotated, TypeVar, assert_never
 
 from azcommon.result import Failure, Result, Success
@@ -61,6 +62,8 @@ async def replace_workspace_environment(
                 member.workspace_id, edits=request_body.entries, role=member.role
             )
         )
+    except asyncio.CancelledError:
+        raise
     except InvalidRuntimeEnvironment as error:
         raise HTTPException(422, str(error)) from None
 
@@ -103,5 +106,7 @@ async def replace_agent_environment_selection(
                 selected_ids=request_body.selected_ids,
             )
         )
+    except asyncio.CancelledError:
+        raise
     except InvalidRuntimeEnvironment as error:
         raise HTTPException(422, str(error)) from None

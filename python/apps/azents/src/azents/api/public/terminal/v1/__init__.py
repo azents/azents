@@ -171,6 +171,8 @@ async def terminal_websocket(
         return
     try:
         admission = await service.consume_ticket(ticket=ticket, resource=resource)
+    except asyncio.CancelledError:
+        raise
     except RuntimeTerminalAdmissionError:
         await _close_unaccepted(
             websocket,
@@ -200,6 +202,8 @@ async def terminal_websocket(
                 last_output_sequence=attach.last_output_sequence,
             ),
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeTerminalAdmissionError as error:
         await websocket.close(
             code=_close_code(error.reason_code),
@@ -366,6 +370,8 @@ async def _run_terminal_socket(
         )
         for task in done:
             task.result()
+    except asyncio.CancelledError:
+        raise
     except WebSocketDisconnect:
         pass
     except _TerminalSocketComplete:

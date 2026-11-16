@@ -1,5 +1,6 @@
 """Completed archive purge database groups and restrictive finalization."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -128,6 +129,8 @@ class ArchivedSessionPurgeOperations:
                         purge_job_id=job.id,
                         lease_owner=lease_owner,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except (RuntimeError, ValueError) as error:
                     materialization_error = error
         return PurgeClaim(job=job, materialization_error=materialization_error)

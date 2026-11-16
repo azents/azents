@@ -1,5 +1,7 @@
 """Workspace repository."""
 
+import asyncio
+
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
@@ -42,6 +44,8 @@ class WorkspaceRepository:
             session.write_session.add(rdb_workspace)
             await session.write_session.flush()
             return Success(self._build_workspace(rdb_workspace))
+        except asyncio.CancelledError:
+            raise
         except IntegrityError as e:
             await session.write_session.rollback()
             if is_constrained_by(e, RDBWorkspace.UQ_HANDLE):
@@ -180,6 +184,8 @@ class WorkspaceRepository:
                 return Failure(NotFound(handle=handle))
 
             return Success(self._build_workspace(rdb_workspace))
+        except asyncio.CancelledError:
+            raise
         except IntegrityError as e:
             await session.write_session.rollback()
             if is_constrained_by(e, RDBWorkspace.UQ_HANDLE):

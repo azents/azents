@@ -1,12 +1,8 @@
 """Worker event publisher projection-boundary tests."""
 
-from typing import Any, cast
-
 import pytest
 
-from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.serialization import serialize_event
-from azents.broker.types import SessionBroker
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_events import (
     AccountLinkNudgeEvent,
@@ -20,7 +16,6 @@ from azents.engine.events.engine_events import (
 )
 from azents.testing.types import is_string_object_dict
 from azents.worker.events.publisher import PublicChatControlEvent, WorkerEventPublisher
-from azents.worker.live.event_projector import LiveEventProjector
 
 
 class _FailingBroadcast:
@@ -74,9 +69,9 @@ async def test_projection_transport_failures_do_not_interrupt_dispatch() -> None
     """WebSocket and TTL failures do not terminalize a valid runtime event."""
     projector = _Projector()
     publisher = WorkerEventPublisher(
-        broker=cast(SessionBroker, cast(Any, _FailingTtlBroker())),
-        broadcast=cast(WebSocketBroadcast, _FailingBroadcast()),
-        live_event_projector=cast(LiveEventProjector, projector),
+        broker=_FailingTtlBroker(),
+        broadcast=_FailingBroadcast(),
+        live_event_projector=projector,
     )
     event = make_system_error_event(session_id="session-1", content="failed")
 
@@ -175,9 +170,9 @@ async def test_public_control_event_retains_direct_wire_delivery(
     """Canonical public controls retain direct WebSocket delivery."""
     calls: list[object] = []
     publisher = WorkerEventPublisher(
-        broker=cast(SessionBroker, cast(Any, _TrackingBroker(calls))),
-        broadcast=cast(WebSocketBroadcast, _TrackingBroadcast(calls)),
-        live_event_projector=cast(LiveEventProjector, _TrackingProjector(calls)),
+        broker=_TrackingBroker(calls),
+        broadcast=_TrackingBroadcast(calls),
+        live_event_projector=_TrackingProjector(calls),
     )
 
     await publisher.dispatch_event("session-1", event, owner_generation=1)
@@ -194,9 +189,9 @@ async def test_internal_runtime_event_is_not_publicly_broadcast() -> None:
     """Internal runtime telemetry feeds projection without becoming public frames."""
     calls: list[object] = []
     publisher = WorkerEventPublisher(
-        broker=cast(SessionBroker, cast(Any, _TrackingBroker(calls))),
-        broadcast=cast(WebSocketBroadcast, _TrackingBroadcast(calls)),
-        live_event_projector=cast(LiveEventProjector, _TrackingProjector(calls)),
+        broker=_TrackingBroker(calls),
+        broadcast=_TrackingBroadcast(calls),
+        live_event_projector=_TrackingProjector(calls),
     )
     event = RunStarted(run_id="run-1", phase=None)
 
@@ -214,9 +209,9 @@ async def test_durable_event_uses_one_canonical_history_frame_after_flush() -> N
     """Durable handoff flushes live partials before the canonical history action."""
     calls: list[object] = []
     publisher = WorkerEventPublisher(
-        broker=cast(SessionBroker, cast(Any, _TrackingBroker(calls))),
-        broadcast=cast(WebSocketBroadcast, _TrackingBroadcast(calls)),
-        live_event_projector=cast(LiveEventProjector, _TrackingProjector(calls)),
+        broker=_TrackingBroker(calls),
+        broadcast=_TrackingBroadcast(calls),
+        live_event_projector=_TrackingProjector(calls),
     )
     event = make_system_error_event(session_id="session-1", content="failed")
 

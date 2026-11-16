@@ -108,6 +108,8 @@ def replay(
                 batch_size=batch_size,
                 after_session_id=after_session_id,
             )
+        except asyncio.CancelledError:
+            raise
         except TeamSessionCutoverReplayInvariantFailure as exc:
             typer.echo("replay_blocked: invariant_failures")
             for code, count in exc.invariant_failures:

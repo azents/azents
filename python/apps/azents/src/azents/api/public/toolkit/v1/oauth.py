@@ -3,6 +3,7 @@
 Provides toolkit-level OAuth2 connection endpoints and connection test endpoints.
 """
 
+import asyncio
 from typing import Annotated, Any, NoReturn, assert_never
 
 from azcommon.result import Result
@@ -105,6 +106,8 @@ async def get_github_platform_install_url(
         )
     try:
         value = await toolkit_oauth_service.platform_install_url(platform_runtime)
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return GitHubPlatformInstallUrlResponse(install_url=value)
@@ -145,6 +148,8 @@ async def get_github_platform_oauth_url(
         )
     try:
         value = await toolkit_oauth_service.platform_oauth_url(config, platform_runtime)
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return GitHubPlatformOAuthUrlResponse(oauth_url=value)
@@ -191,6 +196,8 @@ async def get_github_platform_installations(
             code=body.code,
             state=body.state,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return GitHubPlatformInstallationsResponse(
@@ -220,6 +227,8 @@ async def get_agent_github_platform_install_url(
         value = await toolkit_oauth_service.agent_platform_install_url(
             member, service, platform_runtime, agent_id=agent_id
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return GitHubPlatformInstallUrlResponse(install_url=value)
@@ -240,6 +249,8 @@ async def get_agent_github_platform_oauth_url(
         value = await toolkit_oauth_service.agent_platform_oauth_url(
             member, service, config, platform_runtime, handle=handle, agent_id=agent_id
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return GitHubPlatformOAuthUrlResponse(oauth_url=value)
@@ -267,6 +278,8 @@ async def get_agent_github_platform_installations(
             state=body.state,
             agent_id=agent_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return GitHubPlatformInstallationsResponse(
@@ -315,6 +328,8 @@ async def connect_oauth(
             handle=handle,
             toolkit_id=toolkit_config_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return OAuthAuthorizeResponse(authorization_url=authorization_url)
@@ -356,6 +371,8 @@ async def exchange_oauth_connection(
             code=body.code,
             state=body.state,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
 
@@ -384,6 +401,8 @@ async def disconnect_oauth_connection(
             workspace_id=member.workspace_id,
             toolkit_id=toolkit_config_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
 
@@ -418,6 +437,8 @@ async def connect_agent_oauth(
             agent_id=agent_id,
             toolkit_config_id=toolkit_config_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return OAuthAuthorizeResponse(authorization_url=value)
@@ -452,6 +473,8 @@ async def exchange_agent_oauth_connection(
             agent_id=agent_id,
             toolkit_config_id=toolkit_config_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
 
@@ -552,6 +575,8 @@ async def test_connection_saved(
             workspace_id=member.workspace_id,
             toolkit_id=toolkit_config_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return TestConnectionResponse(
@@ -595,6 +620,8 @@ async def test_connection_unsaved(
                 toolkit_config_id=body.toolkit_config_id,
             ),
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return TestConnectionResponse(
@@ -629,6 +656,8 @@ async def test_agent_connection_saved(
             agent_id=agent_id,
             toolkit_config_id=toolkit_config_id,
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return TestConnectionResponse(
@@ -669,6 +698,8 @@ async def test_agent_connection_unsaved(
                 toolkit_config_id=body.toolkit_config_id,
             ),
         )
+    except asyncio.CancelledError:
+        raise
     except ToolkitOAuthError as exc:
         _raise_toolkit_oauth_error(exc)
     return TestConnectionResponse(

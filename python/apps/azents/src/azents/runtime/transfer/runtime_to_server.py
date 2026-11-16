@@ -38,7 +38,10 @@ from grpc import StatusCode
 from grpc.aio import AioRpcError
 
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
-from azents.utils.logging import sanitized_exception_info
+from azents.utils.logging import (
+    content_safe_exception_diagnostic,
+    sanitized_exception_info,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _CONSUMER_REVISION_ATTEMPTS = 3
@@ -48,6 +51,25 @@ _CLEANUP_TIMEOUT_SECONDS = 3.0
 
 class RuntimeToServerTransferError(RuntimeError):
     """Raised when a Runtime upload cannot complete managed publication."""
+
+
+def _consumer_lease_failure(
+    error: Exception, *, identity: CoordinatorTransferIdentity, phase: str
+) -> RuntimeToServerTransferError:
+    """Consume the renewal-task failure once without retaining sensitive values."""
+    message = "Runtime upload consumer lease renewal failed"
+    diagnostic = content_safe_exception_diagnostic(error, message=message)
+    _LOGGER.error(
+        message,
+        exc_info=diagnostic.exc_info,
+        extra={
+            "transfer_id": identity.transfer_id,
+            "attempt_id": identity.attempt_id,
+            "phase": phase,
+            **diagnostic.log_fields(),
+        },
+    )
+    return RuntimeToServerTransferError(message)
 
 
 @dataclass(frozen=True)
@@ -344,9 +366,9 @@ class RuntimeToServerConsumer:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                self._renewal_failure = RuntimeToServerTransferError(
-                    "Runtime upload consumer lease renewal failed"
+            except Exception as error:
+                self._renewal_failure = _consumer_lease_failure(
+                    error, identity=self.upload.identity, phase="download"
                 )
                 return
             finally:
@@ -785,9 +807,9 @@ class RuntimeToServerTransferService:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                lease.failure = RuntimeToServerTransferError(
-                    "Runtime upload consumer lease renewal failed"
+            except Exception as error:
+                lease.failure = _consumer_lease_failure(
+                    error, identity=identity, phase="publication"
                 )
                 return
             if status.phase is not CoordinatorTransferPhase.CONSUMING:

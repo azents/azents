@@ -1,5 +1,6 @@
 """OpenRouter API-key credit usage adapter tests."""
 
+import asyncio
 import json
 from collections.abc import Callable
 
@@ -178,3 +179,57 @@ async def test_non_json_response_is_not_logged_with_provider_body(
 
     assert isinstance(result, OpenRouterUsageUnavailable)
     assert "secret-provider-body" not in caplog.text
+
+
+@pytest.mark.parametrize("complete_sdk_shape", [False, True])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("limit_remaining", "72.5"), ("include_byok_in_limit", "false")],
+)
+async def test_sdk_display_coercion_cannot_relax_usage_contract(
+    complete_sdk_shape: bool, field: str, value: object
+) -> None:
+    body = _payload()
+    data = body["data"]
+    assert isinstance(data, dict)
+    if complete_sdk_shape:
+        data.update(
+            creator_user_id=None,
+            is_management_key=False,
+            rate_limit={"interval": "10s", "note": "deprecated", "requests": -1},
+        )
+    data[field] = value
+    result = await _read(lambda _: httpx.Response(200, json=body))
+    assert isinstance(result, OpenRouterUsageUnavailable)
+    assert result.reason is SubscriptionUsageUnavailableReason.INVALID_PROVIDER_RESPONSE
+
+
+@pytest.mark.parametrize("status", [200, 401, 429, 503])
+async def test_sdk_retains_injected_timeout_and_single_request(status: int) -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.extensions["timeout"] == httpx.Timeout(7).as_dict()
+        return httpx.Response(status, json=_payload())
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), timeout=7
+    ) as client:
+        await OpenRouterSubscriptionUsageClient(client, _BASE_URL).read_usage(
+            secrets=ApiKeySecrets(api_key="synthetic-key")
+        )
+        assert not client.is_closed
+    assert len(requests) == 1
+
+
+async def test_sdk_propagates_cancellation_without_closing_injected_client() -> None:
+    async def respond(_: httpx.Request) -> httpx.Response:
+        raise asyncio.CancelledError
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(asyncio.CancelledError):
+            await OpenRouterSubscriptionUsageClient(client, _BASE_URL).read_usage(
+                secrets=ApiKeySecrets(api_key="synthetic-key")
+            )
+        assert not client.is_closed

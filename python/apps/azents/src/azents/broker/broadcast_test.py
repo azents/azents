@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from typing import Any, cast
 
 import pytest
 from redis.asyncio import Redis
@@ -55,22 +54,20 @@ class _PubSub:
             yield {}
 
 
-class _Redis:
-    """Redis test double exposing one PubSub instance."""
-
-    def __init__(self, pubsub: _PubSub) -> None:
-        self.value = pubsub
-
-    def pubsub(self) -> _PubSub:
-        """Return the controlled PubSub instance."""
-        return self.value
-
-
 @pytest.mark.asyncio
-async def test_subscribe_context_waits_for_redis_confirmation() -> None:
+async def test_subscribe_context_waits_for_redis_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The public subscription barrier opens only after Redis confirms it."""
     pubsub = _PubSub()
-    broadcast = WebSocketBroadcast(cast(Redis, cast(Any, _Redis(pubsub))))
+
+    def create_pubsub(redis: Redis) -> _PubSub:
+        del redis
+        return pubsub
+
+    monkeypatch.setattr(Redis, "pubsub", create_pubsub)
+    redis = Redis()
+    broadcast = WebSocketBroadcast(redis)
     entered = asyncio.Event()
 
     async def consume() -> None:
@@ -86,6 +83,7 @@ async def test_subscribe_context_waits_for_redis_confirmation() -> None:
 
     assert entered.is_set()
     assert pubsub.closed
+    await redis.aclose()
 
 
 @pytest.mark.parametrize("phase", ["subscribe", "unsubscribe"])

@@ -1,3 +1,4 @@
+import asyncio
 import contextvars
 import logging
 from collections.abc import Collection, Mapping
@@ -77,6 +78,8 @@ class EventEmitter(object):
         """
         try:
             await listener(payload)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(
                 "Background listener task failed",

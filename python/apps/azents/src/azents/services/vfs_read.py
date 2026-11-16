@@ -714,6 +714,8 @@ async def _run_regex_grep_process(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
+    except asyncio.CancelledError:
+        raise
     except OSError as exc:
         raise VfsReadError(
             "storage_unavailable",

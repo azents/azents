@@ -26,6 +26,23 @@ class _GatewayIdleReached(Exception):
     """Stop the runner after it reaches the stable open state."""
 
 
+@pytest.mark.parametrize("payload", [None, [], 4, "invalid"])
+async def test_gateway_root_shape_errors_keep_transport_gap_classification(
+    payload: object,
+) -> None:
+    def respond(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(DiscordGatewayError, match="fixture response is invalid"):
+            await discord_testenv._gateway_attempt(
+                client,
+                "https://example.test/gateway",
+                target_guild_id="300",
+                resumed=False,
+            )
+
+
 @pytest.mark.parametrize(
     ("content", "confirmed_missing"),
     [
@@ -153,10 +170,10 @@ async def test_gateway_invalid_session_selects_resume_or_fresh_identify(
         *,
         target_guild_id: str,
         resumed: bool,
-    ) -> dict[str, object]:
+    ) -> discord_testenv.GatewayAttempt:
         del client, url, target_guild_id
         resume_attempts.append(resumed)
-        return {"scenario": scenarios.pop(0), "dispatches": []}
+        return discord_testenv.GatewayAttempt(scenario=scenarios.pop(0), dispatches=())
 
     async def stop_after_open(delay: float) -> None:
         del delay
@@ -196,9 +213,9 @@ async def test_gateway_publishes_active_then_empty_typing_snapshots(
         *,
         target_guild_id: str,
         resumed: bool,
-    ) -> dict[str, object]:
+    ) -> discord_testenv.GatewayAttempt:
         del client, url, target_guild_id, resumed
-        return {"scenario": "open", "dispatches": []}
+        return discord_testenv.GatewayAttempt(scenario="open", dispatches=())
 
     async def load_typing_targets() -> tuple[DiscordGatewayTypingTarget, ...]:
         nonlocal load_count
@@ -266,9 +283,9 @@ async def test_gateway_repeats_typing_pulses_for_the_same_active_target(
         *,
         target_guild_id: str,
         resumed: bool,
-    ) -> dict[str, object]:
+    ) -> discord_testenv.GatewayAttempt:
         del client, url, target_guild_id, resumed
-        return {"scenario": "open", "dispatches": []}
+        return discord_testenv.GatewayAttempt(scenario="open", dispatches=())
 
     def respond(request: httpx.Request) -> httpx.Response:
         snapshots.append(json.loads(request.content))
@@ -331,9 +348,9 @@ async def test_gateway_retries_typing_provider_failure_without_stopping(
         *,
         target_guild_id: str,
         resumed: bool,
-    ) -> dict[str, object]:
+    ) -> discord_testenv.GatewayAttempt:
         del client, url, target_guild_id, resumed
-        return {"scenario": "open", "dispatches": []}
+        return discord_testenv.GatewayAttempt(scenario="open", dispatches=())
 
     def respond(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
@@ -388,9 +405,9 @@ async def test_gateway_rejects_stale_typing_target_authority(
         *,
         target_guild_id: str,
         resumed: bool,
-    ) -> dict[str, object]:
+    ) -> discord_testenv.GatewayAttempt:
         del client, url, target_guild_id, resumed
-        return {"scenario": "open", "dispatches": []}
+        return discord_testenv.GatewayAttempt(scenario="open", dispatches=())
 
     def respond(request: httpx.Request) -> httpx.Response:
         calls.append(request)

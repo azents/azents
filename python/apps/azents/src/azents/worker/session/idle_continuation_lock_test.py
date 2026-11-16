@@ -110,6 +110,9 @@ async def test_idle_description_does_not_wait_for_held_owner_or_hierarchy_rows(
             try:
                 yield ReadWriteSession(raw)
                 await raw.commit()
+            except asyncio.CancelledError:
+                await raw.rollback()
+                raise
             except BaseException:
                 await raw.rollback()
                 raise
@@ -191,6 +194,9 @@ async def test_idle_finalization_waits_for_exact_owner_handover_then_rejects(
             try:
                 yield ReadWriteSession(raw)
                 await raw.commit()
+            except asyncio.CancelledError:
+                await raw.rollback()
+                raise
             except BaseException:
                 await raw.rollback()
                 raise

@@ -402,6 +402,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         )
         try:
             await self._save_tool_snapshot(snapshot)
+        except asyncio.CancelledError:
+            raise
         except FunctionToolError:
             return
         except CanonicalExecutionOwnerGenerationStaleError:

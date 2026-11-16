@@ -43,10 +43,8 @@ def generate_short_operation_id(route: APIRoute) -> str:
     # Warn when exceeding 60 characters (for development-time check)
     if len(operation_id) > 60:
         logger.warning(
-            "operationId '%s' exceeds 60 chars (%d). "
-            "Consider shortening the function name.",
-            operation_id,
-            len(operation_id),
+            "operationId exceeds 60 chars. Consider shortening the function name.",
+            extra={"operation_id": operation_id, "length": len(operation_id)},
         )
 
     return operation_id

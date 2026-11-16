@@ -1,8 +1,6 @@
 """Tests for S3-native managed Server-to-Runtime source staging."""
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
-from typing import cast
 
 import pytest
 from azcommon.infra.s3.service import (
@@ -25,6 +23,7 @@ from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimePreparation,
     ServerToRuntimeSourceMetadata,
 )
+from azents.testing.transfer_status import preparation_status
 
 
 class S3CopySpy:
@@ -160,10 +159,7 @@ class _UnusedCleanupCoordinator:
         self,
         request: CoordinatorPromotePreparationCleanupRequest,
     ) -> CoordinatorTransferStatus:
-        return cast(
-            CoordinatorTransferStatus,
-            SimpleNamespace(revision=request.expected_revision + 1),
-        )
+        return preparation_status(request.identity, request.expected_revision + 1)
 
     async def clear_preparation_cleanup(
         self,

@@ -275,6 +275,8 @@ async def summarize_text_with_model(
             "model": selection.model_identifier,
             "session_id": session_id,
             "conversation_chars": len(conversation_text),
+            "attempt": 1,
+            "input_chars": len(conversation_text),
             "conversation_estimated_tokens": _estimated_tokens(conversation_text),
             "requested_max_output_tokens": effective_model_output_tokens(
                 selection, candidate.settings
@@ -283,11 +285,7 @@ async def summarize_text_with_model(
     )
     L.info(
         "Compaction summary model call starting",
-        extra={
-            "attempt": 1,
-            "input_chars": len(conversation_text),
-            "input_estimated_tokens": _estimated_tokens(conversation_text),
-        },
+        extra={"input_estimated_tokens": _estimated_tokens(conversation_text)},
     )
     try:
         result = await call_model_operation_text_with_usage(
@@ -329,8 +327,6 @@ async def summarize_text_with_model(
     L.info(
         "Compaction summary model call completed",
         extra={
-            "attempt": 1,
-            "input_chars": len(conversation_text),
             "summary_chars": len(summary),
             "summary_estimated_tokens": _estimated_tokens(summary),
         },

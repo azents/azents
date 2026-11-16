@@ -805,6 +805,13 @@ class _BoundedEnvelopeQueue:
                 )
                 self.bytes += size
                 self.condition.notify_all()
+        except asyncio.CancelledError:
+            if resources is not None and reserved:
+                resources.release_envelope(
+                    application_bytes=application_bytes,
+                    control_bytes=control_bytes,
+                )
+            raise
         except BaseException:
             if resources is not None and reserved:
                 resources.release_envelope(
@@ -1061,6 +1068,8 @@ class _RunnerConnection:
             heartbeat.heartbeat.monotonic_sequence = sequence
             try:
                 await self.queue.put(heartbeat)
+            except asyncio.CancelledError:
+                raise
             except RuntimeError:
                 return
 
@@ -1473,6 +1482,8 @@ class RuntimeStreamControlDataPlane:
                         CloseReason.TRANSPORT_UNAVAILABLE,
                     )
                 )
+            except asyncio.CancelledError:
+                raise
             except _RuntimeStreamControlResourceExhausted:
                 await source.queue.close()
             except RuntimeError:
@@ -1695,6 +1706,8 @@ class RuntimeStreamControlDataPlane:
                 envelope,
                 direction=CapacityDirection.OUTBOUND,
             )
+        except asyncio.CancelledError:
+            raise
         except _RuntimeStreamCapacityRejected:
             await self._send_runner_reset(
                 binding,
@@ -1712,6 +1725,8 @@ class RuntimeStreamControlDataPlane:
             return
         try:
             delivered = await connection.receive(envelope, on_dequeued=on_dequeued)
+        except asyncio.CancelledError:
+            raise
         except RuntimeError:
             if on_dequeued is not None:
                 await on_dequeued()
@@ -1759,6 +1774,8 @@ class RuntimeStreamControlDataPlane:
         source_key = BrokerStreamKey(source.source_key, translated.stream_id)
         try:
             await source.queue.put(translated)
+        except asyncio.CancelledError:
+            raise
         except RuntimeError:
             if not source.queue.closed:
                 raise
@@ -1851,6 +1868,8 @@ class RuntimeStreamControlDataPlane:
                     generation=owner.runner_generation,
                     current_time=current_time,
                 )
+            except asyncio.CancelledError:
+                raise
             except self.metrics_recoverable_errors:
                 continue
             if not samples:
@@ -2326,6 +2345,9 @@ class RuntimeStreamControlDataPlane:
                     lambda: self._guard_browser(binding),
                     name="browser-current-scope",
                 )
+        except asyncio.CancelledError:
+            await self._release(key)
+            raise
         except BaseException:
             await self._release(key)
             raise
@@ -2365,6 +2387,8 @@ class RuntimeStreamControlDataPlane:
                     envelope,
                     direction=CapacityDirection.INBOUND,
                 )
+            except asyncio.CancelledError:
+                raise
             except _RuntimeStreamCapacityRejected:
                 await self._send_runner_reset(
                     binding,
@@ -2386,6 +2410,10 @@ class RuntimeStreamControlDataPlane:
                     envelope,
                     on_dequeued=on_dequeued,
                 )
+            except asyncio.CancelledError:
+                if on_dequeued is not None:
+                    await on_dequeued()
+                raise
             except BaseException:
                 if on_dequeued is not None:
                     await on_dequeued()
@@ -2627,6 +2655,8 @@ class RuntimeStreamGatewaySessionGrpcServicer(
                 peer_boot_id=first.peer_boot_id,
                 owner=None,
             )
+        except asyncio.CancelledError:
+            raise
         except _RuntimeStreamControlDraining:
             await context.abort(
                 grpc.StatusCode.UNAVAILABLE,
@@ -2644,6 +2674,8 @@ class RuntimeStreamGatewaySessionGrpcServicer(
                 await source.queue.put(
                     _acceptance(first, self.data_plane.control_boot_id, self.clock)
                 )
+            except asyncio.CancelledError:
+                raise
             except _RuntimeStreamControlResourceExhausted:
                 await context.abort(
                     grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2716,6 +2748,8 @@ class RuntimeStreamControlSessionGrpcServicer(
                 peer_boot_id=first.peer_boot_id,
                 owner=owner,
             )
+        except asyncio.CancelledError:
+            raise
         except _RuntimeStreamControlDraining:
             await context.abort(
                 grpc.StatusCode.UNAVAILABLE,
@@ -2733,6 +2767,8 @@ class RuntimeStreamControlSessionGrpcServicer(
                 await source.queue.put(
                     _acceptance(first, owner.owner_boot_id, self.clock)
                 )
+            except asyncio.CancelledError:
+                raise
             except _RuntimeStreamControlResourceExhausted:
                 await context.abort(
                     grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2832,6 +2868,8 @@ class RuntimeRunnerStreamSessionGrpcServicer(
                 registry=self.registry,
                 accepted=accepted,
             )
+        except asyncio.CancelledError:
+            raise
         except _RuntimeStreamControlResourceExhausted:
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -2842,6 +2880,8 @@ class RuntimeRunnerStreamSessionGrpcServicer(
             await connection.queue.put(
                 _acceptance(first, owner.owner_boot_id, self.clock)
             )
+        except asyncio.CancelledError:
+            raise
         except _RuntimeStreamControlResourceExhausted:
             await _release_runner_owner(
                 data_plane=self.data_plane,

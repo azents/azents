@@ -1,5 +1,6 @@
 """Current execution files behind ordinary native text and mutation tools."""
 
+import asyncio
 import dataclasses
 import fnmatch
 import re
@@ -290,6 +291,8 @@ class SessionExecutionFileBackend:
                     )
                 case _:
                     assert_never(request)
+        except asyncio.CancelledError:
+            raise
         except FileExistsError as error:
             raise VfsMutationError("already_exists", str(error)) from None
         except PermissionError as error:
@@ -375,6 +378,8 @@ class SessionExecutionFileBackend:
                         after = apply_update(operation, source).output.decode("utf-8")
                 changes.append(ExecutionFileChange(target.path, before, after))
             await self.repository.atomic_patch(principal.owner, tuple(changes))
+        except asyncio.CancelledError:
+            raise
         except V4aPatchError as error:
             raise VfsMutationError(error.reason, error.message) from None
         except PermissionError as error:

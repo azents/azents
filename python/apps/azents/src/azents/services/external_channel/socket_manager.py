@@ -155,6 +155,8 @@ class SlackSocketManagerService:
                         shutdown_event.wait(),
                         timeout=self.poll_interval.total_seconds(),
                     )
+                except asyncio.CancelledError:
+                    raise
                 except asyncio.TimeoutError:
                     continue
         finally:

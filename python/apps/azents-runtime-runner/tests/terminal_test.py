@@ -480,6 +480,112 @@ async def test_pending_open_does_not_block_invalidation_or_install_after_fence(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["stale", "cancel"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_registry_close_owns_uninstalled_allocation_cleanup(
+    tmp_path: Path,
+    outcome: str,
+    cleanup_fails: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Admission fails promptly, but shutdown joins its retained cleanup tail."""
+    cleanup_started, cleanup_release = asyncio.Event(), asyncio.Event()
+    allocated, close_started = asyncio.Event(), asyncio.Event()
+
+    class CleanupPty(_FakePty):
+        async def terminate_session(
+            self, *, terminate_timeout_seconds: float, kill_timeout_seconds: float
+        ) -> TerminalExit:
+            cleanup_started.set()
+            await cleanup_release.wait()
+            if cleanup_fails:
+                raise OSError("uninstalled-cleanup-secret-canary")
+            return await super().terminate_session(
+                terminate_timeout_seconds=terminate_timeout_seconds,
+                kill_timeout_seconds=kill_timeout_seconds,
+            )
+
+    process = CleanupPty()
+
+    class AllocatingBackend(_SlowBackend):
+        async def open(self, spec: TerminalSpec) -> PtyTerminalProcess:
+            del spec
+            self.started.set()
+            await self.release.wait()
+            allocated.set()
+            return process
+
+    backend = AllocatingBackend()
+    registry = RunnerTerminalRegistry(
+        backend=backend,
+        limits=_limits(),
+        clock=_Clock(100),
+        utc_clock=_UtcClock(_TEST_UTC_NOW),
+    )
+    opening = asyncio.create_task(registry.open(_spec(tmp_path)))
+    closing: asyncio.Task[tuple[TerminalExit, ...]] | None = None
+    held = False
+
+    async def close_registry() -> tuple[TerminalExit, ...]:
+        close_started.set()
+        return await registry.close()
+
+    try:
+        async with asyncio.timeout(5):
+            await backend.started.wait()
+            if outcome == "stale":
+                assert await registry.invalidate_runtime(runtime_id="runtime-1") == ()
+            else:
+                await registry._lock.acquire()
+                held = True
+            backend.release.set()
+            await allocated.wait()
+            if outcome == "cancel":
+                opening.cancel("original-cancellation")
+                registry._lock.release()
+                held = False
+                with pytest.raises(asyncio.CancelledError) as raised:
+                    await opening
+                assert raised.value.args == ("original-cancellation",)
+            else:
+                with pytest.raises(TerminalInvalidatedError):
+                    await opening
+            await cleanup_started.wait()
+            assert not process.closed
+            closing = asyncio.create_task(close_registry())
+            await close_started.wait()
+            assert not closing.done()
+            cleanup_release.set()
+            assert await closing == ()
+            assert process.closed
+            assert not registry._uninstalled_cleanup_tasks
+            records = [
+                record
+                for record in caplog.records
+                if record.message == "Uninstalled Terminal process cleanup failed"
+            ]
+            assert len(records) == int(cleanup_fails)
+            if cleanup_fails:
+                assert records[0].exc_info is not None
+                assert records[0].__dict__["error_type"] == "OSError"
+                assert any(
+                    frame["function"] == "terminate_session"
+                    for frame in records[0].__dict__["error_frames"]
+                )
+            assert "uninstalled-cleanup-secret-canary" not in caplog.text
+    finally:
+        if held:
+            registry._lock.release()
+        backend.release.set()
+        cleanup_release.set()
+        opening.cancel()
+        await asyncio.gather(opening, return_exceptions=True)
+        if closing is not None:
+            await asyncio.gather(closing, return_exceptions=True)
+        await registry.close()
+
+
+@pytest.mark.asyncio
 async def test_pending_open_counts_against_session_quota(tmp_path: Path) -> None:
     backend = _SlowBackend()
     registry = RunnerTerminalRegistry(

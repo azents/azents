@@ -1,5 +1,6 @@
 """Convert Runtime control client to engine runtime I/O protocol."""
 
+import asyncio
 from collections.abc import Awaitable
 from datetime import datetime
 from typing import TypeVar
@@ -533,6 +534,8 @@ async def _translate_runtime_errors(awaitable: Awaitable[_T]) -> _T:
     """Convert Runtime control error to engine protocol error."""
     try:
         return await awaitable
+    except asyncio.CancelledError:
+        raise
     except control_runner_operations.RuntimeFileApplyPatchFailedError as exc:
         raise RuntimeFileApplyPatchFailedError(
             str(exc),

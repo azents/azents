@@ -493,6 +493,8 @@ class SystemCatalogProjectionService:
         """Publish changed source and every affected system catalog together."""
         try:
             await self.source_sync_service.sync_current_source()
+        except asyncio.CancelledError:
+            raise
         except ModelMetadataSourceSyncBusy:
             pass
         states = await self.list_system_catalogs()

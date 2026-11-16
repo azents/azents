@@ -1,8 +1,5 @@
 """Application root lifecycle tests."""
 
-from typing import Any, cast
-from unittest.mock import MagicMock
-
 import pytest
 from azcommon.logging import RuntimeEnvironment
 
@@ -13,6 +10,7 @@ from azents.job_runtime.deps import (
     get_job_runtime,
 )
 from azents.process_lifecycle import create_container, run_with_container
+from azents.testing.config import isolated_config
 from azents.utils.appctx import AppContext
 
 
@@ -37,12 +35,8 @@ def test_testenv_app_rejects_disabled_or_nonlocal_startup(
     message: str,
 ) -> None:
     """Testenv routes never start without explicit enablement and local mode."""
-    config = cast(
-        Any,
-        MagicMock(
-            testenv_api_enabled=enabled,
-            runtime_env=runtime_env,
-        ),
+    config = isolated_config().model_copy(
+        update={"testenv_api_enabled": enabled, "runtime_env": runtime_env},
     )
 
     with pytest.raises(RuntimeError, match=message):
@@ -52,7 +46,7 @@ def test_testenv_app_rejects_disabled_or_nonlocal_startup(
 @pytest.mark.asyncio
 async def test_external_fastapi_lifespan_keeps_shared_runtime_owned_by_root() -> None:
     """A co-located API lifespan does not close the devserver AppContext."""
-    config = cast(Any, MagicMock(job_runtime_backend=JobRuntimeBackend.LOCAL))
+    config = isolated_config()
     appctx = AppContext(config)
     container = create_container(appctx)
 
@@ -73,7 +67,9 @@ async def test_external_fastapi_lifespan_keeps_shared_runtime_owned_by_root() ->
 @pytest.mark.asyncio
 async def test_run_with_container_rejects_unavailable_temporal_at_startup() -> None:
     """Root startup fails before serving work when Temporal is selected."""
-    config = cast(Any, MagicMock(job_runtime_backend=JobRuntimeBackend.TEMPORAL))
+    config = isolated_config().model_copy(
+        update={"job_runtime_backend": JobRuntimeBackend.TEMPORAL}
+    )
 
     with pytest.raises(
         JobRuntimeBackendUnavailableError,

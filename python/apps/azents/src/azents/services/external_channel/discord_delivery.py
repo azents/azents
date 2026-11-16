@@ -108,6 +108,8 @@ class DiscordFileMessageTransport:
                 headers={"Authorization": f"Bot {bot_token}", **stream.headers},
                 content=stream,
             )
+        except asyncio.CancelledError:
+            raise
         except DiscordOutboundFileContentError:
             return DiscordDeliveryResult(
                 status="unknown",
@@ -224,6 +226,8 @@ class DiscordDeliveryClient:
                         name=thread_name,
                         auto_archive_duration=auto_archive_duration,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except DiscordSDKError as error:
                     result = _sdk_delivery_failure(error)
                     reconciled = await sdk.fetch_root_thread(
@@ -246,6 +250,8 @@ class DiscordDeliveryClient:
                     ),
                     created_thread_name=thread_name,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             return _sdk_delivery_failure(error)
         except TimeoutError:
@@ -265,6 +271,8 @@ class DiscordDeliveryClient:
                     guild_id=guild_id,
                     channel_id=channel_id,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKResourceUnavailable:
             return DiscordThreadTitleReadResult(
                 status="missing", name=None, error_kind="thread_not_found"
@@ -305,6 +313,8 @@ class DiscordDeliveryClient:
                     channel_id=channel_id,
                     name=normalized,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             return _sdk_delivery_failure(error)
         except TimeoutError:
@@ -375,6 +385,8 @@ class DiscordDeliveryClient:
                         message=message,
                         destination_channel_id=parent_channel_id,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except DiscordSDKError as error:
                     return _forwarding_result(
                         created_result,
@@ -388,6 +400,8 @@ class DiscordDeliveryClient:
                         channel_id=parent_channel_id,
                     ),
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             return _sdk_delivery_failure(error)
         except TimeoutError:
@@ -452,6 +466,8 @@ class DiscordDeliveryClient:
                     message=message,
                     destination_channel_id=parent_channel_id,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             return _forwarding_result(created, _sdk_delivery_failure(error))
         except TimeoutError:
@@ -489,6 +505,8 @@ class DiscordDeliveryClient:
                     components=components,
                     embeds=embeds,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             return _sdk_delivery_failure(error)
         except TimeoutError:
@@ -511,6 +529,8 @@ class DiscordDeliveryClient:
                     channel_id=channel_id,
                     message_id=message_id,
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             return _sdk_delivery_failure(error)
         except TimeoutError:

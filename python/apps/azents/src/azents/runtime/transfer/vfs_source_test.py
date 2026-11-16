@@ -2,8 +2,6 @@
 
 import base64
 import hashlib
-from types import SimpleNamespace
-from typing import cast
 
 import pytest
 from azcommon.infra.s3.service import (
@@ -26,6 +24,7 @@ from azents_runtime_control.transfer import CoordinatorTransferIdentity
 from azents.core.vfs import VFS_FILE_MAX_BYTES, VfsFileEntry
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimePreparation
 from azents.runtime.transfer.vfs_source import VfsServerToRuntimeSource
+from azents.testing.transfer_status import preparation_status
 
 
 class Store:
@@ -216,27 +215,18 @@ class CleanupCoordinator:
         self.calls.append(("register", request))
         if self.events is not None:
             self.events.append("register")
-        return cast(
-            CoordinatorTransferStatus,
-            SimpleNamespace(revision=request.expected_revision + 1),
-        )
+        return preparation_status(request.identity, request.expected_revision + 1)
 
     async def promote_preparation_cleanup(
         self,
         request: CoordinatorPromotePreparationCleanupRequest,
     ) -> CoordinatorTransferStatus:
         self.calls.append(("promote", request))
-        return cast(
-            CoordinatorTransferStatus,
-            SimpleNamespace(revision=request.expected_revision + 1),
-        )
+        return preparation_status(request.identity, request.expected_revision + 1)
 
     async def clear_preparation_cleanup(
         self,
         request: CoordinatorClearPreparationCleanupRequest,
     ) -> CoordinatorTransferStatus:
         self.calls.append(("clear", request))
-        return cast(
-            CoordinatorTransferStatus,
-            SimpleNamespace(revision=request.expected_revision + 1),
-        )
+        return preparation_status(request.identity, request.expected_revision + 1)

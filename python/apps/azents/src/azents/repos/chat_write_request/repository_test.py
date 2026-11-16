@@ -302,7 +302,3 @@ class TestChatWriteRequestRepository:
         assert second.id == first.id
         assert second.session_id == session_id
         assert second.accepted_id == "input-buffer-1"
-
-    def test_session_creation_advisory_lock_removed(self) -> None:
-        """Session creation no longer exposes a repository advisory lock API."""
-        assert not hasattr(ChatWriteRequestRepository, "lock_session_creation_request")

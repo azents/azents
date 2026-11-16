@@ -1,5 +1,7 @@
 """Toolkit repository."""
 
+import asyncio
+
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
@@ -503,6 +505,8 @@ class AgentToolkitRepository:
             session.write_session.add(rdb_agent_toolkit)
             await session.write_session.flush()
             return Success(self._build(rdb_agent_toolkit))
+        except asyncio.CancelledError:
+            raise
         except IntegrityError as e:
             await session.write_session.rollback()
             if is_constrained_by(e, RDBAgentToolkit.UQ_AGENT_TOOLKIT):

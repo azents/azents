@@ -1,5 +1,6 @@
 """Kubernetes Secret adapter for bootstrap-owned Provider credentials."""
 
+import asyncio
 import base64
 import binascii
 from collections.abc import Awaitable
@@ -47,6 +48,8 @@ async def read_runtime_provider_credential(
             name=secret_name,
             namespace=namespace,
         )
+    except asyncio.CancelledError:
+        raise
     except ApiException as error:
         if error.status == 404:
             raise RuntimeError(

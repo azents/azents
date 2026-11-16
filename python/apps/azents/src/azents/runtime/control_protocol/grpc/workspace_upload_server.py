@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import UTC, datetime
 from typing import NoReturn, Protocol
@@ -125,8 +126,8 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         coordinator: _WorkspaceUploadCoordinator,
         credential_auth: _WorkspaceUploadCredentialAuth,
     ) -> None:
-        self._coordinator = coordinator
-        self._credential_auth = credential_auth
+        self.coordinator = coordinator
+        self.credential_auth = credential_auth
 
     async def CreateWorkspaceUpload(
         self,
@@ -134,7 +135,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         context: grpc.aio.ServicerContext,
     ) -> pb.WorkspaceUploadStatusResponse:
         """Create one requester-bound upload metadata record."""
-        await self._credential_auth.authenticate_workspace(
+        await self.credential_auth.authenticate_workspace(
             context,
             operation=WORKSPACE_UPLOAD_OPERATION_CREATE,
             request=request,
@@ -143,7 +144,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
             admission = _admission_from_create_request(request)
         except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        record = await self._coordinator.create(admission)
+        record = await self.coordinator.create(admission)
         if record is None:
             await _abort(
                 context,
@@ -158,7 +159,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         context: grpc.aio.ServicerContext,
     ) -> pb.WorkspaceUploadTicketResponse:
         """Issue one short-lived direct browser PUT capability."""
-        await self._credential_auth.authenticate_workspace(
+        await self.credential_auth.authenticate_workspace(
             context,
             operation=WORKSPACE_UPLOAD_OPERATION_ISSUE_TICKET,
             request=request,
@@ -167,7 +168,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         await _positive_or_abort(
             request.expected_revision, "expected_revision", context
         )
-        record = await self._coordinator.get(
+        record = await self.coordinator.get(
             identity.upload_id,
             requester_user_id=identity.requester_user_id,
             workspace_id=identity.workspace_id,
@@ -186,12 +187,14 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
                 "Workspace upload ticket precondition is stale",
             )
         try:
-            ticket = await self._coordinator.issue_upload_ticket(
+            ticket = await self.coordinator.issue_upload_ticket(
                 identity.upload_id,
                 requester_user_id=identity.requester_user_id,
                 workspace_id=identity.workspace_id,
                 agent_id=identity.agent_id,
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as exc:
             await _abort(context, grpc.StatusCode.FAILED_PRECONDITION, str(exc))
         if ticket is None:
@@ -220,7 +223,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         context: grpc.aio.ServicerContext,
     ) -> pb.WorkspaceUploadStatusResponse:
         """Verify the direct S3 ingress object and start delivery."""
-        await self._credential_auth.authenticate_workspace(
+        await self.credential_auth.authenticate_workspace(
             context,
             operation=WORKSPACE_UPLOAD_OPERATION_FINALIZE,
             request=request,
@@ -229,7 +232,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         await _positive_or_abort(
             request.expected_revision, "expected_revision", context
         )
-        record = await self._coordinator.finalize(
+        record = await self.coordinator.finalize(
             identity.upload_id,
             requester_user_id=identity.requester_user_id,
             workspace_id=identity.workspace_id,
@@ -250,13 +253,13 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         context: grpc.aio.ServicerContext,
     ) -> pb.WorkspaceUploadStatusResponse:
         """Read one requester-bound upload status."""
-        await self._credential_auth.authenticate_workspace(
+        await self.credential_auth.authenticate_workspace(
             context,
             operation=WORKSPACE_UPLOAD_OPERATION_GET,
             request=request,
         )
         identity = await _identity_or_abort(request.identity, context)
-        record = await self._coordinator.get(
+        record = await self.coordinator.get(
             identity.upload_id,
             requester_user_id=identity.requester_user_id,
             workspace_id=identity.workspace_id,
@@ -276,7 +279,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         context: grpc.aio.ServicerContext,
     ) -> pb.WorkspaceUploadStatusResponse:
         """Request idempotent cancellation of one upload operation."""
-        await self._credential_auth.authenticate_workspace(
+        await self.credential_auth.authenticate_workspace(
             context,
             operation=WORKSPACE_UPLOAD_OPERATION_CANCEL,
             request=request,
@@ -290,7 +293,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
             if request.current_delivery_number > 0
             else None
         )
-        record = await self._coordinator.cancel(
+        record = await self.coordinator.cancel(
             identity.upload_id,
             requester_user_id=identity.requester_user_id,
             workspace_id=identity.workspace_id,
@@ -312,7 +315,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
         context: grpc.aio.ServicerContext,
     ) -> pb.WorkspaceUploadStatusResponse:
         """Queue one exact source-owned immutable delivery retry."""
-        await self._credential_auth.authenticate_workspace(
+        await self.credential_auth.authenticate_workspace(
             context,
             operation=WORKSPACE_UPLOAD_OPERATION_RETRY,
             request=request,
@@ -331,7 +334,7 @@ class RuntimeWorkspaceUploadCoordinatorGrpcServicer(
             if request.HasField("conflict_precondition")
             else None
         )
-        record = await self._coordinator.retry(
+        record = await self.coordinator.retry(
             identity.upload_id,
             requester_user_id=identity.requester_user_id,
             workspace_id=identity.workspace_id,

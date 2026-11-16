@@ -1,5 +1,6 @@
 """Discord-native conversation settings responses and signed control mutations."""
 
+import asyncio
 import datetime
 from dataclasses import dataclass, replace
 from typing import Annotated, Literal, NamedTuple
@@ -174,6 +175,8 @@ class DiscordSettingsResponseService:
         )
         try:
             settings = await self._resolve(context, expected_binding_id=None)
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelParticipationError:
             return DiscordSettingsResponse(
                 response=_link_only_response(account=account, response_type=4),
@@ -274,6 +277,8 @@ class DiscordSettingsResponseService:
                     now=now,
                 )
             raise AssertionError("Discord settings action is not exhaustive.")
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelParticipationError:
             _, account = await self._account_presentation(
                 context=context,
@@ -631,6 +636,8 @@ class DiscordSettingsResponseService:
                 actor=_account_actor(context),
                 now=now,
             )
+        except asyncio.CancelledError:
+            raise
         except ExternalAccountLinkError:
             return _DiscordAccountPresentationResult(
                 state=None, presentation=discord_account_link_state_unavailable()

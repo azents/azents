@@ -299,7 +299,7 @@ class RedisBroker:
     _CUTOVER_REPLAY_BARRIER_TTL = 60 * 60
 
     def __init__(self, redis: Redis, *, worker_id: str | None = None) -> None:
-        self._redis = redis
+        self.redis = redis
         self._worker_id = worker_id
 
     async def setup(self) -> None:
@@ -314,12 +314,14 @@ class RedisBroker:
     async def _ensure_stream_group(self, stream_key: str) -> None:
         """Create the Stream consumer group if it does not exist."""
         try:
-            await self._redis.xgroup_create(
+            await self.redis.xgroup_create(
                 stream_key,
                 self._GROUP_NAME,
                 id="0",
                 mkstream=True,
             )
+        except asyncio.CancelledError:
+            raise
         except ResponseError as exc:
             if not str(exc).startswith(_BUSYGROUP_PREFIX):
                 raise
@@ -333,14 +335,16 @@ class RedisBroker:
         """
         encoded = encode_broker_message(message)
         msg_key = f"{self._SESSION_PREFIX}{message.session_id}:messages"
-        pushed = self._redis.rpush(msg_key, encoded)
+        pushed = self.redis.rpush(msg_key, encoded)
         if inspect.isawaitable(pushed):
             await pushed
-        await self._redis.expire(msg_key, self._MESSAGE_TTL)
+        await self.redis.expire(msg_key, self._MESSAGE_TTL)
         try:
             await self._publish_wake_up(message.session_id)
+        except asyncio.CancelledError:
+            raise
         except RedisError:
-            removed = self._redis.lrem(  # redis-py stub omits LREM.
+            removed = self.redis.lrem(  # redis-py stub omits LREM.
                 msg_key,
                 1,
                 encoded.decode(),
@@ -352,7 +356,7 @@ class RedisBroker:
     async def notify_mailbox_activity(self, session_id: str) -> None:
         """Publish activity only to a live owner, dropping when idle."""
         assert self._worker_id is not None, "worker_id is required"
-        owner = await self._redis.eval(
+        owner = await self.redis.eval(
             _ROUTE_WAKE_SCRIPT,
             2,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -361,7 +365,7 @@ class RedisBroker:
         if not owner:
             return
         owner_id = owner.decode() if isinstance(owner, bytes) else owner
-        await self._redis.xadd(
+        await self.redis.xadd(
             _worker_stream_key(owner_id),
             {"session_id": session_id, "type": "mailbox_activity"},
             minid=_stream_min_id(self._INCOMING_RETENTION),
@@ -370,7 +374,7 @@ class RedisBroker:
 
     async def _publish_wake_up(self, session_id: str) -> None:
         """Wake the owner stream when there is a live owner."""
-        owner = await self._redis.eval(
+        owner = await self.redis.eval(
             _ROUTE_WAKE_SCRIPT,
             2,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -381,7 +385,7 @@ class RedisBroker:
             if owner
             else self._STREAM_KEY
         )
-        await self._redis.xadd(
+        await self.redis.xadd(
             stream_key,
             {"session_id": session_id},
             minid=_stream_min_id(self._INCOMING_RETENTION),
@@ -403,7 +407,7 @@ class RedisBroker:
         assert self._worker_id is not None, "worker_id is required"
         while True:
             wake_up = await self._read_wake_up()
-            await self._redis.xack(
+            await self.redis.xack(
                 wake_up.stream_name,
                 self._GROUP_NAME,
                 wake_up.entry_id,
@@ -415,7 +419,7 @@ class RedisBroker:
             session_id = wake_up.session_id
             ownership = await self._acquire_or_find_owner(session_id)
             if ownership.status == "cutover":
-                await self._redis.xadd(
+                await self.redis.xadd(
                     self._STREAM_KEY,
                     {"session_id": session_id},
                     minid=_stream_min_id(self._INCOMING_RETENTION),
@@ -424,7 +428,7 @@ class RedisBroker:
                 await asyncio.sleep(self._RECEIVE_BLOCK_MS / 1000)
                 continue
             if ownership.status == "live_owner":
-                await self._redis.xadd(
+                await self.redis.xadd(
                     _worker_stream_key(ownership.owner),
                     {"session_id": session_id},
                     minid=_stream_min_id(self._INCOMING_RETENTION),
@@ -436,7 +440,7 @@ class RedisBroker:
             msg_key = f"{self._SESSION_PREFIX}{session_id}:messages"
             messages: list[WorkerSignal] = []
             while True:
-                raw = self._redis.lpop(msg_key)
+                raw = self.redis.lpop(msg_key)
                 if inspect.isawaitable(raw):
                     raw = await raw
                 if raw is None:
@@ -475,13 +479,15 @@ class RedisBroker:
         """
         assert self._worker_id is not None, "worker_id is required"
         try:
-            results = await self._redis.xreadgroup(
+            results = await self.redis.xreadgroup(
                 self._GROUP_NAME,
                 self._worker_id,
                 {stream_key: ">"},
                 count=1,
                 block=self._RECEIVE_BLOCK_MS,
             )
+        except asyncio.CancelledError:
+            raise
         except ResponseError as exc:
             if not str(exc).startswith(_NOGROUP_PREFIX):
                 raise
@@ -499,7 +505,7 @@ class RedisBroker:
     async def _acquire_or_find_owner(self, session_id: str) -> _Ownership:
         """Acquire session ownership or return the live owner."""
         assert self._worker_id is not None, "worker_id is required"
-        result = await self._redis.eval(
+        result = await self.redis.eval(
             _ACQUIRE_LOCK_SCRIPT,
             3,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -537,7 +543,7 @@ class RedisBroker:
             return
         lock_key = _session_lock_key(self._SESSION_PREFIX, session_id)
         heartbeat_key = _session_owner_heartbeat_key(self._SESSION_PREFIX, session_id)
-        await self._redis.eval(
+        await self.redis.eval(
             _RENEW_LEASE_SCRIPT,
             2,
             lock_key,
@@ -547,7 +553,7 @@ class RedisBroker:
             str(self._OWNER_HEARTBEAT_TTL),
         )
         activity_key = f"{self._SESSION_PREFIX}{session_id}:activity"
-        await self._redis.expire(activity_key, self._ACTIVITY_TTL)
+        await self.redis.expire(activity_key, self._ACTIVITY_TTL)
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
         """Refresh only the sticky owner heartbeat.
@@ -556,7 +562,7 @@ class RedisBroker:
         """
         if self._worker_id is None:
             return
-        await self._redis.eval(
+        await self.redis.eval(
             _RENEW_HEARTBEAT_SCRIPT,
             2,
             _session_lock_key(self._SESSION_PREFIX, session_id),
@@ -573,9 +579,9 @@ class RedisBroker:
         lock_key = _session_lock_key(self._SESSION_PREFIX, session_id)
         heartbeat_key = _session_owner_heartbeat_key(self._SESSION_PREFIX, session_id)
         if self._worker_id is None:
-            await self._redis.delete(lock_key, heartbeat_key)
+            await self.redis.delete(lock_key, heartbeat_key)
             return
-        await self._redis.eval(
+        await self.redis.eval(
             _RELEASE_LOCK_SCRIPT,
             2,
             lock_key,
@@ -607,7 +613,7 @@ class RedisBroker:
                 phase=phase,
             )
         )
-        result = await self._redis.eval(
+        result = await self.redis.eval(
             _SET_ACTIVITY_SCRIPT,
             1,
             key,
@@ -631,7 +637,7 @@ class RedisBroker:
         :param owner_generation: Durable Session execution generation
         """
         key = f"{self._SESSION_PREFIX}{session_id}:activity"
-        result = await self._redis.eval(
+        result = await self.redis.eval(
             _CLEAR_ACTIVITY_SCRIPT,
             1,
             key,
@@ -649,7 +655,7 @@ class RedisBroker:
         :return: SessionActivity when running, otherwise None
         """
         key = f"{self._SESSION_PREFIX}{session_id}:activity"
-        raw = await self._redis.eval(
+        raw = await self.redis.eval(
             _GET_ACTIVITY_SCRIPT,
             1,
             key,
@@ -661,12 +667,12 @@ class RedisBroker:
 
     async def purge_session_state(self, session_id: str) -> None:
         """Delete all ephemeral broker state owned by one Session."""
-        await self._redis.delete(f"{self._SESSION_PREFIX}{session_id}:messages")
-        await self._redis.delete(
+        await self.redis.delete(f"{self._SESSION_PREFIX}{session_id}:messages")
+        await self.redis.delete(
             _session_lock_key(self._SESSION_PREFIX, session_id),
             _session_owner_heartbeat_key(self._SESSION_PREFIX, session_id),
         )
-        await self._redis.delete(f"{self._SESSION_PREFIX}{session_id}:activity")
+        await self.redis.delete(f"{self._SESSION_PREFIX}{session_id}:activity")
 
     async def acquire_cutover_replay_barrier(
         self,
@@ -677,7 +683,7 @@ class RedisBroker:
         acquired_session_ids: list[str] = []
         try:
             for session_id in session_ids:
-                acquired = await self._redis.set(
+                acquired = await self.redis.set(
                     _session_cutover_replay_barrier_key(
                         self._SESSION_PREFIX,
                         session_id,
@@ -689,6 +695,12 @@ class RedisBroker:
                 if not acquired:
                     raise RuntimeError("Team Session cutover replay is already active")
                 acquired_session_ids.append(session_id)
+        except asyncio.CancelledError:
+            await self.release_cutover_replay_barrier(
+                tuple(acquired_session_ids),
+                token,
+            )
+            raise
         except BaseException:
             await self.release_cutover_replay_barrier(
                 tuple(acquired_session_ids),
@@ -704,7 +716,7 @@ class RedisBroker:
     ) -> None:
         """Release only the barrier acquired by this replay process."""
         for session_id in session_ids:
-            await self._redis.eval(
+            await self.redis.eval(
                 _RELEASE_CUTOVER_BARRIER_SCRIPT,
                 1,
                 _session_cutover_replay_barrier_key(
@@ -721,7 +733,7 @@ class RedisBroker:
     ) -> bool:
         """Renew every exact barrier token without adopting another replay."""
         for session_id in session_ids:
-            renewed = await self._redis.eval(
+            renewed = await self.redis.eval(
                 _RENEW_CUTOVER_BARRIER_SCRIPT,
                 1,
                 _session_cutover_replay_barrier_key(

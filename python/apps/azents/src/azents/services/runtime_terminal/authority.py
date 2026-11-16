@@ -1,5 +1,6 @@
 """Durable and volatile authority resolution for Public Runtime Terminal."""
 
+import asyncio
 import dataclasses
 from datetime import datetime
 
@@ -205,6 +206,8 @@ class DatabaseRuntimeTerminalAuthorityResolver:
                     ),
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except SessionWorkingFolderBindingError:
             return dataclasses.replace(
                 base,

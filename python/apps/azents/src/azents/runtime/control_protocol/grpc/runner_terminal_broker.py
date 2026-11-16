@@ -142,8 +142,8 @@ class CoordinatedRuntimeRunnerTerminalBroker(RuntimeRunnerTerminalBroker):
         monotonic_clock: Callable[[], float],
     ) -> None:
         """Initialize the coordination-backed Terminal broker."""
-        self._store = store
-        self._clock = clock
+        self.store = store
+        self.clock = clock
         self._output_rate_limiter = _OutputRateLimiter(monotonic_clock)
 
     async def connect(
@@ -154,7 +154,7 @@ class CoordinatedRuntimeRunnerTerminalBroker(RuntimeRunnerTerminalBroker):
         connected_at: datetime,
     ) -> RuntimeRunnerTerminalStream:
         """Atomically verify Terminal, desired, Runner, nonce, and stream evidence."""
-        result = await self._store.register_runner_stream(
+        result = await self.store.register_runner_stream(
             registration,
             desired_generation=authority.desired_generation,
             connected_at=connected_at,
@@ -166,10 +166,10 @@ class CoordinatedRuntimeRunnerTerminalBroker(RuntimeRunnerTerminalBroker):
         ):
             raise RuntimeRunnerTerminalAdmissionError(_stream_error_code(result.status))
         return CoordinatedRuntimeRunnerTerminalStream(
-            store=self._store,
+            store=self.store,
             registration=registration,
             admission=result.value,
-            clock=self._clock,
+            clock=self.clock,
             output_rate_limiter=self._output_rate_limiter,
         )
 
@@ -187,10 +187,10 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
         output_rate_limiter: _OutputRateLimiter,
     ) -> None:
         """Initialize exact stream generation and resume cursors."""
-        self._store = store
+        self.store = store
         self._registration = registration
         self._accepted = admission.accepted
-        self._clock = clock
+        self.clock = clock
         self._output_rate_limiter = output_rate_limiter
         self._record_revision = admission.record.revision
         self._last_input_sent = self._accepted.next_input_sequence - 1
@@ -216,7 +216,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
             case RunnerTerminalOutputFrame(sequence=sequence, data=data):
                 await self._append_output(sequence=sequence, data=data)
             case RunnerTerminalInputAcknowledgement(sequence=sequence):
-                result = await self._store.acknowledge_input(
+                result = await self.store.acknowledge_input(
                     self.terminal_id,
                     runner_stream_generation=self.stream_generation,
                     sequence=sequence,
@@ -227,7 +227,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                 if sequence <= self._last_heartbeat_sequence:
                     await self._reject(RuntimeTerminalMutationStatus.SEQUENCE_REJECTED)
                     return
-                result = await self._store.heartbeat_runner_stream(
+                result = await self.store.heartbeat_runner_stream(
                     self.terminal_id,
                     runner_stream_generation=self.stream_generation,
                     heartbeat_at=self._now(),
@@ -241,7 +241,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                         )
                     )
             case RunnerTerminalExit(reason=reason, exit_code=exit_code):
-                result = await self._store.finalize_terminal(
+                result = await self.store.finalize_terminal(
                     self.terminal_id,
                     runner_stream_generation=self.stream_generation,
                     reason=reason,
@@ -252,7 +252,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                 await self._accept_or_reject(result)
                 self._closed = True
             case RunnerTerminalStreamError():
-                await self._store.request_termination(
+                await self.store.request_termination(
                     self.terminal_id,
                     reason=RunnerTerminalTerminationReason.PROTOCOL_VIOLATION,
                     requested_at=self._now(),
@@ -271,7 +271,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
         self._cleanup_completed = True
         self._closed = True
         current_time = self._now()
-        record = await self._store.get_terminal(
+        record = await self.store.get_terminal(
             self.terminal_id,
             current_time=current_time,
         )
@@ -279,7 +279,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
             record is not None
             and record.lifecycle is RuntimeTerminalLifecycle.TERMINATING
         ):
-            finalized = await self._store.finalize_terminal(
+            finalized = await self.store.finalize_terminal(
                 self.terminal_id,
                 runner_stream_generation=self.stream_generation,
                 reason=(
@@ -292,7 +292,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
             )
             if finalized.status is RuntimeTerminalMutationStatus.APPLIED:
                 return
-        await self._store.detach_runner_stream(
+        await self.store.detach_runner_stream(
             self.terminal_id,
             runner_stream_generation=self.stream_generation,
             detached_at=current_time,
@@ -316,7 +316,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
             amount=len(data),
         )
         while not self._closed:
-            result = await self._store.append_output(
+            result = await self.store.append_output(
                 self.terminal_id,
                 runner_stream_generation=self.stream_generation,
                 sequence=sequence,
@@ -324,7 +324,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                 accepted_at=self._now(),
             )
             if result.status is RuntimeTerminalMutationStatus.CAPACITY_EXCEEDED:
-                record = await self._store.get_terminal(
+                record = await self.store.get_terminal(
                     self.terminal_id,
                     current_time=self._now(),
                 )
@@ -332,7 +332,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                     await self._reject(RuntimeTerminalMutationStatus.NOT_FOUND)
                     return
                 self._record_revision = record.revision
-                changed = await self._store.wait_for_change(
+                changed = await self.store.wait_for_change(
                     self.terminal_id,
                     after_revision=record.revision,
                     timeout_seconds=_CHANGE_WAIT_SECONDS,
@@ -352,7 +352,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                 yield self._outbound.get_nowait()
             if self._closed:
                 return
-            record = await self._store.get_terminal(
+            record = await self.store.get_terminal(
                 self.terminal_id,
                 current_time=self._now(),
             )
@@ -376,7 +376,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
                 if outbound is not None:
                     yield outbound
                 continue
-            inputs = await self._store.read_inputs(
+            inputs = await self.store.read_inputs(
                 self.terminal_id,
                 runner_stream_generation=self.stream_generation,
                 after_sequence=self._last_input_sent,
@@ -411,7 +411,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
     ) -> RunnerTerminalControlFrame | None:
         outbound_task = asyncio.create_task(self._outbound.get())
         change_task = asyncio.create_task(
-            self._store.wait_for_change(
+            self.store.wait_for_change(
                 self.terminal_id,
                 after_revision=self._record_revision,
                 timeout_seconds=_CHANGE_WAIT_SECONDS,
@@ -458,7 +458,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
     async def _reject(self, status: RuntimeTerminalMutationStatus) -> None:
         code = _stream_error_code(status)
         if code is RunnerTerminalStreamErrorCode.PROTOCOL_VIOLATION:
-            await self._store.request_termination(
+            await self.store.request_termination(
                 self.terminal_id,
                 reason=RunnerTerminalTerminationReason.PROTOCOL_VIOLATION,
                 requested_at=self._now(),
@@ -467,7 +467,7 @@ class CoordinatedRuntimeRunnerTerminalStream(RuntimeRunnerTerminalStream):
         self._closed = True
 
     def _now(self) -> datetime:
-        now = self._clock()
+        now = self.clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("Runtime Terminal broker clock must be timezone-aware")
         return now

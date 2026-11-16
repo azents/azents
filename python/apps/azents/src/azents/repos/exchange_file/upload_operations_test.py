@@ -1059,6 +1059,9 @@ async def test_concurrent_finalize_and_cleanup_claims_have_one_exact_winner(
             try:
                 yield session
                 await session.write_session.commit()
+            except asyncio.CancelledError:
+                await session.write_session.rollback()
+                raise
             except BaseException:
                 await session.write_session.rollback()
                 raise

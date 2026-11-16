@@ -1,5 +1,6 @@
 """Root-only External Channel Action toolkit."""
 
+import asyncio
 import json
 import logging
 import textwrap
@@ -559,6 +560,8 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         provider_delivery_service=provider_delivery_service,
                         resolve_runtime_target=resolve_runtime_target,
                     )
+            except asyncio.CancelledError:
+                raise
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
             return json.dumps(
@@ -584,6 +587,8 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     agent_id=self.agent_id,
                     binding_id=args.binding,
                 )
+            except asyncio.CancelledError:
+                raise
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
             return json.dumps(
@@ -635,6 +640,8 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     transfer_service=context.transfer_service,
                     transfer_target=transfer_target,
                 )
+            except asyncio.CancelledError:
+                raise
             except ExternalChannelFileTransferError as error:
                 _LOGGER.warning(
                     "External Channel file download failed",

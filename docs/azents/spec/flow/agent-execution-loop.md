@@ -1152,6 +1152,13 @@ Failed or cancelled acquisition, confirmation, consumption or unsubscribe still
 closes the handle; an interrupted unsubscribe cannot bypass connection release.
 Subscription confirmation remains the barrier before exposing the live iterator.
 
+Transient child tasks have the same explicit lifetime ownership. The Worker's
+receive-versus-shutdown race cancels and joins both children on every exit.
+The Engine adapter cancels and joins each queue getter even when its consumer is
+cancelled or closes the generator; it separately drains the execution task and
+preserves the user-stop cancellation reason. Propagating cancellation cannot leave
+an unowned broker receive, shutdown waiter or queue getter running.
+
 `ContentDelta`, `ReasoningDelta`, and `ProviderToolActivityChanged` are live projection events only.
 The worker coalesces each Session's text and reasoning deltas for at most 75 milliseconds or 96
 characters before applying a batch to the Redis live projection and emitting

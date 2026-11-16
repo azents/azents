@@ -1,5 +1,6 @@
 """Runtime Provider enrollment v1 Public API."""
 
+import asyncio
 import datetime
 from textwrap import dedent
 from typing import Annotated, Protocol
@@ -63,6 +64,8 @@ async def exchange_credential(
             grant_id=request_body.grant_id,
             source_address=source_address,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderEnrollmentRateLimited as exc:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -76,6 +79,8 @@ async def exchange_credential(
             credential_expires_at=None,
             source_address=source_address,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderEnrollmentUnavailable:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

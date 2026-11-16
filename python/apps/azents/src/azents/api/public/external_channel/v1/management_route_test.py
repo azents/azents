@@ -1072,6 +1072,31 @@ def test_multi_route_removal_rejects_stale_generation() -> None:
     }
 
 
+def test_multi_channel_default_clear_rejects_stale_generation() -> None:
+    """The route maps the service's generation fence to conflict without mutation."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.clear_multi_channel_default.side_effect = (
+        ExternalChannelManagementGenerationChanged(
+            "The Multi App changed. Reload it before retrying the operation."
+        )
+    )
+    response = _client(service).request(
+        "DELETE",
+        "/external-channel/v1/workspaces/ws/external-channels/slack/multi/"
+        "multi-connection-1/channel-defaults/channel-1",
+        json={"expected_generation": "2026-07-25T00:00:00Z"},
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "The Multi App changed. Reload it before retrying the operation."
+    }
+    arguments = service.clear_multi_channel_default.await_args
+    assert arguments is not None
+    assert arguments.kwargs["expected_generation"] == datetime.datetime(
+        2026, 7, 25, tzinfo=datetime.UTC
+    )
+
+
 def test_multi_catalog_pagination_and_cross_workspace_not_found() -> None:
     """Catalog pages preserve parameters and foreign Multi Apps remain opaque."""
     service = AsyncMock(spec=ExternalChannelManagementService)

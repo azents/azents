@@ -1,5 +1,6 @@
 """Binding-specific External Channel Work Toolkit State."""
 
+import asyncio
 import datetime
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -209,6 +210,8 @@ class ExternalChannelWorkStateStore:
                         expected_version=expected_version,
                     ),
                 )
+            except asyncio.CancelledError:
+                raise
             except ToolkitStateConflictError as error:
                 last_error = error
                 continue
@@ -270,6 +273,8 @@ class ExternalChannelWorkStateStore:
                         expected_version=record.version,
                     ),
                 )
+            except asyncio.CancelledError:
+                raise
             except ToolkitStateConflictError as error:
                 last_error = error
                 continue

@@ -1,5 +1,6 @@
 """Completed Runtime infrastructure Profile administrative database operations."""
 
+import asyncio
 import dataclasses
 from typing import Annotated, NamedTuple
 
@@ -215,6 +216,8 @@ class RuntimeProfileAdminOperationsRepository:
                         actor_user_id=actor_user_id,
                     ),
                 )
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 raise ProfileAdminOperationUnavailable(
                     code="profile_name_conflict",
@@ -299,6 +302,8 @@ class RuntimeProfileAdminOperationsRepository:
                     expected_version=expected_version,
                     replacement=replacement,
                 )
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 raise ProfileAdminOperationUnavailable(
                     code="profile_name_conflict",
@@ -412,6 +417,8 @@ class RuntimeProfileAdminOperationsRepository:
                     profile_id=profile_id,
                     expected_version=expected_version,
                 )
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 raise ProfileAdminOperationUnavailable(
                     code="profile_delete_conflict",

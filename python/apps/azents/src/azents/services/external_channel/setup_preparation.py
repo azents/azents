@@ -41,7 +41,10 @@ from azents.services.external_channel.provider_control import (
 from azents.services.external_channel.setup_preparation_job import (
     build_setup_preparation_job,
 )
-from azents.utils.logging import sanitized_exception_info
+from azents.utils.logging import (
+    content_safe_exception_diagnostic,
+    sanitized_exception_info,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +92,17 @@ class ExternalChannelSetupPreparationService:
             )
         except asyncio.CancelledError:
             raise
-        except JobRuntimeClosedError:
+        except JobRuntimeClosedError as error:
+            diagnostic = content_safe_exception_diagnostic(
+                error, message="Setup preparation Runtime unavailable"
+            )
             logger.warning(
                 "Setup preparation Runtime submission is unavailable",
-                extra={"external_channel_setup_claim_id": claim_id},
+                exc_info=diagnostic.exc_info,
+                extra={
+                    "external_channel_setup_claim_id": claim_id,
+                    **diagnostic.log_fields(),
+                },
             )
 
     async def recover(self, *, now: datetime.datetime, limit: int) -> None:

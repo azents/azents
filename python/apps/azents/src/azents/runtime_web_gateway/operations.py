@@ -828,6 +828,8 @@ async def _run_close(
     try:
         async with asyncio.timeout(timeout_seconds):
             await close(CloseReason.SERVICE_DRAIN)
+    except asyncio.CancelledError:
+        raise
     except TimeoutError:
         return (
             RuntimeWebDrainCallbackFailure(

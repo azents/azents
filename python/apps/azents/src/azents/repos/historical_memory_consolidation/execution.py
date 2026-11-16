@@ -1,5 +1,6 @@
 """Memory domain association and atomic submission over common execution state."""
 
+import asyncio
 import datetime
 from dataclasses import dataclass
 from typing import Annotated
@@ -1199,6 +1200,8 @@ class MemoryExecutionRepository:
                 if result is None:
                     raise RuntimeError("Memory acceptance outcome is missing.")
             return result
+        except asyncio.CancelledError:
+            raise
         except MemoryExecutionAuthorityError:
             binding = await self.load_binding(principal.owner.session_id)
             if (

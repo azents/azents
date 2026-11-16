@@ -1,5 +1,6 @@
 """Runtime-native edit tool."""
 
+import asyncio
 import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
@@ -110,6 +111,8 @@ def make_edit_tool(
                 ),
                 admission_authority=target.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError as exc:
             raise FunctionToolError(str(exc)) from None
         except (

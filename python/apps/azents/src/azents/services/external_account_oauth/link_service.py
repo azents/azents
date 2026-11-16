@@ -1,5 +1,6 @@
 """Authenticated provider identity account-link OAuth orchestration."""
 
+import asyncio
 import datetime
 from dataclasses import dataclass
 from typing import Annotated
@@ -134,11 +135,15 @@ class ExternalAccountOAuthService:
             raise _claim_failure(failure_code)
         try:
             runtime = await self.settings.resolve_runtime(provider)
+        except asyncio.CancelledError:
+            raise
         except ExternalAccountOAuthProviderUnavailable:
             try:
                 current_callback = await self.settings.resolve_callback_context(
                     provider
                 )
+            except asyncio.CancelledError:
+                raise
             except ExternalAccountOAuthProviderUnavailable:
                 current_callback = None
             if current_callback is not None and (
@@ -176,6 +181,8 @@ class ExternalAccountOAuthService:
                 redirect_uri=runtime.redirect_uri,
                 code_verifier=self.attempts.decrypt_pkce_verifier(attempt),
             )
+        except asyncio.CancelledError:
+            raise
         except ExternalAccountOAuthProviderError:
             await self.attempts.fail(
                 attempt_id=attempt.id,

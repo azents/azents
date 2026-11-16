@@ -217,6 +217,11 @@ async def test_browser_source_setup_deadline_bounds_authority_and_initial_open(
     try:
         async with asyncio.timeout(4):
             await channel.channel_ready()
+    except asyncio.CancelledError:
+        await channel.close()
+        await server.stop(None)
+        await plane.close()
+        raise
     except BaseException:
         await channel.close()
         await server.stop(None)

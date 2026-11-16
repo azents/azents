@@ -1,5 +1,6 @@
 """Completed Worker model profile, quota and preparation atomic operations."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -351,6 +352,8 @@ class WorkerExecutorModelOperationRepository:
                         raise CanonicalExecutionWorkDriftError(
                             "Transferred reservation changed"
                         )
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exc:
                 resulting_operation = exc.operation
                 exhausted = True
@@ -660,6 +663,8 @@ class WorkerExecutorModelOperationRepository:
                     session_id=session_id,
                     reservation=locked_session.primary_model_reservation,
                 )
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exc:
                 exhausted_state = ModelOperationState(
                     foreground=exc.operation,
@@ -713,6 +718,8 @@ class WorkerExecutorModelOperationRepository:
                     session_id=None,
                     reservation=None,
                 )
+            except asyncio.CancelledError:
+                raise
             except ModelOperationChainExhaustedError as exc:
                 exhausted_state = ModelOperationState(
                     foreground=selection.operation,
@@ -904,6 +911,8 @@ class WorkerExecutorModelOperationRepository:
                         session_id=None,
                         reservation=None,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except ModelOperationChainExhaustedError as exc:
                     await self.agent_run_repository.update(
                         session,

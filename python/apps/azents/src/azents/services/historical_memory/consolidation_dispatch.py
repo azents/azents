@@ -54,6 +54,8 @@ class ConsolidationDispatchAdmission:
                 if await self.check_stop():
                     return True
                 await self.repository.authorize_execution(self.principal)
+            except asyncio.CancelledError:
+                raise
             except (
                 CanonicalExecutionOwnerGenerationStaleError,
                 MemoryExecutionAuthorityError,

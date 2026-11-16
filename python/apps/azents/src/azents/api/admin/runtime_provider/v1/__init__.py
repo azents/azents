@@ -1,5 +1,6 @@
 """Runtime Provider inventory v1 Admin API."""
 
+import asyncio
 from textwrap import dedent
 from typing import Annotated, Any, NoReturn
 
@@ -73,6 +74,8 @@ async def _list_infrastructure_profiles(
             profile_kind=profile_kind,
             include_disabled=include_disabled,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileListResponse(
@@ -100,6 +103,8 @@ async def _get_infrastructure_profile_deletion_impact(
             offset=offset,
             limit=limit,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileDeletionImpactResponse.convert_from(impact)
@@ -122,6 +127,8 @@ async def _delete_infrastructure_profile(
             expected_version=request_body.expected_version,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileDeleteResponse(
@@ -188,6 +195,8 @@ async def create_pod_profile(
             terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
@@ -216,6 +225,8 @@ async def create_container_profile(
             terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
@@ -235,6 +246,8 @@ async def get_pod_profile(
             profile_id,
             profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
@@ -254,6 +267,8 @@ async def get_container_profile(
             profile_id,
             profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
@@ -349,6 +364,8 @@ async def get_workspace_profile_admin_detail(
     """Inspect one Workspace Runtime Profile with System Admin authority."""
     try:
         detail = await service.get_workspace_profile_admin_detail(handle, profile_id)
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return AdminWorkspaceRuntimeProfileDetailResponse.convert_from(detail)
@@ -377,6 +394,8 @@ async def replace_pod_profile(
             terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
@@ -405,6 +424,8 @@ async def replace_container_profile(
             terminal_enabled=request_body.terminal_enabled,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
@@ -428,6 +449,8 @@ async def _create_infrastructure_profile_recreation(
             concurrency_limit=request_body.concurrency_limit,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeRecreationUnavailable as error:
         _raise_recreation_unavailable(error)
     return RuntimeRecreationOperationResponse.convert_operation(operation)
@@ -498,6 +521,8 @@ async def create_provider_recreation(
             concurrency_limit=request_body.concurrency_limit,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeRecreationUnavailable as error:
         _raise_recreation_unavailable(error)
     return RuntimeRecreationOperationResponse.convert_operation(operation)
@@ -518,6 +543,8 @@ async def get_platform_recreation(
             offset=offset,
             limit=limit,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeRecreationUnavailable as error:
         _raise_recreation_unavailable(error)
     return RuntimeRecreationOperationResponse.convert_projection(projection)
@@ -532,6 +559,8 @@ async def list_contracts(
     """List immutable Provider capability advertisement history."""
     try:
         contracts = await service.list_contracts(provider_id)
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderContractUnavailable as error:
         _raise_contract_unavailable(error)
     return RuntimeProviderContractListResponse(
@@ -548,6 +577,8 @@ async def list_auth_bindings(
     """List secret-safe authentication bindings for one Provider."""
     try:
         bindings = await service.list_bindings(provider_id)
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderBindingAdminUnavailable as error:
         _raise_binding_unavailable(error)
     return RuntimeProviderAuthenticationBindingListResponse(
@@ -578,6 +609,8 @@ async def create_auth_binding(
             config=request_body.config,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderBindingAdminUnavailable as error:
         _raise_binding_unavailable(error)
     return RuntimeProviderAuthenticationBindingResponse.convert_from(binding)
@@ -592,6 +625,8 @@ async def get_auth_binding(
     """Inspect one secret-safe authentication binding."""
     try:
         binding = await service.get_binding(binding_id)
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderBindingAdminUnavailable as error:
         _raise_binding_unavailable(error)
     return RuntimeProviderAuthenticationBindingResponse.convert_from(binding)
@@ -613,6 +648,8 @@ async def rotate_auth_binding(
             expires_at=request_body.expires_at,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderBindingAdminUnavailable as error:
         _raise_binding_unavailable(error)
     return RuntimeProviderAuthenticationBindingRotateResponse.convert_from(rotation)
@@ -634,6 +671,8 @@ async def revoke_auth_binding(
             reason=request_body.reason,
             actor_user_id=system_admin.user_id,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderBindingAdminUnavailable as error:
         _raise_binding_unavailable(error)
     return RuntimeProviderAuthenticationBindingResponse.convert_from(binding)
@@ -654,6 +693,8 @@ async def list_auth_binding_audit_events(
             offset=offset,
             limit=limit,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderBindingAdminUnavailable as error:
         _raise_binding_unavailable(error)
     return RuntimeProviderAuthenticationBindingAuditListResponse(
@@ -684,6 +725,8 @@ async def get_runtime_provider(
     """Inspect one durable Runtime Provider."""
     try:
         provider = await service.get_provider(provider_id)
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderAdminUnavailable as error:
         _raise_unavailable(error)
     return RuntimeProviderResponse.convert_from(provider)
@@ -698,6 +741,8 @@ async def get_provider_diagnostics(
     """Inspect warning-only diagnostics from the active Provider connection."""
     try:
         projection = await service.get_operational_diagnostics(provider_id)
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderAdminUnavailable as error:
         _raise_unavailable(error)
     return RuntimeProviderOperationalDiagnosticsResponse.convert_from(projection)
@@ -718,6 +763,8 @@ async def update_runtime_provider_policy(
             lifecycle_state=request_body.lifecycle_state,
             availability_mode=request_body.availability_mode,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderAdminUnavailable as error:
         _raise_unavailable(error)
     return RuntimeProviderResponse.convert_from(provider)
@@ -736,6 +783,8 @@ async def replace_runtime_provider_availability(
             provider_id,
             workspace_ids=request_body.workspace_ids,
         )
+    except asyncio.CancelledError:
+        raise
     except RuntimeProviderAdminUnavailable as error:
         _raise_unavailable(error)
     return RuntimeProviderResponse.convert_from(provider)

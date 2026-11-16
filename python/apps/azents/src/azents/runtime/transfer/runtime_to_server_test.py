@@ -304,7 +304,7 @@ class _LeaseFailureCoordinator(_Coordinator):
         self.calls.append("renew")
         self.renewals += 1
         if self.renewals > 1:
-            raise OSError("consumer lease renewal failed")
+            raise OSError("consumer lease renewal failed: provider-secret-canary")
         return _status(6, request.identity, CoordinatorTransferPhase.CONSUMING)
 
 
@@ -1022,7 +1022,9 @@ async def test_long_publication_renews_consumer_lease_until_callback_finishes() 
 
 
 @pytest.mark.asyncio
-async def test_lease_loss_cancels_publication_before_its_commit_boundary() -> None:
+async def test_lease_loss_cancels_publication_before_its_commit_boundary(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A failed renewal cancels the cooperative publisher before it commits."""
     coordinator = _LeaseFailureCoordinator()
     callback = _CancellableCallback([])
@@ -1038,6 +1040,19 @@ async def test_lease_loss_cancels_publication_before_its_commit_boundary() -> No
 
     assert callback.cancelled is True
     assert callback.uploads == []
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "Runtime upload consumer lease renewal failed"
+    ]
+    assert len(records) == 1
+    assert records[0].exc_info is not None
+    assert records[0].__dict__["error_type"] == "OSError"
+    assert any(
+        frame["function"] == "renew_consumer_lease"
+        for frame in records[0].__dict__["error_frames"]
+    )
+    assert "provider-secret-canary" not in caplog.text
 
 
 def _rpc_error(code: StatusCode) -> AioRpcError:

@@ -1,5 +1,6 @@
 """Database-owned aggregate selection, filtering and boundary CAS operations."""
 
+import asyncio
 import dataclasses
 import datetime
 from collections.abc import AsyncIterator
@@ -58,6 +59,8 @@ async def _authority_session[SessionT: ReadSession](
     try:
         async with manager() as session:
             yield session
+    except asyncio.CancelledError:
+        raise
     except OperationalError as error:
         if not isinstance(
             error.orig,
@@ -307,6 +310,8 @@ class MemoryContextSnapshotRepository:
                     expected_version=None if record is None else record.version,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except ToolkitStateConflictError:
             return False
         return True

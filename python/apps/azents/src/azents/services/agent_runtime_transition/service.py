@@ -1,5 +1,6 @@
 """Explicit Agent Runtime addition through one completed atomic repository owner."""
 
+import asyncio
 import dataclasses
 from typing import Annotated
 
@@ -44,6 +45,8 @@ class AgentRuntimeTransitionService:
                     idempotency_key=request.idempotency_key,
                 )
             )
+        except asyncio.CancelledError:
+            raise
         except AgentRuntimeAdditionRejected as error:
             raise AgentRuntimeAdditionUnavailable(
                 code=error.code, message=str(error)

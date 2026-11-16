@@ -1,5 +1,6 @@
 """Completed repository-owned Session model availability and reservation operations."""
 
+import asyncio
 import dataclasses
 from typing import Annotated
 
@@ -245,6 +246,8 @@ class SessionModelAvailabilityRepository:
                 session_id=session_id,
                 user_id=user_id,
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError:
             return None
         return await self._context(db, session=session, agent_id=agent_id)
@@ -264,6 +267,8 @@ class SessionModelAvailabilityRepository:
                 session_id=session_id,
                 user_id=user_id,
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError:
             return None
         return await self._context(db, session=session, agent_id=agent_id)

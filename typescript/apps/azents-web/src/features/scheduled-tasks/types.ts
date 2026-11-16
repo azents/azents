@@ -9,15 +9,23 @@ export type ScheduledTasksState =
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; tasks: ScheduledTaskResponse[] };
 
+export type ScheduledTaskCycleState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "LOADED"; cycle: ScheduledTaskCurrentCycleResponse | null };
+
+export type ScheduledTaskBindingsState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string; bindings: ManagedBinding[] }
+  | { type: "LOADED"; bindings: ManagedBinding[] };
+
 export type ScheduledTaskDetailState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
   | {
       type: "LOADED";
       task: ScheduledTaskResponse;
-      cycle: ScheduledTaskCurrentCycleResponse | null;
-      cycleLoading: boolean;
-      cycleError: string | null;
+      cycleState: ScheduledTaskCycleState;
     };
 
 export interface ScheduledTaskDraft {
@@ -47,9 +55,7 @@ export type ScheduledTaskFormState =
       type: "CREATE" | "EDIT";
       taskId: string | null;
       draft: ScheduledTaskDraft;
-      bindings: ManagedBinding[];
-      bindingsLoading: boolean;
-      bindingsError: string | null;
+      bindingsState: ScheduledTaskBindingsState;
       error: ScheduledTaskFormError | null;
     };
 

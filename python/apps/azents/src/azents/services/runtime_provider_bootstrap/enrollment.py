@@ -1,5 +1,6 @@
 """Bootstrap-owned Runtime Provider credential enrollment."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -74,6 +75,8 @@ class RuntimeProviderBootstrapEnrollmentService:
                 authentication = await self.enrollment_service.authenticate_credential(
                     secret=existing_secret
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeProviderCredentialUnavailable:
                 pass
             else:

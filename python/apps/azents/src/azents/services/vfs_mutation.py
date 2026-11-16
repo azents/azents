@@ -1,5 +1,6 @@
 """Optional native mutation contracts, separate from complete read-only backends."""
 
+import asyncio
 import dataclasses
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
@@ -268,6 +269,8 @@ class VfsMutationRouter[PrincipalT = VfsReadContext]:
     ) -> VfsMutationResult:
         try:
             await self.authority_validator.validate(admitted.principal)
+        except asyncio.CancelledError:
+            raise
         except VfsReadError as error:
             raise VfsMutationError(error.code, error.message) from None
         return await admitted.backend.mutate(

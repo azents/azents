@@ -1,5 +1,6 @@
 """Completed database operations for external account linking."""
 
+import asyncio
 import datetime
 import json
 from collections.abc import Awaitable, Callable
@@ -284,6 +285,8 @@ class ExternalAccountLinkRepository:
                     identity=identity,
                     now=now,
                 )
+            except asyncio.CancelledError:
+                raise
             except DBAPIError as error:
                 if _is_retryable(error) and transaction_attempt + 1 < (
                     _MAX_TRANSACTION_ATTEMPTS
@@ -451,6 +454,8 @@ class ExternalAccountLinkRepository:
                     _link_view(link, None, ExternalAccountLinkState.ACTIVE),
                     None,
                 )
+        except asyncio.CancelledError:
+            raise
         except ExternalAccountLinkUnavailable:
             await self._mark_oauth_attempt_failed(
                 attempt_id=attempt_id,
@@ -478,6 +483,8 @@ class ExternalAccountLinkRepository:
                 async with self.session_manager() as session:
                     await _set_lock_timeout(session)
                     return await operation(session)
+            except asyncio.CancelledError:
+                raise
             except IntegrityError as error:
                 if _sqlstate(error) == "23505":
                     raise ExternalAccountLinkConflict from error

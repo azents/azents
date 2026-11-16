@@ -1105,6 +1105,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 )
             try:
                 await resolver.require(capability)
+            except asyncio.CancelledError:
+                raise
             except RuntimeCapabilityDeniedError as exc:
                 raise FunctionToolError(
                     "Runtime capability is unavailable.",
@@ -1128,6 +1130,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 return
             try:
                 await resolver.require(capability)
+            except asyncio.CancelledError:
+                raise
             except RuntimeCapabilityDeniedError:
                 return
             await original_cancel_handler(request)
@@ -1237,6 +1241,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         capability_snapshot=capability_resolver.snapshot,
                         runtime_target=runtime,
                     )
+                except asyncio.CancelledError:
+                    raise
                 except (
                     RuntimeCapabilityDeniedError,
                     SessionWorkingFolderBindingError,
@@ -1256,6 +1262,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                     await capability_resolver.require(
                         RuntimeCapability.RUNTIME_TRANSFER
                     )
+                except asyncio.CancelledError:
+                    raise
                 except RuntimeCapabilityDeniedError as exc:
                     raise FunctionToolError(
                         "Browser image transfer capability is unavailable."
@@ -1556,6 +1564,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             return None
         try:
             await resolver.require(RuntimeCapability.PROCESS_EXECUTION)
+        except asyncio.CancelledError:
+            raise
         except RuntimeCapabilityDeniedError as exc:
             raise FunctionToolError(
                 "Runtime capability is unavailable.",
@@ -1662,6 +1672,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 capability_snapshot=resolver.snapshot,
                 runtime_target=runtime_target,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeCapabilityDeniedError,
             SessionWorkingFolderBindingError,
@@ -2022,6 +2034,8 @@ class RuntimeRunnerFileStorage:
                 admission_authority=runtime.admission_authority,
             )
             return result.data
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
 
@@ -2055,6 +2069,8 @@ class RuntimeRunnerFileStorage:
                 end_character=result.end_character,
                 truncated=result.truncated,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             if exc.code == "FILE_READ_TEXT_DECODE_ERROR":
                 raise UnicodeDecodeError(
@@ -2098,6 +2114,8 @@ class RuntimeRunnerFileStorage:
                 admission_authority=runtime.admission_authority,
             )
             return result.data
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
         except (
@@ -2119,6 +2137,8 @@ class RuntimeRunnerFileStorage:
                 deadline_at=_runtime_file_operation_deadline(),
                 admission_authority=runtime.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
         except (
@@ -2149,6 +2169,8 @@ class RuntimeRunnerFileStorage:
                 deadline_at=_runtime_file_operation_deadline(),
                 admission_authority=runtime.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
         return RuntimeAttachment(
@@ -2175,6 +2197,8 @@ class RuntimeRunnerFileStorage:
                 + timedelta(seconds=30 + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS),
                 admission_authority=runtime.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
         if result.exit_code != 0:
@@ -2184,6 +2208,8 @@ class RuntimeRunnerFileStorage:
         """Return whether a Runtime path exists."""
         try:
             await self.stat(path, agent_id=agent_id)
+        except asyncio.CancelledError:
+            raise
         except FileNotFoundError:
             return False
         return True
@@ -2244,6 +2270,8 @@ class RuntimeRunnerFileStorage:
                 deadline_at=_runtime_file_operation_deadline(),
                 admission_authority=runtime.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
         except (
@@ -2312,6 +2340,8 @@ class RuntimeRunnerFileStorage:
                 deadline_at=_runtime_file_operation_deadline(),
                 admission_authority=runtime.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
         except (
@@ -2381,6 +2411,8 @@ class RuntimeRunnerFileStorage:
                 admission_authority=runtime.admission_authority,
             )
             return result.entries
+        except asyncio.CancelledError:
+            raise
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
         except (
@@ -2526,6 +2558,8 @@ def make_exec_command_tool(
                 await runtime_capability_resolver.require(
                     RuntimeCapability.RUNTIME_CREDENTIALS
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeCapabilityDeniedError as exc:
                 raise FunctionToolError(
                     "Runtime credential capability is unavailable.",
@@ -2552,6 +2586,8 @@ def make_exec_command_tool(
                 process_output_callback=_publish_process_output_delta(publish_event),
                 admission_authority=runtime.admission_authority,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -2624,6 +2660,8 @@ def make_write_stdin_tool(
                 deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
                 process_output_callback=_publish_process_output_delta(publish_event),
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -2688,6 +2726,8 @@ def _make_process_cancel_handler(
                 deadline_at=datetime.now(UTC)
                 + timedelta(seconds=_RUNTIME_PROCESS_TERMINATE_TIMEOUT_SECONDS),
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,

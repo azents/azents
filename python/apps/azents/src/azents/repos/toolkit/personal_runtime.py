@@ -1,5 +1,6 @@
 """Current personal source projection and short parent-serialized effect admission."""
 
+import asyncio
 import dataclasses
 
 import sqlalchemy as sa
@@ -101,6 +102,8 @@ class PersonalToolkitRuntimeRepository:
                 session_id=owner.session_id,
                 owner_generation=owner.owner_generation,
             )
+        except asyncio.CancelledError:
+            raise
         except CanonicalExecutionSnapshotError:
             raise PersonalToolkitExecutionDenied(Reason.ROOT_UNAVAILABLE) from None
         if canonical.workspace_id != workspace_id or canonical.agent_id != agent_id:
@@ -147,6 +150,8 @@ class PersonalToolkitRuntimeRepository:
                 workspace_id=target.workspace_id,
                 toolkit_id=target.toolkit_id,
             )
+        except asyncio.CancelledError:
+            raise
         except PersonalToolkitNotFound:
             raise PersonalToolkitExecutionDenied(Reason.SOURCE_UNAVAILABLE) from None
         subject = await self._subject(
@@ -206,6 +211,8 @@ class PersonalToolkitRuntimeRepository:
                 subject = await self._subject(
                     session, owner=owner, workspace_id=workspace_id, agent_id=agent_id
                 )
+            except asyncio.CancelledError:
+                raise
             except PersonalToolkitExecutionDenied:
                 return []
             candidates = list(
@@ -247,6 +254,8 @@ class PersonalToolkitRuntimeRepository:
                             toolkit, reservation.namespace, target
                         )
                     )
+            except asyncio.CancelledError:
+                raise
             except PersonalToolkitExecutionDenied:
                 continue
         return result

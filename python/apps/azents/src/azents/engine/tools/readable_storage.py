@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import re
 from collections.abc import Callable
@@ -67,6 +68,8 @@ class RoutedReadableStorage[ReadContextT = VfsReadContext]:
                     limit=limit,
                     encoding=encoding,
                 )
+            except asyncio.CancelledError:
+                raise
             except VfsReadError as exc:
                 if exc.code == "not_found":
                     raise FileNotFoundError(path) from None
@@ -96,6 +99,8 @@ class RoutedReadableStorage[ReadContextT = VfsReadContext]:
                     pattern,
                     exclude_patterns=exclude_patterns or (),
                 )
+            except asyncio.CancelledError:
+                raise
             except VfsReadError as exc:
                 raise ValueError(exc.message) from None
             return GlobResult(
@@ -150,6 +155,8 @@ class RoutedReadableStorage[ReadContextT = VfsReadContext]:
                     ),
                     max_scanned_bytes=(max_scanned_bytes or _DEFAULT_MAX_SCANNED_BYTES),
                 )
+            except asyncio.CancelledError:
+                raise
             except VfsReadError as exc:
                 raise ValueError(exc.message) from None
         storage = await self._runtime_storage(path)
@@ -184,6 +191,8 @@ class RoutedReadableStorage[ReadContextT = VfsReadContext]:
             await self.runtime_capability_resolver.require(
                 RuntimeCapability.RUNTIME_FILESYSTEM
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeCapabilityDeniedError as exc:
             raise FunctionToolError(
                 "Runtime capability is unavailable.",

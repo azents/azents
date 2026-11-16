@@ -25,6 +25,7 @@ Security principles:
   + Lifecycle 1-day provides backup cleanup
 """
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -33,6 +34,7 @@ import uuid
 from typing import ClassVar, Protocol
 
 from azcommon.infra.s3.service import S3Service
+from azcommon.logging import bind_extra
 
 from azents.core.upload_images import StoredImage
 
@@ -105,22 +107,17 @@ class UploadService:
     ) -> UploadTicket:
         """Issue Presigned PUT URL. First-pass filter with client-advertised values."""
         handler = self._handler(category)
+        L = bind_extra(logger, {"category": category, "owner_id": owner_id})
         if content_type not in handler.allowed_mime_types:
-            logger.warning(
+            L.warning(
                 "Upload ticket rejected: unsupported mime",
-                extra={
-                    "category": category,
-                    "owner_id": owner_id,
-                    "content_type": content_type,
-                },
+                extra={"content_type": content_type},
             )
             raise UploadValidationError(f"unsupported mime: {content_type}")
         if content_length <= 0 or content_length > handler.max_bytes:
-            logger.warning(
+            L.warning(
                 "Upload ticket rejected: content_length out of range",
                 extra={
-                    "category": category,
-                    "owner_id": owner_id,
                     "content_length": content_length,
                     "max_bytes": handler.max_bytes,
                 },
@@ -136,11 +133,9 @@ class UploadService:
             content_type=content_type,
             expires_in=UPLOAD_URL_EXPIRES,
         )
-        logger.info(
+        L.info(
             "Upload ticket issued",
             extra={
-                "category": category,
-                "owner_id": owner_id,
                 "upload_key": upload_key,
                 "content_type": content_type,
                 "content_length": content_length,
@@ -166,38 +161,29 @@ class UploadService:
         — prevents finalize injection from another owner.
         """
         expected_prefix = f"uploads/{category}/{owner_id}/"
+        L = bind_extra(
+            logger,
+            {"category": category, "owner_id": owner_id, "upload_key": upload_key},
+        )
         if not upload_key.startswith(expected_prefix):
-            logger.warning(
+            L.warning(
                 "Finalize rejected: upload_key scope mismatch",
-                extra={
-                    "category": category,
-                    "owner_id": owner_id,
-                    "upload_key": upload_key,
-                },
+                extra={},
             )
             raise UploadValidationError("invalid upload_key (scope mismatch)")
         handler = self._handler(category)
 
         body = await self.s3.download_bytes(bucket=self.bucket, key=upload_key)
         if body is None:
-            logger.warning(
+            L.warning(
                 "Finalize rejected: upload not found or expired",
-                extra={
-                    "category": category,
-                    "owner_id": owner_id,
-                    "upload_key": upload_key,
-                },
+                extra={},
             )
             raise UploadValidationError("upload not found or expired")
 
-        logger.info(
+        L.info(
             "Finalize started",
-            extra={
-                "category": category,
-                "owner_id": owner_id,
-                "upload_key": upload_key,
-                "body_bytes": len(body),
-            },
+            extra={"body_bytes": len(body)},
         )
         try:
             await handler.validate(body)
@@ -208,14 +194,9 @@ class UploadService:
                 s3=self.s3,
                 bucket=self.bucket,
             )
-            logger.info(
+            L.info(
                 "Finalize published",
-                extra={
-                    "category": category,
-                    "owner_id": owner_id,
-                    "upload_key": upload_key,
-                    "default_key": result.default.key,
-                },
+                extra={"default_key": result.default.key},
             )
             return result
         finally:
@@ -223,12 +204,10 @@ class UploadService:
             # Lifecycle backs up on failure.
             try:
                 await self.s3.delete(bucket=self.bucket, key=upload_key)
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                logger.exception(
+                L.exception(
                     "Failed to cleanup uploads/ object (Lifecycle will retry)",
-                    extra={
-                        "category": category,
-                        "owner_id": owner_id,
-                        "upload_key": upload_key,
-                    },
+                    extra={},
                 )

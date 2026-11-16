@@ -466,6 +466,10 @@ Helm keeps Admin Web public routing separate from internal API services. An oper
 `User.locale` stores one supported BCP 47 account locale: `en-US`, `ko-KR`,
 `ja-JP`, or `fr-FR`. Authenticated `GET /user/v1/me` returns it, and
 `PATCH /user/v1/me` replaces it with a validated supported value.
+The `users.locale` column uses the named PostgreSQL `user_locale` enum with an
+`en-US` default. Its migration preserves existing values and the default, rejects
+unsupported retained values before creating the enum, and never silently rewrites
+an account preference. Downgrade restores the string column without changing rows.
 
 Main Web server rendering resolves one locale without locale-prefixed routes in this
 order:

@@ -1,5 +1,6 @@
 """Agent service."""
 
+import asyncio
 import dataclasses
 import datetime
 from typing import Annotated, Literal, assert_never
@@ -956,6 +957,8 @@ class AgentService:
                 content_type=content_type,
                 content_length=content_length,
             )
+        except asyncio.CancelledError:
+            raise
         except UploadValidationError as err:
             return Failure(AvatarUploadRejected(message=str(err)))
         return Success(
@@ -997,6 +1000,8 @@ class AgentService:
                 upload_key=upload_key,
                 filename=filename,
             )
+        except asyncio.CancelledError:
+            raise
         except UploadValidationError as err:
             return Failure(AvatarUploadRejected(message=str(err)))
         update_result = await self.repository.update_avatar(
@@ -1162,6 +1167,8 @@ class AgentService:
                     agent.workspace_id,
                     agent.runtime_profile_id,
                 )
+            except asyncio.CancelledError:
+                raise
             except RuntimeProfileWorkspaceUnavailable as error:
                 runtime_profile_reason = error.code
             else:

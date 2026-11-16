@@ -155,6 +155,8 @@ async def test_competing_expected_revision_updates_have_one_winner(
                         operation=_operation(label, actor_id=fixture.agent_id),
                     )
                 return "updated"
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebRepositoryConflict:
                 return "conflict"
 
@@ -215,6 +217,8 @@ async def test_reset_expiration_preserves_revision_and_never_revives_off(
                         operation=_operation(key, actor_id=fixture.agent_id),
                     )
                 return "reset"
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebRepositoryConflict:
                 return "conflict"
 
@@ -284,6 +288,8 @@ async def test_competing_active_slot_admission_preserves_hard_quota(
                         active_agent_limit=1,
                     )
                 return "on"
+            except asyncio.CancelledError:
+                raise
             except RuntimeWebRepositoryQuotaExceeded as error:
                 assert error.scope == "agent_active"
                 return "quota"

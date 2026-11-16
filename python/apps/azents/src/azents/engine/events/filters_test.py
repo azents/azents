@@ -97,6 +97,8 @@ class _SessionManager:
         self.active_scopes += 1
         try:
             yield capability_session
+        except asyncio.CancelledError:
+            raise
         except BaseException:
             raise
         else:

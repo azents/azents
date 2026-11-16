@@ -192,6 +192,8 @@ class DiscordConversationHistoryClient:
                         limit=page_limit,
                     )
                 )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             raise _history_error(error) from error
         if len(payload) > page_limit:
@@ -399,6 +401,8 @@ class DiscordConversationHistoryClient:
                             "Discord history pagination cursor is invalid."
                         )
                     cursor = last_item_id
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKError as error:
             error = _history_error(error)
             if isinstance(error, DiscordHistoryCredentialsInvalid):

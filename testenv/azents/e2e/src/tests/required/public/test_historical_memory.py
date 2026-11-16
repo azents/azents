@@ -627,8 +627,11 @@ def test_agentic_consolidation_isolated_runtime_free_and_scope_only_result(
     openai_proxy_url: str,
     tmp_path: Path,
     postgres_container: PostgresContainer,
+    ordinary_model_stream_worker: object,
 ) -> None:
     """Common Worker submits independent scope results from supplied summaries."""
+    # Consolidation is ordinary file-tool work, not a fast watchdog deadline case.
+    del ordinary_model_stream_worker
     server, admin = azents_public_server_url, azents_admin_server_url
     setup = _setup(public_api_client, admin_api_client, server)
     other_email = f"historical-other-{unique()}@example.com"

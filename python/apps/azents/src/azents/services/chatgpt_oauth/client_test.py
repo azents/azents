@@ -1,10 +1,12 @@
 """ChatGPTOAuthClient tests."""
 
+import asyncio
 import base64
 import datetime
 import json
 
 import httpx
+import pytest
 from azcommon.result import Failure, Success
 
 from azents.core.chatgpt_oauth import (
@@ -14,6 +16,72 @@ from azents.core.chatgpt_oauth import (
 
 from .client import ChatGPTOAuthClient
 from .data import ProviderPending, ProviderRejected, ProviderUnavailable
+
+
+@pytest.mark.parametrize("refresh_value", [None, "", False, 0, [], {}])
+async def test_refresh_wire_preserves_falsy_token_fallback(
+    refresh_value: object,
+) -> None:
+    def respond(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"access_token": "new-access", "refresh_token": refresh_value}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        result = await ChatGPTOAuthClient(
+            http, token_url=CHATGPT_OAUTH_TOKEN_URL
+        ).refresh_tokens(
+            refresh_token="retained-refresh",
+            connection_method=ChatGPTOAuthConnectionMethod.DEVICE,
+        )
+    assert isinstance(result, Success)
+    assert result.value.refresh_token == "retained-refresh"
+
+
+async def test_invalid_wire_reason_does_not_include_provider_values() -> None:
+    def respond(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"access_token": "access-canary", "expires_in": "expiry-canary"}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        result = await ChatGPTOAuthClient(
+            http, token_url=CHATGPT_OAUTH_TOKEN_URL
+        ).refresh_tokens(
+            refresh_token="refresh-canary",
+            connection_method=ChatGPTOAuthConnectionMethod.DEVICE,
+        )
+    assert isinstance(result, Failure)
+    assert "canary" not in repr(result)
+
+
+@pytest.mark.parametrize("operation", ["device", "poll", "exchange", "refresh"])
+async def test_oauth_wire_propagates_cancellation(operation: str) -> None:
+    async def respond(_: httpx.Request) -> httpx.Response:
+        raise asyncio.CancelledError
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        client = ChatGPTOAuthClient(http, token_url=CHATGPT_OAUTH_TOKEN_URL)
+        with pytest.raises(asyncio.CancelledError):
+            match operation:
+                case "device":
+                    await client.request_device_user_code()
+                case "poll":
+                    await client.poll_device_authorization_code(
+                        device_auth_id="id", user_code="code"
+                    )
+                case "exchange":
+                    await client.exchange_authorization_code(
+                        code="code",
+                        code_verifier="verifier",
+                        redirect_uri="https://example.test",
+                        connection_method=ChatGPTOAuthConnectionMethod.DEVICE,
+                    )
+                case "refresh":
+                    await client.refresh_tokens(
+                        refresh_token="refresh",
+                        connection_method=ChatGPTOAuthConnectionMethod.DEVICE,
+                    )
 
 
 def _jwt_payload(payload: dict[str, object]) -> str:

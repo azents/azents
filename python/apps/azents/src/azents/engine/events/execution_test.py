@@ -132,6 +132,8 @@ async def _session_context() -> AsyncIterator[WriteSession]:
     session = _Session()
     try:
         yield ReadWriteSession(session)
+    except asyncio.CancelledError:
+        raise
     except Exception:
         await session.rollback()
         raise
@@ -148,6 +150,8 @@ def _session_manager_for(
     async def manager() -> AsyncIterator[WriteSession]:
         try:
             yield ReadWriteSession(session)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             await session.rollback()
             raise

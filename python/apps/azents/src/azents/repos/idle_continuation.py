@@ -1,5 +1,6 @@
 """Completed Session idle-continuation database operations."""
 
+import asyncio
 import dataclasses
 from collections.abc import Sequence
 from typing import Annotated
@@ -193,6 +194,8 @@ class IdleContinuationRepository:
                     admissions=admissions,
                     continuation_count=len(accepted),
                 )
+        except asyncio.CancelledError:
+            raise
         except _IdleContinuationConsumptionRejected:
             return IdleContinuationFinalization(
                 consumed=False,

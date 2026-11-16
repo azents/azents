@@ -86,6 +86,8 @@ class DiscordAttachmentByteTransport:
                 headers={"Accept-Encoding": "identity"},
                 follow_redirects=False,
             )
+        except asyncio.CancelledError:
+            raise
         except httpx.RequestError as error:
             raise DiscordFileTemporaryError(
                 "Discord attachment download is temporarily unavailable."
@@ -178,6 +180,8 @@ class DiscordAttachmentByteTransport:
                     content_length=declared_length,
                     chunks=chunks(),
                 )
+        except asyncio.CancelledError:
+            raise
         except httpx.RequestError as error:
             raise DiscordFileTemporaryError(
                 "Discord attachment download did not produce a complete response."
@@ -214,6 +218,8 @@ class DiscordChannelClient:
                         message_id=message_id,
                         attachment_id=attachment_id,
                     )
+        except asyncio.CancelledError:
+            raise
         except DiscordSDKCredentialsInvalid as error:
             raise DiscordFileCredentialsInvalid(
                 "Discord rejected the active Bot credential."

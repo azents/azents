@@ -1,5 +1,6 @@
 """Provider preparation and Session creation for ingress conversation owners."""
 
+import asyncio
 import dataclasses
 from typing import Annotated, Literal
 
@@ -115,6 +116,8 @@ class ExternalChannelIngressProvisioningRepository:
                     invocation=initial_invocation,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except ValueError as error:
             raise ExternalChannelIngressProvisioningError(
                 category="ownership_stale",

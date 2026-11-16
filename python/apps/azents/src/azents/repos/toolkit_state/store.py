@@ -1,5 +1,6 @@
 """Typed DB-only Toolkit State handles."""
 
+import asyncio
 from collections.abc import Callable
 from typing import Generic, TypeVar
 
@@ -91,6 +92,8 @@ class ToolkitStateHandle(Generic[ToolkitStateModelT, SessionT_co]):
             updated = mutator(current)
             try:
                 return await self._save(updated)
+            except asyncio.CancelledError:
+                raise
             except ToolkitStateConflictError as exc:
                 last_error = exc
 

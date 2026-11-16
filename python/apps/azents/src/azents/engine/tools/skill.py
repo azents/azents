@@ -1,5 +1,6 @@
 """Filesystem-backed Skill projection Toolkit."""
 
+import asyncio
 import datetime
 import hashlib
 import json
@@ -78,6 +79,7 @@ from azents.services.session_working_folder_binding import (
 )
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 from azents.transport.chat import chat_input_actions_updated_dump
+from azents.utils.logging import content_safe_exception_diagnostic
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +344,8 @@ class SkillProjectionService:
                 session_id=session_id,
                 runtime_target=runtime,
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeStorageError, SessionWorkingFolderBindingError:
             return await self.store.load(agent_id, session_id)
         projects = await self.project_reader.list_projects(session_id=session_id)
@@ -370,6 +374,8 @@ class SkillProjectionService:
                 session_id,
                 chat_input_actions_updated_dump(session_id),
             )
+        except asyncio.CancelledError:
+            raise
         except WebSocketBroadcastPublishError:
             logger.exception(
                 "Input action update broadcast failed",
@@ -455,6 +461,8 @@ class SkillProjectionService:
                 deadline_at=_runner_file_operation_deadline(),
                 admission_authority=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -494,6 +502,8 @@ class SkillProjectionService:
                 deadline_at=_runner_file_operation_deadline(),
                 admission_authority=None,
             )
+        except asyncio.CancelledError:
+            raise
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
@@ -718,6 +728,8 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
             await self.runtime_capability_resolver.require(
                 RuntimeCapability.FILESYSTEM_SKILLS
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeCapabilityDeniedError:
             return
         await self.projection_service.sync_latest(
@@ -861,6 +873,8 @@ def make_load_skill_tool(
                     uri=canonical_uri,
                 )
                 item = skill_item_from_vfs_entry(resolved.entry)
+            except asyncio.CancelledError:
+                raise
             except (VfsUriError, ValueError) as exc:
                 raise FunctionToolError(str(exc)) from None
             except VfsFileResolutionError as exc:
@@ -898,6 +912,8 @@ def make_load_skill_tool(
             await runtime_capability_resolver.require(
                 RuntimeCapability.FILESYSTEM_SKILLS
             )
+        except asyncio.CancelledError:
+            raise
         except RuntimeCapabilityDeniedError as exc:
             raise FunctionToolError(
                 "Filesystem Skill capability is unavailable.",
@@ -977,11 +993,17 @@ async def load_skill_projection_for_actions(
             running=run_state == AgentSessionRunState.RUNNING,
             active_run_id=active_run_id,
         )
+    except asyncio.CancelledError:
+        raise
     except VfsFileResolutionError as exc:
         if exc.code != "storage_unavailable":
             raise
+        diagnostic = content_safe_exception_diagnostic(
+            exc, message="Managed Skill VFS projection unavailable"
+        )
         logger.warning(
             "Managed Skill actions unavailable because the VFS projection is not ready",
+            exc_info=diagnostic.exc_info,
             extra={
                 "agent_id": agent_id,
                 "session_id": session_id,
@@ -989,6 +1011,7 @@ async def load_skill_projection_for_actions(
                 "run_state": run_state.value,
                 "active_run_id": active_run_id,
                 "vfs_error_code": exc.code,
+                **diagnostic.log_fields(),
             },
         )
         return filesystem

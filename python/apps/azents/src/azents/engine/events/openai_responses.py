@@ -536,6 +536,8 @@ class OpenAISDKResponsesWebSocketConnection:
         self._closed = True
         try:
             await self.connection.close()
+        except asyncio.CancelledError:
+            raise
         except OSError, WebSocketException:
             return
 
@@ -743,6 +745,8 @@ class OpenAIResponsesModelAdapter:
                         ),
                     )
                 return physical_response
+            except asyncio.CancelledError:
+                raise
             except OpenAIError as exc:
                 if not (
                     transport == "http"
@@ -1006,6 +1010,8 @@ class OpenAIResponsesModelAdapter:
         if connection is not None:
             try:
                 await connection.close()
+            except asyncio.CancelledError:
+                raise
             except OSError, WebSocketException:
                 return
 

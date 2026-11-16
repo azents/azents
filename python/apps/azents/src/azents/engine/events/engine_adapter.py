@@ -1295,14 +1295,15 @@ class AgentEngineAdapter:
                     if run_task.done() and emit_queue.empty():
                         break
                     get_task = asyncio.create_task(emit_queue.get())
-                    done, pending = await asyncio.wait(
-                        {run_task, get_task},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if get_task in pending:
-                        get_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await get_task
+                    try:
+                        done, _ = await asyncio.wait(
+                            {run_task, get_task},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                    finally:
+                        if not get_task.done():
+                            get_task.cancel()
+                        await asyncio.gather(get_task, return_exceptions=True)
                     if get_task in done:
                         yield get_task.result()
                     elif run_task in done and emit_queue.empty():

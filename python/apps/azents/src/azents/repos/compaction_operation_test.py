@@ -1,5 +1,6 @@
 """Completed compaction operation tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -54,6 +55,8 @@ class _SessionManager:
         self.active = True
         try:
             yield ReadWriteSession(session)
+        except asyncio.CancelledError:
+            raise
         except BaseException:
             raise
         else:

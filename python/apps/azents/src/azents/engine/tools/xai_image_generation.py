@@ -1,5 +1,6 @@
 """Auto-bound xAI Imagine image-generation client tool."""
 
+import asyncio
 import contextlib
 import dataclasses
 from collections.abc import Awaitable, Callable
@@ -102,6 +103,8 @@ class XaiImageGenerationExecutor:
             while True:
                 try:
                     return await client.generate(request, access_token=access_token)
+                except asyncio.CancelledError:
+                    raise
                 except XaiImagineAuthenticationError as exc:
                     if (
                         self.provider == LLMProvider.XAI_OAUTH
