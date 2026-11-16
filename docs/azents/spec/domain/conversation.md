@@ -361,12 +361,14 @@ embed an associated AgentRun summary and do not change when later run provenance
 Session inference snapshot's allowlisted physical provenance, including whether its current foreground
 route uses a fallback candidate; clients never infer it from Composer or Agent defaults.
 
-Each `turn_marker` with provider usage copies the exact Session inference snapshot and applied
-physical route for that completed logical operation. Immutable provenance separates the requested
+Foreground model-output admission copies the prepared call's exact inference snapshot and applied
+physical route into its usage `turn_marker`. Immutable provenance separates the requested
 semantic label, effort, and execution options from operation ID/kind, candidate ordinal,
 `primary | fallback` role, provider/integration/model identity, public model display, and allowlisted
-effective limits. `run_id` remains the marker-to-AgentRun link. Historical markers without route
-fields remain valid, and readers report provenance as unavailable instead of borrowing the current
+effective limits. `run_id` remains the marker-to-AgentRun link. Historical markers and usage-only
+callers such as Memory consolidation may omit this snapshot or route; see
+[turn-marker provenance](../execution/transcript.md#usage-and-immutable-applied-provenance).
+Readers report missing provenance as unavailable instead of borrowing the current
 Session, Agent, Composer, or live Run profile. Credentials, raw provider payloads, and arbitrary
 provider diagnostics are never stored in the public marker payload.
 
