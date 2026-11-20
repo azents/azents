@@ -21,7 +21,13 @@ class KeyLock(object):
         if key not in self._locks:
             self._locks[key] = asyncio.Lock()
         self._waiters[key] += 1
-        await self._locks[key].acquire()
+        acquired = False
+        try:
+            await self._locks[key].acquire()
+            acquired = True
+        finally:
+            if not acquired:
+                self._unregister(key)
 
     def release(self, key: str) -> None:
         """
@@ -29,10 +35,13 @@ class KeyLock(object):
         """
         if key in self._locks:
             self._locks[key].release()
-            self._waiters[key] -= 1
-            if self._waiters[key] == 0:
-                del self._locks[key]
-                del self._waiters[key]
+            self._unregister(key)
+
+    def _unregister(self, key: str) -> None:
+        self._waiters[key] -= 1
+        if self._waiters[key] == 0:
+            del self._locks[key]
+            del self._waiters[key]
 
     @contextlib.asynccontextmanager
     async def __call__(self, key: str) -> AsyncGenerator[None, None]:

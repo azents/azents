@@ -15,16 +15,20 @@ def is_constrained_by(
     .. code-block:: python
 
         import sqlalchemy as sa
-        from ottcommon.sqlalchemy.postgres import is_constrained_by
+        from sqlalchemy.exc import IntegrityError
 
-        async def create_user(user: UserModel) -> User:
+        from azcommon.sqlalchemy.postgres import is_constrained_by
+
+        async def create_user(email: str, username: str) -> None:
             try:
-                return await session.execute(sa.insert(User).values(user))
-            except sa.IntegrityError as e:
+                await session.execute(
+                    sa.insert(User).values(email=email, username=username)
+                )
+            except IntegrityError as e:
                 if is_constrained_by(e, "uix_users_email"):
-                    raise ValueError("Email already exists")
-                elif is_constrained_by(e, UserModel.UQ_USERNAME):
-                    raise ValueError("Username already exists")
+                    raise ValueError("Email already exists") from e
+                if is_constrained_by(e, "uix_users_username"):
+                    raise ValueError("Username already exists") from e
                 raise
 
     """
