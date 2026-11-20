@@ -1,6 +1,6 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-11-16T00:18:54Z",
+    "checked_at": "2026-11-20T22:13:18Z",
     "checked_ruleset_revisions": [
       "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
       "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
@@ -9,7 +9,7 @@
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
+    "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -273,9 +273,9 @@
       "checked_through_commit": "5fd401ba4c2ccc5aa61600cd24a3c42935dadc13"
     },
     "python/**::bucket-7-of-8": {
-      "checked_at": "2026-10-05T22:17:22Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "ae5fffc89ac30fcc58baaf2ac0a4f3f6dc8db03c"
+      "checked_at": "2026-11-20T22:13:18Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
     },
     "python/**::bucket-8-of-8": {
       "checked_at": "2026-11-02T22:07:06Z",
@@ -523,34 +523,34 @@
       "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/libs/az-common/**::bucket-2-of-8": {
-      "checked_at": "2026-10-05T22:17:22Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "ae5fffc89ac30fcc58baaf2ac0a4f3f6dc8db03c"
+      "checked_at": "2026-11-20T22:13:18Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
     },
     "python/libs/az-common/**::bucket-3-of-8": {
-      "checked_at": "2026-10-05T22:17:22Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "ae5fffc89ac30fcc58baaf2ac0a4f3f6dc8db03c"
+      "checked_at": "2026-11-20T22:13:18Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
     },
     "python/libs/az-common/**::bucket-4-of-8": {
-      "checked_at": "2026-10-05T22:17:22Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "ae5fffc89ac30fcc58baaf2ac0a4f3f6dc8db03c"
+      "checked_at": "2026-11-20T22:13:18Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
     },
     "python/libs/az-common/**::bucket-5-of-8": {
-      "checked_at": "2026-10-05T22:17:22Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "ae5fffc89ac30fcc58baaf2ac0a4f3f6dc8db03c"
+      "checked_at": "2026-11-20T22:13:18Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
     },
     "python/libs/az-common/**::bucket-6-of-8": {
-      "checked_at": "2026-10-07T08:15:10Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "7882bed3636186baf30c533a4f9c49b3c876e0e7"
+      "checked_at": "2026-11-20T22:13:18Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
     },
     "python/libs/az-common/**::bucket-7-of-8": {
-      "checked_at": "2026-10-07T08:15:10Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "7882bed3636186baf30c533a4f9c49b3c876e0e7"
+      "checked_at": "2026-11-20T22:13:18Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "ba08bab2a78aee1b657fa72f4533667be3c52fe5"
     },
     "python/libs/az-common/**::bucket-8-of-8": {
       "checked_at": "2026-10-07T08:15:10Z",
