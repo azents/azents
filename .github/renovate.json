@@ -125,7 +125,7 @@
       "matchPackageNames": [
         "next"
       ],
-      "allowedVersions": "<=16.4.1"
+      "allowedVersions": "<=16.4.5"
     }
   ],
   "customManagers": [
