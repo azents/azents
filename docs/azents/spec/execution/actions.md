@@ -70,24 +70,40 @@ deterministic external identity, making the turn eligible for inference. The act
 the user-visible history authority; the reminder is model input only. Replay exposes either the
 pending mailbox row or the promoted event, never duplicate continuation input.
 
-`action_executions` stores live operation TurnAction state keyed by the source
-`source_mailbox_item_id` and
-includes the typed action payload plus the admitting Session `owner_generation`.
-`action_execution_events` stores its ordered live progress records such as step start, command
-start/completion, stdout/stderr text, warning, failure, and completion. `GET
-/chat/v1/sessions/{session_id}/live` and REST write snapshots expose these active projections.
+### Live state and settlement
 
-Completion, failure, or cancellation atomically appends one durable `action_execution_result` snapshot
-with deterministic identity `action_execution_result:{execution_id}` and deletes the live execution
-and progress rows. Terminal state is therefore owned only by transcript history. A worker takeover
-cancels leftover active operations before new work and never replays their potentially completed side
-effects. Failed and cancelled actions are not retried or discarded through a separate mutation API.
+`action_executions.mailbox_item_id` uniquely identifies the source envelope, even after
+promotion deletes it. The row stores the typed action and the admitting Session
+`owner_generation`. `action_execution_events` stores progress in an execution-local sequence.
+`GET /chat/v1/sessions/{session_id}/live` and REST write snapshots expose chat-visible active
+projections. Internal Routine judgment actions are excluded from public action projections.
+
+For Workspace actions, the terminal handoff fences the current Session owner and locks the
+live projection. It appends one `action_execution_result:{execution_id}` snapshot containing
+the terminal state and ordered progress, then deletes the live execution and its progress
+rows in the same transaction. Bridge actions also enqueue their continuation in that transaction.
+A terminal handoff retried after deletion returns the existing result; a bridge additionally
+requires its pending continuation or already-promoted reminder to exist. The atomic database
+handoff is separate from settlement of external Git effects.
+
+[Routine judgment](../domain/routine.md#transcript-events-and-session-lifecycle-integration)
+shares admission and live execution state, but settles through the Routine repository.
+When there is an outcome, the transaction records a `routine_judgment` observation alongside
+any admitted Routine input. It updates check state and deletes the live action in the same
+transaction, including when no candidates remain and no observation is written. Cancellation
+clears the matching queued judgment identity and deletes the live action without consuming
+the saved source inputs or writing an `action_execution_result`.
+
+Takeover cancels leftover active actions before new work through their respective settlement
+paths, without invoking the stale handler. There is no separate retry or discard mutation for
+a terminal Workspace action.
 
 ## References
 
 Selected source entrypoints, not an exhaustive dependency map. Verify the relevant
 claim through current callers, models and tests.
 
-- [`python/apps/azents/src/azents/repos/session_execution`](../../../../python/apps/azents/src/azents/repos/session_execution)
-- [`python/apps/azents/src/azents/worker`](../../../../python/apps/azents/src/azents/worker)
-- [`python/apps/azents/src/azents/services/chat`](../../../../python/apps/azents/src/azents/services/chat)
+- [Mailbox promotion](../../../../python/apps/azents/src/azents/repos/mailbox/promotion.py)
+- [Worker operation dispatch and cancellation](../../../../python/apps/azents/src/azents/worker/run/turn_action_executor.py)
+- [Workspace terminal handoff](../../../../python/apps/azents/src/azents/repos/session_git_worktree/operations.py)
+- [Routine judgment settlement](../../../../python/apps/azents/src/azents/repos/routine/judgment_inbox.py)
