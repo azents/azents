@@ -1,11 +1,15 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-11-07T22:51:07Z",
+    "checked_at": "2026-11-16T00:18:54Z",
     "checked_ruleset_revisions": [
+      "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
       "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "6d3a3bafea19886f6349ad8fbc162b1a37f3fd7dafa6118e96852f0f7fd800e1",
+      "a17cf7d88595dc5ac405abbff7fd713dd139c90ec09c0e87131f53bec14f7f8c",
+      "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "3f1d90fd038ac7da0f19e409ee155e8df2f7c56d"
+    "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -259,9 +263,9 @@
       "checked_through_commit": "5fd401ba4c2ccc5aa61600cd24a3c42935dadc13"
     },
     "python/**::bucket-3-of-8": {
-      "checked_at": "2026-10-05T22:17:22Z",
-      "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "checked_through_commit": "ae5fffc89ac30fcc58baaf2ac0a4f3f6dc8db03c"
+      "checked_at": "2026-11-16T00:18:54Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/**::bucket-4-of-8": {
       "checked_at": "2026-11-02T22:07:06Z",
@@ -489,34 +493,34 @@
       "checked_through_commit": "3f1d90fd038ac7da0f19e409ee155e8df2f7c56d"
     },
     "python/apps/azents/**::bucket-4-of-8": {
-      "checked_at": "2026-10-05T00:11:44Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "144c3217e5fa49dcd6f3ba314495d080a6be89d5"
+      "checked_at": "2026-11-16T00:18:54Z",
+      "checked_ruleset_revision": "6d3a3bafea19886f6349ad8fbc162b1a37f3fd7dafa6118e96852f0f7fd800e1",
+      "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/apps/azents/**::bucket-5-of-8": {
-      "checked_at": "2026-10-05T00:11:44Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "144c3217e5fa49dcd6f3ba314495d080a6be89d5"
+      "checked_at": "2026-11-16T00:18:54Z",
+      "checked_ruleset_revision": "6d3a3bafea19886f6349ad8fbc162b1a37f3fd7dafa6118e96852f0f7fd800e1",
+      "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/apps/azents/**::bucket-6-of-8": {
-      "checked_at": "2026-10-05T00:11:44Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "144c3217e5fa49dcd6f3ba314495d080a6be89d5"
+      "checked_at": "2026-11-16T00:18:54Z",
+      "checked_ruleset_revision": "6d3a3bafea19886f6349ad8fbc162b1a37f3fd7dafa6118e96852f0f7fd800e1",
+      "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/apps/azents/**::bucket-7-of-8": {
-      "checked_at": "2026-10-05T00:11:44Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "144c3217e5fa49dcd6f3ba314495d080a6be89d5"
+      "checked_at": "2026-11-16T00:18:54Z",
+      "checked_ruleset_revision": "6d3a3bafea19886f6349ad8fbc162b1a37f3fd7dafa6118e96852f0f7fd800e1",
+      "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/apps/azents/**::bucket-8-of-8": {
-      "checked_at": "2026-10-05T00:11:44Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "144c3217e5fa49dcd6f3ba314495d080a6be89d5"
+      "checked_at": "2026-11-16T00:18:54Z",
+      "checked_ruleset_revision": "6d3a3bafea19886f6349ad8fbc162b1a37f3fd7dafa6118e96852f0f7fd800e1",
+      "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/libs/az-common/**::bucket-1-of-8": {
-      "checked_at": "2026-10-05T00:11:44Z",
-      "checked_ruleset_revision": "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52",
-      "checked_through_commit": "144c3217e5fa49dcd6f3ba314495d080a6be89d5"
+      "checked_at": "2026-11-16T00:18:54Z",
+      "checked_ruleset_revision": "1d067a0bb3a3188458067a5f54711c4479ee82b90521a3a266174802290db720",
+      "checked_through_commit": "228b804d3dc83d0d9fb19b508811939c37849b4d"
     },
     "python/libs/az-common/**::bucket-2-of-8": {
       "checked_at": "2026-10-05T22:17:22Z",
@@ -1127,58 +1131,6 @@
       ".claude/conventions/global/prefer-supported-external-service-sdks.md",
       ".claude/conventions/global/redis-optional-no-ha.md",
       ".claude/conventions/global/remove-obsolete-feature-tests.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/python/alembic-revision-only.md",
-      ".claude/conventions/python/apps-depend-on-libs-only.md",
-      ".claude/conventions/python/avoid-underscore-dependency-fields.md",
-      ".claude/conventions/python/bind-extra-for-shared-log-context.md",
-      ".claude/conventions/python/boolean-no-is-prefix.md",
-      ".claude/conventions/python/cancellederror-separately.md",
-      ".claude/conventions/python/catch-narrowest-exception.md",
-      ".claude/conventions/python/dedent-llm-prompts.md",
-      ".claude/conventions/python/dependency-injection-no-singletons.md",
-      ".claude/conventions/python/dependency-injection-over-post-init.md",
-      ".claude/conventions/python/dependency-version-pin.md",
-      ".claude/conventions/python/engine-changes-all-lowerers.md",
-      ".claude/conventions/python/exhaustive-union-match.md",
-      ".claude/conventions/python/explicit-named-indexes.md",
-      ".claude/conventions/python/import-from-defining-module.md",
-      ".claude/conventions/python/layered-architecture-no-skip.md",
-      ".claude/conventions/python/linear-migration-chain.md",
-      ".claude/conventions/python/llm-tool-schema-compatibility.md",
-      ".claude/conventions/python/log-errors-once.md",
-      ".claude/conventions/python/logger-exception-for-errors.md",
-      ".claude/conventions/python/never-discard-exceptions.md",
-      ".claude/conventions/python/no-empty-value-defaults.md",
-      ".claude/conventions/python/no-explicit-5xx-http-exception.md",
-      ".claude/conventions/python/no-getattr-setattr-type-bypass.md",
-      ".claude/conventions/python/postgres-enum-types.md",
-      ".claude/conventions/python/rdb-index-constants.md",
-      ".claude/conventions/python/required-new-fields.md",
-      ".claude/conventions/python/sphinx-style-docstrings.md",
-      ".claude/conventions/python/structured-logging-extra.md",
-      ".claude/conventions/python/structured-multi-field-returns.md",
-      ".claude/conventions/python/timezone-aware-datetimes.md",
-      ".claude/conventions/python/toolkit-prompt-placement.md",
-      ".claude/conventions/python/transaction-db-operations-only.md",
-      ".claude/conventions/python/transparent-error-handling.md",
-      ".claude/conventions/python/type-safety-order.md",
-      ".claude/conventions/python/typeddict-for-update-apis.md"
-    ],
-    "54a25573d8ff81ac5a2cd2a5b3f3d59e4a86f7305779185adc9154bb8d474d52": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/load-tests-as-reports.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
       ".claude/conventions/global/runner-reported-agent-workspace.md",
       ".claude/conventions/global/stacked-pr-rebase-script.md",
       ".claude/conventions/global/user-facing-text-in-english.md",
