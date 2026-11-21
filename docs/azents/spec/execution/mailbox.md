@@ -89,7 +89,7 @@ Canonical outcomes are:
 | `turn_action_continuation` | Invisible deterministic `system_reminder` after a valid terminal same-Session predecessor; completed-origin work and accumulated predecessor context are carried and the turn becomes inference-eligible. See [Actions](actions.md). |
 | Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
 | Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
-| Worktree `action_message` | Mailbox-item-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
+| Operation `action_message` | Mailbox-item-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. [Settlement](actions.md#live-state-and-settlement) follows the action's domain. |
 
 A handled preparation failure consumes only the failing head, appends a deterministic `system_error`,
 preserves the previous Session inference snapshot, and is never retried. FIFO draining may continue

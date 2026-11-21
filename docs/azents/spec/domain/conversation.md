@@ -545,7 +545,7 @@ controls, and live projections never create an interruption divider. The UI must
 events as user bubbles or delete controls; it may render non-interactive timeline indicators such as goal
 controls or an interrupted divider.
 
-Session todo is persisted in `toolkit_states`, not in the transcript. `/live` and REST write snapshots expose it as `todo: { items }`; each item has `content` and status `pending`, `in_progress`, or `completed`. The same live and write snapshots expose `action_executions` as the current active operation TurnAction projections. Terminal snapshots exist only as durable `action_execution_result` events so completed, failed, or cancelled worktree progress remains visible after live state is deleted. The worker broadcasts `todo_state_changed` after `update_todo` so the chat UI can update without a separate todo read API.
+Session todo is persisted in `toolkit_states`, not in the transcript. `/live` and REST write snapshots expose it as `todo: { items }`; each item has `content` and status `pending`, `in_progress`, or `completed`. The same snapshots expose chat-visible active `action_executions`; internal Routine judgments are excluded. Workspace action progress remains visible after live-state deletion through durable `action_execution_result` events. See [action settlement](../execution/actions.md#live-state-and-settlement). The worker broadcasts `todo_state_changed` after `update_todo` so the chat UI can update without a separate todo read API.
 
 WebSocket chat clients receive subscription and event actions:
 
@@ -585,7 +585,7 @@ Durable/live handoff follows these invariants:
   durable transcript events. A delayed terminal or clear for Run A cannot clear a newer Run B.
 - When a durable event has a matching live counterpart, the worker publishes the history
   append action before publishing the live removal action.
-- Operation terminalization commits the durable `action_execution_result` append and live execution
+- Workspace action terminalization commits the durable `action_execution_result` append and live execution
   deletion in one database transaction, then publishes `action_execution_removed`.
 - If the same semantic entity is present in both durable history and live projection, durable history
   wins for rendering; operation executions use their stable execution ID for this handover.
