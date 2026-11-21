@@ -114,6 +114,26 @@
       "enabled": false
     },
     {
+      "description": "Exempt only the Python Bookworm digest containing apt 2.6.2 (CVE-2026-109518) from release-age waiting",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchCurrentValue": "3.14-slim-bookworm",
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "matchJsonata": [
+        "newDigest = 'sha256:3fe1a0b6c2d6b2ebb572906cdabeca75aeb558c0c17db5ffefbcf8094871c32b'"
+      ],
+      "minimumReleaseAge": null,
+      "addLabels": [
+        "security"
+      ]
+    },
+    {
       "description": "Exempt only the Python slim digest containing Python 3.14.10 and apt 3.0.4 security fixes from release-age waiting",
       "matchManagers": [
         "dockerfile"
@@ -145,7 +165,7 @@
       "matchPackageNames": [
         "next"
       ],
-      "allowedVersions": "<=16.4.1"
+      "allowedVersions": "<=16.4.5"
     }
   ],
   "customManagers": [

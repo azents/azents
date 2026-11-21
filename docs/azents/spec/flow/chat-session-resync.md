@@ -204,7 +204,7 @@ Response fields:
 | `run` | currently running Run projection. `null` if absent. Includes profile provenance, nullable `model_call_started_at`, optional stable `run.operation` for context preparation, and optional `run.retry` with provider/runtime presentation kind, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
-| `action_executions` | current nonterminal operation TurnAction execution projections, each with execution state and live progress events. Terminal completed, failed, and cancelled snapshots are recovered only from durable history events. |
+| `action_executions` | Current chat-visible nonterminal operation projections, with execution state and live progress. Workspace action terminal snapshots come from durable history; internal Routine judgments are not action projections. See [action settlement](../execution/actions.md#live-state-and-settlement). |
 
 `run.retry` represents only the active model turn's retry cycle. It remains present during backoff and
 the in-flight retry model call so a reconnect can recover current progress. Its `error_kind` selects
@@ -232,7 +232,7 @@ executions only when no newer WebSocket observation or newer REST request has su
 `run_id` matching is also required for `RunComplete`, `RunStopped`, and `live_run_cleared`; a delayed
 Run A event cannot clear active Run B.
 
-Action execution progress is reconciled through `action_execution_updated` and the
+Chat-visible Workspace action progress is reconciled through `action_execution_updated` and the
 `/live.action_executions` baseline. Clients upsert projections by execution ID. Completion, failure,
 or cancellation atomically appends one durable `action_execution_result` snapshot and deletes the
 matching live execution row and progress events. The server then publishes the durable history event

@@ -1063,7 +1063,7 @@ command from the session and passes it into `RunExecutor`, which prepares the sa
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
 Operation TurnActions are processed after input-buffer preparation and before model dispatch at both
 wake-up entry and model-call turn boundaries inside an already-running run. `create_git_worktree`
-action execution is keyed by the source `input_buffer_id`; the preparation transaction stores the
+action execution is keyed by the source `mailbox_item_id`; the preparation transaction stores the
 typed action payload, current Session owner generation, and pending execution before deleting the
 source buffer. Before invoking a side effect, the worker verifies that generation and admits the
 operation through the same shutdown barrier used by foreground tools. The generic
@@ -1086,16 +1086,15 @@ any in-flight removal claim through its bounded lease, and never
 replays removal on a later owner. After successful Project mutation, the same active `AgentRun` rebuilds model/tool context
 and the next physical model request from the current Session inference snapshot. If an action fails,
 it is terminal and FIFO processing may continue to later pending input without a retry/discard
-mutation. Completion, failure, and cancellation all use one transaction that copies the current
-execution and ordered progress events into one `action_execution_result`, then deletes the live row.
-The stable execution ID joins live and durable projections.
+mutation. Workspace actions use the atomic [terminal handoff](../execution/actions.md#live-state-and-settlement)
+to store the result and remove the live row. Internal Routine judgments use their own settlement.
 
 At every new Session processing boundary, the current owner terminalizes any leftover operation as
 cancelled before admitting new work. It never resumes or re-executes an uncertain stale side effect.
 Worker shutdown closes new operation admission and allows the supervised foreground task up to 30
-seconds to finish. Timeout cancels the task and persists a cancelled snapshot before ownership is
-released. User stop cancels immediately through the existing foreground-task path; the operation
-records a user-stop cancellation snapshot while the Run follows normal preemptive stop semantics.
+seconds to finish. Timeout cancels the task and settles the live action before ownership is
+released. User stop cancels immediately through the existing foreground-task path; the action
+uses its domain cancellation path while the Run follows normal preemptive stop semantics.
 
 The Agent-facing dynamic worktree tools use two closed bridge action types:
 `agent_create_git_worktree` and `agent_remove_git_worktree`. Their client-tool handlers admit
@@ -1428,7 +1427,7 @@ recoverable `running` state and hands over by wake-up instead of dispatching idl
 owner that receives a no-actionable wake-up re-resolves current hook providers and conditionally
 consumes the durable pointer. The supervised foreground task receives a bounded 30-second completion
 window. Tool-call recovery may continue from its durable ownership protocol, but an uncertain
-operation TurnAction is cancelled into durable history and is never resumed by the next owner.
+operation TurnAction is settled through its domain cancellation path and is never resumed by the next owner.
 
 The first idle hook provider is Goal Toolkit. It emits continuation only for `active` Goal state.
 `paused`, `blocked`, `complete`, or empty Goal state does not enqueue a continuation and does not
