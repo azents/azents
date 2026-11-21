@@ -98,12 +98,14 @@ RUN set -eux; \
     rm /tmp/pixi.tar.gz; \
     pixi --version | grep -F "pixi ${PIXI_VERSION}"
 
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && dpkg --compare-versions "$(node --version | cut -c2-)" ge 24.22.1 \
+    && dpkg --compare-versions "$(node --version | cut -c2-)" ge 26.13.1 \
+    && dpkg --compare-versions "$(node --version | cut -c2-)" lt 27 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /usr/local/bin/corepack-shims \
+RUN npm install -g corepack@0.36.0 \
+    && mkdir -p /usr/local/bin/corepack-shims \
     && corepack enable --install-directory /usr/local/bin/corepack-shims
 
 COPY python/apps/azents-runtime-runner/docker/install-gh.sh /tmp/install-gh.sh
