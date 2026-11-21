@@ -139,13 +139,6 @@
         "@types/node"
       ],
       "allowedVersions": "/^24\\./"
-    },
-    {
-      "description": "Keep Next.js at the last version verified with Admin Web gateway path-prefix routing",
-      "matchPackageNames": [
-        "next"
-      ],
-      "allowedVersions": "<=16.4.5"
     }
   ],
   "customManagers": [
