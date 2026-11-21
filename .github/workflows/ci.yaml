@@ -896,7 +896,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # Keep native JUnit identities independent of the host's cached minor.
-          node-version: "24.22.0"
+          node-version: "26.13.1"
       - name: Install pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -1125,7 +1125,12 @@ jobs:
               ;;
             azents-runtime-runner)
               docker run --rm --entrypoint sh "${{ matrix.image }}" -ec \
-                'docker --version | grep -F "Docker version 29.8.2" &&
+                'test "$(id -u)" = 1000 &&
+                 node --version | grep -E "^v26\." &&
+                 test "$(corepack --version)" = 0.36.0 &&
+                 test "$(command -v pnpm)" = /usr/local/bin/corepack-shims/pnpm &&
+                 test "$(corepack pnpm@11.26.0 --version)" = 11.26.0 &&
+                 docker --version | grep -F "Docker version 29.8.2" &&
                  docker buildx version | grep -F "github.com/docker/buildx v0.37.2" &&
                  docker compose version | grep -F "Docker Compose version v5.6.0" &&
                  test -z "${DOCKER_BUILDKIT:-}" &&

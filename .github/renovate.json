@@ -154,11 +154,11 @@
       ]
     },
     {
-      "description": "Keep @types/node on the Node.js 24 major used by the TypeScript workspace",
+      "description": "Keep @types/node on the Node.js 26 major used by the TypeScript workspace",
       "matchPackageNames": [
         "@types/node"
       ],
-      "allowedVersions": "/^24\\./"
+      "allowedVersions": "/^26\\./"
     }
   ],
   "customManagers": [
