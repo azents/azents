@@ -23,7 +23,7 @@ acceptance require separate operational authorization and eligible accounts.
 
 ## Composition and startup
 
-- Published stable LiteLLM wheel: `1.109.0`, with registry artifacts hashed in `uv.lock`.
+- Published stable LiteLLM wheel: `1.110.2`, with registry artifacts hashed in `uv.lock`.
   This release includes ChatGPT request-credential forwarding (upstream PR #41522)
   and permits patched filelock through upstream PR #49137.
 - Original Proxy application/config loader and lifespan, no model deployment

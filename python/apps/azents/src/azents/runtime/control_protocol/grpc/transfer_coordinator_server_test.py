@@ -422,7 +422,7 @@ async def _server(
     return _CoordinatorServer(
         server=server,
         channel=channel,
-        stub=pb_grpc.RuntimeTransferCoordinatorStub(channel),  # ty: ignore[invalid-argument-type]  # Generated aio stub overload is runtime-correct.
+        stub=pb_grpc.RuntimeTransferCoordinatorStub(channel),
         credentials=supplier,
     )
 

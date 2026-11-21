@@ -36,6 +36,7 @@ from azents.core.mailbox_data import (
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
+    ChatAction,
     PersistedChatAction,
 )
 from azents.engine.events.provider_tool_semantics import (
@@ -95,6 +96,7 @@ def _decode_reasoning_identity(item: Mapping[str, object]) -> _ReasoningIdentity
 _OWNER_GENERATION_FIELD = "__owner_generation__"
 _live_event_adapter = TypeAdapter(Event)
 _chat_action_adapter = TypeAdapter(PersistedChatAction)
+_pending_chat_action_adapter = TypeAdapter(ChatAction)
 _agent_message_adapter = TypeAdapter(AgentMessagePayload)
 type AgentMailboxMessageKind = Literal[
     "spawn_agent",
@@ -570,7 +572,7 @@ def mailbox_item_to_pending_projection(
                 raise ValueError("Action mailbox item payload is missing action")
             presentation = PendingMailboxActionPresentation(
                 type="action_message",
-                action=_chat_action_adapter.validate_python(item.action),
+                action=_pending_chat_action_adapter.validate_python(item.action),
                 message=item.content,
                 requested_inference_profile=_mailbox_item_requested_profile(
                     mailbox_item

@@ -142,31 +142,37 @@ class TmuxInstalled(Check):
 
 
 class PythonVersion(Check):
-    """Check whether Python 3.14 is available."""
+    """Check whether the supported Python minor release is available."""
+
+    _VERSION = (3, 15)
+    _VERSION_LABEL = f"{_VERSION[0]}.{_VERSION[1]}"
 
     def __init__(self) -> None:
         super().__init__(
             id="python-version",
-            name="Python 3.14 available",
+            name=f"Python {self._VERSION_LABEL} available",
             category="system",
         )
 
     def run(self, context: RunContext) -> CheckResult:
         del context
-        if sys.version_info[:2] == (3, 14):
+        if sys.version_info[:2] == self._VERSION:
             return CheckResult(
                 status=Status.PASS,
                 message=f"current interpreter {sys.version.split()[0]}",
             )
-        if shutil.which("python3.14"):
+        executable = f"python{self._VERSION_LABEL}"
+        if shutil.which(executable):
             return CheckResult(
                 status=Status.PASS,
-                message="python3.14 found in PATH",
+                message=f"{executable} found in PATH",
             )
         return CheckResult(
             status=Status.FAIL,
-            message=f"Python 3.14 not available (current: {sys.version.split()[0]})",
-            fix_hint="Install Python 3.14 via pyenv/mise/uv",
+            message=(
+                f"Python {self._VERSION_LABEL} not available (current: {sys.version.split()[0]})"
+            ),
+            fix_hint=f"Install Python {self._VERSION_LABEL} via pyenv/mise/uv",
         )
 
 
