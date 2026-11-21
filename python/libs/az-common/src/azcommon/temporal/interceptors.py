@@ -10,6 +10,8 @@ Key considerations for Temporal's idempotency:
 - Activities are NOT replayed, so we always log their failures
 """
 
+import asyncio
+
 from temporalio import activity, workflow
 from temporalio.worker import (
     ActivityInboundInterceptor,
@@ -28,6 +30,8 @@ class _LoggingActivityInboundInterceptor(ActivityInboundInterceptor):
         """Execute activity and log any failures."""
         try:
             return await super().execute_activity(input)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             activity.logger.exception("Activity failed")
             raise
@@ -49,6 +53,8 @@ with workflow.unsafe.imports_passed_through():
             """Execute workflow and log failures only when not replaying."""
             try:
                 return await super().execute_workflow(input)
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 # Only log during actual execution, not during replay
                 # This prevents duplicate logs when workflow is recovered
