@@ -2,7 +2,7 @@
 name = "azents-runtime-provider-docker"
 version = "0.1.0"
 description = "Azents Agent Runtime Docker Provider"
-requires-python = ">=3.14"
+requires-python = ">=3.15,<3.16"
 dependencies = [
     "aiodocker==0.27.0",
     "azents-runtime-control",
@@ -37,7 +37,7 @@ target-version = "py314"
 select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
 
 [tool.ty.environment]
-python-version = "3.14"
+python-version = "3.15"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

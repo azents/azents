@@ -2,7 +2,7 @@
 name = "azents-e2e"
 version = "0.1.0"
 description = "Azents E2E Tests"
-requires-python = ">=3.14"
+requires-python = ">=3.15,<3.16"
 dependencies = [
     "requests==2.34.2",
     "websockets==16.1.1",
@@ -57,7 +57,7 @@ target-version = "py314"
 select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "T", "PGH003"]
 
 [tool.ty.environment]
-python-version = "3.14"
+python-version = "3.15"
 extra-paths = ["../../.."]
 
 [tool.pytest.ini_options]
