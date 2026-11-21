@@ -2,7 +2,7 @@
 name = "azents-runtime-runner"
 version = "0.1.0"
 description = "Azents Agent Runtime Runner"
-requires-python = ">=3.15,<3.16"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     "aiohttp==3.14.5",
     "azents-runtime-control",
@@ -45,7 +45,7 @@ target-version = "py314"
 select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
 
 [tool.ty.environment]
-python-version = "3.15"
+python-version = "3.14"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

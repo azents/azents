@@ -179,6 +179,7 @@ jobs:
             observation: python-azents
           - project: python/apps/azents-runtime-runner
             observation: python-runtime-runner
+            python-version: "3.14.10"
           - project: python/apps/azents-runtime-proxy
             observation: python-runtime-proxy
           - project: python/apps/azents-runtime-provider-kubernetes
@@ -197,7 +198,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.15.2"
+          python-version: ${{ matrix.python-version || '3.15.2' }}
       - name: Install dependencies
         run: |
           cd "${{ matrix.project }}"
