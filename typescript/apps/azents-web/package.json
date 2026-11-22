@@ -59,7 +59,7 @@
     "@storybook/addon-themes": "^10.6.3",
     "@storybook/addon-vitest": "^10.6.3",
     "@storybook/nextjs-vite": "^10.6.3",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@types/react-syntax-highlighter": "^15.5.13",

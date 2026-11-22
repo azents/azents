@@ -1,4 +1,4 @@
-FROM node:24.22.2-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS base
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS base
 
 ARG ROOT_DIR=/app
 
@@ -11,10 +11,12 @@ WORKDIR ${ROOT_DIR}/typescript
 COPY typescript/ .
 RUN turbo prune @azents/admin-web --docker
 
-# --- deps: install dependencies using the pruned lockfile ---
-FROM base AS deps
+# --- tooling: Node.js 26 no longer bundles Corepack ---
+FROM base AS tooling
+RUN npm install -g corepack@0.36.0 && corepack enable && corepack prepare pnpm@11.1.0 --activate
 
-RUN corepack enable && corepack prepare pnpm@11.1.0 --activate
+# --- deps: install dependencies using the pruned lockfile ---
+FROM tooling AS deps
 WORKDIR ${ROOT_DIR}/typescript
 
 # Copy the minimal package.json files and pruned lockfile produced by turbo prune
@@ -23,9 +25,8 @@ COPY --from=pruner ${ROOT_DIR}/typescript/out/json/ .
 RUN pnpm install --frozen-lockfile
 
 # --- builder: build the application ---
-FROM base AS builder
+FROM tooling AS builder
 
-RUN corepack enable && corepack prepare pnpm@11.1.0 --activate
 WORKDIR ${ROOT_DIR}/typescript
 
 # Copy dependencies
