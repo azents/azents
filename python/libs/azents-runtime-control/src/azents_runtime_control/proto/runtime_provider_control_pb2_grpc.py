@@ -7,7 +7,7 @@ import warnings
 
 from . import runtime_provider_control_pb2 as runtime__provider__control__pb2
 
-GRPC_GENERATED_VERSION = "1.83.0"
+GRPC_GENERATED_VERSION = "1.85.3"
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

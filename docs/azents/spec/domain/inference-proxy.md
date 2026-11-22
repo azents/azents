@@ -160,7 +160,7 @@ No built-in limit is represented as a cluster-wide guarantee without shared coor
 
 ## Packaging and deployment
 
-The exact published stable PyPI wheel is `litellm==1.109.0`, locked with registry
+The exact published stable PyPI wheel is `litellm==1.110.2`, locked with registry
 artifact hashes. It includes upstream ChatGPT request-credential forwarding PR41522
 and permits patched filelock through PR49137. Request authentication, concurrent
 account isolation and native stream privacy remain covered by the Proxy tests.

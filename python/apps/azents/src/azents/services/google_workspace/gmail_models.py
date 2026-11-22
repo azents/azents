@@ -48,6 +48,8 @@ class GmailMailbox(GmailInput):
             ) from None
         if value != value.strip() or not parsed.username or not parsed.domain:
             raise ValueError("Mailbox address must have a local part and domain.")
+        if not parsed.username.isascii():
+            raise ValueError("Mailbox local part must use ASCII.")
         try:
             domain = (
                 parsed.domain

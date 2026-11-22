@@ -5,7 +5,7 @@ description = "Common library for Azents"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.141.1",
-    "pydantic>=2.12",
+    "pydantic>=2.14.4",
     "pydantic-settings>=2.6.1",
     "aioboto3>=13.3.0",
     "types-aioboto3[aioboto3,s3]>=13.3.0",
@@ -14,7 +14,7 @@ dependencies = [
     "uvicorn>=0.38.0",
     "pytz>=2025.2",
     "sqlalchemy>=2.0.44",
-    "psycopg[binary]>=3.3.2",
+    "psycopg[binary]>=3.3.6",
     "sentry-sdk>=2.48.0",
     "temporalio>=1.21.1",
     # UUIDv7 support

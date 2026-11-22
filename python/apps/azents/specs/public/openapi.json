@@ -29675,6 +29675,7 @@
             "title": "Overrides"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "windows",
@@ -29717,6 +29718,7 @@
             "title": "Invalid"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "source_field",
@@ -29782,6 +29784,7 @@
             "title": "Search Context Size"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "metric",
@@ -29820,6 +29823,7 @@
             "title": "Issues"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "rates",
@@ -29854,6 +29858,7 @@
             "title": "Weekdays"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "start_minute",

@@ -942,7 +942,7 @@ EventPayload = (
     | UnknownAdapterOutputPayload
 )
 
-PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
+PAYLOAD_BY_KIND: dict[EventKind, type[EventPayload]] = {
     EventKind.USER_MESSAGE: UserMessagePayload,
     EventKind.GOAL_CONTINUATION: UserMessagePayload,
     EventKind.EXTERNAL_CHANNEL_CONTINUATION: UserMessagePayload,

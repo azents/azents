@@ -2,7 +2,7 @@
 name = "azents"
 version = "0.1.0"
 description = "Azents Server"
-requires-python = ">=3.14"
+requires-python = ">=3.15,<3.16"
 dependencies = [
     # FastAPI & Web
     "fastapi[standard]==0.141.1",
@@ -13,7 +13,7 @@ dependencies = [
     "alembic==1.19.2",
     "alembic-postgresql-enum==1.10.0",
     # Configuration
-    "pydantic==2.13.5",
+    "pydantic==2.14.4",
     "pydantic-settings==2.15.0",
     # AWS
     "boto3==1.40.61",
@@ -70,7 +70,7 @@ dependencies = [
     "google-analytics-data==0.23.3",
     "google-analytics-admin==0.30.2",
     "google-cloud-container==2.67.0",
-    "grpcio==1.83.1",
+    "grpcio==1.85.3",
     "azents-runtime-control",
     "websockets==15.0.1",
     "discord-py==2.7.1",
@@ -128,7 +128,7 @@ select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003
 "typings/**/*.pyi" = ["ANN401"]  # Stubs may use Any when external types are unavailable.
 
 [tool.ty.environment]
-python-version = "3.14"
+python-version = "3.15"
 extra-paths = ["typings/botocore-public"]
 
 [tool.pytest.ini_options]

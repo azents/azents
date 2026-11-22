@@ -44,8 +44,10 @@ class _Secrets(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
 
-class _Values(RootModel[dict[str, str]]):
+class _Values(RootModel):
+    # Alembic executes revisions without registering them in sys.modules.
     model_config = ConfigDict(strict=True, hide_input_in_errors=True)
+    root: dict[str, str]
 
 
 class _Toolkit(BaseModel):
