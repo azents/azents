@@ -70,6 +70,7 @@ export interface GoogleSetupProps {
   onReauthenticate: () => void;
   onClose: () => void;
   onRetryAuthorization: () => Promise<void>;
+  onSwitchAccount: () => Promise<void>;
   onServiceChange: (service: GoogleService, selected: boolean) => void;
   onGroupChange: (group: GoogleToolGroup, selected: boolean) => void;
   onPresetChange: (service: GoogleService, preset: GoogleGroupPreset) => void;

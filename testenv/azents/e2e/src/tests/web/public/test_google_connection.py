@@ -88,7 +88,7 @@ def disclose(driver: WebDriver, label: str, index: int = 0) -> None:
 
 
 @pytest.mark.parametrize("agent_owned", [False, True])
-def test_google_automatic_recovery_preserves_single_apply_draft(
+def test_google_reconnect_preserves_single_apply_draft(
     browser_driver: WebDriver,
     azents_main_web_url: str,
     azents_public_server_url: str,
@@ -199,7 +199,18 @@ def test_google_automatic_recovery_preserves_single_apply_draft(
     disclose(browser_driver, "Advanced settings")
     _fill_text_input(browser_driver, "Tool request timeout (seconds)", "12")
     _fill_text_input(browser_driver, "Toolkit name", "Renamed after reconnect")
+    base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}" + (
+        "" if agent_id is None else "/agents/" + agent_id
+    )
+    if agent_owned:
+        scenario(fixture, "changed_account_full")
     _click_button(browser_driver, "Reauthenticate")
+    if agent_owned:
+        _assert_visible_text(browser_driver, "The connected account will change")
+        before = saved_status(base, workspace.token, saved.id)
+        assert before.identity is not None
+        assert before.identity.subject == "connected-account"
+        _click_button(browser_driver, "Switch account")
     _assert_visible_text(browser_driver, "Connection updated")
     disclose(browser_driver, "Advanced settings")
     _click_button(browser_driver, "Apply changes")
@@ -224,10 +235,11 @@ def test_google_automatic_recovery_preserves_single_apply_draft(
     assert current is not None
     assert current.config["timeout"] == 12
     assert current.name == "Renamed after reconnect"
-    base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}" + (
-        "" if agent_id is None else "/agents/" + agent_id
+    connection = saved_status(base, workspace.token, saved.id)
+    assert connection.status == "connected" and connection.identity is not None
+    assert connection.identity.subject == (
+        "replacement-account" if agent_owned else "connected-account"
     )
-    assert saved_status(base, workspace.token, saved.id).status == "connected"
     if any(
         marker in browser_driver.page_source
         for marker in ("synthetic-access-", "synthetic-renewal-")

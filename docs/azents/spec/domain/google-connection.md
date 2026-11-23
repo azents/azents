@@ -103,13 +103,14 @@ the action area.
 
 Connect and recovery still use staged server review and atomic confirmation. A
 manager-started Web attempt automatically confirms a verified same-account result
-with all requested selected operations and renewable credentials. Changed verified
-issuer/subject, missing capabilities, unknown evidence and missing renewal do not
-silently complete. Exceptional results retain the existing connection and offer
-one prominent Reauthenticate button plus cancellation. There is no separate
-account-change action or partial-result publication control. A newly published normal
-connection does not require an additional generic save. Plain Toolkit creation still
-cannot bypass Google publication checks.
+with all requested selected operations and renewable credentials. A reconnect with
+a different verified issuer/subject and otherwise complete authorization displays
+the saved and new identities. **Switch account** atomically replaces that Toolkit's
+Google connection; cancellation keeps it unchanged. Missing capabilities, unknown
+evidence and missing renewal retain the existing connection and offer Reauthenticate
+plus cancellation, without a partial-result publication control. A successfully
+published connection does not require an additional generic save. Plain Toolkit
+creation still cannot bypass Google publication checks.
 
 The editor applies settings once. Local apply updates service/group selection,
 timeout and explicitly edited metadata in one revision-fenced transaction. It uses
@@ -351,8 +352,9 @@ creation, `drive.file` resource denial, canonical Artifact bytes, real Runner im
 and resumable upload with matching SHA-256 through shared Team and personal User
 Session sources. The personal flow also verifies minimal Picker issuance, noncacheable
 response headers and rejection after revision-fenced local service withdrawal. Browser E2E
-verifies same-context callback, partial review, explicit publication and reconnect
-metadata preservation on shared and Agent surfaces. Picker browser verification
+verifies same-context callback and partial review, plus reconnect and metadata
+preservation on shared and Agent surfaces, including explicit Agent account
+switching. Picker browser verification
 uses the deployed loader/API and a synthetic modal peer to observe selection,
 cancellation, disposal and navigation cleanup without changing the main grant or
 persisting credentials/selected IDs.

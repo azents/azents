@@ -161,15 +161,6 @@ export function useGoogleSetupContainer(
             toolkitId == null ? null : (statusQuery.data ?? null),
             catalog,
           );
-  const reviewAllowed =
-    review != null &&
-    canPublishGoogleReview(review, review.services, Date.now()) &&
-    googleGroupsUsable(
-      review.services,
-      review.tool_groups,
-      catalog,
-      review.accesses,
-    );
   const preparation: GooglePreparationState = preparationQuery.isPending
     ? { type: "LOADING" }
     : preparationQuery.isError
@@ -644,20 +635,36 @@ export function useGoogleSetupContainer(
     enabled: metadata.enabled,
     always_expose_tools: metadata.alwaysExposeTools,
   });
-  async function publish(): Promise<void> {
+  async function publish(decision: "NORMAL" | "ACCOUNT"): Promise<void> {
     if (
       pending.current ||
+      cancelling ||
       flow.type !== "REVIEW" ||
-      reviewDecision !== "NORMAL" ||
+      reviewDecision !== decision ||
       active.current == null ||
-      !sameGoogleResumeAttempt(readResume(), active.current) ||
-      !reviewAllowed
+      !sameGoogleResumeAttempt(readResume(), active.current)
     ) {
       return;
     }
     const result = flow.review,
       context = active.current,
-      selection = googleUsableSelection(result, catalog);
+      now = Date.now();
+    if (Date.parse(result.expires_at) <= now) {
+      setFlow({ type: "ERROR", message: t("expired") });
+      return;
+    }
+    if (
+      !canPublishGoogleReview(result, result.services, now) ||
+      !googleGroupsUsable(
+        result.services,
+        result.tool_groups,
+        catalog,
+        result.accesses,
+      )
+    ) {
+      return;
+    }
+    const selection = googleUsableSelection(result, catalog);
     if (selection.services.length === 0 || selection.toolGroups.length === 0) {
       return;
     }
@@ -740,7 +747,7 @@ export function useGoogleSetupContainer(
       return;
     }
     automatic.current = context.attemptId;
-    void publish();
+    void publish("NORMAL");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- exact normal attempt publishes once; UNKNOWN never resubmits.
   }, [flow, reviewDecision]);
   useEffect(() => {
@@ -1089,6 +1096,7 @@ export function useGoogleSetupContainer(
       void authorize(toolkitId == null ? "CONNECT" : "APPLY");
     },
     onRetryAuthorization: () => cancelExact(true),
+    onSwitchAccount: () => publish("ACCOUNT"),
     onCheckOutcome: checkOutcome,
     onCancel: () => cancelExact(),
     onRefresh: () => {

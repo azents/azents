@@ -157,7 +157,7 @@
   "partialTitle": "一部の権限がありません",
   "partialImpact": "接続を完了するには、Googleで選択した権限を許可してください。既存の接続は変更されていません。",
   "accountChanged": "接続先アカウントが変わります",
-  "accountMismatch": "別のGoogleアカウントで認証されました。保存済みのアカウントで再認証してください。既存の接続は変更されていません。",
+  "switchAccount": "アカウントを切り替える",
   "selectRequired": "サービスとツールグループを1つ以上選択してください。",
   "draftUnavailable": "この認証の設定下書きが見つかりません。既存の接続を維持してやり直してください。",
   "discardDraft": "未適用の変更を破棄しますか？"

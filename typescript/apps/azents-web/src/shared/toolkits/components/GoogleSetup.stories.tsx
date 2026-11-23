@@ -110,6 +110,7 @@ const props: GoogleSetupProps = {
   onReauthenticate: fn(),
   onClose: fn(),
   onRetryAuthorization: fn(() => Promise.resolve()),
+  onSwitchAccount: fn(() => Promise.resolve()),
   onOpenPicker: fn(),
   onClosePicker: fn(),
   onTimeoutChange: fn(),
@@ -242,16 +243,38 @@ export const PartialGrantReview: Story = {
     await userEvent.click(c.getByRole("button", { name: "Reauthenticate" }));
     await expect(args.onRetryAuthorization).toHaveBeenCalled();
     await expect(c.getByRole("button", { name: "Cancel" })).toBeVisible();
+    await expect(
+      c.queryByRole("button", { name: "Switch account" }),
+    ).not.toBeInTheDocument();
   },
 };
 export const DifferentAccount: Story = {
   args: {
-    ...PartialGrantReview.args,
+    ...SavedEdit.args,
     reviewDecision: "ACCOUNT",
     flow: {
       type: "REVIEW",
       review: {
         ...review,
+        services: ["calendar"],
+        tool_groups: ["calendar_read"],
+        oauth_request_scopes: [
+          "https://www.googleapis.com/auth/calendar.readonly",
+        ],
+        granted_scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+        grant_result: "full",
+        accesses: [
+          {
+            service: "calendar",
+            enabled: true,
+            status: "permitted",
+            permitted_tools:
+              googleGroupCatalog.find(
+                (group) => group.group === "calendar_read",
+              )?.operations ?? [],
+            unavailable_tools: [],
+          },
+        ],
         identity: {
           ...review.identity,
           subject: "new-account",
@@ -260,16 +283,14 @@ export const DifferentAccount: Story = {
       },
     },
   },
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const c = within(canvasElement);
     await expect(
-      c.getByText(
-        "Google returned a different account. Reauthenticate with the saved account. Your existing connection has not changed.",
-      ),
+      c.getByText("reader@example.invalid → new@example.invalid"),
     ).toBeVisible();
-    await expect(
-      c.getByRole("button", { name: "Reauthenticate" }),
-    ).toBeVisible();
+    await expect(c.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    await userEvent.click(c.getByRole("button", { name: "Switch account" }));
+    await expect(args.onSwitchAccount).toHaveBeenCalledOnce();
   },
 };
 export const UnknownGrant: Story = {
