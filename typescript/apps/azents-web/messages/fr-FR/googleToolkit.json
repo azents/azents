@@ -157,7 +157,7 @@
   "partialTitle": "Certaines autorisations manquent",
   "partialImpact": "Accordez les autorisations sélectionnées sur Google pour terminer la connexion. La connexion existante est inchangée.",
   "accountChanged": "Le compte connecté va changer",
-  "accountMismatch": "Google a renvoyé un autre compte. Réauthentifiez-vous avec le compte enregistré. La connexion existante est inchangée.",
+  "switchAccount": "Changer de compte",
   "selectRequired": "Sélectionnez au moins un service et un groupe d’outils.",
   "draftUnavailable": "Le brouillon de cette autorisation est introuvable. Conservez la connexion existante et recommencez.",
   "discardDraft": "Abandonner les modifications non appliquées ?"

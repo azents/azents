@@ -93,6 +93,7 @@ class Scenario(BaseModel):
         "missing_scope",
         "no_renewal",
         "changed_account",
+        "changed_account_full",
         "expiring",
         "revoked",
         "mixed_drive",
@@ -233,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
         with self.lock:
             granted = (
                 fields["scope"][0]
-                if self.scenario == "full"
+                if self.scenario in {"full", "changed_account_full"}
                 else "openid email " + CALENDAR_SCOPE
             )
             if self.scenario == "empty":
@@ -247,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
                 fields["code_challenge"][0],
                 granted,
                 "replacement-account"
-                if self.scenario == "changed_account"
+                if self.scenario in {"changed_account", "changed_account_full"}
                 else "connected-account",
                 redirect,
             )

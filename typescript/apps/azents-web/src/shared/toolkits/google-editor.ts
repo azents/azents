@@ -127,21 +127,21 @@ export function googleReviewDecision(
     return "UNUSABLE";
   }
   if (
-    saved?.identity != null &&
+    !groups.every((group) =>
+      group.operations.every((op) =>
+        review.accesses
+          .find((access) => access.service === group.service)
+          ?.permitted_tools.includes(op),
+      ),
+    )
+  ) {
+    return "PARTIAL";
+  }
+  return saved?.identity != null &&
     (saved.identity.issuer !== review.identity.issuer ||
       saved.identity.subject !== review.identity.subject)
-  ) {
-    return "ACCOUNT";
-  }
-  return groups.every((group) =>
-    group.operations.every((op) =>
-      review.accesses
-        .find((access) => access.service === group.service)
-        ?.permitted_tools.includes(op),
-    ),
-  )
-    ? "NORMAL"
-    : "PARTIAL";
+    ? "ACCOUNT"
+    : "NORMAL";
 }
 export function googleUsableSelection(
   review: GoogleReview,

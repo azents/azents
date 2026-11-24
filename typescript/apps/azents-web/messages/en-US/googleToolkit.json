@@ -157,7 +157,7 @@
   "partialTitle": "Some permissions are missing",
   "partialImpact": "Allow the selected permissions at Google to finish connecting. Your existing connection has not changed.",
   "accountChanged": "The connected account will change",
-  "accountMismatch": "Google returned a different account. Reauthenticate with the saved account. Your existing connection has not changed.",
+  "switchAccount": "Switch account",
   "selectRequired": "Select at least one service and tool group.",
   "draftUnavailable": "This authorization’s settings draft is unavailable. Keep the existing connection and start again.",
   "discardDraft": "Discard unapplied changes?"

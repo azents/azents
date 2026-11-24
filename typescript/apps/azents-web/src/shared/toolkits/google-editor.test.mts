@@ -88,6 +88,30 @@ void test("normal recovery compares actual operations and verified issuer/subjec
     "ACCOUNT",
   );
 });
+void test("a different account can only replace a saved connection with complete renewable permissions", () => {
+  const result = review(),
+    old = saved(result);
+  result.identity = { ...result.identity, subject: "replacement" };
+  assert.equal(
+    googleReviewDecision(result, old, googleGroupCatalog),
+    "ACCOUNT",
+  );
+  assert.equal(
+    googleReviewDecision(
+      { ...result, renewable: false },
+      old,
+      googleGroupCatalog,
+    ),
+    "UNUSABLE",
+  );
+  const access = result.accesses.at(0);
+  assert.ok(access);
+  access.permitted_tools = ["calendar_list_events"];
+  assert.equal(
+    googleReviewDecision(result, old, googleGroupCatalog),
+    "PARTIAL",
+  );
+});
 void test("unknown, empty, nonrenewable and expired evidence never auto-confirms", () => {
   for (const result of [
     { ...review(), granted_scopes: null },

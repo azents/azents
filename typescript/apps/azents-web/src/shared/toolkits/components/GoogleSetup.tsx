@@ -304,7 +304,6 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
               </Title>
               {props.reviewDecision === "ACCOUNT" && saved.type === "READY" && (
                 <Alert color="yellow">
-                  <Text size="sm">{t("accountMismatch")}</Text>
                   <Text size="sm" className={classes.identity}>
                     {saved.detail.identity?.email ??
                       saved.detail.identity?.subject}
@@ -346,15 +345,26 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                 >
                   {common("cancel")}
                 </Button>
-                <Button
-                  leftSection={<IconRefresh size="1rem" />}
-                  onClick={() => {
-                    void props.onRetryAuthorization();
-                  }}
-                  loading={props.cancelling}
-                >
-                  {t("reauthenticate")}
-                </Button>
+                {props.reviewDecision === "ACCOUNT" ? (
+                  <Button
+                    disabled={busy || saved.type !== "READY"}
+                    onClick={() => {
+                      void props.onSwitchAccount();
+                    }}
+                  >
+                    {t("switchAccount")}
+                  </Button>
+                ) : (
+                  <Button
+                    leftSection={<IconRefresh size="1rem" />}
+                    onClick={() => {
+                      void props.onRetryAuthorization();
+                    }}
+                    loading={props.cancelling}
+                  >
+                    {t("reauthenticate")}
+                  </Button>
+                )}
               </Group>
             </Stack>
           </section>
