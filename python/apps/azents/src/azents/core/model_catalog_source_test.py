@@ -86,6 +86,42 @@ def test_undeclared_alias_contract_does_not_create_lookup_identity() -> None:
     assert payload.models[0].extensions_json == '{"aliases":["other"]}'
 
 
+def test_reference_only_aliases_do_not_become_model_evidence() -> None:
+    payload = decode_catalog_source(
+        b"""{
+          "chatgpt/latest": {"alias_of": "chatgpt/literal"},
+          "chatgpt/dangling": {"alias_of": "chatgpt/not-in-source"},
+          "chatgpt/literal": {"litellm_provider": "chatgpt",
+                              "supports_response_schema": true}
+        }"""
+    )
+
+    assert payload.model_count == payload.provider_count == 1
+    literal = payload.lookup_exact(provider="chatgpt", model_key="chatgpt/literal")
+    assert literal is not None and literal.facts.response_schema.value is True
+    assert payload.lookup_exact(provider="chatgpt", model_key="chatgpt/latest") is None
+    assert (
+        payload.lookup_exact(provider="chatgpt", model_key="chatgpt/dangling") is None
+    )
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        b'{"alias_of": null}',
+        b'{"alias_of": ""}',
+        b'{"alias_of": " invalid"}',
+        b'{"alias_of": "literal", "supports_response_schema": true}',
+        b'{"alias_of": "literal", "litellm_provider": null}',
+    ],
+)
+def test_malformed_entries_are_not_skipped_as_aliases(entry: bytes) -> None:
+    with pytest.raises(CatalogSourceDecodeError):
+        decode_catalog_source(
+            b'{"literal": {"litellm_provider": "chatgpt"}, "other": ' + entry + b"}"
+        )
+
+
 def test_canonical_roundtrip_preserves_exact_values_and_presence() -> None:
     first = decode_catalog_source(
         b"""{
@@ -122,6 +158,7 @@ def test_same_source_key_in_different_provider_is_not_a_match() -> None:
         b"null",
         b"{}",
         b'{"sample_spec":{}}',
+        b'{"latest":{"alias_of":"missing"}}',
         b'{"m":{"mode":"chat"}}',
         b'{"m":{"litellm_provider":null}}',
         b'{"m":{"litellm_provider":" openai"}}',
@@ -171,6 +208,21 @@ def test_model_limit_excludes_documentation_entries(
     with pytest.raises(CatalogSourceDecodeError, match="bounded model"):
         decode_catalog_source(
             b'{"a":{"litellm_provider":"openai"},"b":{"litellm_provider":"openai"}}'
+        )
+
+
+def test_document_entry_limit_includes_alias_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model_catalog_source, "_MAX_MODELS", 1)
+    with pytest.raises(CatalogSourceDecodeError, match="entry count"):
+        decode_catalog_source(
+            b"""{
+              "sample_spec": {},
+              "fallback_generalizations": {},
+              "literal": {"litellm_provider": "chatgpt"},
+              "latest": {"alias_of": "literal"}
+            }"""
         )
 
 

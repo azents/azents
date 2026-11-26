@@ -250,6 +250,10 @@ regex matching, SDK profiles, aliases, or price calculator. The bounded response
 is decoded transiently; raw/canonical dataset blobs, hashes, ETags, and fingerprints
 are not persisted or used as authority. Strict decoding validates exact identities,
 presence, numeric evidence, lifecycle dates, derived reasoning consistency and counts.
+An entry containing only `alias_of` is a reference. Its key and target must be
+valid identifiers, but the collector does not resolve the target. References
+count toward the document entry limit and are excluded from model inventory and
+exact lookup. Invalid model rows still reject the full source publication.
 
 Absence, null, false and an explicit empty set are distinct. Exact provider/account
 declarations own their scope and only absent fields may be enriched by an exact

@@ -193,20 +193,24 @@ async def test_actual_sdk_wire_preserves_history_schema_usage_and_owned_cleanup(
             },
             capability_evidence=None,
         )
+        source = decode_catalog_source(
+            json.dumps(
+                {
+                    "chatgpt/latest": {"alias_of": f"chatgpt/{model_name}"},
+                    f"chatgpt/{model_name}": {
+                        "litellm_provider": "chatgpt",
+                        "mode": "responses",
+                        "supports_response_schema": True,
+                    },
+                }
+            ).encode()
+        )
         compiled = compile_stored_choice(
             provider=provider,
             exact_model=model_name,
-            source_model=decode_catalog_source(
-                json.dumps(
-                    {
-                        f"chatgpt/{model_name}": {
-                            "litellm_provider": "chatgpt",
-                            "mode": "responses",
-                            "supports_response_schema": True,
-                        }
-                    }
-                ).encode()
-            ).models[0],
+            source_model=source.lookup_exact(
+                provider="chatgpt", model_key=f"chatgpt/{model_name}"
+            ),
             evidence=evidence,
             model_developer=LLMModelDeveloper.OPENAI,
         )
