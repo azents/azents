@@ -672,8 +672,7 @@ def _price_evidence(key: str, value: object) -> CatalogPriceEvidence:
     )
 
 
-def _decode_model(key: str, value: object) -> CatalogSourceModel:
-    raw = _object(value)
+def _decode_model(key: str, raw: Mapping[str, object]) -> CatalogSourceModel:
     provider = _identity(raw.get("litellm_provider"))
     facts = _decode_facts(raw)
     prices = tuple(
@@ -717,25 +716,27 @@ def decode_catalog_source(raw_bytes: bytes) -> CatalogSourcePayload:
         )
         raw = _object(document)
         if len(raw) > _MAX_MODELS + len(_NON_MODEL_KEYS):
-            raise CatalogSourceDecodeError("Source model count exceeds the limit.")
+            raise CatalogSourceDecodeError("Source entry count exceeds the limit.")
         # This also bounds opaque extensions before they enter durable evidence.
         _encoded_json(raw).encode("utf-8")
-        models = tuple(
-            sorted(
-                (
-                    _decode_model(key, value)
-                    for key, value in raw.items()
-                    if key not in _NON_MODEL_KEYS
-                ),
-                key=lambda model: (model.provider, model.source_key),
-            )
-        )
+        models: list[CatalogSourceModel] = []
+        for key, value in raw.items():
+            if key in _NON_MODEL_KEYS:
+                continue
+            entry = _object(value)
+            if entry.keys() == {"alias_of"}:
+                # A producer reference is not an exact model declaration.
+                _identity(key)
+                _identity(entry["alias_of"])
+                continue
+            models.append(_decode_model(key, entry))
         if not models or len(models) > _MAX_MODELS:
             raise CatalogSourceDecodeError("Source must contain bounded model records.")
+        models.sort(key=lambda model: (model.provider, model.source_key))
         return CatalogSourcePayload(
             schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
             interpreter_version=CATALOG_SOURCE_INTERPRETER_VERSION,
-            models=models,
+            models=tuple(models),
         )
     except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise CatalogSourceDecodeError("Invalid source JSON document.") from exc

@@ -169,6 +169,52 @@ async def test_sync_publishes_source_and_affected_systems(
             )
 
 
+async def test_sync_publishes_new_exact_model_from_source_with_alias_references(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            content=b"""{
+              "gpt-test": {"litellm_provider": "openai", "mode": "chat"},
+              "chatgpt/latest": {"alias_of": "chatgpt/new-account-model"},
+              "chatgpt/new-account-model": {
+                "litellm_provider": "chatgpt",
+                "mode": "responses",
+                "supports_response_schema": true
+              }
+            }""",
+            request=request,
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+        service = _service(
+            rdb_session_manager,
+            CatalogSourceAdapter(
+                http_client=client,
+                policy=CatalogCollectionPolicy(
+                    source_url="https://metadata.example/data.json",
+                    max_bytes=10_000,
+                    timeout_seconds=2,
+                    allow_testenv_endpoint=False,
+                ),
+            ),
+        )
+        published = await service.sync_current_source()
+        current = await service.get_current_source()
+
+    assert current == published
+    assert current.model_count == 2
+    model = current.payload.lookup_exact(
+        provider="chatgpt", model_key="chatgpt/new-account-model"
+    )
+    assert model is not None and model.facts.response_schema.value is True
+    assert (
+        current.payload.lookup_exact(provider="chatgpt", model_key="chatgpt/latest")
+        is None
+    )
+
+
 async def test_valid_single_provider_source_records_scoped_projection_failures(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
