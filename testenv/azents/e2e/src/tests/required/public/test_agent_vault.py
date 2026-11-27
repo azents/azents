@@ -1,5 +1,6 @@
 """Exercise Agent Vault settings through the actual CLI tool and managed Runner."""
 
+import json
 from functools import partial
 from typing import TypedDict
 
@@ -67,7 +68,7 @@ def test_vault_settings_value_reaches_only_nominated_cli_command(
 
     def completed(step: str) -> str | None:
         history = _history(**params)
-        assert marker not in history.to_json()
+        assert marker not in json.dumps(history.to_dict(), default=str)
         output = None
         final = False
         for item in history.items:
