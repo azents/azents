@@ -116,6 +116,7 @@ class GoogleResponseDecodingTests(unittest.TestCase):
                 "drive_access": _NO_DRIVE,
                 "timeout": 30.0,
                 "accesses": [],
+                "granted_tools": [],
                 "renewable": False,
                 "service_access_verified": False,
             }
@@ -124,3 +125,4 @@ class GoogleResponseDecodingTests(unittest.TestCase):
         assert decoded is not None
         self.assertIs(decoded.service_access_verified, False)
         self.assertIsNone(decoded.identity)
+        self.assertEqual(decoded.granted_tools, [])
