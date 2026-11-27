@@ -1642,6 +1642,7 @@ class SlackConversationClient:
         message_ts: str,
         text: str,
         blocks: list[dict[str, object]] | None = None,
+        literal_text: bool = False,
     ) -> SlackControlMessageResult:
         """Attempt one message update without retry."""
 
@@ -1651,7 +1652,7 @@ class SlackConversationClient:
                 ts=message_ts,
                 text=text,
                 blocks=blocks,
-                parse="none",
+                parse="full" if literal_text else "none",
                 link_names=False,
                 token=bot_token,
             )

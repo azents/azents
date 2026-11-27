@@ -55,14 +55,21 @@ mailbox consumption.
 
 An optional Discord or Slack destination is an explicit provider channel
 currently connected and routable to the requesting Agent in its Workspace.
-The scheduler claims one initial link-bearing post and rechecks the exact
-binding before sending. It records only a confirmed delivery address and
-installation identity. After settlement, it claims one best-effort link-free
-edit to that exact message under current authority. A late receipt can still
-enable the edit while the request is retained. Unknown creates, failed edits,
-revocation, and purge do not cause a replay, fallback, or reopened request.
+The scheduler claims one initial post and rechecks the exact binding before
+sending. A Discord embed or Slack Block Kit message displays the Agent-authored
+purpose and ordered field labels as text, not as links or mentions. Slack
+includes the same context in its accessible fallback text. The only navigation
+action is an input button, and no submitted value appears. The scheduler
+records only a confirmed delivery address and installation identity. After
+settlement, it claims one best-effort edit to that exact message under current
+authority. The purpose and field labels stay visible while a link-free disabled
+button on Discord or status text on Slack replaces the input action. A late receipt
+can still enable the edit while the request is retained. Unknown creates,
+failed edits, revocation, and purge do not cause a replay, fallback, or reopened
+request.
 
 ## References
 
 - [Request persistence and settlement](../../../../python/apps/azents/src/azents/repos/agent_vault_requests.py)
 - [Provider claims and receipt boundary](../../../../python/apps/azents/src/azents/repos/vault_request_delivery.py)
+- [Discord and Slack payload rendering](../../../../python/apps/azents/src/azents/services/vault_request_presentation.py)

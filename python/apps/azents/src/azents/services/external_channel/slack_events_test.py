@@ -23,6 +23,7 @@ from azents.core.external_channel_conversation_data import (
     ExternalChannelHistoryTriggerMissing,
     ExternalChannelOperationDeadline,
 )
+from azents.rdb.models.agent_vault_request import VaultRequestStatus
 from azents.services.external_channel.slack_endpoint import slack_api_base_url
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
@@ -46,6 +47,10 @@ from azents.services.external_channel.slack_events import (
     normalize_slack_event,
     slack_message_reference_ids,
     slack_provider_position,
+)
+from azents.services.vault_request_presentation import (
+    SlackVaultRequest,
+    render_slack_vault_request,
 )
 from azents.testing.types import is_string_object_dict
 
@@ -1176,6 +1181,70 @@ async def test_control_message_reports_confirmed_provider_rejection() -> None:
     assert result.error_summary == (
         "Slack rejected the provider operation (invalid_blocks)."
     )
+
+
+async def test_vault_blocks_replace_input_action_on_the_same_slack_message() -> None:
+    """Pass the native action, escaped fallback and exact receipt through the SDK."""
+    requests: list[httpx.Request] = []
+    ts = "1721600000.000100"
+    url = "https://azents.example.test/request"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "ts": ts})
+
+    def render(status: VaultRequestStatus, action_url: str | None) -> SlackVaultRequest:
+        return render_slack_vault_request(
+            purpose="Configure *reports* without <!everyone>.",
+            labels=("Account", "Token"),
+            status=status,
+            url=action_url,
+        )
+
+    opened = render(VaultRequestStatus.OPEN, url)
+    expired = render(VaultRequestStatus.EXPIRED, None)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = _client(http)
+        posted = await client.post_blocks(
+            bot_token="test-token",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts=None,
+            text=opened.text,
+            blocks=opened.blocks,
+            icon_url=None,
+        )
+        edited = await client.update_message(
+            bot_token="test-token",
+            tenant_id="T1",
+            channel_id="C1",
+            message_ts=ts,
+            text=expired.text,
+            blocks=expired.blocks,
+            literal_text=True,
+        )
+
+    assert posted.status == edited.status == "delivered"
+    assert (
+        posted.provider_message_key
+        == edited.provider_message_key
+        == f"slack:T1:C1:{ts}"
+    )
+    assert [request.url.path for request in requests] == [
+        "/api/chat.postMessage",
+        "/api/chat.update",
+    ]
+    create, edit = (json.loads(request.content) for request in requests)
+    assert create["channel"] == edit["channel"] == "C1"
+    assert edit["ts"] == ts
+    assert create["mrkdwn"] is False and create["parse"] == "none"
+    assert edit["parse"] == "full"
+    assert create["link_names"] is False and edit["link_names"] is False
+    assert create["blocks"][:-1] == edit["blocks"][:-1]
+    assert create["blocks"][-1]["elements"][0]["url"] == url
+    assert edit["blocks"][-1]["elements"] == [{"type": "plain_text", "text": "Expired"}]
+    assert url not in json.dumps(edit)
+    assert "&lt;!everyone&gt;" in edit["text"]
 
 
 @pytest.mark.parametrize(
