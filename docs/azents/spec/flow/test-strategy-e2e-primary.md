@@ -872,8 +872,8 @@ Always-on required CI does not depend on external credentials.
 - Whole-CI gate-completion elapsed time spans workflow creation to the last configured
   gate, including dependency scheduling and queues. Maximum job wall, aggregate
   runner job-seconds and E2E max-lane wall are distinct metrics. Reporting overhead is
-  named separately. The `ci-optimization` Skill and shared collection/analysis/chart
-  tools measure the Linux general CI workflow. iOS remains a separate quality
+  named separately. The collection, analysis and chart tools in `scripts/ci/`
+  measure the Linux general CI workflow. iOS remains a separate quality
   workflow, excluded from speed statistics, daily charts and the same-SHA
   two-attempt measurement requirement. Its timing pair is not a prerequisite for
   Linux measurement completion; native failures remain explicit quality results.

@@ -95,8 +95,8 @@ For each changed topic, check:
 
 A wiki edit alone is not a full implementation audit. Report exactly which claims,
 references and paths were checked and what remains uncertain. For recurring audits,
-use `/living-spec-audit`: select one bounded semantic topic plus the independent
-preceding-24-hour change review, rather than reviving file-to-Spec matching.
+select one bounded semantic topic plus an independent review of changes from the
+preceding 24 hours. Discover affected claims semantically, not by file-to-Spec matching.
 
 ## Format and lightweight validation
 

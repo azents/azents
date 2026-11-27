@@ -149,8 +149,8 @@ When modifying azents-scoped areas:
 
 - Ingest verified behavior changes into the owning wiki pages in the same PR;
   update affected neighbors and the index, then lint for contradictions, missing
-  contracts, broken links and unsupported claims. `/spec-review` handles semantic
-  diff impact; `/living-spec-audit` handles bounded wiki/implementation verification.
+  contracts, broken links and unsupported claims. Use `/spec-review` for semantic
+  diff impact and the wiki maintenance guide for bounded wiki/implementation verification.
 - For new technical feature design, confirm a Requirements document before creating its same-basename ADR or Design.
 - When a large feature is split into stacked phases, run spec review once in a separate phase right before QA.
 - For material architecture or product-contract decisions, record the accepted
