@@ -35,6 +35,22 @@ Session or Agent settings operates on the same Agent-owned service.
 
 ## Core Model
 
+### Vault storage
+
+`agent_vault_entries` stores independent encrypted values keyed by exact
+`(agent_id, name)`. The name and contributor label are separate from ciphertext;
+the label is informational and grants no authority. The storage repository admits
+manager operations only for the active Agent's Workspace Owner or an explicit
+administrator of that Agent. Its listing selects metadata without decrypting
+values; selected-value resolution is an internal repository operation. Storage
+uses the existing application credential cipher, independently of Runtime
+environment settings. No public Vault API or tooling is exposed by this storage
+layer.
+
+The `agent_id` foreign key cascades only on permanent Agent deletion under the
+[Agent deletion registry](agent-deletion.md). Session removal does not own these
+rows. Vault writes use the active-Agent lifecycle fence.
+
 ### Agent
 
 `agents` row has following core fields.
