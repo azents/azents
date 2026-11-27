@@ -7,8 +7,10 @@ Method | HTTP request | Description
 [**agent_v1_add_agent_admin**](AgentV1Api.md#agent_v1_add_agent_admin) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | Add Agent Admin
 [**agent_v1_create_agent**](AgentV1Api.md#agent_v1_create_agent) | **POST** /agent/v1/workspaces/{handle}/agents | Create Agent
 [**agent_v1_create_agent_memory**](AgentV1Api.md#agent_v1_create_agent_memory) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | Create Agent Memory
+[**agent_v1_create_agent_vault_entry**](AgentV1Api.md#agent_v1_create_agent_vault_entry) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | Create Agent Vault Entry
 [**agent_v1_delete_agent**](AgentV1Api.md#agent_v1_delete_agent) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id} | Delete Agent
 [**agent_v1_delete_agent_memory**](AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
+[**agent_v1_delete_agent_vault_entry**](AgentV1Api.md#agent_v1_delete_agent_vault_entry) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | Delete Agent Vault Entry
 [**agent_v1_finalize_avatar**](AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 [**agent_v1_get_agent**](AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
 [**agent_v1_get_agent_consolidated_memory**](AgentV1Api.md#agent_v1_get_agent_consolidated_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory | Get Agent Consolidated Memory
@@ -19,9 +21,11 @@ Method | HTTP request | Description
 [**agent_v1_list_agent_admins**](AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
 [**agent_v1_list_agent_historical_memories**](AgentV1Api.md#agent_v1_list_agent_historical_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories | List Agent Historical Memories
 [**agent_v1_list_agent_memories**](AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
+[**agent_v1_list_agent_vault_entries**](AgentV1Api.md#agent_v1_list_agent_vault_entries) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | List Agent Vault Entries
 [**agent_v1_list_agents**](AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 [**agent_v1_remove_agent_admin**](AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
 [**agent_v1_remove_avatar**](AgentV1Api.md#agent_v1_remove_avatar) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar | Remove Avatar
+[**agent_v1_replace_agent_vault_entry**](AgentV1Api.md#agent_v1_replace_agent_vault_entry) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | Replace Agent Vault Entry
 [**agent_v1_replace_automatic_session_projects**](AgentV1Api.md#agent_v1_replace_automatic_session_projects) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Replace Automatic Session Projects
 [**agent_v1_replace_browser_configuration**](AgentV1Api.md#agent_v1_replace_browser_configuration) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/browser-configuration | Replace Browser Configuration
 [**agent_v1_request_avatar_upload**](AgentV1Api.md#agent_v1_request_avatar_upload) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/upload-url | Request Avatar Upload
@@ -284,6 +288,87 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **agent_v1_create_agent_vault_entry**
+> agent_v1_create_agent_vault_entry(agent_id, handle, vault_entry_write_request)
+
+Create Agent Vault Entry
+
+Create an entry; an existing exact name is a conflict.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.vault_entry_write_request import VaultEntryWriteRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    vault_entry_write_request = azentspublicclient.VaultEntryWriteRequest() # VaultEntryWriteRequest | 
+
+    try:
+        # Create Agent Vault Entry
+        api_instance.agent_v1_create_agent_vault_entry(agent_id, handle, vault_entry_write_request)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_create_agent_vault_entry: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **vault_entry_write_request** | [**VaultEntryWriteRequest**](VaultEntryWriteRequest.md)|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **agent_v1_delete_agent**
 > AgentDecommissionResponse agent_v1_delete_agent(agent_id, handle)
 
@@ -424,6 +509,86 @@ Name | Type | Description  | Notes
  **agent_id** | **str**|  | 
  **memory_id** | **str**|  | 
  **handle** | **str**|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_delete_agent_vault_entry**
+> agent_v1_delete_agent_vault_entry(agent_id, handle, name)
+
+Delete Agent Vault Entry
+
+Delete an exact existing entry name.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    name = 'name_example' # str | 
+
+    try:
+        # Delete Agent Vault Entry
+        api_instance.agent_v1_delete_agent_vault_entry(agent_id, handle, name)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_delete_agent_vault_entry: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **name** | **str**|  | 
 
 ### Return type
 
@@ -1301,6 +1466,87 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **agent_v1_list_agent_vault_entries**
+> AgentVaultSettings agent_v1_list_agent_vault_entries(agent_id, handle)
+
+List Agent Vault Entries
+
+List Vault entry metadata for the exact Agent.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_vault_settings import AgentVaultSettings
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # List Agent Vault Entries
+        api_response = api_instance.agent_v1_list_agent_vault_entries(agent_id, handle)
+        print("The response of AgentV1Api->agent_v1_list_agent_vault_entries:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_list_agent_vault_entries: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+[**AgentVaultSettings**](AgentVaultSettings.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **agent_v1_list_agents**
 > AgentListResponse agent_v1_list_agents(handle)
 
@@ -1547,6 +1793,87 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_replace_agent_vault_entry**
+> agent_v1_replace_agent_vault_entry(agent_id, handle, vault_entry_write_request)
+
+Replace Agent Vault Entry
+
+Replace an existing entry's value without returning it.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.vault_entry_write_request import VaultEntryWriteRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    vault_entry_write_request = azentspublicclient.VaultEntryWriteRequest() # VaultEntryWriteRequest | 
+
+    try:
+        # Replace Agent Vault Entry
+        api_instance.agent_v1_replace_agent_vault_entry(agent_id, handle, vault_entry_write_request)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_replace_agent_vault_entry: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **vault_entry_write_request** | [**VaultEntryWriteRequest**](VaultEntryWriteRequest.md)|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

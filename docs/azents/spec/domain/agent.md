@@ -44,8 +44,22 @@ manager operations only for the active Agent's Workspace Owner or an explicit
 administrator of that Agent. Its listing selects metadata without decrypting
 values; selected-value resolution is an internal repository operation. Storage
 uses the existing application credential cipher, independently of Runtime
-environment settings. No public Vault API or tooling is exposed by this storage
-layer.
+environment settings.
+
+Vault is a separate Agent settings section. Its authenticated API lists names
+and contributor labels without stored values, creates only absent names,
+replaces only an existing value, and deletes only the exact name. Earlier
+authorization evidence does not substitute for the current manager and lifecycle
+checks inside the write transaction.
+
+An admitted execution can nominate entries for its current `exec_command` or
+`browser_act` fill without a manager identity. `vault_register_file` creates one
+own-Agent entry from a complete readable Runtime text file and does not return
+the content or remove the file. The original execution is revalidated before
+registration commits. CLI values apply only to the selected process environment.
+Browser fill and CLI/file transfers use encrypted envelopes for the exact
+admitted Runner; an incompatible or replaced Runner is not a fallback to a
+plaintext operation.
 
 The `agent_id` foreign key cascades only on permanent Agent deletion under the
 [Agent deletion registry](agent-deletion.md). Session removal does not own these

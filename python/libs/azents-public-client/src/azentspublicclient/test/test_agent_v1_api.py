@@ -47,6 +47,13 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_create_agent_vault_entry(self) -> None:
+        """Test case for agent_v1_create_agent_vault_entry
+
+        Create Agent Vault Entry
+        """
+        pass
+
     def test_agent_v1_delete_agent(self) -> None:
         """Test case for agent_v1_delete_agent
 
@@ -58,6 +65,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_delete_agent_memory
 
         Delete Agent Memory
+        """
+        pass
+
+    def test_agent_v1_delete_agent_vault_entry(self) -> None:
+        """Test case for agent_v1_delete_agent_vault_entry
+
+        Delete Agent Vault Entry
         """
         pass
 
@@ -131,6 +145,13 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_list_agent_vault_entries(self) -> None:
+        """Test case for agent_v1_list_agent_vault_entries
+
+        List Agent Vault Entries
+        """
+        pass
+
     def test_agent_v1_list_agents(self) -> None:
         """Test case for agent_v1_list_agents
 
@@ -149,6 +170,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_remove_avatar
 
         Remove Avatar
+        """
+        pass
+
+    def test_agent_v1_replace_agent_vault_entry(self) -> None:
+        """Test case for agent_v1_replace_agent_vault_entry
+
+        Replace Agent Vault Entry
         """
         pass
 

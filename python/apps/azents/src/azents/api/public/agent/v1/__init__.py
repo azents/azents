@@ -87,9 +87,11 @@ from .data import (
     MemoryResponse,
     MemoryUpdateRequest,
 )
+from .vault import router as vault_router
 
 router = APIRouter()
 router.include_router(browser_configuration_router)
+router.include_router(vault_router)
 
 
 # --- Agent CRUD ---

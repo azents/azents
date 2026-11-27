@@ -49,6 +49,11 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 from azents_runtime_control.v4a import ApplyPatchLimits
+from azents_runtime_control.vault_contract import (
+    VAULT_FILE_READ,
+    VAULT_PROCESS_START,
+    VaultTransportError,
+)
 
 import azents_runtime_runner.operation_payloads as payloads
 from azents_runtime_runner.apply_patch import (
@@ -71,6 +76,11 @@ from azents_runtime_runner.execution import (
     ExecutionSpec,
     ProcessTerminationResult,
     shell_execution_spec,
+)
+from azents_runtime_runner.vault_transport import (
+    VaultRecipient,
+    read_vault_file,
+    seal_vault_file,
 )
 from azents_runtime_runner.workspace import Workspace
 
@@ -300,11 +310,15 @@ class RunnerOperations:
         max_file_operation_workers: int = _DEFAULT_MAX_FILE_OPERATION_WORKERS,
         apply_patch_limits: ApplyPatchLimits | None = None,
         apply_patch_fault_injector: ApplyPatchFaultInjector | None = None,
+        vault_recipient: VaultRecipient | None = None,
+        vault_reserved_environment: frozenset[str] = frozenset(),
     ) -> None:
         """Initialize operation handlers."""
         self.client = client
         self.browser_manager = browser_manager
         self.workspace = workspace
+        self.vault_recipient = vault_recipient
+        self.vault_reserved_environment = vault_reserved_environment
         self._processes: dict[str, _ManagedProcess] = {}
         self._missing_processes: dict[str, _MissingProcessRecord] = {}
         self._process_notices: dict[str, _ProcessNotice] = {}
@@ -388,6 +402,8 @@ class RunnerOperations:
                     await self._bash(operation, request)
                 case payloads.FileReadPayload():
                     await self._file_read(operation, request)
+                case payloads.VaultFileReadPayload():
+                    await self._vault_file_read(operation, request)
                 case payloads.FileReadTextPayload():
                     await self._file_read_text(operation, request)
                 case payloads.FileWritePayload():
@@ -416,6 +432,12 @@ class RunnerOperations:
                     await self._file_bulk_move(operation, request)
                 case payloads.ProcessStartPayload():
                     await self._process_start(operation, request)
+                case payloads.VaultProcessStartPayload():
+                    await self._process_start(
+                        operation,
+                        request.launch,
+                        sealed_environment=request.sealed_environment,
+                    )
                 case payloads.ProcessObservePayload():
                     await self._process_observe(operation, request)
                 case payloads.ProcessWritePayload():
@@ -457,7 +479,11 @@ class RunnerOperations:
         except BrowserFailure as exc:
             await self._final_error(operation, exc.code, str(exc))
         except payloads.OperationPayloadError as exc:
-            if exc.patch_reason is not None:
+            if operation.operation_type in {VAULT_FILE_READ, VAULT_PROCESS_START}:
+                await self._final_error(
+                    operation, "INVALID_VAULT_INPUT", "Invalid Vault operation."
+                )
+            elif exc.patch_reason is not None:
                 await self._file_apply_patch_error(
                     operation,
                     ApplyPatchFailure(
@@ -483,7 +509,13 @@ class RunnerOperations:
                 exc_info=diagnostic.exc_info,
                 extra=diagnostic.log_fields(),
             )
-            await self._final_error(operation, "RUNNER_OPERATION_ERROR", str(exc))
+            await self._final_error(
+                operation,
+                "RUNNER_OPERATION_ERROR",
+                "Vault operation failed."
+                if operation.operation_type in {VAULT_FILE_READ, VAULT_PROCESS_START}
+                else str(exc),
+            )
 
     async def cancel(self, operation: RunnerOperationEnvelope) -> None:
         """Publish terminal cancellation for work that has not started."""
@@ -750,6 +782,24 @@ class RunnerOperations:
             {"data_base64": base64.b64encode(data).decode()},
         )
         await self._final_success(operation, {"bytes_read": len(data)})
+
+    async def _vault_file_read(
+        self, operation: RunnerOperationEnvelope, request: payloads.VaultFileReadPayload
+    ) -> None:
+        """Return complete, bounded file content only in a sealed terminal result."""
+        try:
+            path = self.workspace.resolve(request.path)
+            data = await self._run_file_operation(
+                operation, lambda cancellation: read_vault_file(path, cancellation)
+            )
+            data.decode("utf-8")
+            sealed = seal_vault_file(operation, data, request.recipient_public_key)
+        except OSError, ValueError, RuntimeError:
+            await self._final_error(
+                operation, "VAULT_FILE_UNAVAILABLE", "Vault file could not be read."
+            )
+            return
+        await self._final_success(operation, {"sealed_value": sealed})
 
     async def _file_read_text(
         self, operation: RunnerOperationEnvelope, request: payloads.FileReadTextPayload
@@ -1876,7 +1926,11 @@ class RunnerOperations:
         )
 
     async def _process_start(
-        self, operation: RunnerOperationEnvelope, request: payloads.ProcessStartPayload
+        self,
+        operation: RunnerOperationEnvelope,
+        request: payloads.ProcessStartPayload,
+        *,
+        sealed_environment: str | None = None,
     ) -> None:
         command = request.command
         if not command:
@@ -1903,24 +1957,45 @@ class RunnerOperations:
             await self._final_error(operation, "INVALID_WORKDIR", str(exc))
             return
         try:
-            process = await self.execution_backend.start(
-                self._command_spec(
-                    command=command,
-                    cwd=cwd,
-                    operation_environment=request.env,
-                    managed=True,
-                )
+            spec = self._command_spec(
+                command=command,
+                cwd=cwd,
+                operation_environment=request.env,
+                managed=True,
             )
+            if sealed_environment is not None:
+                if self.vault_recipient is None:
+                    raise VaultTransportError("Vault recipient is unavailable.")
+                extra = self.vault_recipient.open_environment(
+                    operation, sealed_environment
+                )
+                if any(
+                    name.startswith("AZENTS_")
+                    or name in self.vault_reserved_environment
+                    for name in extra
+                ):
+                    raise VaultTransportError("Vault environment name is reserved.")
+                spec = replace(spec, environment={**spec.environment, **extra})
+            process = await self.execution_backend.start(spec)
         except asyncio.CancelledError:
             raise
         except ValueError as exc:
-            await self._final_error(operation, "INVALID_ENVIRONMENT", str(exc))
+            await self._final_error(
+                operation,
+                "INVALID_ENVIRONMENT",
+                "Invalid Vault environment."
+                if sealed_environment is not None
+                else str(exc),
+            )
             return
-        except OSError as exc:
-            await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
-            return
-        except RuntimeError as exc:
-            await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
+        except (OSError, RuntimeError) as exc:
+            await self._final_error(
+                operation,
+                "PROCESS_START_FAILED",
+                "Vault process did not start."
+                if sealed_environment is not None
+                else str(exc),
+            )
             return
         record = self._register_process(
             operation,

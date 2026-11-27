@@ -1919,6 +1919,8 @@ class RunnerOperationRequest(_message.Message):
     FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
     BROWSER_FIELD_NUMBER: _builtins.int
     PROCESS_OBSERVE_FIELD_NUMBER: _builtins.int
+    VAULT_PROCESS_START_FIELD_NUMBER: _builtins.int
+    VAULT_FILE_READ_FIELD_NUMBER: _builtins.int
     runtime_id: _builtins.str
     runner_generation: _builtins.int
     operation_type: _builtins.str
@@ -1991,6 +1993,10 @@ class RunnerOperationRequest(_message.Message):
     def browser(self) -> Global___BrowserOperationPayload: ...
     @_builtins.property
     def process_observe(self) -> Global___ProcessObserveOperationPayload: ...
+    @_builtins.property
+    def vault_process_start(self) -> Global___VaultProcessStartOperationPayload: ...
+    @_builtins.property
+    def vault_file_read(self) -> Global___VaultFileReadOperationPayload: ...
     def __init__(
         self,
         *,
@@ -2032,6 +2038,8 @@ class RunnerOperationRequest(_message.Message):
         file_read_text: Global___FileReadTextOperationPayload | None = ...,
         browser: Global___BrowserOperationPayload | None = ...,
         process_observe: Global___ProcessObserveOperationPayload | None = ...,
+        vault_process_start: Global___VaultProcessStartOperationPayload | None = ...,
+        vault_file_read: Global___VaultFileReadOperationPayload | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_owner_session_id",
@@ -2096,6 +2104,10 @@ class RunnerOperationRequest(_message.Message):
         b"process_terminate_session",
         "process_write",
         b"process_write",
+        "vault_file_read",
+        b"vault_file_read",
+        "vault_process_start",
+        b"vault_process_start",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -2173,6 +2185,10 @@ class RunnerOperationRequest(_message.Message):
         b"runner_generation",
         "runtime_id",
         b"runtime_id",
+        "vault_file_read",
+        b"vault_file_read",
+        "vault_process_start",
+        b"vault_process_start",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__owner_session_id: _TypeAlias = _typing.Literal[
@@ -2209,6 +2225,8 @@ class RunnerOperationRequest(_message.Message):
         "file_read_text",
         "browser",
         "process_observe",
+        "vault_process_start",
+        "vault_file_read",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
     @_typing.overload
@@ -2618,6 +2636,61 @@ class ProcessStartOperationPayload(_message.Message):
     ) -> _WhichOneofReturnType__workdir | None: ...
 
 Global___ProcessStartOperationPayload: _TypeAlias = ProcessStartOperationPayload
+
+@_typing.final
+class VaultProcessStartOperationPayload(_message.Message):
+    """A distinct arm prevents older receivers from launching an ordinary process
+    without the required confidential environment.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    LAUNCH_FIELD_NUMBER: _builtins.int
+    SEALED_ENVIRONMENT_FIELD_NUMBER: _builtins.int
+    sealed_environment: _builtins.str
+    @_builtins.property
+    def launch(self) -> Global___ProcessStartOperationPayload: ...
+    def __init__(
+        self,
+        *,
+        launch: Global___ProcessStartOperationPayload | None = ...,
+        sealed_environment: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["launch", b"launch"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "launch", b"launch", "sealed_environment", b"sealed_environment"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___VaultProcessStartOperationPayload: _TypeAlias = (
+    VaultProcessStartOperationPayload
+)
+
+@_typing.final
+class VaultFileReadOperationPayload(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    PATH_FIELD_NUMBER: _builtins.int
+    RECIPIENT_PUBLIC_KEY_FIELD_NUMBER: _builtins.int
+    path: _builtins.str
+    recipient_public_key: _builtins.str
+    def __init__(
+        self,
+        *,
+        path: _builtins.str = ...,
+        recipient_public_key: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "path", b"path", "recipient_public_key", b"recipient_public_key"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___VaultFileReadOperationPayload: _TypeAlias = VaultFileReadOperationPayload
 
 @_typing.final
 class ProcessObserveOperationPayload(_message.Message):
@@ -3475,6 +3548,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     PROCESS_OBSERVE_FIELD_NUMBER: _builtins.int
     BROWSER_FIELD_NUMBER: _builtins.int
     PROCESS_TERMINATE_SESSION_FIELD_NUMBER: _builtins.int
+    VAULT_FILE_READ_FIELD_NUMBER: _builtins.int
     @_builtins.property
     def bash(self) -> Global___BashFinalSuccess: ...
     @_builtins.property
@@ -3533,6 +3607,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     def process_terminate_session(
         self,
     ) -> Global___ProcessTerminateSessionFinalSuccess: ...
+    @_builtins.property
+    def vault_file_read(self) -> Global___VaultFileReadFinalSuccess: ...
     def __init__(
         self,
         *,
@@ -3565,6 +3641,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         browser: Global___BrowserFinalSuccess | None = ...,
         process_terminate_session: Global___ProcessTerminateSessionFinalSuccess
         | None = ...,
+        vault_file_read: Global___VaultFileReadFinalSuccess | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "bash",
@@ -3621,6 +3698,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"process_terminate_session",
         "result",
         b"result",
+        "vault_file_read",
+        b"vault_file_read",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -3678,6 +3757,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"process_terminate_session",
         "result",
         b"result",
+        "vault_file_read",
+        b"vault_file_read",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType_result: _TypeAlias = _typing.Literal[
@@ -3707,6 +3788,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         "process_observe",
         "browser",
         "process_terminate_session",
+        "vault_file_read",
     ]
     _WhichOneofArgType_result: _TypeAlias = _typing.Literal["result", b"result"]
     def WhichOneof(
@@ -3716,6 +3798,25 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
 Global___RunnerOperationFinalSuccessPayload: _TypeAlias = (
     RunnerOperationFinalSuccessPayload
 )
+
+@_typing.final
+class VaultFileReadFinalSuccess(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SEALED_VALUE_FIELD_NUMBER: _builtins.int
+    sealed_value: _builtins.str
+    def __init__(
+        self,
+        *,
+        sealed_value: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["sealed_value", b"sealed_value"]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___VaultFileReadFinalSuccess: _TypeAlias = VaultFileReadFinalSuccess
 
 @_typing.final
 class BrowserFinalSuccess(_message.Message):

@@ -1,6 +1,7 @@
 """Runner operation client tests."""
 
 import asyncio
+import base64
 import dataclasses
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Never
@@ -22,6 +23,15 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
+from azents_runtime_control.vault_contract import (
+    VAULT_FILE_READ,
+    VAULT_RUNTIME_CAPABILITY,
+    VAULT_RUNTIME_PUBLIC_KEY_METADATA,
+    VaultOperationContext,
+    encode_vault_body,
+)
+from nacl.public import PrivateKey, PublicKey, SealedBox
+from pydantic import SecretStr
 
 from azents.core.runtime_admission import (
     RuntimeAdmissionAuthority,
@@ -57,6 +67,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationCanceledError,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
+    RuntimeRunnerOperationUnavailable,
     encode_file_chunk,
     runner_reply_target,
 )
@@ -1813,13 +1824,27 @@ class _Harness:
 async def _make_harness(
     *,
     body_chunk_size_bytes: int = 1024 * 1024,
+    vault_key: PrivateKey | None = None,
 ) -> _Harness:
     store = _ObservableStore()
     control = FakeRuntimeControlProtocolService(
         store,
         request_id_factory=_RequestIds(),
     )
-    runner = await control.register_runner(_runner_registration(), registered_at=_now())
+    registration = _runner_registration()
+    if vault_key is not None:
+        registration = dataclasses.replace(
+            registration,
+            capabilities=RuntimeProtocolCapabilities(
+                (*registration.capabilities.values, VAULT_RUNTIME_CAPABILITY)
+            ),
+            metadata={
+                VAULT_RUNTIME_PUBLIC_KEY_METADATA: base64.urlsafe_b64encode(
+                    bytes(vault_key.public_key)
+                ).decode("ascii")
+            },
+        )
+    runner = await control.register_runner(registration, registered_at=_now())
     metrics = RuntimeReplyDeliveryMetrics()
     client = RuntimeRunnerOperationClient(
         control_protocol=control,
@@ -1958,6 +1983,117 @@ def _admission_client(
     )
     client.waits = 0
     return client
+
+
+@pytest.mark.parametrize("surface", ["cli", "browser"])
+async def test_vault_admission_does_not_append_after_execution_revocation(
+    surface: str,
+) -> None:
+    harness = await _make_harness(vault_key=PrivateKey.generate())
+    generation = harness.runner_generation
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    authorized = True
+
+    async def authority_check() -> bool:
+        entered.set()
+        await release.wait()
+        return authorized
+
+    async def attempt() -> None:
+        deadline = _now() + timedelta(seconds=10)
+        with pytest.raises(RuntimeRunnerOperationUnavailable):
+            if surface == "browser":
+                await harness.client.run_browser_command(
+                    runtime_id="runtime-1",
+                    runner_generation=generation,
+                    owner_session_id="session-1",
+                    command=BrowserOpenCommand(
+                        BrowserAuthority("session-1", "/workspace/agent"),
+                        None,
+                        None,
+                        None,
+                    ),
+                    deadline_at=deadline,
+                    vault_execution_check=authority_check,
+                )
+            else:
+                client = _admission_client(
+                    harness, _AdmissionReader(RuntimeAdmissionReady(generation))
+                )
+                await client.start_process(
+                    runtime_id="runtime-1",
+                    runner_generation=generation,
+                    owner_session_id="session-1",
+                    command="true",
+                    fire_and_forget=False,
+                    workdir=None,
+                    yield_time_ms=1000,
+                    max_output_bytes=4096,
+                    env=None,
+                    deadline_at=deadline,
+                    admission_authority=_admission_authority(),
+                    vault_env={"VAULT_TEST": SecretStr("synthetic-value")},
+                    vault_execution_check=authority_check,
+                )
+
+    async with asyncio.TaskGroup() as tasks:
+        tasks.create_task(attempt())
+        async with asyncio.timeout(5):
+            await entered.wait()
+        authorized = False
+        release.set()
+    assert harness.store.request_appended.empty()
+
+
+async def test_vault_file_accepts_only_bound_ciphertext() -> None:
+    harness = await _make_harness(vault_key=PrivateKey.generate())
+    generation = harness.runner_generation
+    client = _admission_client(
+        harness, _AdmissionReader(RuntimeAdmissionReady(generation))
+    )
+    deadline = _now() + timedelta(seconds=15)
+    marker = "synthetic-secret-control"
+    async with asyncio.TaskGroup() as tasks:
+        read = tasks.create_task(
+            client.read_vault_file(
+                runtime_id="runtime-1",
+                runner_generation=generation,
+                admission_authority=_admission_authority(),
+                owner_session_id="session-1",
+                path="file",
+                deadline_at=deadline,
+            )
+        )
+        async with asyncio.timeout(5):
+            request = await harness.claim()
+        assert request.operation_type == VAULT_FILE_READ
+        assert marker not in repr(request)
+        payload = request.payload["payload"]
+        assert isinstance(payload, dict)
+        public = payload["recipient_public_key"]
+        assert isinstance(public, str)
+        context = VaultOperationContext(
+            VAULT_FILE_READ,
+            "runtime-1",
+            generation,
+            "session-1",
+            request.request_id,
+            deadline,
+        )
+        cipher = base64.urlsafe_b64encode(
+            SealedBox(PublicKey(base64.urlsafe_b64decode(public))).encrypt(
+                encode_vault_body(context, marker.encode())
+            )
+        ).decode()
+        assert marker not in cipher
+        await harness.reply(
+            request.request_id,
+            RuntimeReplyEventType.FINAL_SUCCESS,
+            {"sealed_value": cipher},
+            final=True,
+        )
+        assert (await read).get_secret_value() == marker
 
 
 async def test_already_stale_connection_uses_frozen_authority() -> None:
@@ -2121,7 +2257,11 @@ async def test_ambiguous_exception_after_append_is_never_resubmitted() -> None:
 
     class AmbiguousControl(FakeRuntimeControlProtocolService):
         async def dispatch_runner_operation(
-            self, operation: RuntimeRunnerOperation, *, created_at: datetime
+            self,
+            operation: RuntimeRunnerOperation,
+            *,
+            created_at: datetime,
+            reserved_request_id: str | None = None,
         ) -> Never:
             await super().dispatch_runner_operation(operation, created_at=created_at)
             raise ConnectionError("Submission acknowledgement lost")
@@ -2179,7 +2319,11 @@ async def test_dispatch_timeout_after_append_reports_unknown_without_replay() ->
 
     class HungAcknowledgement(FakeRuntimeControlProtocolService):
         async def dispatch_runner_operation(
-            self, operation: RuntimeRunnerOperation, *, created_at: datetime
+            self,
+            operation: RuntimeRunnerOperation,
+            *,
+            created_at: datetime,
+            reserved_request_id: str | None = None,
         ) -> (
             RuntimeDispatchResult
             | RuntimeProtocolRouteUnavailable

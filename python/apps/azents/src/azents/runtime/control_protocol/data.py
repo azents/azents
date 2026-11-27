@@ -2,6 +2,7 @@
 
 import dataclasses
 import enum
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Protocol
 
@@ -157,6 +158,9 @@ class RuntimeRunnerOperation:
     deadline_at: datetime
     body_stream_id: str | None
     admission_authority: RuntimeAdmissionAuthority | None
+    execution_check: Callable[[], Awaitable[bool]] | None = dataclasses.field(
+        default=None, repr=False, compare=False
+    )
 
 
 @dataclasses.dataclass(frozen=True)

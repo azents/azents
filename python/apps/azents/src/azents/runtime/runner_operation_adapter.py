@@ -1,12 +1,13 @@
 """Convert Runtime control client to engine runtime I/O protocol."""
 
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import TypeVar
 
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
 from azents_runtime_control.process_observation import ProcessObservation
+from pydantic import SecretStr
 
 from azents.core.runtime_admission import RuntimeAdmissionAuthority
 from azents.engine.tools import runtime_io as engine_runtime_io
@@ -49,6 +50,38 @@ class RuntimeRunnerOperationAdapter:
         """Initialize Adapter."""
         self.client = client
 
+    async def browser_vault_public_key(
+        self, *, runtime_id: str, runner_generation: int
+    ) -> str:
+        """Resolve the current Browser recipient through authenticated Control."""
+        return await _translate_runtime_errors(
+            self.client.browser_vault_public_key(
+                runtime_id=runtime_id, runner_generation=runner_generation
+            )
+        )
+
+    async def read_vault_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
+        owner_session_id: str,
+        path: str,
+        deadline_at: datetime,
+    ) -> SecretStr:
+        """Read Vault material without an ordinary filesystem reply."""
+        return await _translate_runtime_errors(
+            self.client.read_vault_file(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                admission_authority=admission_authority,
+                owner_session_id=owner_session_id,
+                path=path,
+                deadline_at=deadline_at,
+            )
+        )
+
     async def run_browser_command(
         self,
         *,
@@ -57,6 +90,7 @@ class RuntimeRunnerOperationAdapter:
         owner_session_id: str,
         command: BrowserCommand,
         deadline_at: datetime,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> BrowserResult:
         """Preserve typed browser results and translate operation failures."""
         return await _translate_runtime_errors(
@@ -66,6 +100,7 @@ class RuntimeRunnerOperationAdapter:
                 owner_session_id=owner_session_id,
                 command=command,
                 deadline_at=deadline_at,
+                vault_execution_check=vault_execution_check,
             )
         )
 
@@ -118,6 +153,8 @@ class RuntimeRunnerOperationAdapter:
         owner_session_id: str,
         deadline_at: datetime,
         process_output_callback: RuntimeProcessOutputCallback | None = None,
+        vault_env: Mapping[str, SecretStr] | None = None,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> RuntimeProcessResult:
         """Start process operation and convert to engine result."""
         result = await _translate_runtime_errors(
@@ -130,6 +167,8 @@ class RuntimeRunnerOperationAdapter:
                 yield_time_ms=yield_time_ms,
                 max_output_bytes=max_output_bytes,
                 env=env,
+                vault_env=vault_env,
+                vault_execution_check=vault_execution_check,
                 owner_session_id=owner_session_id,
                 deadline_at=deadline_at,
                 process_output_callback=_control_process_output_callback(

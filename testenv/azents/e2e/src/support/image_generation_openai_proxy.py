@@ -45,6 +45,8 @@ _BRAVE_PROMPT_PREFIX = "Brave Search E2E "
 _BRAVE_KINDS = ("web", "context", "news", "images", "videos")
 RUNTIME_ENVIRONMENT_PROMPT_PREFIX = "Agent Runtime environment E2E: "
 RUNTIME_ENVIRONMENT_FINAL = "AGENT_RUNTIME_ENVIRONMENT_E2E_COMPLETED"
+VAULT_CLI_PROMPT_PREFIX = "Agent Vault CLI E2E: "
+VAULT_CLI_FINAL = "AGENT_VAULT_CLI_E2E_COMPLETED"
 RUNTIME_ENVIRONMENT_COMMAND = (
     'if [ -n "${E2E_AGENT_SECRET+x}" ]; then '
     'printf "%s" "$E2E_AGENT_SECRET" | sha256sum; '
@@ -3061,6 +3063,40 @@ class _Handler(BaseHTTPRequestHandler):
                         request,
                         plan.final_text,
                         response_id=f"resp_consolidation_final_{logical.chain_id}",
+                    )
+                return
+            if isinstance(user_text, str) and user_text.startswith(
+                VAULT_CLI_PROMPT_PREFIX
+            ):
+                step = user_text.removeprefix(VAULT_CLI_PROMPT_PREFIX)
+                call_id = f"call_vault_cli_{step}"
+                if _SESSION_TITLE_SYSTEM_MARKER in (request.instructions or ""):
+                    self._write_text_response(
+                        request,
+                        '{"title":"Agent Vault CLI E2E"}',
+                        response_id=f"resp_vault_cli_title_{step}",
+                    )
+                elif request_has_tool_output(request, call_id):
+                    self._write_text_response(
+                        request,
+                        VAULT_CLI_FINAL,
+                        response_id=f"resp_vault_cli_final_{step}",
+                    )
+                else:
+                    arguments: dict[str, object] = {
+                        "command": (
+                            'if [ -n "${VAULT_E2E_VALUE+x}" ]; then '
+                            'printf "%s" "$VAULT_E2E_VALUE" | wc -c; '
+                            'else printf "ABSENT\\n"; fi'
+                        )
+                    }
+                    if step == "use":
+                        arguments["vault_env"] = {"VAULT_E2E_VALUE": "e2e-token"}
+                    self._write_function_call_response(
+                        request,
+                        call_id=call_id,
+                        name="exec_command",
+                        arguments=arguments,
                     )
                 return
             if isinstance(user_text, str) and user_text.startswith(

@@ -6,7 +6,7 @@ import dataclasses
 import json
 import math
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -25,7 +25,16 @@ from azents_runtime_control.browser_contract import (
 )
 from azents_runtime_control.browser_runner_wire import encode_configured_browser_command
 from azents_runtime_control.process_observation import ProcessObservation
-from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
+from azents_runtime_control.vault_contract import (
+    BROWSER_VAULT_PUBLIC_KEY_METADATA,
+    BROWSER_VAULT_RECIPIENT_CAPABILITY,
+    VAULT_FILE_READ,
+    VAULT_PROCESS_START,
+    VAULT_RUNTIME_CAPABILITY,
+    VAULT_RUNTIME_PUBLIC_KEY_METADATA,
+    VaultOperationContext,
+)
+from pydantic import ConfigDict, SecretStr, TypeAdapter, ValidationError, with_config
 
 from azents.core.browser_configuration import BrowserConfigurationIntentReader
 from azents.core.runtime_admission import (
@@ -42,9 +51,15 @@ from azents.runtime.control_protocol.data import (
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
+from azents.runtime.control_protocol.vault_sealing import (
+    FileVaultRecipient,
+    VaultSealError,
+    seal_process_environment,
+)
 from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunk,
+    RuntimeConnectionKind,
     RuntimeCoordinationTarget,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
@@ -573,6 +588,145 @@ class RuntimeRunnerOperationClient:
         self.browser_configuration = browser_configuration
         self.admission_reader = admission_reader
 
+    async def browser_vault_public_key(
+        self, *, runtime_id: str, runner_generation: int
+    ) -> str:
+        """Read only the authenticated recipient of the current Runner generation."""
+        return await self._vault_public_key(
+            runtime_id,
+            runner_generation,
+            BROWSER_VAULT_RECIPIENT_CAPABILITY,
+            BROWSER_VAULT_PUBLIC_KEY_METADATA,
+        )
+
+    async def _vault_public_key(
+        self, runtime_id: str, generation: int, capability: str, metadata_key: str
+    ) -> str:
+        connection = await self.coordination_store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER, subject_id=runtime_id
+        )
+        if connection is not None and connection.generation == generation:
+            capabilities = connection.metadata.get("capabilities")
+            registration = connection.metadata.get("metadata")
+            if (
+                isinstance(capabilities, list)
+                and capability in capabilities
+                and isinstance(registration, dict)
+            ):
+                key = registration.get(metadata_key)
+                if isinstance(key, str) and len(key) == 44:
+                    return key
+        raise RuntimeRunnerOperationUnavailable(
+            "The current Runner does not support this Vault operation."
+        )
+
+    async def _dispatch_vault_operation(
+        self,
+        context: VaultOperationContext,
+        authority: RuntimeAdmissionAuthority | None,
+        payload: dict[str, JsonValue],
+        execution_check: Callable[[], Awaitable[bool]] | None = None,
+    ) -> RuntimeDispatchResult:
+        """Submit only to the exact admitted generation without automatic replay."""
+        if self.admission_reader is None or authority is None:
+            raise RuntimeRunnerOperationUnavailable(
+                "Vault Runtime authority is unavailable."
+            )
+        try:
+            async with asyncio.timeout(
+                (context.deadline - datetime.now(timezone.utc)).total_seconds()
+            ):
+                status = await self.admission_reader.resolve(authority)
+                if (
+                    authority.runtime_id != context.runtime_id
+                    or not isinstance(status, RuntimeAdmissionReady)
+                    or status.runner_generation != context.runner_generation
+                ):
+                    raise RuntimeRunnerOperationUnavailable(
+                        "The Runner changed before Vault operation admission."
+                    )
+                now = datetime.now(timezone.utc)
+                if now >= context.deadline:
+                    raise TimeoutError
+                result = await self.control_protocol.dispatch_runner_operation(
+                    RuntimeRunnerOperation(
+                        runtime_id=context.runtime_id,
+                        runner_generation=context.runner_generation,
+                        operation_type=context.operation,
+                        owner_session_id=context.session_id,
+                        payload=payload,
+                        deadline_at=context.deadline,
+                        body_stream_id=None,
+                        admission_authority=authority,
+                        execution_check=execution_check,
+                    ),
+                    created_at=now,
+                    reserved_request_id=context.request_id,
+                )
+        except TimeoutError:
+            raise RuntimeRunnerOperationFailedError(
+                "Vault operation timed out; do not replay an uncertain command.",
+                code="vault_operation_timeout",
+            ) from None
+        if not isinstance(result, RuntimeDispatchResult):
+            raise RuntimeRunnerOperationUnavailable(
+                "The Runner changed before Vault operation admission."
+            )
+        return result
+
+    async def read_vault_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
+        owner_session_id: str,
+        path: str,
+        deadline_at: datetime,
+    ) -> SecretStr:
+        """Open only a final bounded reply for this application recipient."""
+        await self._vault_public_key(
+            runtime_id,
+            runner_generation,
+            VAULT_RUNTIME_CAPABILITY,
+            VAULT_RUNTIME_PUBLIC_KEY_METADATA,
+        )
+        context = VaultOperationContext(
+            VAULT_FILE_READ,
+            runtime_id,
+            runner_generation,
+            owner_session_id,
+            self.control_protocol.request_id_factory(),
+            deadline_at,
+        )
+        recipient = FileVaultRecipient()
+        dispatch = await self._dispatch_vault_operation(
+            context,
+            admission_authority,
+            {"path": path, "recipient_public_key": recipient.public_key},
+        )
+        final = await self._read_until_final(
+            dispatch.reply_stream_id,
+            _ReplyFolder(after_cursor=None),
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=dispatch.generation,
+            deadline_at=deadline_at,
+        )
+        result = final.event.payload
+        ciphertext = result.get("sealed_value")
+        if set(result) != {"sealed_value"} or not isinstance(ciphertext, str):
+            raise RuntimeRunnerOperationFailedError(
+                "Vault file response is invalid.", code="invalid_vault_file_response"
+            )
+        try:
+            return recipient.open_value(context, ciphertext)
+        except VaultSealError:
+            raise RuntimeRunnerOperationFailedError(
+                "Vault file response is invalid.", code="invalid_vault_file_response"
+            ) from None
+
     async def run_browser_command(
         self,
         *,
@@ -581,6 +735,7 @@ class RuntimeRunnerOperationClient:
         owner_session_id: str,
         command: BrowserCommand,
         deadline_at: datetime,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> BrowserResult:
         """Dispatch one typed browser command without retrying site effects."""
         intent = (
@@ -605,6 +760,7 @@ class RuntimeRunnerOperationClient:
                 deadline_at=deadline_at,
                 body_stream_id=None,
                 admission_authority=None,
+                execution_check=vault_execution_check,
             ),
             cancel_check=None,
         )
@@ -1589,6 +1745,8 @@ class RuntimeRunnerOperationClient:
         owner_session_id: str,
         deadline_at: datetime,
         process_output_callback: RuntimeProcessOutputCallback | None = None,
+        vault_env: Mapping[str, SecretStr] | None = None,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> RuntimeProcessResult:
         """Start a pipe-based process and wait for the operation snapshot."""
         payload: dict[str, JsonValue] = {
@@ -1601,19 +1759,50 @@ class RuntimeRunnerOperationClient:
             payload["workdir"] = workdir
         if env is not None:
             payload["env"] = dict(env)
-        dispatch = await self._dispatch_runner_operation(
-            RuntimeRunnerOperation(
-                runtime_id=runtime_id,
-                runner_generation=runner_generation,
-                operation_type="process.start",
-                owner_session_id=owner_session_id,
-                payload=payload,
-                deadline_at=deadline_at,
-                body_stream_id=None,
-                admission_authority=admission_authority,
-            ),
-            cancel_check=None,
-        )
+        if vault_env:
+            if vault_execution_check is None:
+                raise RuntimeRunnerOperationUnavailable(
+                    "Vault execution authority is unavailable."
+                )
+            recipient = await self._vault_public_key(
+                runtime_id,
+                runner_generation,
+                VAULT_RUNTIME_CAPABILITY,
+                VAULT_RUNTIME_PUBLIC_KEY_METADATA,
+            )
+            context = VaultOperationContext(
+                VAULT_PROCESS_START,
+                runtime_id,
+                runner_generation,
+                owner_session_id,
+                self.control_protocol.request_id_factory(),
+                deadline_at,
+            )
+            try:
+                payload["sealed_environment"] = seal_process_environment(
+                    context, vault_env, recipient
+                )
+            except VaultSealError:
+                raise RuntimeRunnerOperationFailedError(
+                    "Invalid Vault environment.", code="invalid_vault_environment"
+                ) from None
+            dispatch = await self._dispatch_vault_operation(
+                context, admission_authority, payload, vault_execution_check
+            )
+        else:
+            dispatch = await self._dispatch_runner_operation(
+                RuntimeRunnerOperation(
+                    runtime_id=runtime_id,
+                    runner_generation=runner_generation,
+                    operation_type="process.start",
+                    owner_session_id=owner_session_id,
+                    payload=payload,
+                    deadline_at=deadline_at,
+                    body_stream_id=None,
+                    admission_authority=admission_authority,
+                ),
+                cancel_check=None,
+            )
         return await self.resume_process(
             reply_stream_id=dispatch.reply_stream_id,
             after_cursor=None,

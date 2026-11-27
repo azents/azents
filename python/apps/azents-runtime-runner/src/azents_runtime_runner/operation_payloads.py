@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from azents_runtime_control.runner import JsonValue
+from azents_runtime_control.vault_contract import VAULT_FILE_READ, VAULT_PROCESS_START
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,12 @@ class FileReadTextPayload:
     character_offset: int
     max_characters: int
     encoding: str
+
+
+@dataclass(frozen=True)
+class VaultFileReadPayload:
+    path: str
+    recipient_public_key: str
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,12 @@ class ProcessStartPayload:
 
 
 @dataclass(frozen=True)
+class VaultProcessStartPayload:
+    launch: ProcessStartPayload
+    sealed_environment: str
+
+
+@dataclass(frozen=True)
 class ProcessObservePayload:
     after_revision: int
     timeout_ms: int
@@ -199,6 +212,7 @@ class UnsupportedPayload:
 type OperationPayload = (
     BashPayload
     | FileReadPayload
+    | VaultFileReadPayload
     | FileReadTextPayload
     | FileWritePayload
     | FileApplyPatchPayload
@@ -213,6 +227,7 @@ type OperationPayload = (
     | FileBulkDeletePayload
     | FileBulkMovePayload
     | ProcessStartPayload
+    | VaultProcessStartPayload
     | ProcessObservePayload
     | ProcessWritePayload
     | ProcessTerminateSessionPayload
@@ -401,6 +416,10 @@ def decode_operation_payload(
                 fields.integer("offset", default=0),
                 fields.optional_integer("max_bytes"),
             )
+        case kind if kind == VAULT_FILE_READ:
+            return VaultFileReadPayload(
+                fields.string("path"), fields.string("recipient_public_key")
+            )
         case "file.read_text":
             return FileReadTextPayload(
                 fields.optional_string("path"),
@@ -471,8 +490,8 @@ def decode_operation_payload(
                 fields.optional_string("destination_directory"),
                 fields.boolean("overwrite", default=False),
             )
-        case "process.start":
-            return ProcessStartPayload(
+        case "process.start" | "vault.process_start":
+            launch = ProcessStartPayload(
                 fields.string("command"),
                 fields.optional_string("workdir"),
                 fields.environment(),
@@ -480,6 +499,11 @@ def decode_operation_payload(
                 fields.positive_integer("max_output_bytes", default=64 * 1024),
                 fields.boolean("fire_and_forget", default=False),
             )
+            if operation_type == VAULT_PROCESS_START:
+                return VaultProcessStartPayload(
+                    launch, fields.string("sealed_environment")
+                )
+            return launch
         case "process.observe":
             return ProcessObservePayload(
                 fields.non_negative_integer("after_revision", default=0),

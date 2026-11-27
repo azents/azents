@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -14,6 +14,7 @@ import pytest
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
 from azents_runtime_control.process_observation import ProcessObservation
 from cryptography.fernet import Fernet
+from pydantic import SecretStr
 
 from azents.core.crypto import CredentialCipher
 from azents.core.engine_tool_state import AgentsAppendixDedupeState
@@ -586,6 +587,23 @@ def _runtime_configuration_state(
 
 
 class _FakeRunnerOperations:
+    async def browser_vault_public_key(
+        self, *, runtime_id: str, runner_generation: int
+    ) -> str:
+        raise AssertionError("Unexpected Vault recipient lookup")
+
+    async def read_vault_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
+        owner_session_id: str,
+        path: str,
+        deadline_at: datetime,
+    ) -> SecretStr:
+        raise AssertionError("Unexpected Vault file read")
+
     async def run_browser_command(
         self,
         *,
@@ -594,6 +612,7 @@ class _FakeRunnerOperations:
         owner_session_id: str,
         command: BrowserCommand,
         deadline_at: datetime,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> BrowserResult:
         """Require browser tests to provide an explicit command implementation."""
         self.browser_calls.append(command)
@@ -713,6 +732,8 @@ class _FakeRunnerOperations:
         owner_session_id: str,
         deadline_at: datetime,
         process_output_callback: object | None = None,
+        vault_env: Mapping[str, SecretStr] | None = None,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> RuntimeProcessResult:
         del runtime_id, runner_generation, deadline_at
         self.process_start_calls.append(

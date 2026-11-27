@@ -14,6 +14,7 @@ function parseSection(value: string): AgentSettingsSection | null {
     case "memory":
     case "runtime":
     case "services":
+    case "vault":
     case "channels":
     case "projects":
     case "danger":
@@ -36,6 +37,9 @@ export default async function Page({
   try {
     const agent = await trpc.agent.get({ handle, agentId });
     if (section === "services" && agent.runtime_capability !== "managed") {
+      notFound();
+    }
+    if (section === "vault" && !agent.toolkit_management_available) {
       notFound();
     }
     return (
