@@ -2794,8 +2794,13 @@ async def list_history_events(
         if value.items:
             next_cursor = value.items[0].id
             previous_cursor = value.items[-1].id
+        items = [ChatEventResponse.from_domain(event) for event in value.items]
+        for item in items:
+            snapshot = value.vault_card_snapshots.get(item.id)
+            if snapshot is not None:
+                item.payload["vault_state"] = snapshot
         return ChatEventPageResponse(
-            items=[ChatEventResponse.from_domain(event) for event in value.items],
+            items=items,
             has_more=value.has_more,
             has_newer=value.has_newer,
             next_cursor=next_cursor,

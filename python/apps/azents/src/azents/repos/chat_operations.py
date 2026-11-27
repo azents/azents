@@ -119,6 +119,7 @@ from azents.repos.agent_project_default.data import (
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_vault_requests import project_vault_history_cards
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.goal.store import (
     GoalInvalidStatusTransitionError,
@@ -1322,11 +1323,15 @@ class ChatOperationsRepository:
                 before=before,
                 after=after,
             )
+            snapshots = await project_vault_history_cards(
+                session, source=agent_session, items=items
+            )
             return Success(
                 PaginatedEvents(
                     items=items,
                     has_more=has_more,
                     has_newer=has_newer,
+                    vault_card_snapshots=snapshots,
                 )
             )
 

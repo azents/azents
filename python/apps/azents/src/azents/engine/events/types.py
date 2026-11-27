@@ -42,6 +42,7 @@ from azents.core.routine_judgment import (
     RoutineJudgmentConsidered,
     RoutineJudgmentDecision,
 )
+from azents.core.vault_request import VaultRequestIdentityPayload
 from azents.core.vfs import VfsProjection
 from azents.core.work_context import WorkContext
 from azents.engine.client_tools import ClientToolWireDialect
@@ -940,6 +941,7 @@ EventPayload = (
     | SystemReminderPayload
     | SystemErrorPayload
     | UnknownAdapterOutputPayload
+    | VaultRequestIdentityPayload
 )
 
 PAYLOAD_BY_KIND: dict[EventKind, type[EventPayload]] = {
@@ -973,6 +975,8 @@ PAYLOAD_BY_KIND: dict[EventKind, type[EventPayload]] = {
     EventKind.SYSTEM_REMINDER: SystemReminderPayload,
     EventKind.SYSTEM_ERROR: SystemErrorPayload,
     EventKind.UNKNOWN_ADAPTER_OUTPUT: UnknownAdapterOutputPayload,
+    EventKind.VAULT_REQUEST: VaultRequestIdentityPayload,
+    EventKind.VAULT_REQUEST_COMPLETED: VaultRequestIdentityPayload,
 }
 
 PAYLOAD_ADAPTER_BY_KIND: dict[EventKind, TypeAdapter[EventPayload]] = {

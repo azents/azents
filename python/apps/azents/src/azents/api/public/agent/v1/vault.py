@@ -8,13 +8,27 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from azents.core.auth.deps import WorkspaceMember, get_workspace_member
+from azents.core.auth.deps import (
+    CurrentUser,
+    WorkspaceMember,
+    get_current_user,
+    get_workspace_member,
+)
+from azents.core.vault_request import VaultRequestId, VaultRequestSubmission
+from azents.repos.agent_vault import InvalidVaultEntry, VaultAccessDenied, VaultManager
+from azents.repos.agent_vault_requests import (
+    VaultRequestClosed,
+    VaultRequestScope,
+    VaultRequestView,
+)
+from azents.services.account_access import AccountAccessService
 from azents.services.agent_vault import (
     AgentVaultService,
     AgentVaultSettings,
     VaultSettingsDenial,
     VaultSettingsError,
 )
+from azents.services.agent_vault_requests import AgentVaultRequestService
 
 
 class VaultRoute(APIRoute):
@@ -30,6 +44,24 @@ class VaultRoute(APIRoute):
                 raise HTTPException(
                     422,
                     "Invalid Vault request.",
+                    headers={"Cache-Control": "no-store"},
+                ) from None
+            except VaultAccessDenied:
+                raise HTTPException(
+                    404,
+                    "Vault request not found.",
+                    headers={"Cache-Control": "no-store"},
+                ) from None
+            except VaultRequestClosed:
+                raise HTTPException(
+                    409,
+                    "Vault request is not open.",
+                    headers={"Cache-Control": "no-store"},
+                ) from None
+            except InvalidVaultEntry:
+                raise HTTPException(
+                    422,
+                    "Invalid Vault request values.",
                     headers={"Cache-Control": "no-store"},
                 ) from None
             except VaultSettingsError as error:
@@ -61,6 +93,53 @@ class VaultEntryWriteRequest(BaseModel):
 
 router = APIRouter(route_class=VaultRoute)
 _ENTRIES = "/workspaces/{handle}/agents/{agent_id}/vault/entries"
+_REQUEST = (
+    "/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}"
+    "/vault/requests/{request_id}"
+)
+
+
+async def _request_scope(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    access_service: Annotated[AccountAccessService, Depends(AccountAccessService)],
+    *,
+    handle: str,
+    session_id: str,
+    agent_id: str,
+) -> VaultRequestScope:
+    access = await access_service.read_workspace_membership(
+        handle=handle, user_id=current_user.user_id
+    )
+    if access.workspace_id is None or access.membership is None:
+        raise VaultAccessDenied("Vault request not found.")
+    return VaultRequestScope(
+        session_id=session_id,
+        agent_id=agent_id,
+        manager=VaultManager(access.workspace_id, current_user.user_id),
+    )
+
+
+@router.get(_REQUEST)
+async def read_vault_request(
+    scope: Annotated[VaultRequestScope, Depends(_request_scope)],
+    service: Annotated[AgentVaultRequestService, Depends(AgentVaultRequestService)],
+    *,
+    request_id: VaultRequestId,
+) -> VaultRequestView:
+    """Read value-free metadata and current status for an exact chat card."""
+    return await service.read(scope, request_id)
+
+
+@router.post(_REQUEST, status_code=204, response_class=Response)
+async def submit_vault_request(
+    scope: Annotated[VaultRequestScope, Depends(_request_scope)],
+    service: Annotated[AgentVaultRequestService, Depends(AgentVaultRequestService)],
+    *,
+    request_id: VaultRequestId,
+    request_body: VaultRequestSubmission,
+) -> None:
+    """Submit all requested values at once without echoing them."""
+    await service.submit(scope, request_id, request_body)
 
 
 @router.get(_ENTRIES)

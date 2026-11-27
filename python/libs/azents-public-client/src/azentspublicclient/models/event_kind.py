@@ -56,6 +56,8 @@ class EventKind(str, Enum):
     SYSTEM_REMINDER = 'system_reminder'
     SYSTEM_ERROR = 'system_error'
     UNKNOWN_ADAPTER_OUTPUT = 'unknown_adapter_output'
+    VAULT_REQUEST = 'vault_request'
+    VAULT_REQUEST_COMPLETED = 'vault_request_completed'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

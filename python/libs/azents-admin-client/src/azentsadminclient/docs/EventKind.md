@@ -64,6 +64,10 @@ Event transcript event kind.
 
 * `UNKNOWN_ADAPTER_OUTPUT` (value: `'unknown_adapter_output'`)
 
+* `VAULT_REQUEST` (value: `'vault_request'`)
+
+* `VAULT_REQUEST_COMPLETED` (value: `'vault_request_completed'`)
+
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 
 

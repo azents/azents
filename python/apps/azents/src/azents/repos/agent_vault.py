@@ -111,11 +111,19 @@ class AgentVaultRepository:
     async def _require_manager(
         self, session: ReadSession, *, agent_id: str, manager: VaultManager
     ) -> None:
-        permitted = await session.read_session.scalar(
-            self._manager_agent(agent_id, manager)
-        )
-        if permitted is None:
+        if not await self.can_manage_in_session(
+            session, agent_id=agent_id, manager=manager
+        ):
             raise VaultAccessDenied("Agent Vault not found")
+
+    async def can_manage_in_session(
+        self, session: ReadSession, *, agent_id: str, manager: VaultManager
+    ) -> bool:
+        """Check the exact active Agent and current Vault manager policy."""
+        return (
+            await session.read_session.scalar(self._manager_agent(agent_id, manager))
+            is not None
+        )
 
     async def fence_manager_write_in_session(
         self, session: WriteSession, *, agent_id: str, manager: VaultManager

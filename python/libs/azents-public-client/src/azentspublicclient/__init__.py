@@ -665,6 +665,11 @@ __all__ = [
     "ValidationErrorLocInner",
     "Value",
     "VaultEntryWriteRequest",
+    "VaultRequestField",
+    "VaultRequestStatus",
+    "VaultRequestSubmission",
+    "VaultRequestValue",
+    "VaultRequestView",
     "VerifyCodeRequest",
     "VerifyCodeResponse",
     "Workspace",
@@ -1367,6 +1372,11 @@ from azentspublicclient.models.validation_error import ValidationError as Valida
 from azentspublicclient.models.validation_error_loc_inner import ValidationErrorLocInner as ValidationErrorLocInner
 from azentspublicclient.models.value import Value as Value
 from azentspublicclient.models.vault_entry_write_request import VaultEntryWriteRequest as VaultEntryWriteRequest
+from azentspublicclient.models.vault_request_field import VaultRequestField as VaultRequestField
+from azentspublicclient.models.vault_request_status import VaultRequestStatus as VaultRequestStatus
+from azentspublicclient.models.vault_request_submission import VaultRequestSubmission as VaultRequestSubmission
+from azentspublicclient.models.vault_request_value import VaultRequestValue as VaultRequestValue
+from azentspublicclient.models.vault_request_view import VaultRequestView as VaultRequestView
 from azentspublicclient.models.verify_code_request import VerifyCodeRequest as VerifyCodeRequest
 from azentspublicclient.models.verify_code_response import VerifyCodeResponse as VerifyCodeResponse
 from azentspublicclient.models.workspace import Workspace as Workspace

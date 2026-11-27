@@ -2649,6 +2649,82 @@ class ExternalChannelRepository:
             )
         )
 
+    async def find_exact_connected_channel(
+        self,
+        session: ReadSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        provider: ExternalChannelProvider,
+        channel_id: str,
+    ) -> ExternalChannelBinding | None:
+        """Resolve an explicit provider channel without selecting among matches."""
+        statement = self.exact_connected_channel_statement(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            provider=provider,
+            channel_id=channel_id,
+        )
+        rows = (await session.read_session.scalars(statement)).all()
+        return self._as(ExternalChannelBinding, rows[0]) if len(rows) == 1 else None
+
+    def exact_connected_channel_statement(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        provider: ExternalChannelProvider,
+        channel_id: str,
+    ) -> sa.Select[tuple[RDBExternalChannelBinding]]:
+        """Share the same exact-target predicate for admission and dispatch."""
+        parent = sa.and_(
+            RDBExternalChannelResource.resource_type
+            == ExternalChannelResourceType.PARENT_CHANNEL,
+            RDBExternalChannelResource.provider_resource_key == channel_id,
+        )
+        channel = parent
+        if provider is ExternalChannelProvider.DISCORD:
+            channel = sa.or_(
+                parent,
+                sa.and_(
+                    RDBExternalChannelResource.resource_type
+                    == ExternalChannelResourceType.THREAD,
+                    RDBExternalChannelResource.provider_resource_key
+                    == sa.func.concat(
+                        "discord:",
+                        RDBExternalChannelConnection.provider_tenant_id,
+                        ":",
+                        channel_id,
+                    ),
+                ),
+            )
+        return (
+            self._routable_route_statement()
+            .join(
+                RDBExternalChannelBinding,
+                RDBExternalChannelBinding.route_id == RDBExternalChannelAgentRoute.id,
+            )
+            .join(
+                RDBExternalChannelResource,
+                RDBExternalChannelResource.id == RDBExternalChannelBinding.resource_id,
+            )
+            .where(
+                RDBExternalChannelAgentRoute.agent_id == agent_id,
+                RDBExternalChannelConnection.workspace_id == workspace_id,
+                RDBExternalChannelConnection.provider == provider,
+                RDBExternalChannelConnection.provider_tenant_id.is_not(None),
+                RDBExternalChannelConnection.disconnected_at.is_(None),
+                RDBExternalChannelResource.connection_id
+                == RDBExternalChannelConnection.id,
+                RDBExternalChannelResource.status
+                == ExternalChannelResourceStatus.ACTIVE,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
+                channel,
+            )
+            .with_only_columns(RDBExternalChannelBinding)
+            .limit(2)
+        )
+
     async def get_agent_route(
         self,
         session: ReadSession,

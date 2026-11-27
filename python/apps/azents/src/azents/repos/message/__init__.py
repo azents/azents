@@ -9,6 +9,7 @@ import sqlalchemy as sa
 
 from azents.core.enums import EventKind, MessageRole
 from azents.core.type_guards import is_object_list
+from azents.core.vault_request import VaultRequestIdentityPayload
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.conversational_tool_projection import (
     CONVERSATIONAL_TOOL_PROJECTIONS,
@@ -225,6 +226,8 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return RoutineJudgmentPayload.model_validate(row.payload)
         case EventKind.ROUTINE_TRIGGER | EventKind.ROUTINE_CONTINUATION:
             return RoutineInputPayload.model_validate(row.payload)
+        case EventKind.VAULT_REQUEST | EventKind.VAULT_REQUEST_COMPLETED:
+            return VaultRequestIdentityPayload.model_validate(row.payload)
         case _:
             raise ValueError("Unsupported event kind")
 

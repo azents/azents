@@ -1,4 +1,16 @@
 {
+  "vaultRequest": {
+    "title": "Vault request",
+    "open": "Open",
+    "submitted": "Submitted",
+    "expired": "Expired",
+    "loading": "Checking request…",
+    "unavailable": "Request unavailable",
+    "openForm": "Enter values",
+    "close": "Close",
+    "submit": "Save to Vault",
+    "submitFailed": "Submission could not be confirmed. Check the request status before trying again."
+  },
   "browser": {
     "focusBrowser": "Focus browser",
     "exitFocus": "Exit focused view",

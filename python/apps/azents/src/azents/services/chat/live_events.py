@@ -478,7 +478,10 @@ def mailbox_item_is_publicly_presentable(mailbox_item: MailboxItem) -> bool:
         MailboxItemKind.ROUTINE_CONTINUATION,
     }:
         return False
-    if mailbox_item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
+    if mailbox_item.kind in {
+        MailboxItemKind.TURN_ACTION_CONTINUATION,
+        MailboxItemKind.VAULT_REQUEST_COMPLETED,
+    }:
         return False
     return not (
         mailbox_item.kind is MailboxItemKind.ACTION_MESSAGE
@@ -498,6 +501,8 @@ def mailbox_item_to_pending_projection(
         raise ValueError("Routine control input is presented after FIFO promotion.")
     if mailbox_item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
         raise ValueError("TurnAction continuation is not publicly presentable")
+    if mailbox_item.kind is MailboxItemKind.VAULT_REQUEST_COMPLETED:
+        raise ValueError("Vault completion is not publicly presentable")
     if not mailbox_item_is_publicly_presentable(mailbox_item):
         raise ValueError("Mailbox item is not publicly presentable")
     if mailbox_item.payload is None:
@@ -743,7 +748,10 @@ def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
             return EventKind.AGENT_MESSAGE
         case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
             return EventKind.EXTERNAL_CHANNEL_MESSAGE
-        case MailboxItemKind.TURN_ACTION_CONTINUATION:
+        case (
+            MailboxItemKind.TURN_ACTION_CONTINUATION
+            | MailboxItemKind.VAULT_REQUEST_COMPLETED
+        ):
             raise ValueError(f"Unsupported MailboxItem kind: {kind}")
         case _ as unreachable:
             assert_never(unreachable)

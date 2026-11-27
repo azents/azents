@@ -14,6 +14,10 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.agent_vault_request import (
+    RDBAgentVaultRequest,
+    VaultRequestStatus,
+)
 from azents.rdb.models.archived_session_retention import RDBSystemFileLifecycleSetting
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
@@ -139,6 +143,15 @@ class CompactedEventRetentionOperations:
                 )
                 .exists()
             )
+            open_vault_anchor = (
+                sa.select(RDBAgentVaultRequest.id)
+                .where(
+                    RDBAgentVaultRequest.anchor_event_id == RDBEvent.id,
+                    RDBAgentVaultRequest.session_id == RDBEvent.session_id,
+                    RDBAgentVaultRequest.status == VaultRequestStatus.OPEN,
+                )
+                .exists()
+            )
             ids = list(
                 await session.write_session.scalars(
                     sa.select(RDBEvent.id)
@@ -148,6 +161,7 @@ class CompactedEventRetentionOperations:
                         RDBEvent.id < RDBAgentSession.model_input_head_event_id,
                         RDBEvent.id <= RDBAgentSession.model_file_gc_cursor_event_id,
                         ~active_input,
+                        ~open_vault_anchor,
                         valid_head,
                     )
                     .order_by(RDBEvent.compacted_at, RDBEvent.id)

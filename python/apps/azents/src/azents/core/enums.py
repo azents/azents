@@ -363,6 +363,7 @@ class MailboxItemKind(enum.StrEnum):
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
     EXTERNAL_CHANNEL_MESSAGE = "external_channel_message"
+    VAULT_REQUEST_COMPLETED = "vault_request_completed"
 
 
 class MailboxSchedulingMode(enum.StrEnum):
@@ -405,6 +406,8 @@ class EventKind(enum.StrEnum):
     SYSTEM_REMINDER = "system_reminder"
     SYSTEM_ERROR = "system_error"
     UNKNOWN_ADAPTER_OUTPUT = "unknown_adapter_output"
+    VAULT_REQUEST = "vault_request"
+    VAULT_REQUEST_COMPLETED = "vault_request_completed"
 
 
 class AgentRunPhase(enum.StrEnum):

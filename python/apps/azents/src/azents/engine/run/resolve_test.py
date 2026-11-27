@@ -46,7 +46,10 @@ from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.runtime_capabilities import RuntimeCapabilityResolver
-from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.core.tools import (
     ResolveContext,
@@ -1819,16 +1822,17 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == [
+            "vault_request",
             "memory_context",
             "memory_write",
             "readable_storage",
             "runtime",
             "claude_rules",
         ]
-        memory_context_state = await bindings[0].toolkit.update_context(
+        memory_context_state = await bindings[1].toolkit.update_context(
             _make_turn_context()
         )
-        memory_write_state = await bindings[1].toolkit.update_context(
+        memory_write_state = await bindings[2].toolkit.update_context(
             _make_turn_context()
         )
         memory_write_tools = {tool.spec.name for tool in memory_write_state.tools}
@@ -1838,7 +1842,7 @@ class TestResolveAgentTools:
     async def test_does_not_auto_bind_claude_rules_when_capability_denies(
         self,
     ) -> None:
-        """Claude rules Toolkit is not auto-bound without Runtime capability."""
+        """Vault requests remain available without Runtime-only capabilities."""
         session = _resolution_session()
 
         bindings = await resolve_agent_tools(
@@ -1872,10 +1876,31 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == [
+            "vault_request",
             "memory_context",
             "memory_write",
             "readable_storage",
         ]
+        vault = bindings[0]
+        assert not vault.use_prefix
+        turn = _make_turn_context()
+        assert (await vault.toolkit.update_context(turn)).tools == []
+        admitted = dataclasses.replace(
+            turn,
+            resource_authority=SessionResourceAuthority(
+                workspace_id=turn.workspace_id,
+                agent_id="agent-1",
+                session_id="session-1",
+                root_session_id="session-1",
+                run_id=turn.run_id,
+                run_index=1,
+                owner_generation=1,
+            ),
+        )
+        assert [
+            tool.spec.name
+            for tool in (await vault.toolkit.update_context(admitted)).tools
+        ] == ["vault_request"]
 
     async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
         """Root sessions receive the coherent subagent collaboration bundle."""
@@ -1961,6 +1986,7 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == [
+            "vault_request",
             "memory_context",
             "readable_storage",
             "runtime",
@@ -2038,18 +2064,21 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in root] == [
+            "vault_request",
             "readable_storage",
             "runtime",
             kind,
         ]
-        assert root[2].use_prefix is False
-        assert root[2].toolkit_type is None
-        assert root[2].toolkit_config_id is None
-        assert root[2].source_revision is not None
+        work_binding = root[-1]
+        assert work_binding.use_prefix is False
+        assert work_binding.toolkit_type is None
+        assert work_binding.toolkit_config_id is None
+        assert work_binding.source_revision is not None
         assert isinstance(
-            root[2].toolkit, ScheduledToolkit if kind == "scheduled" else RoutineToolkit
+            work_binding.toolkit,
+            ScheduledToolkit if kind == "scheduled" else RoutineToolkit,
         )
-        assert root[2].toolkit.runtime_context_store is not None
+        assert work_binding.toolkit.runtime_context_store is not None
         assert subagent == []
 
 

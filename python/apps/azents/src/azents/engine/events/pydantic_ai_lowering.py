@@ -43,6 +43,7 @@ from azents.core.model_capability_contract import ModelCapabilityFeature
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.route_capability_constraints import google_lossless_efforts
 from azents.core.type_guards import is_string_object_dict
+from azents.core.vault_request import VaultRequestIdentityPayload
 from azents.engine.events.effective_model_request import (
     EffortReasoning,
     RequestDialect,
@@ -644,6 +645,10 @@ class PydanticAILowerer:
             return self._prompt(format_interrupted_reminder())
         if isinstance(payload, SystemReminderPayload):
             return self._prompt(format_plain_system_reminder(payload.text))
+        if isinstance(payload, VaultRequestIdentityPayload):
+            if event.kind is EventKind.VAULT_REQUEST:
+                return None
+            return self._prompt(format_plain_system_reminder(payload.model_content()))
         if isinstance(
             payload,
             RoutineInputPayload

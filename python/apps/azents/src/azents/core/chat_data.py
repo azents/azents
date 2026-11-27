@@ -143,6 +143,9 @@ class PaginatedEvents:
     items: list[Event]
     has_more: bool
     has_newer: bool = False
+    vault_card_snapshots: dict[str, dict[str, object]] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 @dataclasses.dataclass(frozen=True)

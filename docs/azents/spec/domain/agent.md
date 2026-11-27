@@ -65,6 +65,9 @@ The `agent_id` foreign key cascades only on permanent Agent deletion under the
 [Agent deletion registry](agent-deletion.md). Session removal does not own these
 rows. Vault writes use the active-Agent lifecycle fence.
 
+An execution can also create a [Vault request](agent-vault.md) for a manager to
+submit values without writing them into chat.
+
 ### Agent
 
 `agents` row has following core fields.

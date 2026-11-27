@@ -29,12 +29,14 @@ import {
   agentV1ListAgentMemories,
   agentV1ListAgents,
   agentV1ListAgentVaultEntries,
+  agentV1ReadVaultRequest,
   agentV1RemoveAgentAdmin,
   agentV1RemoveAvatar,
   agentV1ReplaceAgentVaultEntry,
   agentV1ReplaceAutomaticSessionProjects,
   agentV1ReplaceBrowserConfiguration,
   agentV1RequestAvatarUpload,
+  agentV1SubmitVaultRequest,
   agentV1UpdateAgent,
   agentV1UpdateAgentMemory,
 } from "@azents/public-client";
@@ -53,6 +55,24 @@ const agentVaultScope = z.object({
   handle: z.string().min(1),
   agentId: z.string().min(1),
 });
+const vaultRequestScope = agentVaultScope.extend({
+  sessionId: z.string().min(1),
+  requestId: z.string().regex(/^[0-9a-f]{32}$/),
+});
+
+function vaultRequestPath(input: z.infer<typeof vaultRequestScope>): {
+  handle: string;
+  agent_id: string;
+  session_id: string;
+  request_id: string;
+} {
+  return {
+    handle: input.handle,
+    agent_id: input.agentId,
+    session_id: input.sessionId,
+    request_id: input.requestId,
+  };
+}
 
 function mapVaultError(error: unknown): TRPCError {
   const mapped = mapExpectedError(error, {
@@ -69,6 +89,48 @@ function mapVaultError(error: unknown): TRPCError {
 }
 
 export const agentRouter = router({
+  readVaultRequest: publicProcedure
+    .input(vaultRequestScope)
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1ReadVaultRequest({
+          client: ctx.apiClient,
+          path: vaultRequestPath(input),
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapVaultError(error);
+      }
+    }),
+
+  submitVaultRequest: publicProcedure
+    .input(
+      vaultRequestScope.extend({
+        values: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(255),
+              value: z.string().min(1).max(32768),
+            }),
+          )
+          .min(1)
+          .max(16),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await agentV1SubmitVaultRequest({
+          client: ctx.apiClient,
+          path: vaultRequestPath(input),
+          body: { values: input.values },
+          throwOnError: true,
+        });
+      } catch (error) {
+        throw mapVaultError(error);
+      }
+    }),
+
   listVaultEntries: publicProcedure
     .input(agentVaultScope)
     .query(async ({ ctx, input }) => {

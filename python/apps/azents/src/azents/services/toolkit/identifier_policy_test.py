@@ -85,6 +85,7 @@ def test_registered_provider_names_produce_fallback_slugs() -> None:
     registry = get_toolkit_registry(
         EngineToolRepositories(
             vault=MagicMock(),
+            vault_requests=MagicMock(),
             runtime_environment=require_instance(
                 MagicMock(spec=AgentRuntimeEnvironmentRepository),
                 AgentRuntimeEnvironmentRepository,

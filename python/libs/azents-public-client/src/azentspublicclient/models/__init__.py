@@ -617,6 +617,11 @@ from azentspublicclient.models.validation_error import ValidationError
 from azentspublicclient.models.validation_error_loc_inner import ValidationErrorLocInner
 from azentspublicclient.models.value import Value
 from azentspublicclient.models.vault_entry_write_request import VaultEntryWriteRequest
+from azentspublicclient.models.vault_request_field import VaultRequestField
+from azentspublicclient.models.vault_request_status import VaultRequestStatus
+from azentspublicclient.models.vault_request_submission import VaultRequestSubmission
+from azentspublicclient.models.vault_request_value import VaultRequestValue
+from azentspublicclient.models.vault_request_view import VaultRequestView
 from azentspublicclient.models.verify_code_request import VerifyCodeRequest
 from azentspublicclient.models.verify_code_response import VerifyCodeResponse
 from azentspublicclient.models.workspace import Workspace

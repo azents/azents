@@ -1,4 +1,16 @@
 {
+  "vaultRequest": {
+    "title": "Vault リクエスト",
+    "open": "入力待ち",
+    "submitted": "送信済み",
+    "expired": "期限切れ",
+    "loading": "リクエストを確認中…",
+    "unavailable": "リクエストを開けません",
+    "openForm": "値を入力",
+    "close": "閉じる",
+    "submit": "Vault に保存",
+    "submitFailed": "送信を確認できませんでした。再試行する前にリクエストの状態を確認してください。"
+  },
   "browser": {
     "focusBrowser": "ブラウザーに集中",
     "exitFocus": "集中表示を終了",

@@ -260,6 +260,11 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                         SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
                         "test_session_lifecycle_conversation_data",
                     ),
+                    _database_resource(
+                        "agent_vault_requests",
+                        SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
+                        "test_session_lifecycle_conversation_data",
+                    ),
                 ),
                 archive_policy=SessionLifecycleTransitionPolicy.PRESERVE,
                 restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,

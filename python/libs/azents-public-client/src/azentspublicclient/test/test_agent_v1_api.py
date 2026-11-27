@@ -159,6 +159,13 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_read_vault_request(self) -> None:
+        """Test case for agent_v1_read_vault_request
+
+        Read Vault Request
+        """
+        pass
+
     def test_agent_v1_remove_agent_admin(self) -> None:
         """Test case for agent_v1_remove_agent_admin
 
@@ -198,6 +205,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_request_avatar_upload
 
         Request Avatar Upload
+        """
+        pass
+
+    def test_agent_v1_submit_vault_request(self) -> None:
+        """Test case for agent_v1_submit_vault_request
+
+        Submit Vault Request
         """
         pass
 
