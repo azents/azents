@@ -5,6 +5,7 @@ import datetime
 import logging
 
 from azents.core.routine import ROUTINE_TICK_INTERVAL
+from azents.repos.agent_vault_requests import AgentVaultRequestRepository
 from azents.scheduler.routine_source_dispatch import routine_source_dispatch_handler
 from azents.scheduler.types import (
     RetryPolicy,
@@ -17,6 +18,7 @@ from azents.scheduler.user_scheduled_task_dispatch import (
 )
 from azents.services.agent_decommission import AgentDecommissionService
 from azents.services.agent_runtime_removal import AgentRuntimeRemovalService
+from azents.services.agent_vault_requests import VaultRequestInvalidation
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
@@ -31,8 +33,23 @@ from azents.services.external_account_oauth.service import (
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
 from azents.services.owner_lifecycle import OwnerLifecycleService
+from azents.services.vault_request_delivery import VaultRequestDeliveryService
 
 logger = logging.getLogger(__name__)
+
+
+async def vault_request_reconciliation_handler(context: TaskContext) -> TaskResult:
+    """Settle overdue Vault requests independently of chat traffic."""
+    repository = await context.container.solve(AgentVaultRequestRepository)
+    expired = await repository.expire_due(limit=100)
+    invalidation = await context.container.solve(VaultRequestInvalidation)
+    for change in expired:
+        if datetime.datetime.now(datetime.UTC) >= context.deadline:
+            break
+        await invalidation.publish(change)
+    delivery = await context.container.solve(VaultRequestDeliveryService)
+    effects = await delivery.reconcile(deadline=context.deadline, limit=10)
+    return TaskResult(next_run_at=None, summary={"expired": len(expired), **effects})
 
 
 async def compacted_event_cleanup_handler(context: TaskContext) -> TaskResult:
@@ -480,12 +497,24 @@ ROUTINE_SOURCE_DISPATCH_TASK = ScheduledTaskDefinition(
 )
 
 
+VAULT_REQUEST_RECONCILIATION_TASK = ScheduledTaskDefinition(
+    key="vault_request_reconciliation",
+    description="Reconcile due Agent Vault requests.",
+    interval=datetime.timedelta(seconds=30),
+    timeout=datetime.timedelta(seconds=20),
+    retry_policy=RetryPolicy(kind="next_interval"),
+    handler=vault_request_reconciliation_handler,
+    enabled_by_default=True,
+)
+
+
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
     ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
     ARCHIVED_SESSION_PURGE_TASK,
     COMPACTED_EVENT_CLEANUP_TASK,
+    VAULT_REQUEST_RECONCILIATION_TASK,
     SESSION_AUTO_ARCHIVE_TASK,
     AGENT_DECOMMISSION_TASK,
     AGENT_RUNTIME_REMOVAL_TASK,

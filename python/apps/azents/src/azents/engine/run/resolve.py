@@ -81,6 +81,7 @@ from azents.engine.tools.builtin import (
     MemoryWriteToolkit,
     ReadableStorageToolkit,
     RuntimeToolkit,
+    VaultRequestToolkit,
 )
 from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkit,
@@ -1573,6 +1574,19 @@ async def resolve_agent_tools(
             }
         )
         readable_storage_resolved: ReadableStorageToolkit | None = None
+        if _allows_execution_mode(_ROOT_AND_SUBAGENT_EXECUTION_MODES, execution_mode):
+            pending.append(
+                (
+                    builtin_toolkit_provider,
+                    VaultRequestToolkit(builtin_toolkit_provider.repositories),
+                    builtin_config,
+                    "vault_request",
+                    None,
+                    False,
+                    None,
+                    _ROOT_AND_SUBAGENT_EXECUTION_MODES,
+                )
+            )
         if memory_enabled:
             memory_context_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
             if _allows_execution_mode(memory_context_modes, execution_mode):

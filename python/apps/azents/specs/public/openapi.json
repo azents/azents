@@ -128,6 +128,159 @@
         }
       }
     },
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/vault/requests/{request_id}": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Read Vault Request",
+        "description": "Read value-free metadata and current status for an exact chat card.",
+        "operationId": "agent_v1_read_vault_request",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultRequestView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Submit Vault Request",
+        "description": "Submit all requested values at once without echoing them.",
+        "operationId": "agent_v1_submit_vault_request",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultRequestSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries": {
       "get": {
         "tags": [
@@ -32007,7 +32160,9 @@
           "compaction_summary",
           "system_reminder",
           "system_error",
-          "unknown_adapter_output"
+          "unknown_adapter_output",
+          "vault_request",
+          "vault_request_completed"
         ],
         "title": "EventKind",
         "description": "Event transcript event kind."
@@ -47316,6 +47471,128 @@
         ],
         "title": "VaultEntryWriteRequest",
         "description": "Explicit write of one named Vault value."
+      },
+      "VaultRequestField": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "label"
+        ],
+        "title": "VaultRequestField",
+        "description": "One exact Vault entry name and the label shown to a submitter."
+      },
+      "VaultRequestStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "submitted",
+          "expired"
+        ],
+        "title": "VaultRequestStatus",
+        "description": "Persisted state; an overdue open row is not submittable."
+      },
+      "VaultRequestSubmission": {
+        "properties": {
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/VaultRequestValue"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Values"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "values"
+        ],
+        "title": "VaultRequestSubmission",
+        "description": "One value per requested exact name, with duplicates explicitly detectable."
+      },
+      "VaultRequestValue": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 32768,
+            "minLength": 1,
+            "format": "password",
+            "title": "Value",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "VaultRequestValue",
+        "description": "A submit-only field whose value is never included in diagnostics."
+      },
+      "VaultRequestView": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/VaultRequestField"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VaultRequestStatus"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Deadline At"
+          },
+          "can_submit": {
+            "type": "boolean",
+            "title": "Can Submit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "purpose",
+          "fields",
+          "status",
+          "deadline_at",
+          "can_submit"
+        ],
+        "title": "VaultRequestView",
+        "description": "Value-free current request state, including immediate effective expiry."
       },
       "VerifyCodeRequest": {
         "properties": {

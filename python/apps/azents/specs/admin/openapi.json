@@ -6092,7 +6092,9 @@
           "compaction_summary",
           "system_reminder",
           "system_error",
-          "unknown_adapter_output"
+          "unknown_adapter_output",
+          "vault_request",
+          "vault_request_completed"
         ],
         "title": "EventKind",
         "description": "Event transcript event kind."

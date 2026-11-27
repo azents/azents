@@ -979,6 +979,43 @@ function toolResultCallIds(items: ChatEventResponse[]): Set<string> {
   );
 }
 
+function vaultHistorySnapshot(
+  value: unknown,
+  requestId: string,
+): NonNullable<ChatMessage["vaultRequestSnapshot"]> | null {
+  if (
+    !isRecord(value) ||
+    value.request_id !== requestId ||
+    typeof value.purpose !== "string" ||
+    typeof value.deadline_at !== "string" ||
+    (value.status !== "open" &&
+      value.status !== "submitted" &&
+      value.status !== "expired") ||
+    !Array.isArray(value.fields)
+  ) {
+    return null;
+  }
+  const fields: Array<{ name: string; label: string }> = [];
+  for (const field of value.fields) {
+    if (
+      !isRecord(field) ||
+      typeof field.name !== "string" ||
+      typeof field.label !== "string"
+    ) {
+      return null;
+    }
+    fields.push({ name: field.name, label: field.label });
+  }
+  return {
+    request_id: requestId,
+    purpose: value.purpose,
+    deadline_at: value.deadline_at,
+    status: value.status,
+    fields,
+    can_submit: false,
+  };
+}
+
 function mapEvents(
   items: ChatEventResponse[],
   options: MapEventsOptions,
@@ -990,6 +1027,27 @@ function mapEvents(
   return items.reduce<ChatMessage[]>((messages, event) => {
     const payload = event.payload;
     switch (event.kind) {
+      case "vault_request": {
+        const requestId = stringField(payload, "request_id");
+        if (requestId === null || !/^[0-9a-f]{32}$/.test(requestId)) {
+          return messages;
+        }
+        const snapshot = vaultHistorySnapshot(payload.vault_state, requestId);
+        return [
+          ...messages,
+          {
+            id: event.id,
+            role: "vault_request",
+            content: null,
+            createdAt: event.created_at,
+            status: "complete",
+            vaultRequestId: requestId,
+            ...(snapshot === null ? {} : { vaultRequestSnapshot: snapshot }),
+          },
+        ];
+      }
+      case "vault_request_completed":
+        return messages;
       case "routine_judgment":
       case "routine_trigger":
       case "routine_continuation":
@@ -2362,6 +2420,15 @@ export function useChatSessionContainer(
         return;
       }
 
+      if ("type" in event && event.type === "vault_request_changed") {
+        void utils.agent.readVaultRequest.invalidate({
+          agentId: agent.id,
+          sessionId: event.session_id,
+          requestId: event.request_id,
+        });
+        return;
+      }
+
       if ("type" in event && event.type === "subagent_tree_changed") {
         void utils.chat.getSubagentTree.invalidate();
         return;
@@ -2692,6 +2759,7 @@ export function useChatSessionContainer(
       connectionInfoQuery,
       reportInvalidLiveRun,
       sessionId,
+      utils.agent.readVaultRequest,
       utils.chat.getSessionProjectBrowserManifest,
       utils.chat.getSubagentTree,
       utils.chat.listAgentProjects,

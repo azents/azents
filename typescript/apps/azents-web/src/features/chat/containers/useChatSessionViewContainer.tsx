@@ -30,6 +30,7 @@ import { workspacePanelTabForSessionPanelView } from "../workspace/workspacePane
 import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
 import { useChatSessionContainer } from "./useChatSessionContainer";
 import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
+import { VaultRequestProvider } from "./VaultRequestContainer";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type { SupportingPanelRenderer } from "../session-panel/supportingPanel";
 import type { SessionPanelState } from "../session-panel/useSessionPanelState";
@@ -318,5 +319,17 @@ export function ChatSessionViewContainer(
   props: ChatSessionViewContainerProps,
 ): React.ReactElement {
   const output = useChatSessionViewContainer(props);
-  return <ChatSessionView {...output} />;
+  return (
+    <VaultRequestProvider
+      key={`${props.handle}:${props.agent.id}:${props.sessionId}`}
+      scope={{
+        handle: props.handle,
+        agentId: props.agent.id,
+        sessionId: props.sessionId,
+      }}
+      agentName={props.agent.name}
+    >
+      <ChatSessionView {...output} />
+    </VaultRequestProvider>
+  );
 }

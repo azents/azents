@@ -20,6 +20,7 @@ from azents.core.model_execution_options import (
     validate_execution_options,
 )
 from azents.core.type_guards import is_string_object_dict
+from azents.core.vault_request import VaultRequestIdentityPayload
 from azents.engine.events.effective_model_request import (
     normalize_effective_model_request,
 )
@@ -862,6 +863,13 @@ class ResponsesRequestLowerer:
                 return {
                     "role": "user",
                     "content": format_plain_system_reminder(text),
+                }
+            case VaultRequestIdentityPayload() as completion:
+                if event.kind is EventKind.VAULT_REQUEST:
+                    return None
+                return {
+                    "role": "user",
+                    "content": format_plain_system_reminder(completion.model_content()),
                 }
             case RunMarkerPayload() | RoutineJudgmentPayload():
                 return None

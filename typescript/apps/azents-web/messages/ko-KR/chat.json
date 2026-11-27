@@ -1,4 +1,16 @@
 {
+  "vaultRequest": {
+    "title": "Vault 요청",
+    "open": "입력 대기",
+    "submitted": "제출 완료",
+    "expired": "만료됨",
+    "loading": "요청을 확인하는 중…",
+    "unavailable": "요청을 열 수 없음",
+    "openForm": "값 입력",
+    "close": "닫기",
+    "submit": "Vault에 저장",
+    "submitFailed": "제출 여부를 확인하지 못했습니다. 다시 시도하기 전에 요청 상태를 확인하세요."
+  },
   "browser": {
     "focusBrowser": "브라우저 전체화면",
     "exitFocus": "전체화면 나가기",

@@ -33,6 +33,7 @@ from azents.core.mailbox_data import (
     ScheduledTaskContinuationMailboxPayload,
     ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
+    VaultRequestCompletionMailboxPayload,
 )
 from azents.core.mailbox_errors import (
     MailboxOwnerGenerationStaleError,
@@ -734,6 +735,8 @@ class MailboxService:
                 return _TurnActionContinuationMailboxProcessor(self)
             case MailboxItemKind.ROUTINE_TRIGGER | MailboxItemKind.ROUTINE_CONTINUATION:
                 return _RoutineMailboxProcessor(self)
+            case MailboxItemKind.VAULT_REQUEST_COMPLETED:
+                return _VaultRequestCompletionMailboxProcessor()
             case MailboxItemKind.AGENT_MESSAGE:
                 return _AgentMessageMailboxProcessor(self)
             case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
@@ -919,6 +922,31 @@ class _RoutineMailboxProcessor:
         del context
         return _preparation_outcome(
             [self.service._routine_promoted_item(buffer)], TurnEffect.ELIGIBLE
+        )
+
+
+class _VaultRequestCompletionMailboxProcessor:
+    """Promote the internal completion without manufacturing human chat."""
+
+    async def process(
+        self,
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
+        del context
+        if not isinstance(buffer.payload, VaultRequestCompletionMailboxPayload):
+            raise ValueError("Vault completion input is malformed.")
+        return _preparation_outcome(
+            [
+                _PromotedMailboxItem(
+                    buffer=buffer,
+                    user_message=None,
+                    event_kind=EventKind.VAULT_REQUEST_COMPLETED,
+                    payload={"request_id": buffer.payload.request_id},
+                    external_id=f"{buffer.id}:vault_request_completed",
+                )
+            ],
+            TurnEffect.ELIGIBLE,
         )
 
 
@@ -1176,6 +1204,7 @@ def _buffer_requires_inference(
             | MailboxItemKind.SCHEDULED_TASK_CONTINUATION
             | MailboxItemKind.ROUTINE_TRIGGER
             | MailboxItemKind.ROUTINE_CONTINUATION
+            | MailboxItemKind.VAULT_REQUEST_COMPLETED
         ):
             return True
         case MailboxItemKind.ACTION_MESSAGE:

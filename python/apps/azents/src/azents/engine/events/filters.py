@@ -9,6 +9,7 @@ from typing import Annotated, NamedTuple, assert_never
 from fastapi import Depends
 
 from azents.core.enums import EventKind
+from azents.core.vault_request import VaultRequestIdentityPayload
 from azents.engine.context.compaction import compute_summary_budget
 from azents.engine.context.window import compute_auto_compaction_threshold_tokens
 from azents.engine.events.external_channel_rendering import (
@@ -689,6 +690,13 @@ def _render_continuity_event(
 def _model_visible_event_value(event: Event) -> object | None:
     """Return model-visible structured content for token estimation."""
     payload = event.payload
+    if isinstance(payload, VaultRequestIdentityPayload):
+        if event.kind is EventKind.VAULT_REQUEST:
+            return None
+        return {
+            "role": "user",
+            "content": format_plain_system_reminder(payload.model_content()),
+        }
     if isinstance(payload, RoutineJudgmentPayload):
         return None
     if isinstance(payload, ExternalChannelMessagePayload):
@@ -784,6 +792,14 @@ def _model_visible_event_text(
 ) -> str | None:
     """Return readable model-visible content for continuity rendering."""
     payload = event.payload
+    if isinstance(payload, VaultRequestIdentityPayload):
+        if event.kind is EventKind.VAULT_REQUEST:
+            return None
+        return _format_continuity_block(
+            "User",
+            format_plain_system_reminder(payload.model_content()),
+            include_label=include_label,
+        )
     if isinstance(payload, ExternalChannelMessagePayload):
         return render_external_channel_message(payload, include_label=include_label)
     if event.kind == EventKind.GOAL_CONTINUATION and isinstance(

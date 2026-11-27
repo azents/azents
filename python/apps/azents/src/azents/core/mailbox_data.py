@@ -18,6 +18,7 @@ from azents.core.routine_execution import (
     RoutineExecutionRef,
     validate_routine_execution_refs,
 )
+from azents.core.vault_request import VaultRequestId
 from azents.engine.events.types import FileOutputPart
 
 
@@ -80,6 +81,13 @@ class UserMessageMailboxPayload(MailboxPayloadBase):
     """Typed user-message mailbox payload."""
 
     type: Literal["user_message"]
+
+
+class VaultRequestCompletionMailboxPayload(MailboxPayloadBase):
+    """Internal wake-capable input carrying only the settled request identity."""
+
+    type: Literal["vault_request_completed"]
+    request_id: VaultRequestId
 
 
 class ContinuationMailboxPayload(MailboxPayloadBase):
@@ -247,6 +255,7 @@ MailboxEnvelopePayload: TypeAlias = Annotated[
     | TurnActionContinuationMailboxPayload
     | AgentMessageMailboxPayload
     | ExternalChannelMessageMailboxPayload
+    | VaultRequestCompletionMailboxPayload
     | TurnActionMailboxPayload,
     Field(discriminator="type"),
 ]
@@ -319,6 +328,8 @@ def mailbox_payload_from_fields(
         )
     if kind in {MailboxItemKind.ROUTINE_TRIGGER, MailboxItemKind.ROUTINE_CONTINUATION}:
         raise ValueError("Routine admission requires its closed typed payload.")
+    if kind is MailboxItemKind.VAULT_REQUEST_COMPLETED:
+        raise ValueError("Vault completion requires its closed typed payload.")
     if kind is MailboxItemKind.AGENT_MESSAGE:
         return AgentMessageMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:

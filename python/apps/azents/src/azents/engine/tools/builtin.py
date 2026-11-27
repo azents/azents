@@ -62,6 +62,7 @@ from azents.core.tools import (
     ToolkitStatus,
     TurnContext,
 )
+from azents.core.vault_request import VaultRequestIdentityPayload, VaultRequestSpec
 from azents.engine.events.engine_events import (
     EngineEvent,
     RuntimeProcessOutputDeltaEvent,
@@ -743,6 +744,54 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
                     if self._config.memory_enabled
                     else []
                 ),
+            ],
+        )
+
+
+class VaultRequestToolkit(Toolkit[ShellToolkitConfig]):
+    """Request Vault values without requiring a Runtime capability."""
+
+    def __init__(self, repositories: EngineToolRepositories) -> None:
+        self.repositories = repositories
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Expose request creation only to an admitted execution."""
+        authority = context.resource_authority
+        if authority is None:
+            return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
+
+        async def vault_request(args: VaultRequestSpec) -> FunctionToolResult:
+            try:
+                anchor = await self.repositories.vault_requests.create_for_execution(
+                    authority, args
+                )
+            except VaultAccessDenied as error:
+                raise FunctionToolError(str(error)) from None
+            except AgentMutationReadOnly, AgentMutationTargetMissing:
+                raise FunctionToolError(
+                    "Vault request source is unavailable."
+                ) from None
+            await context.publish_event(anchor)
+            assert isinstance(anchor.payload, VaultRequestIdentityPayload)
+            return FunctionToolResult(
+                output=json.dumps(
+                    {"request_id": anchor.payload.request_id, "status": "open"}
+                )
+            )
+
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                make_tool(
+                    vault_request,
+                    name="vault_request",
+                    description=(
+                        "Ask a Vault manager for values through the Azents chat card. "
+                        "Enter only names, labels and purpose, never values. "
+                        "The request expires in 24 hours without pausing this run. "
+                        "An optional explicit connected channel receives the link."
+                    ),
+                )
             ],
         )
 

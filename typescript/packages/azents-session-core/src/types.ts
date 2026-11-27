@@ -11,6 +11,7 @@ import type {
   InputActionDefinitionResponse,
   PendingMailboxEnvelope,
   RequestedInferenceProfile,
+  VaultRequestView,
 } from "@azents/public-client/types";
 
 // --- WebSocket event type ---
@@ -561,6 +562,12 @@ export interface LiveEventUpsertedEvent {
   event: ChatEventResponse;
 }
 
+export interface VaultRequestChangedEvent {
+  type: "vault_request_changed";
+  session_id: string;
+  request_id: string;
+}
+
 export interface LiveEventRemovedEvent {
   type: "live_event_removed";
   session_id: string;
@@ -697,6 +704,7 @@ export type ChatEvent =
   | MailboxItemRemovedEvent
   | SubscribedEvent
   | InputActionsUpdatedEvent
+  | VaultRequestChangedEvent
   | ActionExecutionUpdatedEvent
   | ActionExecutionRemovedEvent
   | SubscriptionHealthCheckAckEvent
@@ -817,6 +825,7 @@ export interface ChatMessage {
     | "routine_judgment"
     | "routine_trigger"
     | "routine_continuation"
+    | "vault_request"
     | "skill_loaded";
   content: string | null;
   toolCalls?: ActiveToolCall[];
@@ -844,6 +853,10 @@ export interface ChatMessage {
   routineJudgment?: RoutineJudgmentMessage | null;
   /** Immutable ordinary work context, distinct from a passive judgment. */
   routineInput?: RoutineInputContext | null;
+  /** Identity of an independently refreshed Vault status card. */
+  vaultRequestId?: string;
+  /** Batch-projected display state; an independent read is required to submit. */
+  vaultRequestSnapshot?: VaultRequestView;
 }
 
 /** WebSocket connection status */

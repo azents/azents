@@ -29,6 +29,7 @@ import { memo } from "react";
 import { MarkdownContent } from "../../../shared/chat-presentation/components/MarkdownContent";
 import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
 import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
+import { VaultRequestCardContainer } from "../containers/VaultRequestContainer";
 import { continuationPresentation } from "../continuationPresentation";
 import { externalChannelMessagePresentation } from "../externalChannelMessage";
 import {
@@ -505,6 +506,17 @@ export const MessageBubble = memo(function MessageBubble({
   const t = useTranslations("chat");
   const tRoutines = useTranslations("routines");
   const messageOpacity = opacity ?? (dimmed ? 0.45 : 1);
+
+  if (message.role === "vault_request" && message.vaultRequestId) {
+    return (
+      <ChatTimelineItem kind="activity" opacity={messageOpacity}>
+        <VaultRequestCardContainer
+          requestId={message.vaultRequestId}
+          snapshot={message.vaultRequestSnapshot ?? null}
+        />
+      </ChatTimelineItem>
+    );
+  }
 
   // tool, system, and completion marker messages hide
   if (

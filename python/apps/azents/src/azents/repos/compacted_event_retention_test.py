@@ -14,11 +14,19 @@ from azents.core.work_context import WorkContext
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.agent_vault_request import (
+    RDBAgentVaultRequest,
+    VaultRequestStatus,
+)
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
+from azents.repos.agent_vault_requests import (
+    AgentVaultRequestRepository,
+    read_vault_clock,
+)
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.compacted_event_retention import CompactedEventRetentionOperations
 from azents.repos.session_execution_record import SessionExecutionRecordRepository
@@ -104,6 +112,38 @@ async def _ids(manager: SessionManager[WriteSession], session_id: str) -> list[s
                 .order_by(RDBEvent.id)
             )
         )
+
+
+async def test_vault_anchor_is_retained_until_request_settles(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    history = await _create_history(rdb_session_manager)
+    await _set_policy(rdb_session_manager, user_id=history.user_id, days=0)
+    async with rdb_session_manager() as session:
+        database_now = await read_vault_clock(session)
+        request = RDBAgentVaultRequest(
+            session_id=history.session_id,
+            anchor_event_id=history.old_id,
+            purpose="Portal sign-in",
+            fields=[{"name": "portal", "label": "Password"}],
+            creation_at=database_now - datetime.timedelta(days=2),
+            deadline_at=database_now - datetime.timedelta(days=1),
+            destination=None,
+        )
+        session.write_session.add(request)
+        request_id = request.id
+    operations = _operations(rdb_session_manager)
+    await operations.cleanup_once(now=NOW, limit=100)
+    assert history.old_id in await _ids(rdb_session_manager, history.session_id)
+    requests = AgentVaultRequestRepository(rdb_session_manager)
+    assert len(await requests.expire_due(limit=1)) == 1
+    assert await requests.expire_due(limit=1) == []
+    async with rdb_session_manager() as session:
+        expired = await session.read_session.get(RDBAgentVaultRequest, request_id)
+        assert expired is not None and expired.status is VaultRequestStatus.EXPIRED
+        assert expired.terminal_at is not None
+    await operations.cleanup_once(now=NOW, limit=100)
+    assert history.old_id not in await _ids(rdb_session_manager, history.session_id)
 
 
 async def test_first_displacement_survives_repeated_compaction(

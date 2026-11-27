@@ -93,6 +93,12 @@ function isChatEventWire(
     case "subscribed":
     case "input_actions_updated":
       return isSessionFrame(value, sessionId);
+    case "vault_request_changed":
+      return (
+        isSessionFrame(value, sessionId) &&
+        typeof value.request_id === "string" &&
+        /^[0-9a-f]{32}$/.test(value.request_id)
+      );
     case "subscription_health_check_ack":
       return (
         isSessionFrame(value, sessionId) &&

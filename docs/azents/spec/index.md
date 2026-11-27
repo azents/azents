@@ -77,6 +77,7 @@ connects disconnect, archive, restore and purge to the owning Session and Agent.
 - [Users and authentication](domain/user-auth.md) — signup, login, elevation and instance administrators.
 - [Workspaces and membership](domain/workspace.md) — collaboration, roles, invitations and ownership transfer.
 - [Agent configuration](domain/agent.md) — persistent Agent identity, management and configuration interface.
+- [Agent Vault requests](domain/agent-vault.md) — Session-owned collection, atomic submission and exact provider status.
 - [System Settings](domain/system-settings.md) — instance-wide operator and retention policies.
 
 ## Execution, context and lifecycle

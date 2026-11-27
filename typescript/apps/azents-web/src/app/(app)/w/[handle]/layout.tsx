@@ -34,7 +34,8 @@ export default async function WorkspaceLayout({
         redirect(`/join/${handle}`);
       }
       if (e.code === "UNAUTHORIZED") {
-        redirect(`/login?next=${encodeURIComponent(`/w/${handle}`)}`);
+        // The browser knows the selected child path and query; the layout does not.
+        return <LoginRequired />;
       }
     }
     throw e;

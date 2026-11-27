@@ -1,4 +1,16 @@
 {
+  "vaultRequest": {
+    "title": "Demande Vault",
+    "open": "En attente",
+    "submitted": "Envoyée",
+    "expired": "Expirée",
+    "loading": "Vérification de la demande…",
+    "unavailable": "Demande indisponible",
+    "openForm": "Saisir les valeurs",
+    "close": "Fermer",
+    "submit": "Enregistrer dans Vault",
+    "submitFailed": "L’envoi n’a pas pu être confirmé. Vérifiez l’état de la demande avant de réessayer."
+  },
   "browser": {
     "focusBrowser": "Agrandir le navigateur",
     "exitFocus": "Quitter la vue agrandie",

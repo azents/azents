@@ -16,6 +16,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime_environment import AgentRuntimeEnvironmentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_vault import AgentVaultRepository
+from azents.repos.agent_vault_requests import AgentVaultRequestRepository
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
@@ -110,6 +111,7 @@ class EngineToolRepositories:
     snapshots: EngineMcpSnapshotFactory
     appendix: ToolkitAgentsAppendixDedupeStateStore
     vault: AgentVaultRepository
+    vault_requests: AgentVaultRequestRepository
 
     def with_owner(self, owner: SessionExecutionOwner) -> "EngineToolRepositories":
         """Bind critical Memory mutations without gating descriptive operations."""
@@ -171,6 +173,7 @@ def get_engine_tool_repositories(
             read_session_manager=read_session_manager,
             cipher=cipher,
         ),
+        vault_requests=AgentVaultRequestRepository(session_manager=session_manager),
         mcp_oauth=MCPOAuthRuntimeOperationRepository(
             session_manager=session_manager,
             connection_repository=MCPOAuthConnectionRepository(cipher=cipher),

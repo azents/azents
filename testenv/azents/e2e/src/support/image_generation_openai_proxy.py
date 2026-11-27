@@ -47,6 +47,9 @@ RUNTIME_ENVIRONMENT_PROMPT_PREFIX = "Agent Runtime environment E2E: "
 RUNTIME_ENVIRONMENT_FINAL = "AGENT_RUNTIME_ENVIRONMENT_E2E_COMPLETED"
 VAULT_CLI_PROMPT_PREFIX = "Agent Vault CLI E2E: "
 VAULT_CLI_FINAL = "AGENT_VAULT_CLI_E2E_COMPLETED"
+VAULT_REQUEST_PROMPT = "Agent Vault request E2E"
+VAULT_REQUEST_OPENED = "AGENT_VAULT_REQUEST_OPENED"
+VAULT_REQUEST_RESUMED = "AGENT_VAULT_REQUEST_RESUMED"
 RUNTIME_ENVIRONMENT_COMMAND = (
     'if [ -n "${E2E_AGENT_SECRET+x}" ]; then '
     'printf "%s" "$E2E_AGENT_SECRET" | sha256sum; '
@@ -3063,6 +3066,45 @@ class _Handler(BaseHTTPRequestHandler):
                         request,
                         plan.final_text,
                         response_id=f"resp_consolidation_final_{logical.chain_id}",
+                    )
+                return
+            if (
+                isinstance(user_text, str)
+                and "Vault request " in user_text
+                and " was submitted." in user_text
+            ):
+                self._write_text_response(
+                    request,
+                    VAULT_REQUEST_RESUMED,
+                    response_id="resp_vault_request_resumed",
+                )
+                return
+            if user_text == VAULT_REQUEST_PROMPT:
+                call_id = "call_vault_request_fixture"
+                if _SESSION_TITLE_SYSTEM_MARKER in (request.instructions or ""):
+                    self._write_text_response(
+                        request,
+                        '{"title":"Agent Vault request E2E"}',
+                        response_id="resp_vault_request_title",
+                    )
+                elif request_has_tool_output(request, call_id):
+                    self._write_text_response(
+                        request,
+                        VAULT_REQUEST_OPENED,
+                        response_id="resp_vault_request_opened",
+                    )
+                else:
+                    self._write_function_call_response(
+                        request,
+                        call_id=call_id,
+                        name="vault_request",
+                        arguments={
+                            "purpose": "Configure the example integration.",
+                            "fields": [
+                                {"name": "account", "label": "Account"},
+                                {"name": "password", "label": "Password"},
+                            ],
+                        },
                     )
                 return
             if isinstance(user_text, str) and user_text.startswith(
