@@ -139,6 +139,8 @@ __all__ = [
     "AgentToolkitResponse",
     "AgentType",
     "AgentUpdateRequest",
+    "AgentVaultEntryMetadata",
+    "AgentVaultSettings",
     "AgentWorkspaceActionResponse",
     "AgentWorkspaceActionsResponse",
     "AgentWorkspaceBulkDeleteRequest",
@@ -662,6 +664,7 @@ __all__ = [
     "ValidationError",
     "ValidationErrorLocInner",
     "Value",
+    "VaultEntryWriteRequest",
     "VerifyCodeRequest",
     "VerifyCodeResponse",
     "Workspace",
@@ -838,6 +841,8 @@ from azentspublicclient.models.agent_toolkit_management_response import AgentToo
 from azentspublicclient.models.agent_toolkit_response import AgentToolkitResponse as AgentToolkitResponse
 from azentspublicclient.models.agent_type import AgentType as AgentType
 from azentspublicclient.models.agent_update_request import AgentUpdateRequest as AgentUpdateRequest
+from azentspublicclient.models.agent_vault_entry_metadata import AgentVaultEntryMetadata as AgentVaultEntryMetadata
+from azentspublicclient.models.agent_vault_settings import AgentVaultSettings as AgentVaultSettings
 from azentspublicclient.models.agent_workspace_action_response import AgentWorkspaceActionResponse as AgentWorkspaceActionResponse
 from azentspublicclient.models.agent_workspace_actions_response import AgentWorkspaceActionsResponse as AgentWorkspaceActionsResponse
 from azentspublicclient.models.agent_workspace_bulk_delete_request import AgentWorkspaceBulkDeleteRequest as AgentWorkspaceBulkDeleteRequest
@@ -1361,6 +1366,7 @@ from azentspublicclient.models.user_toolkit_owner import UserToolkitOwner as Use
 from azentspublicclient.models.validation_error import ValidationError as ValidationError
 from azentspublicclient.models.validation_error_loc_inner import ValidationErrorLocInner as ValidationErrorLocInner
 from azentspublicclient.models.value import Value as Value
+from azentspublicclient.models.vault_entry_write_request import VaultEntryWriteRequest as VaultEntryWriteRequest
 from azentspublicclient.models.verify_code_request import VerifyCodeRequest as VerifyCodeRequest
 from azentspublicclient.models.verify_code_response import VerifyCodeResponse as VerifyCodeResponse
 from azentspublicclient.models.workspace import Workspace as Workspace

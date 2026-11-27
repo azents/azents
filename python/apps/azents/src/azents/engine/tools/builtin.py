@@ -6,6 +6,7 @@ Each runtime-backed tool runs through Agent Runtime Runner operation.
 
 import asyncio
 import dataclasses
+import json
 import logging
 import shlex
 import time
@@ -19,8 +20,17 @@ from typing import List, NoReturn, Protocol
 
 from azcommon.types import JSONObject
 from azents_runtime_control.process_observation import ProcessObservation
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from azents_runtime_control.vault_contract import vault_environment_name_valid
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    model_validator,
+)
 
+from azents.core.agent_mutation import AgentMutationReadOnly, AgentMutationTargetMissing
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderObservedState,
@@ -128,9 +138,19 @@ from azents.engine.tools.runtime_io import (
 )
 from azents.engine.tools.session_history import make_session_history_tools
 from azents.engine.tools.write import make_write_tool
+from azents.repos.agent_vault import (
+    InvalidVaultEntry,
+    VaultAccessDenied,
+    VaultEntryConflict,
+    VaultEntryUnavailable,
+)
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.engine_tool_repositories import EngineToolRepositories
 from azents.repos.memory.operations import MemoryOperationRepository
+from azents.runtime.control_protocol.vault_sealing import (
+    VaultSealError,
+    seal_browser_input,
+)
 from azents.runtime.transfer.runtime_image_read import RuntimeImageReadService
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
@@ -274,6 +294,14 @@ class ExecCommandInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     command: str = Field(description="Shell command to execute")
+    vault_env: dict[str, str] | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Environment-variable names mapped to exact entries in this Agent's "
+            "Vault. Values are injected into this command only."
+        ),
+    )
     fire_and_forget: bool = Field(
         default=False,
         description=(
@@ -301,6 +329,14 @@ class ExecCommandInput(BaseModel):
         le=_MAX_PROCESS_MAX_OUTPUT_BYTES,
         description="Maximum stdout/stderr bytes to return in this tool result.",
     )
+
+
+class VaultRegisterFileInput(BaseModel):
+    """Register the content of one accessible Runtime text file."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    path: str = Field(min_length=1, max_length=4096)
+    name: str = Field(min_length=1, max_length=255)
 
 
 class WriteStdinInput(BaseModel):
@@ -1217,8 +1253,65 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
         file_tools: list[FunctionTool] = []
         browser_tools: list[FunctionTool] = []
+        vault_tools: list[FunctionTool] = []
         if context.resource_authority is not None:
             authority = context.resource_authority
+
+            async def vault_register_file(
+                args: VaultRegisterFileInput,
+            ) -> FunctionToolResult:
+                try:
+                    if not await revalidate_resource_authority():
+                        raise VaultAccessDenied()
+                    runtime = await resolve_exact_runtime_target()
+                    path = PurePosixPath(args.path)
+                    if not path.is_absolute():
+                        binding = (
+                            await self._resolve_operation_working_folder_authority(
+                                runtime
+                            )
+                        )
+                        path = PurePosixPath(binding.working_folder_path) / path
+                    value = await self.runner_operations.read_vault_file(
+                        runtime_id=runtime.id,
+                        runner_generation=runtime.runner_generation,
+                        admission_authority=runtime.admission_authority,
+                        owner_session_id=authority.session_id,
+                        path=str(path),
+                        deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+                    )
+                    entry = await self.repositories.vault.register_runtime_value(
+                        authority, args.name, value
+                    )
+                except VaultEntryConflict:
+                    raise FunctionToolError(
+                        "A Vault entry with that name already exists."
+                    ) from None
+                except (
+                    AgentMutationReadOnly,
+                    AgentMutationTargetMissing,
+                    RuntimeRunnerOperationUnavailable,
+                    RuntimeRunnerOperationGenerationError,
+                    RuntimeRunnerOperationFailedError,
+                    InvalidVaultEntry,
+                    VaultAccessDenied,
+                ):
+                    raise FunctionToolError(
+                        "Could not register the Vault file."
+                    ) from None
+                return FunctionToolResult(output=json.dumps({"name": entry.name}))
+
+            vault_tools.append(
+                make_tool(
+                    vault_register_file,
+                    name="vault_register_file",
+                    description=(
+                        "Create a Vault entry from one readable Runtime text file. "
+                        "Do not read its contents into chat. Existing entries and "
+                        "the source file are unchanged."
+                    ),
+                )
+            )
 
             async def browser_allowed() -> bool:
                 return await self.repositories.runtime.browser_enabled(
@@ -1269,6 +1362,28 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         "Browser image transfer capability is unavailable."
                     ) from exc
 
+            async def seal_browser_vault_entry(
+                name: str, target: BrowserExecutionTarget
+            ) -> str:
+                try:
+                    key = await self.runner_operations.browser_vault_public_key(
+                        runtime_id=target.runtime_id,
+                        runner_generation=target.runner_generation,
+                    )
+                    values = await self.repositories.vault.resolve_for_execution(
+                        authority.agent_id, {name}
+                    )
+                    return seal_browser_input(values[name], key)
+                except (
+                    RuntimeRunnerOperationUnavailable,
+                    InvalidVaultEntry,
+                    VaultEntryUnavailable,
+                    VaultSealError,
+                ):
+                    raise FunctionToolError(
+                        "Vault Browser input is unavailable."
+                    ) from None
+
             if await browser_allowed():
                 browser_tools = make_browser_tools(
                     runner_operations=self.runner_operations,
@@ -1277,6 +1392,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                     revalidate_authority=revalidate_browser_authority,
                     require_image_transfer=require_browser_image_transfer,
                     runtime_image_read_service=self.runtime_image_read_service,
+                    seal_vault_entry=seal_browser_vault_entry,
                 )
             self._run_tool_to_file_context = RunToolToFileRuntimeContext(
                 session_storage=file_ss,
@@ -1326,6 +1442,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 read_agent_environment=lambda: (
                     self.repositories.runtime_environment.read_values(runtime_agent_id)
                 ),
+                resolve_vault_entries=self.repositories.vault.resolve_for_execution,
+                revalidate_vault_authority=revalidate_resource_authority,
                 runtime_capability_resolver=capability_resolver,
                 expected_authority_provider=self._required_runtime_authority,
                 resolve_working_folder_authority=(
@@ -1350,6 +1468,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 for tool in file_tools
             ],
             *browser_tools,
+            *vault_tools,
         ]
         # Filter tools requested by the runtime context.
         if self._excluded_tools:
@@ -2539,6 +2658,10 @@ def make_exec_command_tool(
         Awaitable[SessionWorkingFolderAuthority],
     ],
     read_agent_environment: Callable[[], Awaitable[dict[str, str]]],
+    resolve_vault_entries: Callable[
+        [str, AbstractSet[str]], Awaitable[dict[str, SecretStr]]
+    ],
+    revalidate_vault_authority: Callable[[], Awaitable[bool]],
     peer_toolkits: Sequence[RuntimeEnvProvider] = (),
 ) -> FunctionTool:
     """Create an exec_command tool backed by Runtime Runner process operations."""
@@ -2571,6 +2694,26 @@ def make_exec_command_tool(
                 ) from None
             secret_env = await _collect_secret_env(peer_toolkits, agent_id)
             secret_env.update(await read_agent_environment())
+            vault_env = None
+            if args.vault_env:
+                if not await revalidate_vault_authority() or any(
+                    not vault_environment_name_valid(name) or name.startswith("AZENTS_")
+                    for name in args.vault_env
+                ):
+                    raise FunctionToolError("Vault command input is unavailable.")
+                try:
+                    selected = await resolve_vault_entries(
+                        agent_id, set(args.vault_env.values())
+                    )
+                except InvalidVaultEntry, VaultEntryUnavailable:
+                    raise FunctionToolError(
+                        "Vault command input is unavailable."
+                    ) from None
+                if not await revalidate_vault_authority():
+                    raise FunctionToolError("Vault command input is unavailable.")
+                vault_env = {
+                    name: selected[entry] for name, entry in args.vault_env.items()
+                }
             await publish_event(RuntimeReadyEvent())
             result = await runner_operations.start_process(
                 runtime_id=runtime.id,
@@ -2581,6 +2724,8 @@ def make_exec_command_tool(
                 yield_time_ms=args.yield_time_ms,
                 max_output_bytes=args.max_output_bytes,
                 env=secret_env or None,
+                vault_env=vault_env,
+                vault_execution_check=revalidate_vault_authority if vault_env else None,
                 owner_session_id=owner_session_id,
                 deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
                 process_output_callback=_publish_process_output_delta(publish_event),
@@ -2594,6 +2739,11 @@ def make_exec_command_tool(
             RuntimeRunnerOperationFailedError,
             RuntimeStorageError,
         ) as exc:
+            if args.vault_env:
+                raise FunctionToolError(
+                    "Vault command did not complete. Observe existing processes "
+                    "before retrying an uncertain command."
+                ) from None
             message = str(exc)
             logger.warning(
                 "Runtime Runner process start operation failed",

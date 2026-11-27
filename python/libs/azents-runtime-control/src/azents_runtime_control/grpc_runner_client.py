@@ -97,6 +97,7 @@ from azents_runtime_control.system_metrics import (
     RunnerSystemMetricsReport,
     RunnerSystemMetricsScope,
 )
+from azents_runtime_control.vault_contract import VAULT_FILE_READ, VAULT_PROCESS_START
 
 if TYPE_CHECKING:
     from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
@@ -1128,6 +1129,19 @@ def _operation_payload(
         )
     if operation.operation_type.startswith("browser."):
         raise BrowserContractError("Browser Runner command payload is missing")
+    if (payload_kind == "vault_file_read") != (
+        operation.operation_type == VAULT_FILE_READ
+    ):
+        raise ValueError("Vault file operation type does not match payload")
+    if (payload_kind == "vault_process_start") != (
+        operation.operation_type == VAULT_PROCESS_START
+    ):
+        raise ValueError("Vault process operation type does not match payload")
+    if payload_kind == "vault_file_read":
+        return {
+            "path": operation.vault_file_read.path,
+            "recipient_public_key": operation.vault_file_read.recipient_public_key,
+        }
     if payload_kind == "bash":
         payload = operation.bash
         result: dict[str, JsonValue] = {"command": payload.command}
@@ -1200,8 +1214,12 @@ def _operation_payload(
             "after_revision": operation.process_observe.after_revision,
             "timeout_ms": operation.process_observe.timeout_ms,
         }
-    if payload_kind == "process_start":
-        payload = operation.process_start
+    if payload_kind in {"process_start", "vault_process_start"}:
+        payload = (
+            operation.vault_process_start.launch
+            if payload_kind == "vault_process_start"
+            else operation.process_start
+        )
         result: dict[str, JsonValue] = {
             "command": payload.command,
             "fire_and_forget": payload.fire_and_forget,
@@ -1212,6 +1230,10 @@ def _operation_payload(
             result["workdir"] = payload.workdir
         if payload.env:
             result["env"] = dict(payload.env)
+        if payload_kind == "vault_process_start":
+            result["sealed_environment"] = (
+                operation.vault_process_start.sealed_environment
+            )
         return result
     if payload_kind == "process_write":
         payload = operation.process_write
@@ -1418,6 +1440,8 @@ def _final_success_payload(
         return {"exit_code": message.bash.exit_code}
     if result_kind == "file_read":
         return {"bytes_read": message.file_read.bytes_read}
+    if result_kind == "vault_file_read":
+        return {"sealed_value": message.vault_file_read.sealed_value}
     if result_kind == "file_read_text":
         return {
             "start_character": message.file_read_text.start_character,

@@ -44,6 +44,7 @@ _COMPLETION_ARMS = (
     ("terminated_count", "process_terminate_session"),
     ("exit_code", "bash"),
     ("bytes_read", "file_read"),
+    ("sealed_value", "vault_file_read"),
     ("start_character", "file_read_text"),
     ("bytes_written", "file_write"),
     ("matches", "file_glob"),

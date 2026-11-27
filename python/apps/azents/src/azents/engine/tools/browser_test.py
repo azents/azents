@@ -1,8 +1,10 @@
 """Browser tool authority, schema, outcome and model-image integration tests."""
 
 import asyncio
+import base64
 import dataclasses
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Literal
@@ -18,6 +20,8 @@ from azents_runtime_control.browser_contract import (
     BrowserPage,
     BrowserResult,
 )
+from nacl.public import PrivateKey, SealedBox
+from pydantic import SecretStr
 
 from azents.core.enums import LLMProvider, ModelFileStatus
 from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
@@ -32,6 +36,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.repos.model_file.data import ModelFile
+from azents.runtime.control_protocol.vault_sealing import seal_browser_input
 from azents.runtime.transfer.runtime_image_read import (
     RuntimeImageReadError,
     RuntimeImageReadRequest,
@@ -79,7 +84,10 @@ class _Runner:
         owner_session_id: str,
         command: BrowserCommand,
         deadline_at: datetime,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> BrowserResult:
+        if vault_execution_check is not None and not await vault_execution_check():
+            raise RuntimeRunnerOperationUnavailable("Vault execution changed")
         self.calls.append(
             _Invocation(
                 runtime_id, runner_generation, owner_session_id, command, deadline_at
@@ -128,6 +136,8 @@ class _Harness:
     transfer_allowed: bool = True
     prepared: int = 0
     authority_checks: int = 0
+    vault_key: PrivateKey | None = None
+    vault_entries: list[str] = dataclasses.field(default_factory=list)
 
     async def target(self) -> BrowserExecutionTarget:
         self.prepared += 1
@@ -141,6 +151,13 @@ class _Harness:
         if not self.transfer_allowed:
             raise FunctionToolError("Image transfer unavailable.")
 
+    async def seal(self, name: str, target: BrowserExecutionTarget) -> str:
+        assert target == _TARGET
+        assert self.vault_key is not None
+        self.vault_entries.append(name)
+        key = base64.urlsafe_b64encode(bytes(self.vault_key.public_key)).decode("ascii")
+        return seal_browser_input(SecretStr("synthetic-browser-vault-value"), key)
+
     def tools(self) -> dict[str, FunctionTool]:
         return {
             tool.spec.name: tool
@@ -151,6 +168,7 @@ class _Harness:
                 revalidate_authority=self.revalidate,
                 require_image_transfer=self.require_transfer,
                 runtime_image_read_service=self.reader,
+                seal_vault_entry=self.seal if self.vault_key is not None else None,
             )
         }
 
@@ -161,6 +179,34 @@ def _target_args() -> dict[str, str]:
         "page_id": "page-1",
         "resource_incarnation": "incarnation-1",
     }
+
+
+async def test_vault_fill_is_exclusive_and_sealed_for_exact_runner() -> None:
+    key = PrivateKey.generate()
+    h = _Harness(vault_key=key)
+    tool = h.tools()["browser_act"]
+    data = {
+        **_target_args(),
+        "action": "fill",
+        "ref": "field",
+        "observation_id": "observation",
+        "vault_entry": "portal-password",
+    }
+    with pytest.raises(FunctionToolError, match="exclusive"):
+        await tool.handler(json.dumps({**data, "text": "other"}))
+    assert h.vault_entries == [] and h.runner.calls == []
+    result = await tool.handler(json.dumps(data))
+    assert "synthetic-browser-vault-value" not in repr(result)
+    assert h.vault_entries == ["portal-password"]
+    assert h.authority_checks == 2
+    call = h.runner.calls[0]
+    assert call.runner_generation == _TARGET.runner_generation
+    assert isinstance(call.command, BrowserActCommand)
+    assert call.command.action.text is None
+    sealed = call.command.action.encrypted_text
+    assert sealed is not None
+    plaintext = SealedBox(key).decrypt(base64.urlsafe_b64decode(sealed))
+    assert plaintext == b"synthetic-browser-vault-value"
 
 
 async def test_open_uses_concrete_session_not_root_or_user_input() -> None:

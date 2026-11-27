@@ -560,7 +560,26 @@
     "memoryEnabledDescription": "会話間で永続的なメモリの保存と活用を許可する",
     "toolSearchEnabledLabel": "ツール検索を有効化",
     "toolSearchEnabledDescription": "接続されたサービスツールを遅延表示し、必要に応じてモデルが検索できるようにする",
+    "vault": {
+      "title": "Vault",
+      "description": "保存後、値は表示されません。エージェントは名前を指定して値を使用できます。",
+      "add": "項目を追加",
+      "replace": "値を置き換える",
+      "remove": "項目を削除",
+      "empty": "登録済みの項目はありません。",
+      "unavailable": "Vault が利用できないか、アクセス権限がありません。",
+      "failed": "変更を保存できませんでした。アクセス権限と項目名を確認して、再試行してください。",
+      "name": "項目名",
+      "value": "値",
+      "save": "保存",
+      "cancel": "キャンセル",
+      "confirmRemove": "削除すると、エージェントはこの項目を使用できなくなります。"
+    },
     "settingsHub": {
+      "vault": {
+        "label": "Vault",
+        "description": "このエージェントのシークレットを管理"
+      },
       "title": "エージェント設定",
       "description": "このエージェントの設定を確認・変更する項目を選択してください。",
       "sections": {

@@ -45,6 +45,12 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
+from azents_runtime_control.vault_contract import (
+    BROWSER_VAULT_PUBLIC_KEY_METADATA,
+    BROWSER_VAULT_RECIPIENT_CAPABILITY,
+    VAULT_RUNTIME_CAPABILITY,
+    VAULT_RUNTIME_PUBLIC_KEY_METADATA,
+)
 
 from azents_runtime_runner.browser import RunnerBrowserManager
 from azents_runtime_runner.browser_controller import RunnerBrowserController
@@ -78,6 +84,7 @@ from azents_runtime_runner.trust import (
     prepare_runner_trust_environment,
     runner_http_ssl_context,
 )
+from azents_runtime_runner.vault_transport import VaultRecipient
 from azents_runtime_runner.web_session_dispatcher import (
     RunnerStreamSessionDispatcher,
     RunnerWebHardLimits,
@@ -313,6 +320,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         ),
     }
     browser_input_key = BrowserInputKey()
+    vault_recipient = VaultRecipient()
     execution_backend = DirectExecutionBackend(
         inherited_environment=inherited_environment
     )
@@ -321,10 +329,17 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         runtime_id=runtime_id,
         runner_id=runner_id,
         protocol_version=_PROTOCOL_VERSION,
-        capabilities=_CAPABILITIES,
+        capabilities=(
+            *_CAPABILITIES,
+            BROWSER_VAULT_RECIPIENT_CAPABILITY,
+            VAULT_RUNTIME_CAPABILITY,
+        ),
         health="ok",
         workspace_path=workspace_path,
-        metadata={},
+        metadata={
+            BROWSER_VAULT_PUBLIC_KEY_METADATA: browser_input_key.public_key,
+            VAULT_RUNTIME_PUBLIC_KEY_METADATA: vault_recipient.public_key,
+        },
         auth_credential_id=credential_id,
         runtime_configuration=runtime_configuration,
     )
@@ -433,6 +448,8 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 client=client,
                 workspace=workspace,
                 execution_backend=execution_backend,
+                vault_recipient=vault_recipient,
+                vault_reserved_environment=frozenset(inherited_environment),
             )
             run_loop = RunnerRunLoop(
                 client=client,

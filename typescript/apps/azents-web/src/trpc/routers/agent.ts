@@ -13,8 +13,10 @@ import {
   agentV1AddAgentAdmin,
   agentV1CreateAgent,
   agentV1CreateAgentMemory,
+  agentV1CreateAgentVaultEntry,
   agentV1DeleteAgent,
   agentV1DeleteAgentMemory,
+  agentV1DeleteAgentVaultEntry,
   agentV1FinalizeAvatar,
   agentV1GetAgent,
   agentV1GetAgentConsolidatedMemory,
@@ -26,14 +28,17 @@ import {
   agentV1ListAgentHistoricalMemories,
   agentV1ListAgentMemories,
   agentV1ListAgents,
+  agentV1ListAgentVaultEntries,
   agentV1RemoveAgentAdmin,
   agentV1RemoveAvatar,
+  agentV1ReplaceAgentVaultEntry,
   agentV1ReplaceAutomaticSessionProjects,
   agentV1ReplaceBrowserConfiguration,
   agentV1RequestAvatarUpload,
   agentV1UpdateAgent,
   agentV1UpdateAgentMemory,
 } from "@azents/public-client";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
@@ -44,8 +49,81 @@ import {
 
 const memoryScopeEnum = z.enum(["agent", "user"]);
 const historicalMemoryScopeEnum = z.enum(["team", "user"]);
+const agentVaultScope = z.object({
+  handle: z.string().min(1),
+  agentId: z.string().min(1),
+});
+
+function mapVaultError(error: unknown): TRPCError {
+  const mapped = mapExpectedError(error, {
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    422: "BAD_REQUEST",
+  });
+  return new TRPCError({
+    code: mapped instanceof TRPCError ? mapped.code : "INTERNAL_SERVER_ERROR",
+    message: "Vault operation failed.",
+  });
+}
 
 export const agentRouter = router({
+  listVaultEntries: publicProcedure
+    .input(agentVaultScope)
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1ListAgentVaultEntries({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapVaultError(error);
+      }
+    }),
+
+  writeVaultEntry: publicProcedure
+    .input(
+      agentVaultScope.extend({
+        operation: z.enum(["create", "replace"]),
+        name: z.string().min(1).max(255),
+        value: z.string().max(32768),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const write =
+        input.operation === "create"
+          ? agentV1CreateAgentVaultEntry
+          : agentV1ReplaceAgentVaultEntry;
+      try {
+        await write({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: { name: input.name, value: input.value },
+          throwOnError: true,
+        });
+      } catch (error) {
+        throw mapVaultError(error);
+      }
+    }),
+
+  deleteVaultEntry: publicProcedure
+    .input(agentVaultScope.extend({ name: z.string().min(1).max(255) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await agentV1DeleteAgentVaultEntry({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          query: { name: input.name },
+          throwOnError: true,
+        });
+      } catch (error) {
+        throw mapVaultError(error);
+      }
+    }),
+
   getBrowserConfiguration: publicProcedure
     .input(z.object({ handle: z.string().min(1), agentId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {

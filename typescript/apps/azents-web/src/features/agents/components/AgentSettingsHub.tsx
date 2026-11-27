@@ -18,6 +18,7 @@ import {
   IconBrain,
   IconChevronRight,
   IconFolder,
+  IconLock,
   IconPlugConnected,
   IconRobot,
   IconSettings,
@@ -186,6 +187,17 @@ export function AgentSettingsHub({
                 icon: <IconWorld size={rem(18)} />,
                 label: t("services.label"),
                 description: t("services.description"),
+                value: null,
+              },
+            ]
+          : []),
+        ...(agent.toolkit_management_available
+          ? [
+              {
+                href: `${basePath}/vault`,
+                icon: <IconLock size={rem(18)} />,
+                label: t("vault.label"),
+                description: t("vault.description"),
                 value: null,
               },
             ]

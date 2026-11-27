@@ -351,6 +351,8 @@ message RunnerOperationRequest {
     FileReadTextOperationPayload file_read_text = 44;
     BrowserOperationPayload browser = 45;
     ProcessObserveOperationPayload process_observe = 46;
+    VaultProcessStartOperationPayload vault_process_start = 47;
+    VaultFileReadOperationPayload vault_file_read = 48;
   }
 }
 
@@ -419,6 +421,18 @@ message ProcessStartOperationPayload {
   uint32 max_output_bytes = 4;
   map<string, string> env = 5;
   bool fire_and_forget = 7;
+}
+
+// A distinct arm prevents older receivers from launching an ordinary process
+// without the required confidential environment.
+message VaultProcessStartOperationPayload {
+  ProcessStartOperationPayload launch = 1;
+  string sealed_environment = 2;
+}
+
+message VaultFileReadOperationPayload {
+  string path = 1;
+  string recipient_public_key = 2;
 }
 
 message ProcessObserveOperationPayload {
@@ -604,7 +618,12 @@ message RunnerOperationFinalSuccessPayload {
     ProcessObserveFinalSuccess process_observe = 25;
     BrowserFinalSuccess browser = 24;
     ProcessTerminateSessionFinalSuccess process_terminate_session = 26;
+    VaultFileReadFinalSuccess vault_file_read = 27;
   }
+}
+
+message VaultFileReadFinalSuccess {
+  string sealed_value = 1;
 }
 
 // Completed BrowserResult only; same size bound and strict codec as commands.

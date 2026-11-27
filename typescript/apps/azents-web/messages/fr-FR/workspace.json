@@ -560,7 +560,26 @@
     "memoryEnabledDescription": "Permettre à cet agent de sauvegarder et rappeler des mémoires persistantes entre les conversations",
     "toolSearchEnabledLabel": "Activer la recherche d’outils",
     "toolSearchEnabledDescription": "Différer l’affichage des outils de service connectés et permettre au modèle de les rechercher selon les besoins",
+    "vault": {
+      "title": "Coffre-fort",
+      "description": "Les valeurs ne sont plus affichées après leur enregistrement. L’agent peut les utiliser en indiquant leur nom.",
+      "add": "Ajouter une entrée",
+      "replace": "Remplacer la valeur",
+      "remove": "Supprimer l’entrée",
+      "empty": "Aucune entrée pour le moment.",
+      "unavailable": "Le coffre-fort est indisponible ou vous n’y avez pas accès.",
+      "failed": "La modification a échoué. Vérifiez vos droits et le nom de l’entrée, puis réessayez.",
+      "name": "Nom de l’entrée",
+      "value": "Valeur",
+      "save": "Enregistrer",
+      "cancel": "Annuler",
+      "confirmRemove": "L’agent ne pourra plus utiliser cette entrée."
+    },
     "settingsHub": {
+      "vault": {
+        "label": "Coffre-fort",
+        "description": "Gérer les secrets nommés de cet agent"
+      },
       "title": "Paramètres de l’agent",
       "description": "Choisissez une rubrique pour consulter ou modifier les paramètres de cet agent.",
       "sections": {

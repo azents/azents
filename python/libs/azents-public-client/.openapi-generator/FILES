@@ -117,6 +117,8 @@ azentspublicclient/docs/AgentToolkitResponse.md
 azentspublicclient/docs/AgentType.md
 azentspublicclient/docs/AgentUpdateRequest.md
 azentspublicclient/docs/AgentV1Api.md
+azentspublicclient/docs/AgentVaultEntryMetadata.md
+azentspublicclient/docs/AgentVaultSettings.md
 azentspublicclient/docs/AgentWorkspaceActionResponse.md
 azentspublicclient/docs/AgentWorkspaceActionsResponse.md
 azentspublicclient/docs/AgentWorkspaceBulkDeleteRequest.md
@@ -668,6 +670,7 @@ azentspublicclient/docs/UserV1Api.md
 azentspublicclient/docs/ValidationError.md
 azentspublicclient/docs/ValidationErrorLocInner.md
 azentspublicclient/docs/Value.md
+azentspublicclient/docs/VaultEntryWriteRequest.md
 azentspublicclient/docs/VerifyCodeRequest.md
 azentspublicclient/docs/VerifyCodeResponse.md
 azentspublicclient/docs/Workspace.md
@@ -800,6 +803,8 @@ azentspublicclient/models/agent_toolkit_management_response.py
 azentspublicclient/models/agent_toolkit_response.py
 azentspublicclient/models/agent_type.py
 azentspublicclient/models/agent_update_request.py
+azentspublicclient/models/agent_vault_entry_metadata.py
+azentspublicclient/models/agent_vault_settings.py
 azentspublicclient/models/agent_workspace_action_response.py
 azentspublicclient/models/agent_workspace_actions_response.py
 azentspublicclient/models/agent_workspace_bulk_delete_request.py
@@ -1323,6 +1328,7 @@ azentspublicclient/models/user_toolkit_owner.py
 azentspublicclient/models/validation_error.py
 azentspublicclient/models/validation_error_loc_inner.py
 azentspublicclient/models/value.py
+azentspublicclient/models/vault_entry_write_request.py
 azentspublicclient/models/verify_code_request.py
 azentspublicclient/models/verify_code_response.py
 azentspublicclient/models/workspace.py
@@ -1453,6 +1459,8 @@ azentspublicclient/test/test_agent_toolkit_response.py
 azentspublicclient/test/test_agent_type.py
 azentspublicclient/test/test_agent_update_request.py
 azentspublicclient/test/test_agent_v1_api.py
+azentspublicclient/test/test_agent_vault_entry_metadata.py
+azentspublicclient/test/test_agent_vault_settings.py
 azentspublicclient/test/test_agent_workspace_action_response.py
 azentspublicclient/test/test_agent_workspace_actions_response.py
 azentspublicclient/test/test_agent_workspace_bulk_delete_request.py
@@ -2004,6 +2012,7 @@ azentspublicclient/test/test_user_v1_api.py
 azentspublicclient/test/test_validation_error.py
 azentspublicclient/test/test_validation_error_loc_inner.py
 azentspublicclient/test/test_value.py
+azentspublicclient/test/test_vault_entry_write_request.py
 azentspublicclient/test/test_verify_code_request.py
 azentspublicclient/test/test_verify_code_response.py
 azentspublicclient/test/test_workspace.py

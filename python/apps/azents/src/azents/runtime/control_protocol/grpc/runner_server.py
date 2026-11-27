@@ -55,6 +55,7 @@ from azents_runtime_control.runtime_stream_session import RunnerSessionOffer
 from azents_runtime_control.system_metrics import (
     RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
 )
+from azents_runtime_control.vault_contract import VAULT_FILE_READ, VAULT_PROCESS_START
 from google.protobuf import timestamp_pb2
 
 from azents.core.browser_configuration import (
@@ -1425,6 +1426,12 @@ def _copy_operation_payload(
                 }
             )
         return
+    if operation_type == VAULT_FILE_READ:
+        message.vault_file_read.path = _str_payload(payload, "path")
+        message.vault_file_read.recipient_public_key = _str_payload(
+            payload, "recipient_public_key"
+        )
+        return
     if operation_type in {"file.read", "file.download"}:
         message.file_read.path = _str_payload(payload, "path")
         message.file_read.offset = _int_payload(payload, "offset")
@@ -1497,19 +1504,24 @@ def _copy_operation_payload(
         message.process_observe.after_revision = _int_payload(payload, "after_revision")
         message.process_observe.timeout_ms = _int_payload(payload, "timeout_ms")
         return
-    if operation_type == "process.start":
-        message.process_start.command = _str_payload(payload, "command")
-        message.process_start.fire_and_forget = payload.get("fire_and_forget") is True
+    if operation_type in {"process.start", VAULT_PROCESS_START}:
+        if operation_type == VAULT_PROCESS_START:
+            message.vault_process_start.sealed_environment = _str_payload(
+                payload, "sealed_environment"
+            )
+            launch = message.vault_process_start.launch
+        else:
+            launch = message.process_start
+        launch.command = _str_payload(payload, "command")
+        launch.fire_and_forget = payload.get("fire_and_forget") is True
         workdir = _optional_str_payload(payload, "workdir")
         if workdir is not None:
-            message.process_start.workdir = workdir
-        message.process_start.yield_time_ms = _int_payload(payload, "yield_time_ms")
-        message.process_start.max_output_bytes = _int_payload(
-            payload, "max_output_bytes"
-        )
+            launch.workdir = workdir
+        launch.yield_time_ms = _int_payload(payload, "yield_time_ms")
+        launch.max_output_bytes = _int_payload(payload, "max_output_bytes")
         env = payload.get("env")
         if isinstance(env, dict):
-            message.process_start.env.update(
+            launch.env.update(
                 {
                     str(key): value
                     for key, value in env.items()

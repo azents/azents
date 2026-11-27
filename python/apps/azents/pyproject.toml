@@ -81,6 +81,7 @@ dependencies = [
     "defusedxml==0.7.1",
     "pypdf==6.21.4",
     "azents-llm-contract",
+    "pynacl==1.6.2",
 ]
 
 [project.scripts]

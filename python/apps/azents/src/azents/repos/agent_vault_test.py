@@ -113,7 +113,6 @@ async def test_manager_metadata_isolation_and_no_value_readback(
             manager=manager,
             mutation=VaultEntryMutation.CREATE,
             value=SecretStr(_VALUE + agent_id),
-            contributor_label="Contributor",
         )
     with pytest.raises(VaultAccessDenied, match="Agent Vault not found"):
         await vault.list_entries("vault-b", manager=_ADMIN)
@@ -140,7 +139,7 @@ async def test_manager_metadata_isolation_and_no_value_readback(
             """)
         )
     assert await vault.list_entries("vault-a", manager=_ADMIN) == [
-        VaultEntryMetadata("token", "Contributor")
+        VaultEntryMetadata("token", "vault-member")
     ]
     with pytest.raises(VaultEntryUnavailable, match="Vault entry unavailable"):
         await vault.resolve_for_execution("vault-a", {"token"})
@@ -166,7 +165,6 @@ async def test_explicit_mutation_batch_rollback_and_agent_cascade(
             manager=_OWNER,
             mutation=VaultEntryMutation.REPLACE,
             value=SecretStr("new"),
-            contributor_label="Contributor",
         )
     with pytest.raises(InvalidVaultEntry):
         async with vault.session_manager() as session:
@@ -199,7 +197,6 @@ async def test_explicit_mutation_batch_rollback_and_agent_cascade(
         manager=_OWNER,
         mutation=VaultEntryMutation.DELETE,
         value=None,
-        contributor_label="Contributor",
     )
     with pytest.raises(VaultEntryUnavailable):
         await vault.resolve_for_execution("vault-a", {"token"})
@@ -269,7 +266,6 @@ async def test_revocation_committed_first_denies_waiting_write(
                 manager=principal,
                 mutation=VaultEntryMutation.CREATE,
                 value=SecretStr(_VALUE),
-                contributor_label="Contributor",
             )
 
     try:

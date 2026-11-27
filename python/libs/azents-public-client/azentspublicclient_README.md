@@ -89,8 +89,10 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_add_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_add_agent_admin) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | Add Agent Admin
 *AgentV1Api* | [**agent_v1_create_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_create_agent) | **POST** /agent/v1/workspaces/{handle}/agents | Create Agent
 *AgentV1Api* | [**agent_v1_create_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_create_agent_memory) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | Create Agent Memory
+*AgentV1Api* | [**agent_v1_create_agent_vault_entry**](azentspublicclient/docs/AgentV1Api.md#agent_v1_create_agent_vault_entry) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | Create Agent Vault Entry
 *AgentV1Api* | [**agent_v1_delete_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id} | Delete Agent
 *AgentV1Api* | [**agent_v1_delete_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
+*AgentV1Api* | [**agent_v1_delete_agent_vault_entry**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent_vault_entry) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | Delete Agent Vault Entry
 *AgentV1Api* | [**agent_v1_finalize_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 *AgentV1Api* | [**agent_v1_get_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
 *AgentV1Api* | [**agent_v1_get_agent_consolidated_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_consolidated_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory | Get Agent Consolidated Memory
@@ -101,9 +103,11 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_list_agent_admins**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
 *AgentV1Api* | [**agent_v1_list_agent_historical_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_historical_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories | List Agent Historical Memories
 *AgentV1Api* | [**agent_v1_list_agent_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
+*AgentV1Api* | [**agent_v1_list_agent_vault_entries**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_vault_entries) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | List Agent Vault Entries
 *AgentV1Api* | [**agent_v1_list_agents**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 *AgentV1Api* | [**agent_v1_remove_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
 *AgentV1Api* | [**agent_v1_remove_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_avatar) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar | Remove Avatar
+*AgentV1Api* | [**agent_v1_replace_agent_vault_entry**](azentspublicclient/docs/AgentV1Api.md#agent_v1_replace_agent_vault_entry) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/vault/entries | Replace Agent Vault Entry
 *AgentV1Api* | [**agent_v1_replace_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_replace_automatic_session_projects) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Replace Automatic Session Projects
 *AgentV1Api* | [**agent_v1_replace_browser_configuration**](azentspublicclient/docs/AgentV1Api.md#agent_v1_replace_browser_configuration) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/browser-configuration | Replace Browser Configuration
 *AgentV1Api* | [**agent_v1_request_avatar_upload**](azentspublicclient/docs/AgentV1Api.md#agent_v1_request_avatar_upload) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/upload-url | Request Avatar Upload
@@ -561,6 +565,8 @@ Class | Method | HTTP request | Description
  - [AgentToolkitResponse](azentspublicclient/docs/AgentToolkitResponse.md)
  - [AgentType](azentspublicclient/docs/AgentType.md)
  - [AgentUpdateRequest](azentspublicclient/docs/AgentUpdateRequest.md)
+ - [AgentVaultEntryMetadata](azentspublicclient/docs/AgentVaultEntryMetadata.md)
+ - [AgentVaultSettings](azentspublicclient/docs/AgentVaultSettings.md)
  - [AgentWorkspaceActionResponse](azentspublicclient/docs/AgentWorkspaceActionResponse.md)
  - [AgentWorkspaceActionsResponse](azentspublicclient/docs/AgentWorkspaceActionsResponse.md)
  - [AgentWorkspaceBulkDeleteRequest](azentspublicclient/docs/AgentWorkspaceBulkDeleteRequest.md)
@@ -1084,6 +1090,7 @@ Class | Method | HTTP request | Description
  - [ValidationError](azentspublicclient/docs/ValidationError.md)
  - [ValidationErrorLocInner](azentspublicclient/docs/ValidationErrorLocInner.md)
  - [Value](azentspublicclient/docs/Value.md)
+ - [VaultEntryWriteRequest](azentspublicclient/docs/VaultEntryWriteRequest.md)
  - [VerifyCodeRequest](azentspublicclient/docs/VerifyCodeRequest.md)
  - [VerifyCodeResponse](azentspublicclient/docs/VerifyCodeResponse.md)
  - [Workspace](azentspublicclient/docs/Workspace.md)

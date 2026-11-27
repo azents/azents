@@ -4,6 +4,7 @@ import { AgentMemorySettingsPage } from "../../features/agents/AgentMemorySettin
 import { AgentRuntimeSettingsPage } from "../../features/agents/AgentRuntimeSettingsPage";
 import { AgentRuntimeWebServicesPage } from "../../features/agents/AgentRuntimeWebServicesPage";
 import { AgentSettingsPage } from "../../features/agents/AgentSettingsPage";
+import { AgentVaultSettingsPage } from "../../features/agents/AgentVaultSettingsPage";
 import type { AgentFormSection } from "../../features/agents/components/AgentForm";
 import type { AgentResponse } from "@azents/public-client";
 
@@ -12,6 +13,7 @@ export type AgentSettingsSection =
   | "memory"
   | "runtime"
   | "services"
+  | "vault"
   | "channels"
   | "projects"
   | "danger";
@@ -34,6 +36,8 @@ export function AgentSettingsSectionPage({
       return <AgentRuntimeSettingsPage handle={handle} agent={agent} />;
     case "services":
       return <AgentRuntimeWebServicesPage handle={handle} agent={agent} />;
+    case "vault":
+      return <AgentVaultSettingsPage handle={handle} agent={agent} />;
     case "channels":
       return <ExternalChannelSettingsPage handle={handle} agent={agent} />;
     case "projects":

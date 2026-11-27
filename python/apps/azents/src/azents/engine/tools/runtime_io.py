@@ -1,12 +1,13 @@
 """I/O protocol used by Runtime-backed builtin tools."""
 
 import dataclasses
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Literal, Protocol
 
 from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
 from azents_runtime_control.process_observation import ProcessObservation
+from pydantic import SecretStr
 
 from azents.core.runtime_admission import RuntimeAdmissionAuthority
 
@@ -234,6 +235,25 @@ class RuntimeFileApplyPatchFailedError(RuntimeRunnerOperationFailedError):
 class RuntimeRunnerOperationClient(Protocol):
     """Runtime Runner operation client used by Builtin tools."""
 
+    async def browser_vault_public_key(
+        self, *, runtime_id: str, runner_generation: int
+    ) -> str:
+        """Resolve the recipient for the exact admitted Runner generation."""
+        ...
+
+    async def read_vault_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        admission_authority: RuntimeAdmissionAuthority | None,
+        owner_session_id: str,
+        path: str,
+        deadline_at: datetime,
+    ) -> SecretStr:
+        """Receive the confidential file result only at the application boundary."""
+        ...
+
     async def run_browser_command(
         self,
         *,
@@ -242,6 +262,7 @@ class RuntimeRunnerOperationClient(Protocol):
         owner_session_id: str,
         command: BrowserCommand,
         deadline_at: datetime,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> BrowserResult:
         """Run a typed browser command with exact Session/resource binding."""
         ...
@@ -277,6 +298,8 @@ class RuntimeRunnerOperationClient(Protocol):
         owner_session_id: str,
         deadline_at: datetime,
         process_output_callback: RuntimeProcessOutputCallback | None = None,
+        vault_env: Mapping[str, SecretStr] | None = None,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> RuntimeProcessResult:
         """Start process operation and return process snapshot."""
         ...

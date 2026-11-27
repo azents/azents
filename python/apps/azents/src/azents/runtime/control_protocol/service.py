@@ -282,6 +282,7 @@ class RuntimeControlProtocolService:
         operation: RuntimeRunnerOperation,
         *,
         created_at: datetime,
+        reserved_request_id: str | None = None,
     ) -> (
         RuntimeDispatchResult
         | RuntimeProtocolRouteUnavailable
@@ -303,7 +304,7 @@ class RuntimeControlProtocolService:
                 subject_id=operation.runtime_id,
                 generation=operation.runner_generation,
             )
-        request_id = self.request_id_factory()
+        request_id = reserved_request_id or self.request_id_factory()
         request_stream_id = _runner_request_stream_id(
             operation.runtime_id,
             operation.runner_generation,
@@ -319,6 +320,14 @@ class RuntimeControlProtocolService:
             "owner_session_id": operation.owner_session_id,
             "payload": operation.payload,
         }
+        if (
+            operation.execution_check is not None
+            and not await operation.execution_check()
+        ):
+            return RuntimeProtocolRouteUnavailable(
+                target=RuntimeCoordinationTarget.RUNNER,
+                subject_id=operation.runtime_id,
+            )
         return await self._append_request(
             connection_kind=RuntimeConnectionKind.RUNNER,
             connection_subject_id=operation.runtime_id,

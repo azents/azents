@@ -83,6 +83,7 @@ class BrowserCommandRunner(Protocol):
         owner_session_id: str,
         command: BrowserCommand,
         deadline_at: datetime,
+        vault_execution_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> BrowserResult:
         """Return completed browser state or propagate typed failure."""
         ...
@@ -211,9 +212,16 @@ class BrowserActInput(BaseModel):
         max_length=5528,
         description=(
             "Fill-only ciphertext from the Browser Skill encryption script; "
-            "use exactly one of text or encrypted_text. Import the Skill script, "
-            "execute it in Runtime with an environment variable name, and copy stdout."
+            "Use exactly one of text, encrypted_text, or vault_entry. "
+            "Import the Skill script, execute it in Runtime with an environment "
+            "variable name, and copy stdout."
         ),
+    )
+    vault_entry: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Fill-only exact entry name from this Agent's Vault.",
     )
     url: str | None = Field(
         default=None,
@@ -317,6 +325,7 @@ def make_browser_tools(
     revalidate_authority: Callable[[], Awaitable[bool]],
     require_image_transfer: Callable[[], Awaitable[None]],
     runtime_image_read_service: RuntimeImageReader | None,
+    seal_vault_entry: Callable[[str, BrowserExecutionTarget], Awaitable[str]] | None,
 ) -> list[FunctionTool]:
     """Bind all three browser roles to trusted execution authority."""
 
@@ -336,7 +345,7 @@ def make_browser_tools(
         )
 
     async def run(
-        command: BrowserCommand, target: BrowserExecutionTarget
+        command: BrowserCommand, target: BrowserExecutionTarget, *, vault: bool = False
     ) -> BrowserResult:
         try:
             encode_browser_command(command)
@@ -352,6 +361,7 @@ def make_browser_tools(
                 owner_session_id=authority.session_id,
                 command=command,
                 deadline_at=datetime.now(UTC) + timedelta(seconds=75),
+                vault_execution_check=revalidate_authority if vault else None,
             )
             expected_task = (
                 command.task_id
@@ -397,7 +407,7 @@ def make_browser_tools(
                 (
                     "Browser encrypted input is invalid. Prepare a new ciphertext "
                     "in a fresh Runtime command; do not replay an uncertain input."
-                    if exc.code == "browser_encrypted_input_invalid"
+                    if exc.code == "browser_encrypted_input_invalid" and not vault
                     else "Browser operation did not complete. Observe current state; "
                     "do not repeat an uncertain submission."
                 ),
@@ -514,9 +524,35 @@ def make_browser_tools(
         return response
 
     async def act_browser(input: BrowserActInput) -> FunctionToolResult:
+        entry = input.vault_entry
+        if entry is not None and (
+            input.action != "fill"
+            or input.text is not None
+            or input.encrypted_text is not None
+        ):
+            raise FunctionToolError("Vault input is exclusive to Browser fill.")
         prepared = await prepare()
         target, session = prepared.target, prepared.authority
-        return output(await run(_act_command(input, session), target))
+        command = _act_command(input, session)
+        if entry is not None:
+            try:
+                encode_browser_command(
+                    dataclasses.replace(
+                        command, action=dataclasses.replace(command.action, text="")
+                    )
+                )
+            except BrowserContractError:
+                raise FunctionToolError(
+                    "Invalid browser action or target arguments."
+                ) from None
+            if seal_vault_entry is None:
+                raise FunctionToolError("Vault Browser input is unavailable.")
+            sealed = await seal_vault_entry(entry, target)
+            command = dataclasses.replace(
+                command,
+                action=dataclasses.replace(command.action, encrypted_text=sealed),
+            )
+        return output(await run(command, target, vault=entry is not None))
 
     return [
         make_tool(

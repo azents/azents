@@ -84,6 +84,7 @@ def test_registered_provider_names_produce_fallback_slugs() -> None:
     """Require every configurable Provider Name to satisfy the fallback invariant."""
     registry = get_toolkit_registry(
         EngineToolRepositories(
+            vault=MagicMock(),
             runtime_environment=require_instance(
                 MagicMock(spec=AgentRuntimeEnvironmentRepository),
                 AgentRuntimeEnvironmentRepository,
