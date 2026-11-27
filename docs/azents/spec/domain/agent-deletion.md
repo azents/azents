@@ -197,6 +197,7 @@ any listed relationship, ownership or delete action update this spec and the reg
 | `agent.database` | `agent_toolkit_namespace_reservations` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `agent_toolkit_namespace_sequences` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `agent_toolkits` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
+| `agent.database` | `agent_vault_entries` / `agent_id, name` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `agent_workspace_environment_selections` / `agent_id, variable_id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `github_user_oauth_creations` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |
 | `agent.database` | `google_oauth_attempts` / `id` | `agent_id` | `agents(id)` | `cascade` | `declared_cascade` |

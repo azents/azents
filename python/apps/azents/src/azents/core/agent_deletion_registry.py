@@ -156,6 +156,7 @@ def get_agent_deletion_registry() -> AgentDeletionRegistry:
                             ("agent_toolkit_namespace_reservations", "agent_id"),
                             ("agent_toolkit_namespace_sequences", "agent_id"),
                             ("agent_toolkits", "agent_id"),
+                            ("agent_vault_entries", "agent_id"),
                             ("agent_workspace_environment_selections", "agent_id"),
                             ("github_user_oauth_creations", "agent_id"),
                             ("google_oauth_attempts", "agent_id"),
