@@ -55,8 +55,14 @@ checks inside the write transaction.
 An admitted execution can nominate entries for its current `exec_command` or
 `browser_act` fill without a manager identity. `vault_register_file` creates one
 own-Agent entry from a complete readable Runtime text file and does not return
-the content or remove the file. The original execution is revalidated before
-registration commits. CLI values apply only to the selected process environment.
+the content or remove the file. `vault_delete` permanently removes one exact
+name from the executing Agent's Vault without decrypting the value or requiring
+a Runtime. This is an execution capability, including for shared Agents; it
+does not grant a human caller access to the settings API. A missing name is a
+no-op after authorization. Deletion rechecks the active Agent, Session tree and
+exact live execution under database locks. The original execution is also
+revalidated before registration commits. CLI values
+apply only to the selected process environment.
 Browser fill and CLI/file transfers use encrypted envelopes for the exact
 admitted Runner; an incompatible or replaced Runner is not a fallback to a
 plaintext operation.

@@ -116,6 +116,7 @@ class VaultRequestDeliveryService:
                 labels=target.field_labels,
                 status=target.status,
                 url=url,
+                button_label=target.button_label,
             )
             result = await self.discord_client.create_message(
                 bot_token=token,
@@ -134,6 +135,7 @@ class VaultRequestDeliveryService:
                 labels=target.field_labels,
                 status=target.status,
                 url=url,
+                button_label=target.button_label,
             )
             result = await self.slack_client.post_blocks(
                 bot_token=token,
@@ -176,6 +178,7 @@ class VaultRequestDeliveryService:
                 labels=target.field_labels,
                 status=target.status,
                 url=None,
+                button_label=None,
             )
             result = await self.discord_client.update_message(
                 bot_token=token,
@@ -193,6 +196,7 @@ class VaultRequestDeliveryService:
                 labels=target.field_labels,
                 status=target.status,
                 url=None,
+                button_label=None,
             )
             result = await self.slack_client.update_message(
                 bot_token=token,

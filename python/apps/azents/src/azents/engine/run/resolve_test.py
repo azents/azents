@@ -1842,7 +1842,7 @@ class TestResolveAgentTools:
     async def test_does_not_auto_bind_claude_rules_when_capability_denies(
         self,
     ) -> None:
-        """Vault requests remain available without Runtime-only capabilities."""
+        """Vault requests and deletion work without Runtime-only capabilities."""
         session = _resolution_session()
 
         bindings = await resolve_agent_tools(
@@ -1900,7 +1900,7 @@ class TestResolveAgentTools:
         assert [
             tool.spec.name
             for tool in (await vault.toolkit.update_context(admitted)).tools
-        ] == ["vault_request"]
+        ] == ["vault_request", "vault_delete"]
 
     async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
         """Root sessions receive the coherent subagent collaboration bundle."""

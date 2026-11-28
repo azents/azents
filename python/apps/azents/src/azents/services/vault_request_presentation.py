@@ -50,6 +50,7 @@ def render_discord_vault_request(
     labels: tuple[str, ...],
     status: VaultRequestStatus,
     url: str | None,
+    button_label: str | None,
 ) -> DiscordVaultRequest:
     """Preserve the request embed when changing only the action on settlement."""
     if status is VaultRequestStatus.OPEN:
@@ -58,7 +59,7 @@ def render_discord_vault_request(
         button: dict[str, object] = {
             "type": 2,
             "style": 5,
-            "label": _OPEN,
+            "label": button_label if button_label is not None else _OPEN,
             "url": url,
         }
     else:
@@ -101,6 +102,7 @@ def render_slack_vault_request(
     labels: tuple[str, ...],
     status: VaultRequestStatus,
     url: str | None,
+    button_label: str | None,
 ) -> SlackVaultRequest:
     """Keep authored text literal and replace the action with terminal status."""
     field_lines = tuple(f"• {label}" for label in labels)
@@ -113,7 +115,10 @@ def render_slack_vault_request(
         if start == 0:
             section = f"Requested fields\n{section}"
         blocks.append({"type": "section", "text": _slack_plain_text(section)})
-    action_or_status = _OPEN if status is VaultRequestStatus.OPEN else _STATUS[status]
+    if status is VaultRequestStatus.OPEN:
+        action_or_status = button_label if button_label is not None else _OPEN
+    else:
+        action_or_status = _STATUS[status]
     # Slack screen readers use the top-level fallback instead of reading blocks.
     # Escape Slack control characters and omit the dialog URL.
     text = escape(
@@ -134,7 +139,7 @@ def render_slack_vault_request(
                     {
                         "type": "button",
                         "action_id": "open_azents_vault_request",
-                        "text": _slack_plain_text(_OPEN),
+                        "text": _slack_plain_text(action_or_status),
                         "url": url,
                     }
                 ],

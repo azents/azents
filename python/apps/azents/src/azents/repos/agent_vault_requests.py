@@ -12,7 +12,6 @@ from azents.core.agent_mutation import AgentMutationReadOnly, AgentMutationTarge
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
-    AgentRunStatus,
     AgentSessionStatus,
     EventKind,
     MailboxItemKind,
@@ -38,15 +37,15 @@ from azents.rdb.models.agent_vault_request import (
 )
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_mutation_guard import require_active_agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_vault import (
     AgentVaultRepository,
     InvalidVaultEntry,
     VaultAccessDenied,
     VaultManager,
+    fence_vault_execution_write,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
@@ -179,39 +178,8 @@ class AgentVaultRequestRepository:
         self, authority: SessionResourceAuthority, spec: VaultRequestSpec
     ) -> Event:
         """Commit one request and its value-free history placement together."""
-        sessions = AgentSessionRepository()
         async with self.session_manager() as session:
-            await require_active_agent(
-                session, agent_id=authority.agent_id, allow_foreign_key_reads=True
-            )
-            tree = await sessions.lock_root_tree_sessions(
-                session, root_session_id=authority.root_session_id
-            )
-            by_id = {item.id: item for item in tree}
-            root = by_id.get(authority.root_session_id)
-            source = by_id.get(authority.session_id)
-            if (
-                root is None
-                or source is None
-                or root.workspace_id != authority.workspace_id
-                or source.workspace_id != authority.workspace_id
-                or source.agent_id != authority.agent_id
-                or source.owner_generation != authority.owner_generation
-                or root.status is not AgentSessionStatus.ACTIVE
-                or source.status is not AgentSessionStatus.ACTIVE
-                or root.stop_requested_at is not None
-                or source.stop_requested_at is not None
-            ):
-                raise VaultAccessDenied("Vault request source is unavailable.")
-            run = await AgentRunRepository().lock_by_id(session, authority.run_id)
-            if (
-                run is None
-                or run.session_id != source.id
-                or run.run_index != authority.run_index
-                or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
-                or run.stop_requested_at is not None
-            ):
-                raise VaultAccessDenied("Vault request source is unavailable.")
+            source = await fence_vault_execution_write(session, authority)
             destination: dict[str, JSONValue] | None = None
             if spec.destination is not None:
                 binding = (
@@ -250,6 +218,7 @@ class AgentVaultRequestRepository:
                 creation_at=now,
                 deadline_at=now + _REQUEST_LIFETIME,
                 destination=destination,
+                button_label=spec.button_label,
             )
             row.id = request_id
             session.write_session.add(row)

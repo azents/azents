@@ -11,9 +11,15 @@ from fastapi import Depends
 from pydantic import SecretStr
 from sqlalchemy.dialects.postgresql import insert
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentRunStatus,
+    AgentSessionStatus,
+    WorkspaceUserRole,
+)
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.models.agent import RDBAgent
@@ -74,6 +80,44 @@ class InvalidVaultEntry(Exception):
 def _validate_name(name: str) -> None:
     if not name.strip() or len(name) > 255 or not name.isprintable():
         raise InvalidVaultEntry("Invalid Vault entry name")
+
+
+async def fence_vault_execution_write(
+    session: WriteSession, authority: SessionResourceAuthority
+) -> AgentSession:
+    """Serialize against retirement, Session archive/stop and Run replacement."""
+    await require_active_agent(
+        session, agent_id=authority.agent_id, allow_foreign_key_reads=True
+    )
+    tree = await AgentSessionRepository().lock_root_tree_sessions(
+        session, root_session_id=authority.root_session_id
+    )
+    by_id = {item.id: item for item in tree}
+    root = by_id.get(authority.root_session_id)
+    source = by_id.get(authority.session_id)
+    if (
+        root is None
+        or source is None
+        or root.workspace_id != authority.workspace_id
+        or source.workspace_id != authority.workspace_id
+        or source.agent_id != authority.agent_id
+        or source.owner_generation != authority.owner_generation
+        or root.status is not AgentSessionStatus.ACTIVE
+        or source.status is not AgentSessionStatus.ACTIVE
+        or root.stop_requested_at is not None
+        or source.stop_requested_at is not None
+    ):
+        raise VaultAccessDenied("Vault execution authority is unavailable.")
+    run = await AgentRunRepository().lock_by_id(session, authority.run_id)
+    if (
+        run is None
+        or run.session_id != source.id
+        or run.run_index != authority.run_index
+        or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+        or run.stop_requested_at is not None
+    ):
+        raise VaultAccessDenied("Vault execution authority is unavailable.")
+    return source
 
 
 @dataclass(frozen=True)
@@ -314,6 +358,23 @@ class AgentVaultRepository:
                 contributor_label=label,
             )
         return VaultEntryMetadata(name, label)
+
+    async def delete_for_execution(
+        self, authority: SessionResourceAuthority, name: str
+    ) -> bool:
+        """Delete only this Agent's exact entry, without reading its stored value."""
+        _validate_name(name)
+        async with self.session_manager() as session:
+            source = await fence_vault_execution_write(session, authority)
+            deleted = await session.write_session.scalar(
+                sa.delete(RDBAgentVaultEntry)
+                .where(
+                    RDBAgentVaultEntry.agent_id == source.agent_id,
+                    RDBAgentVaultEntry.name == name,
+                )
+                .returning(RDBAgentVaultEntry.name)
+            )
+            return deleted is not None
 
     async def apply_manager_batch_in_session(
         self,

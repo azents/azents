@@ -5,14 +5,18 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import Depends
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from azents.core.enums import (
     AgentSessionStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
 )
-from azents.core.vault_request import VaultChannelReference, VaultRequestField
+from azents.core.vault_request import (
+    VaultChannelReference,
+    VaultRequestButtonLabel,
+    VaultRequestField,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_vault_request import (
@@ -37,6 +41,9 @@ from azents.repos.session_resource_authority import (
 
 class _Destination(VaultChannelReference):
     binding_id: str
+
+
+_BUTTON_LABEL_ADAPTER = TypeAdapter(VaultRequestButtonLabel | None)
 
 
 class VaultDeliveryReceipt(BaseModel):
@@ -71,6 +78,7 @@ class VaultDeliveryTarget:
     purpose: str = field(repr=False)
     field_labels: tuple[str, ...] = field(repr=False)
     encrypted_credentials: str = field(repr=False)
+    button_label: str | None = field(repr=False)
 
     def matches_receipt(self, receipt: VaultDeliveryReceipt) -> bool:
         """Require the exact provider installation, author, and channel."""
@@ -156,6 +164,11 @@ class VaultRequestDeliveryRepository:
                 field_labels = tuple(
                     VaultRequestField.model_validate(item).label for item in row.fields
                 )
+                button_label = (
+                    None
+                    if terminal
+                    else _BUTTON_LABEL_ADAPTER.validate_python(row.button_label)
+                )
             except ValidationError:
                 return None
             sessions = AgentSessionRepository()
@@ -234,6 +247,7 @@ class VaultRequestDeliveryRepository:
                 purpose=row.purpose,
                 field_labels=field_labels,
                 encrypted_credentials=connection.encrypted_credentials,
+                button_label=button_label,
             )
             if receipt is not None and not target.matches_receipt(receipt):
                 return None
