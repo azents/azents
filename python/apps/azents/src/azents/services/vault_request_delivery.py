@@ -14,7 +14,6 @@ from azents.core.external_channel_provider_effect import ProviderOperationKey
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
-from azents.rdb.models.agent_vault_request import VaultRequestStatus
 from azents.repos.vault_request_delivery import (
     VaultDeliveryReceipt,
     VaultDeliveryTarget,
@@ -30,6 +29,10 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 from azents.services.external_channel.slack_events import SlackConversationClient
+from azents.services.vault_request_presentation import (
+    render_discord_vault_request,
+    render_slack_vault_request,
+)
 
 
 def _message_id(target: VaultDeliveryTarget, message_key: str) -> str | None:
@@ -107,25 +110,38 @@ class VaultRequestDeliveryService:
             return "skipped"
         url = f"{url}?{urlencode({'vaultRequest': request_id})}"
         token = self.credentials_codec.decrypt(target.encrypted_credentials).bot_token
-        text = "Vault values requested in Azents."
         if target.provider is ExternalChannelProvider.DISCORD:
+            content = render_discord_vault_request(
+                purpose=target.purpose,
+                labels=target.field_labels,
+                status=target.status,
+                url=url,
+            )
             result = await self.discord_client.create_message(
                 bot_token=token,
                 guild_id=target.tenant_id,
                 channel_id=target.channel_id,
-                content=f"{text}\n<{url}>",
+                content="",
                 operation_key=ProviderOperationKey.from_seed(f"vault:{request_id}"),
                 suppress_notifications=True,
-                suppress_embeds=True,
+                suppress_embeds=False,
+                embeds=content.embeds,
+                components=content.components,
             )
         else:
-            result = await self.slack_client.post_message(
+            slack = render_slack_vault_request(
+                purpose=target.purpose,
+                labels=target.field_labels,
+                status=target.status,
+                url=url,
+            )
+            result = await self.slack_client.post_blocks(
                 bot_token=token,
                 tenant_id=target.tenant_id,
                 channel_id=target.channel_id,
                 thread_ts=None,
-                markdown_text=f"{text}\n[Open Vault request]({url})",
-                blocks=None,
+                text=slack.text,
+                blocks=slack.blocks,
                 icon_url=None,
             )
         if result.status != "delivered":
@@ -154,29 +170,37 @@ class VaultRequestDeliveryService:
         if message_id is None:
             return "skipped"
         token = self.credentials_codec.decrypt(target.encrypted_credentials).bot_token
-        text = (
-            "Vault request submitted."
-            if target.status is VaultRequestStatus.SUBMITTED
-            else "Vault request expired."
-        )
         if target.provider is ExternalChannelProvider.DISCORD:
+            content = render_discord_vault_request(
+                purpose=target.purpose,
+                labels=target.field_labels,
+                status=target.status,
+                url=None,
+            )
             result = await self.discord_client.update_message(
                 bot_token=token,
                 guild_id=target.tenant_id,
                 channel_id=target.channel_id,
                 message_id=message_id,
-                content=text,
-                suppress_embeds=True,
-                components=[],
-                embeds=[],
+                content="",
+                suppress_embeds=False,
+                components=content.components,
+                embeds=content.embeds,
             )
         else:
+            slack = render_slack_vault_request(
+                purpose=target.purpose,
+                labels=target.field_labels,
+                status=target.status,
+                url=None,
+            )
             result = await self.slack_client.update_message(
                 bot_token=token,
                 tenant_id=target.tenant_id,
                 channel_id=target.channel_id,
                 message_ts=message_id,
-                text=text,
-                blocks=[],
+                text=slack.text,
+                blocks=slack.blocks,
+                literal_text=True,
             )
         return result.status

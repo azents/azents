@@ -404,6 +404,8 @@ async def test_claim_rechecks_exact_connected_binding(
     assert await delivery.claim(terminal=False) == case.request_id
     target = await delivery.read_target(case.request_id, terminal=False)
     assert target is not None and target.channel_id == channel
+    assert target.purpose == "Test configuration"
+    assert target.field_labels == ("Login", "Password")
     original_get_configuration = ExternalChannelRepository.get_connection_configuration
 
     async def disconnect_after_target_read(

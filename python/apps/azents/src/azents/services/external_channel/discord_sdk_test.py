@@ -10,6 +10,7 @@ import discord
 import discord.http
 import pytest
 
+from azents.rdb.models.agent_vault_request import VaultRequestStatus
 from azents.services.external_channel import discord_delivery, discord_sdk
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKCredentialsInvalid,
@@ -18,6 +19,7 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKRequestRejected,
     DiscordSDKResourceUnavailable,
 )
+from azents.services.vault_request_presentation import render_discord_vault_request
 
 
 def _http_error(status: int) -> discord.HTTPException:
@@ -666,6 +668,62 @@ async def test_private_message_mutation_rejects_cross_guild_channel() -> None:
         )
 
     http.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_vault_message_keeps_embed_visible_on_exact_message_edit() -> None:
+    """Serialize the native open and settled controls through discord.py."""
+    http = _PrivateHTTP()
+    http.get_channel.return_value = _channel()
+    http.send_message.return_value = http.edit_message.return_value = _message()
+    session = _session(http)
+    url = "https://azents.example.test/request"
+    opened = render_discord_vault_request(
+        purpose="Connect the account.",
+        labels=("Account", "Token"),
+        status=VaultRequestStatus.OPEN,
+        url=url,
+    )
+    posted = await session.create_message(
+        guild_id="111",
+        channel_id="300",
+        content="",
+        nonce="vault-1",
+        suppress_notifications=True,
+        suppress_embeds=False,
+        components=opened.components,
+        embeds=opened.embeds,
+    )
+    settled = render_discord_vault_request(
+        purpose="Connect the account.",
+        labels=("Account", "Token"),
+        status=VaultRequestStatus.SUBMITTED,
+        url=None,
+    )
+    await session.update_message(
+        guild_id="111",
+        channel_id="300",
+        message_id=posted.message_id,
+        content="",
+        suppress_embeds=False,
+        components=settled.components,
+        embeds=settled.embeds,
+    )
+    create_call = http.send_message.await_args
+    edit_call = http.edit_message.await_args
+    assert create_call is not None and edit_call is not None
+    assert create_call.args == (300,)
+    assert edit_call.args == (300, 400)
+    create = create_call.kwargs["params"].payload
+    edit = edit_call.kwargs["params"].payload
+    assert not discord.MessageFlags._from_value(create["flags"]).suppress_embeds
+    assert not discord.MessageFlags._from_value(edit["flags"]).suppress_embeds
+    assert create["embeds"] == edit["embeds"]
+    assert create["components"][0]["components"][0]["url"] == url
+    button = edit["components"][0]["components"][0]
+    assert button["disabled"] is True
+    assert button["label"] == "Input complete"
+    assert "url" not in button
 
 
 @pytest.mark.asyncio

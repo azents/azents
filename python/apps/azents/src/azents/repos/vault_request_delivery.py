@@ -12,7 +12,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
 )
-from azents.core.vault_request import VaultChannelReference
+from azents.core.vault_request import VaultChannelReference, VaultRequestField
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_vault_request import (
@@ -68,6 +68,8 @@ class VaultDeliveryTarget:
     session_id: str
     status: VaultRequestStatus
     receipt: VaultDeliveryReceipt | None
+    purpose: str = field(repr=False)
+    field_labels: tuple[str, ...] = field(repr=False)
     encrypted_credentials: str = field(repr=False)
 
     def matches_receipt(self, receipt: VaultDeliveryReceipt) -> bool:
@@ -151,6 +153,9 @@ class VaultRequestDeliveryRepository:
                     if terminal
                     else None
                 )
+                field_labels = tuple(
+                    VaultRequestField.model_validate(item).label for item in row.fields
+                )
             except ValidationError:
                 return None
             sessions = AgentSessionRepository()
@@ -226,6 +231,8 @@ class VaultRequestDeliveryRepository:
                 session_id=source.id,
                 status=row.status,
                 receipt=receipt,
+                purpose=row.purpose,
+                field_labels=field_labels,
                 encrypted_credentials=connection.encrypted_credentials,
             )
             if receipt is not None and not target.matches_receipt(receipt):
