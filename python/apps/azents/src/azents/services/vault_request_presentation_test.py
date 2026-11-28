@@ -28,10 +28,18 @@ def test_discord_preserves_embed_and_replaces_link_button(
     status: VaultRequestStatus, label: str
 ) -> None:
     opened = render_discord_vault_request(
-        purpose=_PURPOSE, labels=_LABELS, status=VaultRequestStatus.OPEN, url=_URL
+        purpose=_PURPOSE,
+        labels=_LABELS,
+        status=VaultRequestStatus.OPEN,
+        url=_URL,
+        button_label=None,
     )
     closed = render_discord_vault_request(
-        purpose=_PURPOSE, labels=_LABELS, status=status, url=_URL
+        purpose=_PURPOSE,
+        labels=_LABELS,
+        status=status,
+        url=_URL,
+        button_label="Previous action",
     )
     assert opened.embeds == closed.embeds
     assert opened.embeds[0]["description"] == _PURPOSE
@@ -75,10 +83,18 @@ def test_slack_preserves_blocks_and_replaces_button_with_status(
 ) -> None:
     purpose = "<!everyone> *literal* <https://example.test|not a link>"
     opened = render_slack_vault_request(
-        purpose=purpose, labels=_LABELS, status=VaultRequestStatus.OPEN, url=_URL
+        purpose=purpose,
+        labels=_LABELS,
+        status=VaultRequestStatus.OPEN,
+        url=_URL,
+        button_label=None,
     )
     closed = render_slack_vault_request(
-        purpose=purpose, labels=_LABELS, status=status, url=_URL
+        purpose=purpose,
+        labels=_LABELS,
+        status=status,
+        url=_URL,
+        button_label="Previous action",
     )
     assert opened.blocks[:-1] == closed.blocks[:-1]
     assert opened.blocks[1]["text"] == {"type": "plain_text", "text": purpose}
@@ -118,6 +134,7 @@ def test_discord_escapes_each_markup_token_and_breaks_auto_links() -> None:
         labels=(r"\**<first>**",),
         status=VaultRequestStatus.OPEN,
         url=_URL,
+        button_label=None,
     )
     description = rendered.embeds[0]["description"]
     assert isinstance(description, str)
@@ -151,7 +168,11 @@ def test_provider_limits_preserve_maximum_unicode_metadata(unit: str) -> None:
     )
     labels = tuple(field.label for field in spec.fields)
     discord = render_discord_vault_request(
-        purpose=spec.purpose, labels=labels, status=VaultRequestStatus.OPEN, url=_URL
+        purpose=spec.purpose,
+        labels=labels,
+        status=VaultRequestStatus.OPEN,
+        url=_URL,
+        button_label=None,
     )
     embed = discord.embeds[0]
     description, title, fields = embed["description"], embed["title"], embed["fields"]
@@ -167,7 +188,11 @@ def test_provider_limits_preserve_maximum_unicode_metadata(unit: str) -> None:
     assert total <= 6000
     assert displayed_indices == [label[:2] for label in labels]
     slack = render_slack_vault_request(
-        purpose=spec.purpose, labels=labels, status=VaultRequestStatus.OPEN, url=_URL
+        purpose=spec.purpose,
+        labels=labels,
+        status=VaultRequestStatus.OPEN,
+        url=_URL,
+        button_label=None,
     )
     for block in slack.blocks:
         if block["type"] == "section":

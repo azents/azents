@@ -1199,6 +1199,7 @@ async def test_vault_blocks_replace_input_action_on_the_same_slack_message() -> 
             labels=("Account", "Token"),
             status=status,
             url=action_url,
+            button_label="Authorize reports",
         )
 
     opened = render(VaultRequestStatus.OPEN, url)
@@ -1242,8 +1243,14 @@ async def test_vault_blocks_replace_input_action_on_the_same_slack_message() -> 
     assert create["link_names"] is False and edit["link_names"] is False
     assert create["blocks"][:-1] == edit["blocks"][:-1]
     assert create["blocks"][-1]["elements"][0]["url"] == url
+    assert create["blocks"][-1]["elements"][0]["text"] == {
+        "type": "plain_text",
+        "text": "Authorize reports",
+    }
+    assert create["text"].splitlines()[-1] == "Authorize reports"
     assert edit["blocks"][-1]["elements"] == [{"type": "plain_text", "text": "Expired"}]
     assert url not in json.dumps(edit)
+    assert "Authorize reports" not in json.dumps(edit)
     assert "&lt;!everyone&gt;" in edit["text"]
 
 

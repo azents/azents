@@ -6,7 +6,7 @@ import datetime
 import pytest
 import sqlalchemy as sa
 from cryptography.fernet import Fernet
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
@@ -27,6 +27,7 @@ from azents.core.json_value import JSONValue
 from azents.core.mailbox_data import VaultRequestCompletionMailboxPayload
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.vault_request import (
+    VaultChannelReference,
     VaultRequestField,
     VaultRequestIdentityPayload,
     VaultRequestSpec,
@@ -34,6 +35,7 @@ from azents.core.vault_request import (
     VaultRequestValue,
 )
 from azents.core.work_context import WorkContext
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_vault_request import (
     RDBAgentVaultRequest,
     VaultRequestStatus,
@@ -50,6 +52,7 @@ from azents.repos.agent_vault import (
     AgentVaultRepository,
     InvalidVaultEntry,
     VaultAccessDenied,
+    VaultEntryMutation,
     VaultManager,
 )
 from azents.repos.agent_vault_requests import (
@@ -81,6 +84,7 @@ class _Request:
     repo: AgentVaultRequestRepository
     vault: AgentVaultRepository
     scope: VaultRequestScope
+    authority: SessionResourceAuthority
     user_id: str
     request_id: str
     body: VaultRequestSubmission
@@ -135,16 +139,17 @@ async def request_case(
         manager, manager, CredentialCipher(Fernet.generate_key().decode())
     )
     repo = AgentVaultRequestRepository(manager)
+    authority = SessionResourceAuthority(
+        workspace_id=source.workspace_id,
+        agent_id=source.agent_id,
+        session_id=session_id,
+        root_session_id=session_id,
+        run_id=run.id,
+        run_index=run.run_index,
+        owner_generation=source.owner_generation,
+    )
     anchor = await repo.create_for_execution(
-        SessionResourceAuthority(
-            workspace_id=source.workspace_id,
-            agent_id=source.agent_id,
-            session_id=session_id,
-            root_session_id=session_id,
-            run_id=run.id,
-            run_index=run.run_index,
-            owner_generation=source.owner_generation,
-        ),
+        authority,
         VaultRequestSpec(
             purpose="Test configuration",
             fields=(
@@ -165,6 +170,7 @@ async def request_case(
     return _Request(
         repo=repo,
         vault=vault,
+        authority=authority,
         scope=VaultRequestScope(
             session_id=session_id,
             agent_id=source.agent_id,
@@ -406,6 +412,21 @@ async def test_claim_rechecks_exact_connected_binding(
     assert target is not None and target.channel_id == channel
     assert target.purpose == "Test configuration"
     assert target.field_labels == ("Login", "Password")
+    assert target.button_label is None
+    anchor = await case.repo.create_for_execution(
+        case.authority,
+        VaultRequestSpec(
+            purpose="Test configuration",
+            fields=(VaultRequestField(name="login", label="Login"),),
+            destination=VaultChannelReference(provider=provider, channel_id=channel),
+            button_label="Enter test data",
+        ),
+    )
+    assert isinstance(anchor.payload, VaultRequestIdentityPayload)
+    custom_id = anchor.payload.request_id
+    assert await delivery.claim(terminal=False) == custom_id
+    custom = await delivery.read_target(custom_id, terminal=False)
+    assert custom is not None and custom.button_label == "Enter test data"
     original_get_configuration = ExternalChannelRepository.get_connection_configuration
 
     async def disconnect_after_target_read(
@@ -430,3 +451,88 @@ async def test_claim_rechecks_exact_connected_binding(
         disconnect_after_target_read,
     )
     assert await delivery.read_target(case.request_id, terminal=False) is None
+
+
+@pytest.mark.parametrize("button_label", ["", " \t", "Use\nnow", "X" * 76, "🧪" * 38])
+def test_vault_request_rejects_invalid_button_label(button_label: str) -> None:
+    with pytest.raises(ValidationError, match="button_label"):
+        VaultRequestSpec(
+            purpose="Test configuration",
+            fields=(VaultRequestField(name="login", label="Login"),),
+            destination=VaultChannelReference(
+                provider=ExternalChannelProvider.SLACK, channel_id="C123"
+            ),
+            button_label=button_label,
+        )
+
+
+def test_chat_only_vault_request_rejects_channel_button_label() -> None:
+    with pytest.raises(ValidationError, match="Invalid Vault request"):
+        VaultRequestSpec(
+            purpose="Test configuration",
+            fields=(VaultRequestField(name="login", label="Login"),),
+            button_label="Enter test data",
+        )
+
+
+async def test_vault_delete_fences_execution_and_deletes_exact_name(
+    request_case: _Request, rdb_session_manager: SessionManager[WriteSession]
+) -> None:
+    case = request_case
+    await case.submit()
+    async with rdb_session_manager() as session:
+        other = await _create_root(session, suffix="vault-delete-other")
+        other_source = await AgentSessionRepository().get_by_id(session, other)
+        assert other_source is not None
+        owner_id = await _create_user(session, "vault-delete-other-owner")
+        session.write_session.add(
+            RDBWorkspaceUser(
+                workspace_id=other_source.workspace_id,
+                user_id=owner_id,
+                role=WorkspaceUserRole.OWNER,
+                name="Other Owner",
+            )
+        )
+    other_manager = VaultManager(other_source.workspace_id, owner_id)
+    await case.vault.mutate_entry(
+        other_source.agent_id,
+        "login",
+        manager=other_manager,
+        mutation=VaultEntryMutation.CREATE,
+        value=SecretStr("unrelated-value"),
+    )
+    foreign = dataclasses.replace(
+        case.authority,
+        workspace_id=other_source.workspace_id,
+        agent_id=other_source.agent_id,
+    )
+    with pytest.raises(VaultAccessDenied):
+        await case.vault.delete_for_execution(foreign, "login")
+    stale = dataclasses.replace(
+        case.authority, owner_generation=case.authority.owner_generation + 1
+    )
+    with pytest.raises(VaultAccessDenied):
+        await case.vault.delete_for_execution(stale, "login")
+    with pytest.raises(InvalidVaultEntry):
+        await case.vault.delete_for_execution(case.authority, "\n")
+    assert not await case.vault.delete_for_execution(case.authority, "Login")
+    assert await case.vault.delete_for_execution(case.authority, "login")
+    assert not await case.vault.delete_for_execution(case.authority, "login")
+    async with rdb_session_manager() as session:
+        source = await session.write_session.get(
+            RDBAgentSession, case.authority.session_id
+        )
+        assert source is not None
+        source.stop_requested_at = await read_vault_clock(session)
+    with pytest.raises(VaultAccessDenied):
+        await case.vault.delete_for_execution(case.authority, "password")
+    entries = await case.vault.list_entries(
+        case.scope.agent_id, manager=case.scope.manager
+    )
+    assert [entry.name for entry in entries] == ["password"]
+    assert [
+        entry.name
+        for entry in await case.vault.list_entries(
+            other_source.agent_id, manager=other_manager
+        )
+    ] == ["login"]

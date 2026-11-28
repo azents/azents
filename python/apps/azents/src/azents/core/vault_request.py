@@ -4,6 +4,7 @@ import re
 from typing import Annotated
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -15,6 +16,21 @@ from pydantic import (
 from azents.core.enums import ExternalChannelProvider
 
 type VaultRequestId = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
+
+
+def _validate_button_label(label: str) -> str:
+    if (
+        not label.strip()
+        or not label.isprintable()
+        or len(label.encode("utf-16-le")) > 150
+    ):
+        raise ValueError("Invalid Vault request button label.")
+    return label
+
+
+VaultRequestButtonLabel = Annotated[
+    str, Field(min_length=1, max_length=75), AfterValidator(_validate_button_label)
+]
 
 
 class VaultRequestField(BaseModel):
@@ -62,6 +78,10 @@ class VaultRequestSpec(BaseModel):
     purpose: Annotated[str, Field(min_length=1, max_length=500)]
     fields: Annotated[tuple[VaultRequestField, ...], Field(min_length=1, max_length=16)]
     destination: VaultChannelReference | None = None
+    button_label: VaultRequestButtonLabel | None = Field(
+        default=None,
+        description="Plain-text input button label for the specified channel.",
+    )
 
     @model_validator(mode="after")
     def validate_spec(self) -> "VaultRequestSpec":
@@ -70,6 +90,7 @@ class VaultRequestSpec(BaseModel):
             not self.purpose.strip()
             or not self.purpose.isprintable()
             or len({field.name for field in self.fields}) != len(self.fields)
+            or (self.button_label is not None and self.destination is None)
         ):
             raise ValueError("Invalid Vault request specification.")
         return self

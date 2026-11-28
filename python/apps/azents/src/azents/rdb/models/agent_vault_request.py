@@ -87,6 +87,7 @@ class RDBAgentVaultRequest(RDBModel):
     destination: Mapped[dict[str, JSONValue] | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True
     )
+    button_label: Mapped[str | None] = mapped_column(sa.String(75), nullable=True)
     status: Mapped[VaultRequestStatus] = mapped_column(
         vault_request_status_enum,
         init=False,

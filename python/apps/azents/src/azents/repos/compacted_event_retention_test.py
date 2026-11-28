@@ -129,6 +129,7 @@ async def test_vault_anchor_is_retained_until_request_settles(
             creation_at=database_now - datetime.timedelta(days=2),
             deadline_at=database_now - datetime.timedelta(days=1),
             destination=None,
+            button_label=None,
         )
         session.write_session.add(request)
         request_id = request.id

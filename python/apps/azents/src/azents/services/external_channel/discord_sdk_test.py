@@ -683,6 +683,7 @@ async def test_vault_message_keeps_embed_visible_on_exact_message_edit() -> None
         labels=("Account", "Token"),
         status=VaultRequestStatus.OPEN,
         url=url,
+        button_label="Authorize reports",
     )
     posted = await session.create_message(
         guild_id="111",
@@ -699,6 +700,7 @@ async def test_vault_message_keeps_embed_visible_on_exact_message_edit() -> None
         labels=("Account", "Token"),
         status=VaultRequestStatus.SUBMITTED,
         url=None,
+        button_label="Authorize reports",
     )
     await session.update_message(
         guild_id="111",
@@ -720,6 +722,7 @@ async def test_vault_message_keeps_embed_visible_on_exact_message_edit() -> None
     assert not discord.MessageFlags._from_value(edit["flags"]).suppress_embeds
     assert create["embeds"] == edit["embeds"]
     assert create["components"][0]["components"][0]["url"] == url
+    assert create["components"][0]["components"][0]["label"] == "Authorize reports"
     button = edit["components"][0]["components"][0]
     assert button["disabled"] is True
     assert button["label"] == "Input complete"

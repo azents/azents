@@ -340,6 +340,13 @@ class VaultRegisterFileInput(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
 
+class VaultDeleteInput(BaseModel):
+    """The exact name of one entry to delete from this Agent's Vault."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    name: str = Field(min_length=1, max_length=255)
+
+
 class WriteStdinInput(BaseModel):
     """write_stdin tool input."""
 
@@ -749,13 +756,13 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
 
 
 class VaultRequestToolkit(Toolkit[ShellToolkitConfig]):
-    """Request Vault values without requiring a Runtime capability."""
+    """Operate on Vault entries and requests without requiring a Runtime."""
 
     def __init__(self, repositories: EngineToolRepositories) -> None:
         self.repositories = repositories
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Expose request creation only to an admitted execution."""
+        """Expose Vault operations only to an admitted execution."""
         authority = context.resource_authority
         if authority is None:
             return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
@@ -779,6 +786,23 @@ class VaultRequestToolkit(Toolkit[ShellToolkitConfig]):
                 )
             )
 
+        async def vault_delete(args: VaultDeleteInput) -> FunctionToolResult:
+            try:
+                deleted = await self.repositories.vault.delete_for_execution(
+                    authority, args.name
+                )
+            except InvalidVaultEntry:
+                raise FunctionToolError("Invalid Vault entry name.") from None
+            except (
+                VaultAccessDenied,
+                AgentMutationReadOnly,
+                AgentMutationTargetMissing,
+            ):
+                raise FunctionToolError("Vault deletion is unavailable.") from None
+            return FunctionToolResult(
+                output=json.dumps({"status": "deleted" if deleted else "absent"})
+            )
+
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -789,9 +813,19 @@ class VaultRequestToolkit(Toolkit[ShellToolkitConfig]):
                         "Ask a Vault manager for values through the Azents chat card. "
                         "Enter only names, labels and purpose, never values. "
                         "The request expires in 24 hours without pausing this run. "
-                        "An optional explicit connected channel receives the link."
+                        "An optional explicit connected channel receives the input "
+                        "button with the supplied label or the default label."
                     ),
-                )
+                ),
+                make_tool(
+                    vault_delete,
+                    name="vault_delete",
+                    description=(
+                        "Permanently delete one exact-name entry from this Agent's "
+                        "Vault. Use only when explicitly asked to delete that entry. "
+                        "Returns deleted or absent without reading the stored value."
+                    ),
+                ),
             ],
         )
 
